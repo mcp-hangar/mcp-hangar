@@ -38,6 +38,8 @@ from typing import Any
 from ...domain.contracts.persistence import IMcpServerConfigRepository
 from ..ports.async_task import IBlockingAsyncRunner
 from ...domain.events import DomainEvent, McpServerDeregistered, McpServerRegistered
+from ...domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
+from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot
 from ...logging_config import get_logger
@@ -79,6 +81,51 @@ class FleetProjection:
             self._register(event.mcp_server_id, event.produced_by)
         elif isinstance(event, McpServerDeregistered):
             self._deregister(event.mcp_server_id, event.produced_by)
+        elif isinstance(event, (EgressPolicySet, EgressPolicyCleared)):
+            self._apply_l7(event.mcp_server_id)
+
+    def _apply_l7(self, mcp_server_id: str) -> None:
+        """Apply a peer's L7 policy change to the local copy of the server.
+
+        The event is an audit summary (counts and group names) -- deliberately
+        not the rule set -- so the policy is read from the shared record the
+        handler saved before publishing, same contract as registration (#991).
+        Idempotent: setting the same policy twice is the same policy.
+        """
+        mcp_server = self._repository.get(mcp_server_id)
+        if mcp_server is None:
+            # Not in the local fleet: nothing to enforce here. If it registers
+            # later, server_from_snapshot restores the policy with the row.
+            return
+
+        snapshot = self._read(mcp_server_id)
+        if snapshot is None:
+            # Fail closed the visible way: keep the local policy as it is and
+            # say so. Applying None on an unreadable row would LIFT enforcement
+            # on this replica because of a read hiccup.
+            logger.warning(
+                "fleet_projection_l7_row_unreadable",
+                mcp_server_id=mcp_server_id,
+                detail="peer changed the L7 policy but the stored row could not be read; local policy left unchanged",
+            )
+            return
+
+        try:
+            policy = L7Policy.from_dict(snapshot.l7_policy) if snapshot.l7_policy is not None else None
+        except ValueError as error:
+            logger.warning(
+                "fleet_projection_l7_row_malformed",
+                mcp_server_id=mcp_server_id,
+                error=str(error),
+            )
+            return
+
+        mcp_server.set_l7_policy(policy)
+        logger.info(
+            "fleet_projection_l7_applied",
+            mcp_server_id=mcp_server_id,
+            cleared=policy is None,
+        )
 
     def _register(self, mcp_server_id: str, produced_by: str) -> None:
         if self._repository.exists(mcp_server_id):

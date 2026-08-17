@@ -44,6 +44,18 @@ class GetMcpServerQuery(Query):
 
 
 @dataclass(frozen=True)
+class GetL7PolicyQuery(Query):
+    """Query for a server's attached L7 egress policy (wire form), or None.
+
+    Added with #991: the route table only had writes, so an operator could not
+    see which policy (if any) a gateway held -- while the EgressPolicySet event
+    docstring claimed the rule set "is already retrievable from the server."
+    """
+
+    mcp_server_id: str
+
+
+@dataclass(frozen=True)
 class GetMcpServerToolsQuery(Query):
     """Query to get tools for a specific mcp_server."""
 

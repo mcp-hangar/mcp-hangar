@@ -150,6 +150,13 @@ def init_event_handlers(runtime: "Runtime") -> None:
         fleet_projection = FleetProjection(runtime.repository, config_repository, BackgroundLoop())
         runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         runtime.event_bus.subscribe(McpServerDeregistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        # L7 policy changes have to reach every replica the same way (#991):
+        # the setting replica saved the row before publishing, peers re-read it
+        # off the tailed event. Without this, exactly one replica enforced.
+        from ...domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
+
+        runtime.event_bus.subscribe(EgressPolicySet, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        runtime.event_bus.subscribe(EgressPolicyCleared, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # Not `fleet_projection_registered`: that name belongs to the
         # projection applying a server, and two different events under one name
         # is a log an operator cannot read. `_configured` matches

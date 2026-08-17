@@ -23,6 +23,9 @@ from mcp_hangar.application.services.event_tailer import EventTailer
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered
+from mcp_hangar.domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
+from mcp_hangar.domain.policies.egress_l7 import L7Policy
+from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
@@ -48,6 +51,8 @@ class _Replica:
         projection = FleetProjection(self.fleet, configs, _SyncLoop())
         self.bus.subscribe(McpServerRegistered, projection.handle, kind=HandlerKind.PROJECTION)
         self.bus.subscribe(McpServerDeregistered, projection.handle, kind=HandlerKind.PROJECTION)
+        self.bus.subscribe(EgressPolicySet, projection.handle, kind=HandlerKind.PROJECTION)
+        self.bus.subscribe(EgressPolicyCleared, projection.handle, kind=HandlerKind.PROJECTION)
         self.tailer = EventTailer(log, self.bus, instance_id)
 
     def registers(self, mcp_server_id: str, description: str = "") -> None:
@@ -71,6 +76,30 @@ class _Replica:
 
     def knows(self, mcp_server_id: str) -> bool:
         return self.fleet.exists(mcp_server_id)
+
+    def sets_l7(self, mcp_server_id: str, policy: L7Policy | None) -> None:
+        """Set the policy as SetL7PolicyHandler does: mutate, record, announce."""
+        server = self.fleet.get(mcp_server_id)
+        server.set_l7_policy(policy)
+        asyncio.run(self.configs.save(snapshot_of(server)))
+        if policy is None:
+            self.bus.publish(EgressPolicyCleared(mcp_server_id=mcp_server_id, source="operator"))
+        else:
+            self.bus.publish(
+                EgressPolicySet(
+                    mcp_server_id=mcp_server_id,
+                    source="operator",
+                    mode=policy.mode.value,
+                    default_action=policy.default_action.value,
+                    allow_rules=len(policy.tools.allow),
+                    deny_rules=len(policy.tools.deny),
+                    require_approval_rules=len(policy.tools.require_approval),
+                    secret_pattern_groups=list(policy.arguments.secret_patterns),
+                )
+            )
+
+    def l7_of(self, mcp_server_id: str) -> L7Policy | None:
+        return self.fleet.get(mcp_server_id).l7_policy
 
 
 @pytest.fixture
@@ -184,7 +213,10 @@ class TestTheProjectionIsWiredThatWay:
             if "fleet_projection.handle" in line
         ]
 
-        assert len(lines) == 2
+        # Registered/Deregistered plus EgressPolicySet/Cleared (#991): an L7
+        # change applied as an effect would enforce on one replica only, which
+        # is the bug the two new subscriptions close.
+        assert len(lines) == 4
         for line in lines:
             assert "HandlerKind.PROJECTION" in line, line
 
@@ -209,3 +241,67 @@ class TestTheProjectionIsWiredThatWay:
         source = inspect.getsource(recovery_service.RecoveryService._create_mcp_server_from_config)
 
         assert "server_from_snapshot(config)" in source
+
+
+class TestAPolicyOnOneReplicaEnforcesOnTheOthers:
+    """Regression for #991: L7 lived in the RAM of the replica that took the
+    POST, so in HA exactly one replica enforced and the others ran denied
+    tools -- while the CR reported Compiled and BackstopApplied."""
+
+    DENY_BOOM = {"tools": {"deny": ["boom"]}, "defaultAction": "Allow"}
+
+    def test_the_peer_enforces_it(self, replicas) -> None:
+        a, b = replicas
+        a.registers("egress-demo")
+        b.tailer.tick()
+
+        a.sets_l7("egress-demo", L7Policy.from_dict(self.DENY_BOOM))
+        b.tailer.tick()
+
+        assert b.l7_of("egress-demo") == a.l7_of("egress-demo") is not None
+
+    def test_the_peer_lifts_it_when_cleared(self, replicas) -> None:
+        a, b = replicas
+        a.registers("egress-demo")
+        b.tailer.tick()
+        a.sets_l7("egress-demo", L7Policy.from_dict(self.DENY_BOOM))
+        b.tailer.tick()
+
+        a.sets_l7("egress-demo", None)
+        b.tailer.tick()
+
+        assert b.l7_of("egress-demo") is None
+
+    def test_a_replica_that_registers_later_gets_the_policy_with_the_row(self, replicas) -> None:
+        # The restart path: server_from_snapshot restores the policy, so a
+        # rolling restart no longer serves unguarded until the next push.
+        a, b = replicas
+        a.registers("egress-demo")
+        a.sets_l7("egress-demo", L7Policy.from_dict(self.DENY_BOOM))
+
+        b.tailer.tick()  # registration lands first, policy row already has L7
+
+        assert b.l7_of("egress-demo") is not None
+
+    def test_an_unreadable_row_leaves_the_local_policy_alone(self, replicas) -> None:
+        # Fail closed: a read hiccup must not LIFT enforcement on this replica.
+        a, b = replicas
+        a.registers("egress-demo")
+        b.tailer.tick()
+        a.sets_l7("egress-demo", L7Policy.from_dict(self.DENY_BOOM))
+        b.tailer.tick()
+        before = b.l7_of("egress-demo")
+
+        real_get = b.configs.get
+
+        async def broken_get(mcp_server_id):
+            raise RuntimeError("storage hiccup")
+
+        b.configs.get = broken_get
+        try:
+            a.sets_l7("egress-demo", None)
+            b.tailer.tick()
+        finally:
+            b.configs.get = real_get
+
+        assert b.l7_of("egress-demo") == before is not None
