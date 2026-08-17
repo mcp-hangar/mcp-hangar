@@ -32,7 +32,6 @@ are listed:
   `trace_tool_invocation` decorator; `create_runtime`, `init_tracing` and
   `get_tracer` stay.
 
-
 ## Upgrade to 2.10.0
 
 ### `config.yaml` warns about a key nothing reads

@@ -15,7 +15,7 @@ include_external_packages = False
 #   infrastructure  adapters. The root-level modules on this line are adapters
 #                   that never moved into the package: metrics is a Prometheus
 #                   registry, http_client and stdio_client are transports,
-#                   retry/progress/gc are runtime machinery.
+#                   retry/gc are runtime machinery.
 #   delivery        HTTP/MCP surfaces and the facade.
 #
 # The split of the root-level modules is the point of this contract rather than
@@ -34,7 +34,7 @@ name = Hexagon: shared kernel < domain < application < infrastructure < delivery
 type = layers
 layers =
     mcp_hangar.server : mcp_hangar.fastmcp_server : mcp_hangar.facade
-    mcp_hangar.infrastructure : mcp_hangar.metrics : mcp_hangar.http_client : mcp_hangar.stdio_client : mcp_hangar.retry : mcp_hangar.progress : mcp_hangar.gc
+    mcp_hangar.infrastructure : mcp_hangar.metrics : mcp_hangar.http_client : mcp_hangar.stdio_client : mcp_hangar.retry : mcp_hangar.gc
     mcp_hangar.application
     mcp_hangar.domain
     mcp_hangar.logging_config : mcp_hangar.lock_hierarchy : mcp_hangar.redactor : mcp_hangar.errors : mcp_hangar.protocol : mcp_hangar.context : mcp_hangar._sdk_compat : mcp_hangar.tasks_wire : mcp_hangar.negotiation : mcp_hangar.observability : mcp_hangar.trusted_hosts
