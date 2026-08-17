@@ -286,6 +286,16 @@ class AuthEnforcementMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # CORS preflight carries no credentials by design (the same contract
+        # the authorization chokepoint below already honors). Authenticating
+        # OPTIONS made every browser preflight 401 before the CORS layer could
+        # answer, with no Access-Control-Allow-Origin on the refusal -- so a
+        # browser OAuth client could not call /mcp or /api at all (#993).
+        # OPTIONS is a safe method: nothing behind this skip mutates on it.
+        if scope["type"] == "http" and str(scope.get("method", "")).upper() == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
         auth_request, source_ip = _build_auth_request(scope, self._trusted_proxies)
         try:
             auth_context = self._authn.authenticate(auth_request)
