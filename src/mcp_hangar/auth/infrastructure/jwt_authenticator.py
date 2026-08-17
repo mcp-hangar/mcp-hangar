@@ -451,6 +451,17 @@ class JWKSTokenValidator(ITokenValidator):
                 message="Invalid JWT issuer",
                 auth_method="jwt",
             ) from e
+        except jwt.exceptions.PyJWKClientError as e:
+            # alg=none, missing/unknown kid, or JWKS fetch trouble: the token
+            # cannot be verified against any configured key. PyJWT raises this
+            # OUTSIDE the InvalidTokenError hierarchy, so without this clause
+            # it escaped the authenticator as a 500 (#992) -- while plain
+            # garbage Bearer was a clean 401. Fail closed the same way the
+            # OIDC-discovery failure path below does.
+            raise InvalidCredentialsError(
+                message=f"JWT signing key resolution failed: {e}",
+                auth_method="jwt",
+            ) from e
         except jwt.InvalidTokenError as e:
             raise InvalidCredentialsError(
                 message=f"Invalid JWT token: {e}",
