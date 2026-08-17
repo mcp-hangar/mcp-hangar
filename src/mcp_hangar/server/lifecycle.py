@@ -510,6 +510,20 @@ class ServerLifecycle:
         else:
             starlette_app = combined_app
 
+        # CORS goes OUTSIDE auth, on the app that actually serves traffic.
+        # create_api_router documents CORS as outermost, but only on the
+        # mounted api_app -- the served process wrapped the combined app
+        # (health + /api + /mcp) with auth directly, so a browser preflight
+        # 401'd before any CORS layer could answer, and /mcp never had CORS
+        # headers at all (#993). Wrapping here covers both, for allowed and
+        # refused origins alike; the inner copy on api_app is redundant but
+        # harmless (same config, headers are set, not appended).
+        from starlette.middleware.cors import CORSMiddleware
+
+        from .api.middleware import get_cors_config
+
+        starlette_app = CORSMiddleware(app=starlette_app, **get_cors_config())
+
         # Configure uvicorn with log_config=None to disable default uvicorn logging
         # Our structlog configuration will handle all logging uniformly
         config = uvicorn.Config(
