@@ -8,7 +8,6 @@ from ...domain.exceptions import ConfigurationError
 from ...logging_config import get_logger
 from ...observability.health import (
     EventStoreDurabilityStatus,
-    register_event_store_durability_check,
     set_event_store_durability_status,
 )
 from .components import create_persistent_event_store
@@ -80,7 +79,6 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
                 detail="event store disabled",
             )
         )
-        register_event_store_durability_check()
         return
 
     driver = event_store_config.get("driver", "sqlite")
@@ -187,7 +185,6 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
 
     runtime.event_bus.set_event_store(event_store)
     _install_dispatch_checkpoint(runtime, event_store, event_store_config)
-    register_event_store_durability_check()
 
 
 def _selected_backend(config: dict[str, Any]) -> Any:
@@ -224,7 +221,6 @@ def _install_from_backend(runtime: Any, backend: Any, name: str) -> None:
             detail=f"{name} backend selected by persistence.backend",
         )
     )
-    register_event_store_durability_check()
 
 
 def _install_dispatch_checkpoint(runtime: Any, event_store: Any, event_store_config: dict[str, Any]) -> None:

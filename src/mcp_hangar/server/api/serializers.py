@@ -5,8 +5,6 @@ Provides:
 - HangarJSONResponse: JSONResponse subclass using HangarJSONEncoder
 - serialize_mcp_server_summary: Convert McpServerSummary to JSON-safe dict
 - serialize_mcp_server_details: Convert McpServerDetails to JSON-safe dict
-- serialize_tool_info: Convert ToolInfo to JSON-safe dict
-- serialize_health_info: Convert HealthInfo to JSON-safe dict
 """
 
 import json
@@ -18,10 +16,8 @@ from starlette.responses import JSONResponse
 
 if TYPE_CHECKING:
     from ...application.read_models.mcp_server_views import (
-        HealthInfo,
         McpServerDetails,
         McpServerSummary,
-        ToolInfo,
     )
 
 
@@ -103,27 +99,3 @@ def serialize_mcp_server_details(details: "McpServerDetails") -> dict[str, Any]:
         JSON-safe dictionary representation.
     """
     return details.to_dict()
-
-
-def serialize_tool_info(tool: "ToolInfo") -> dict[str, Any]:
-    """Convert ToolInfo read model to JSON-safe dict.
-
-    Args:
-        tool: ToolInfo read model instance.
-
-    Returns:
-        JSON-safe dictionary representation.
-    """
-    return tool.to_dict()
-
-
-def serialize_health_info(health: "HealthInfo") -> dict[str, Any]:
-    """Convert HealthInfo read model to JSON-safe dict.
-
-    Args:
-        health: HealthInfo read model instance.
-
-    Returns:
-        JSON-safe dictionary representation.
-    """
-    return health.to_dict()

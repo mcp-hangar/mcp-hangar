@@ -17,9 +17,9 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 async def open_mcp_streams(url: str, headers: dict[str, str]):
     """Yield the `(read, write)` transport streams for `url` with `headers`.
 
-        async with open_mcp_streams(f"{base}/mcp", headers) as (read, write):
-            async with ClientSession(read, write) as session:
-                ...
+    async with open_mcp_streams(f"{base}/mcp", headers) as (read, write):
+        async with ClientSession(read, write) as session:
+            ...
     """
     async with streamable_http_client(url, http_client=create_mcp_http_client(headers=headers)) as streams:
         yield streams

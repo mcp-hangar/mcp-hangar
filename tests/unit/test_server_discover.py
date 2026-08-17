@@ -204,6 +204,7 @@ class TestHandlerAndWiring:
         assert resp.status_code == 404
         assert json.loads(bytes(resp.body).decode())["error"]["code"] == -32601
 
+
 def _make_awaitable(value):
     async def _coro():
         return value

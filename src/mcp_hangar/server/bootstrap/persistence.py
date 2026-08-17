@@ -304,9 +304,9 @@ def restore_persisted_fleet(runtime: Any) -> int:
 
     **This is the read half of a path whose write half shipped without it.**
     `RecoveryService.recover_mcp_servers` had exactly one caller,
-    `bootstrap.runtime.initialize_runtime`, and *that* function has no callers
-    at all -- so the snapshot written on every registration since #794 was never
-    read back, and a server registered through the API still did not survive a
+    the since-deleted `bootstrap.runtime.initialize_runtime` (#978), itself
+    caller-less -- so the snapshot written on every registration since #794 was
+    never read back, and a server registered through the API still did not survive a
     restart. The unit test for #794 called the recovery service directly and
     passed, which is the difference between testing a component and testing that
     it is plugged in.

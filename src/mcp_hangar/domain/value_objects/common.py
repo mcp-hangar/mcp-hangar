@@ -4,7 +4,7 @@ Contains:
 - CorrelationId - request tracing
 - ToolName - tool identification
 - ToolArguments - validated tool arguments
-- Multi-tenancy value objects (TenantId, NamespaceId, CatalogItemId, ResourceScope)
+- Multi-tenancy value objects (TenantId, NamespaceId, ResourceScope)
 """
 
 from dataclasses import dataclass
@@ -222,26 +222,6 @@ class NamespaceId:
             raise ValueError("NamespaceId must be alphanumeric with -")
         if not self.value[0].isalnum() or not self.value[-1].isalnum():
             raise ValueError("NamespaceId must start and end with alphanumeric")
-
-    def __str__(self) -> str:
-        return self.value
-
-
-@dataclass(frozen=True)
-class CatalogItemId:
-    """Unique identifier for a catalog item.
-
-    Catalog items are mcp_server templates that can be deployed.
-
-    Attributes:
-        value: Identifier string (1-128 characters)
-    """
-
-    value: str
-
-    def __post_init__(self) -> None:
-        if not self.value or len(self.value) > 128:
-            raise ValueError("CatalogItemId must be 1-128 characters")
 
     def __str__(self) -> str:
         return self.value

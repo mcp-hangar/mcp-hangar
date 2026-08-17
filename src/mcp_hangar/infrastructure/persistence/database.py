@@ -80,8 +80,8 @@ class Database:
         """Get a database connection, creating the schema if it is not there.
 
         The schema used to arrive only from an explicit `initialize()`, whose
-        one caller -- `bootstrap.runtime.initialize_runtime` -- has no callers
-        of its own. So on every path that reached a repository without going
+        one caller -- the since-deleted `bootstrap.runtime.initialize_runtime`
+        (#978) -- had no callers of its own. So on every path that reached a repository without going
         through that dead function, the tables did not exist. It stayed
         invisible for as long as nothing wrote: the fleet's own repository had
         no production writer until #794, and the moment it got one, registering

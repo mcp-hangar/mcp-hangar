@@ -17,13 +17,7 @@ import pytest
 
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 from mcp_hangar.observability.health import (
-    EventStoreDurabilityStatus,
-    HealthStatus,
-    create_event_store_durability_health_check,
     get_event_store_durability_status,
-    get_health_endpoint,
-    reset_health_endpoint,
-    set_event_store_durability_status,
 )
 from mcp_hangar.server.bootstrap.event_store import (
     EventStoreConfigurationError,
@@ -58,9 +52,7 @@ def runtime() -> SimpleNamespace:
 
 @pytest.fixture(autouse=True)
 def _clean_health():
-    reset_health_endpoint()
     yield
-    reset_health_endpoint()
 
 
 class TestFailFastBootstrap:
@@ -148,61 +140,3 @@ class TestExplicitMemory:
         assert status.configured_driver == "sqlite"
         assert status.durable is False
         assert status.degraded is True
-
-
-class TestDurabilityReadinessCheck:
-    """The readiness check must fail (503) only when degraded-while-durable."""
-
-    async def test_degraded_reports_unhealthy(self):
-        set_event_store_durability_status(
-            EventStoreDurabilityStatus(
-                configured_driver="sqlite",
-                durable=False,
-                degraded=True,
-                detail="path not writable; degraded to in-memory",
-            )
-        )
-        check = create_event_store_durability_health_check()
-        result = await check.execute()
-        assert result.status == HealthStatus.UNHEALTHY
-
-    async def test_explicit_memory_reports_healthy(self):
-        set_event_store_durability_status(
-            EventStoreDurabilityStatus(
-                configured_driver="memory",
-                durable=False,
-                degraded=False,
-                detail="explicit memory",
-            )
-        )
-        check = create_event_store_durability_health_check()
-        result = await check.execute()
-        assert result.status == HealthStatus.HEALTHY
-
-    async def test_unknown_status_is_vacuously_healthy(self):
-        set_event_store_durability_status(None)
-        check = create_event_store_durability_health_check()
-        result = await check.execute()
-        assert result.status == HealthStatus.HEALTHY
-
-    async def test_readiness_endpoint_unhealthy_when_degraded(self, runtime, monkeypatch):
-        """End-to-end: bootstrap degrades -> HealthEndpoint.check_readiness UNHEALTHY."""
-        monkeypatch.setattr(
-            es_module,
-            "create_persistent_event_store",
-            lambda _driver, _config: (_ for _ in ()).throw(OSError("Read-only file system")),
-        )
-        config = {
-            "event_store": {
-                "enabled": True,
-                "driver": "sqlite",
-                "path": "data/events.db",
-                "allow_memory_fallback": True,
-            }
-        }
-        init_event_store(runtime, config)
-
-        response = await get_health_endpoint().check_readiness()
-        assert response.status == HealthStatus.UNHEALTHY
-        names = {c.name for c in response.checks}
-        assert "event_store_durability" in names
