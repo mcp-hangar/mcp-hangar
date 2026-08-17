@@ -74,3 +74,37 @@ class TestDuplicateIssuers:
         jwt_auth = next(a for a in ac.authn_middleware._authenticators if hasattr(a, "_issuer_configs"))
         # The duplicate issuer key resolves to a single (last-wins) config -- no crash.
         assert list(jwt_auth._issuer_configs.keys()) == ["https://dup/"]
+
+
+class TestAlgNone:
+    """Regression for #992: alg=none answered 500, plain garbage answered 401.
+
+    Issuer routing does an unverified decode, so an alg=none token with a
+    configured `iss` reaches the real validator; the crash was
+    PyJWKClientError escaping validate() (it is not an InvalidTokenError
+    subclass). The stub raises exactly what PyJWKClient raises for a token
+    with no usable signing key, without needing a network JWKS fetch.
+    """
+
+    def test_alg_none_is_rejected_not_500(self):
+        import jwt as pyjwt
+
+        def seg(d: dict) -> str:
+            return base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+
+        token = f"{seg({'alg': 'none', 'typ': 'JWT'})}.{seg({'iss': 'https://idp-a/', 'aud': 'h'})}."
+
+        inner = JWKSTokenValidator(OIDCConfig(issuer="https://idp-a/", audience="h", jwks_uri="https://idp-a/jwks"))
+
+        class _StubJWKSClient:
+            def get_signing_key_from_jwt(self, _token):
+                raise pyjwt.exceptions.PyJWKClientError('Unable to find a signing key that matches: ""')
+
+        inner._jwks_client = _StubJWKSClient()
+
+        validator = MultiIssuerTokenValidator([inner])
+        try:
+            validator.validate(token)
+            raise AssertionError("alg=none token was not rejected")
+        except InvalidCredentialsError:
+            pass  # clean 401, not PyJWKClientError escaping as a 500
