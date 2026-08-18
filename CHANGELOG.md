@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.11.0...v2.12.0) (2026-08-18)
+
+### Added
+
+- **core:** a `resource_link` the front door hands out is now resolvable on the
+  same gateway. Each relayed link is remembered per tenant (capability-style: a
+  reference handed to tenant A is unknown to tenant B), `resources/read`
+  forwards to the owning upstream, `resources/list` answers with the caller's
+  handed-out links, and `ui://` resources go through the fail-closed SEP-1865
+  guard (denied until an operator wires a policy). Before this the gateway
+  proxied the reference faithfully and then answered `Unknown resource` when
+  the client followed it. The full prompts/resources proxy (#889 -- upstream
+  catalogues, templates, subscriptions, completions) remains open ([#1021](https://github.com/mcp-hangar/mcp-hangar/pull/1021))
+- **core:** the gateway now opens and holds the standing `GET` stream of a
+  remote (Streamable HTTP) upstream, so server-initiated messages finally have
+  somewhere to land. `notifications/tools/list_changed` triggers rediscovery --
+  a changed upstream catalogue no longer persists stale until the next restart.
+  The upstream's MCP-protocol log notifications are deliberately not routed
+  (SEP-2577 deprecates the Logging surface). An upstream that answers the
+  `GET` with 404/405 simply has no
+  channel; that is detected once and left alone. On shutdown, a legacy
+  session-based upstream's negotiated session is now terminated with a `DELETE`
+  instead of being abandoned to its server-side timer. Progress-token
+  translation (#883) rides this channel and ships separately ([#1019](https://github.com/mcp-hangar/mcp-hangar/pull/1019))
+
+### Changed
+
+- **core:** `truncation.cache_driver: redis` fails closed. A missing `redis`
+  package, an unparseable URL, or a server that cannot `SETEX` (a Sentinel
+  listen port answers PING and fails every data command) used to fall back to
+  the per-replica memory cache while the log still said `cache_driver=redis` --
+  so cross-replica continuation fetches missed and nobody was told. Now: init
+  failures refuse the boot, the constructor probes with `SETEX` (not PING), the
+  boot log names the ACTUAL backend, and a truncated response only advertises a
+  `continuation_id` when the full payload was stored. A new `redis` extra
+  (`pip install mcp-hangar[redis]`) ships in the published image next to
+  `[postgres]`; `cache_driver: memory` on a coordinated deploy stays legal and
+  logs a per-replica warning. See UPGRADE.md ([#1022](https://github.com/mcp-hangar/mcp-hangar/pull/1022))
+
+### Fixed
+
+- **core:** the config schema drifted from the readers in both directions.
+  A documented per-server `max_concurrency` warned as `unknown_config_key`,
+  failed `mcp-hangar config check`, and was refused under
+  `HANGAR_CONFIG_STRICT=1` even though the limit demonstrably applied; it is
+  now in `SERVER_SPEC_KEYS`. `working_dir` sat in the schema with no reader --
+  a config carrying it validated cleanly while the key silently did nothing --
+  and is now rejected like any other unread key ([#1013](https://github.com/mcp-hangar/mcp-hangar/pull/1013))
+- **core:** a misspelt discovery `mode` over REST answered 500 instead of 400.
+  `POST /api/discovery/sources` and `PUT /api/discovery/sources/{source_id}`
+  checked only that `mode` was present; a value like `"Authoritative"` reached
+  the command handler's `DiscoveryMode(...)` conversion, whose bare `ValueError`
+  was reported as "an internal server error occurred" and logged as an unhandled
+  exception. Both endpoints now answer 400 naming the rejected value and the two
+  valid spellings (`additive`, `authoritative`). If you scripted around the 500,
+  read the 400's `detail` instead. ([#1016](https://github.com/mcp-hangar/mcp-hangar/pull/1016))
+- **core:** a caller's `_meta.progressToken` on a `tools/call` is now relayed:
+  the upstream is asked for progress with a per-call minted token, and its
+  `notifications/progress` (arriving on the standing GET stream) are translated
+  back to the caller's token on the caller's session. Before this the upstream
+  was never asked, so every long call looked frozen to the caller who had bound
+  a progress callback. The front-door call handler also no longer blocks the
+  event loop for the duration of an upstream call -- concurrent requests on the
+  same connection (including the progress notifications themselves) proceed
+  while a call is in flight ([#1020](https://github.com/mcp-hangar/mcp-hangar/pull/1020))
+- **core:** a group behind `tool_access.mode: front_door` collided with itself
+  and served none of its tools. The flat projection keyed on the bare tool name
+  and dropped both entries on a collision -- and group members expose the same
+  names by definition. Members of one group now collapse into a single logical
+  server: the projection lists each shared tool once, policy is checked against
+  the group (the same check the call path applies), and calls dispatch through
+  the group id so member selection stays with the group's strategy (round-robin,
+  canary, health). Collisions across *different* backends are still dropped ([#1018](https://github.com/mcp-hangar/mcp-hangar/pull/1018))
+
 ## [2.11.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.10.1...v2.11.0) (2026-08-18)
 
 ### Added
