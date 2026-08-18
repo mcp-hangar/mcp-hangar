@@ -95,6 +95,7 @@ class SupportsToolInvocation(Protocol):
         arguments: dict[str, Any],
         timeout: float = 30.0,
         l7_approval_id: str | None = None,
+        progress_token: str | None = None,
     ) -> dict[str, Any]:
         """Invoke a tool on the mcp_server.
 

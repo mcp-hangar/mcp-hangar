@@ -84,6 +84,17 @@ VALID_TRANSITIONS = {
 }
 
 
+def _tool_call_params(tool_name: str, arguments: dict[str, Any], progress_token: str | None) -> dict[str, Any]:
+    """The upstream ``tools/call`` params; ``_meta.progressToken`` only when asked (#883).
+
+    A helper so the branch stays out of ``invoke_tool`` (CC baseline 18).
+    """
+    params: dict[str, Any] = {"name": tool_name, "arguments": arguments}
+    if progress_token is not None:
+        params["_meta"] = {"progressToken": progress_token}
+    return params
+
+
 class McpServer(AggregateRoot):
     """
     McpServer aggregate root.
@@ -1058,6 +1069,14 @@ class McpServer(AggregateRoot):
         if method == "notifications/tools/list_changed":
             logger.info("upstream_tools_list_changed", mcp_server_id=self.mcp_server_id)
             self._refresh_tools()
+        elif method == "notifications/progress":
+            from ..services import progress_relay
+
+            if not progress_relay.forward(msg.get("params") or {}):
+                logger.debug(
+                    "upstream_progress_unclaimed",
+                    mcp_server_id=self.mcp_server_id,
+                )
         else:
             logger.debug(
                 "upstream_notification_unrouted",
@@ -1286,6 +1305,7 @@ class McpServer(AggregateRoot):
         arguments: dict[str, Any],
         timeout: float = 30.0,
         l7_approval_id: str | None = None,
+        progress_token: str | None = None,
     ) -> dict[str, Any]:
         """
         Invoke a tool on this mcp_server.
@@ -1407,7 +1427,7 @@ class McpServer(AggregateRoot):
             response = self._call_with_session_recovery(
                 client,
                 "tools/call",
-                {"name": tool_name, "arguments": arguments},
+                _tool_call_params(tool_name, arguments, progress_token),
                 timeout=timeout,
             )
         except (OSError, TimeoutError) as e:
