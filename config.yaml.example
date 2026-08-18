@@ -61,11 +61,15 @@ mcp_servers:
     #      "Tool not found: <name>" (a WARNING is logged at start naming any
     #      such unconfirmed static tool).
     #
-    #   2. A DICT with `allow:` / `deny:` = an ACCESS POLICY that filters
-    #      which discovered tools are exposed, e.g.:
+    #   2. A DICT with `allow_list:` / `deny_list:` / `approval_list:` = an
+    #      ACCESS POLICY that filters which discovered tools are exposed, e.g.:
     #        tools:
-    #          allow: [add, subtract]
-    #          deny: [dangerous_tool]
+    #          allow_list: [add, subtract]
+    #          deny_list: [dangerous_tool]
+    #      ONLY these canonical key names are read. Any other spelling
+    #      (`allow:`, `deny:`, ...) parses as NO access policy at all --
+    #      silently, because keys below the server-spec level are not
+    #      schema-checked.
     #
     # The list form below is the pre-start SCHEMA projection:
     tools:
@@ -172,7 +176,7 @@ mcp_servers:
   #     header: X-API-Key              # Custom header name (default: X-API-Key)
   #     key: \${TRANSLATE_API_KEY}
   #   tls:
-  #     verify: true                   # Verify TLS certificates (default: true)
+  #     verify_ssl: true               # Verify TLS certificates (default: true)
   #   idle_ttl_s: 300
 
   # Provider Group
