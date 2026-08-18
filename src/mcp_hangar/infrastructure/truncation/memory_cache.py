@@ -79,7 +79,7 @@ class MemoryResponseCache(IResponseCache):
         """Get the default TTL in seconds."""
         return self._default_ttl_s
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> None:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
         """Store a full response in the cache.
 
         Args:
@@ -98,7 +98,7 @@ class MemoryResponseCache(IResponseCache):
                 continuation_id=continuation_id,
                 error=str(e),
             )
-            return
+            return False
 
         with self._lock:
             # Remove existing entry if present
@@ -123,6 +123,7 @@ class MemoryResponseCache(IResponseCache):
                 size_bytes=len(serialized),
                 ttl_s=ttl_s,
             )
+            return True
 
     def retrieve(
         self,

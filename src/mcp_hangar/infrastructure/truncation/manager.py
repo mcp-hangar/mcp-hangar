@@ -184,13 +184,22 @@ class TruncationManager:
         if result.result is None:
             return result
 
-        # Cache the full response
+        # Cache the full response. A failed store must not mint a continuation
+        # the client cannot fetch (#1007) -- the payload is still truncated,
+        # the client just is not promised a rest that does not exist.
         continuation_id = ContinuationId.generate(batch_id, call_index)
-        self._cache.store(
+        stored = self._cache.store(
             continuation_id.value,
             result.result,
             self._config.cache_ttl_s,
         )
+        if not stored:
+            logger.warning(
+                "continuation_not_advertised",
+                batch_id=batch_id,
+                call_index=call_index,
+                message="full payload could not be cached; truncating without a continuation_id",
+            )
 
         # Calculate original size
         try:
@@ -215,7 +224,7 @@ class TruncationManager:
             call_index=call_index,
             original_size=original_size,
             budget=budget,
-            continuation_id=continuation_id.value,
+            continuation_id=continuation_id.value if stored else None,
         )
 
         return CallResult(
@@ -230,7 +239,7 @@ class TruncationManager:
             truncated_reason="batch_budget_exceeded",
             original_size_bytes=original_size,
             retry_metadata=result.retry_metadata,
-            continuation_id=continuation_id.value,
+            continuation_id=continuation_id.value if stored else None,
         )
 
     def _smart_truncate_json(self, data: Any, max_bytes: int) -> Any:

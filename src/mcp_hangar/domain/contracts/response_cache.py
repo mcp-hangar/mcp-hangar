@@ -38,13 +38,16 @@ class IResponseCache(ABC):
     """
 
     @abstractmethod
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> None:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
         """Store a full response for later retrieval.
 
         Args:
             continuation_id: Unique identifier for this cached response.
             full_response: The complete response data to cache.
             ttl_s: Time-to-live in seconds before the entry expires.
+
+        Returns:
+            True if the payload is retrievable under continuation_id.
         """
 
     @abstractmethod
@@ -91,9 +94,9 @@ class NullResponseCache(IResponseCache):
     All operations are no-ops or return empty results.
     """
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> None:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
         """No-op store."""
-        pass
+        return False
 
     def retrieve(
         self,
