@@ -10,7 +10,7 @@ Track the upstream MCP status the interceptor/governance extension depends on.
 
 **Governing decision:** [ADR-012](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-012-interceptor-sep-pin-tracking-policy.md) — vendor + freeze at a known-good SHA, bump on a deliberate cadence, keep the surface experimental and off-by-default, detect drift on a schedule.
 
-**Current pin:** `7cf90c9`. The canonical, machine-readable pin lives in `.github/workflows/interceptor-pin-drift.yml` (`PINNED_SHA`) — that workflow runs on `main` weekly and opens an informational issue when upstream `HEAD` moves ahead. Pin history: `5bd7ab4` → `99bc7c9` (#405, capability key aligned to the SEP-2133 extensions format) → `7cf90c9` (#655, 2026-07-29; review found the server-declared `interceptors/list` shape untouched, so no schema change).
+**Current pin:** `8704137`. The canonical, machine-readable pin lives in `.github/workflows/interceptor-pin-drift.yml` (`PINNED_SHA`) — that workflow runs on `main` weekly and opens an informational issue when upstream `HEAD` moves ahead. Pin history: `5bd7ab4` → `99bc7c9` (#405, capability key aligned to the SEP-2133 extensions format) → `7cf90c9` (#655, 2026-07-29; review found the server-declared `interceptors/list` shape untouched, so no schema change) → `8704137` (#840, 2026-08-18; review found the three intervening commits are C#-SDK-only, Go-SDK-only, and Go-deps/CI-only — `docs/sep.md` untouched, so no schema change).
 
 **Spec shape:**
 
@@ -61,7 +61,7 @@ ADR-005 framed interceptors as a core SEP. It is **Superseded by ADR-010** (the 
 
 | Item | Ref | Status | Our Action |
 |------|-----|--------|-----------|
-| Interceptors spec | `experimental-ext-interceptors` (was SEP-1763, closed completed 2026-04-22) | Experimental extension repo; not core spec | Pin `7cf90c9` in `interceptor-pin-drift.yml`; deliberate-cadence bumps per ADR-012 |
+| Interceptors spec | `experimental-ext-interceptors` (was SEP-1763, closed completed 2026-04-22) | Experimental extension repo; not core spec | Pin `8704137` in `interceptor-pin-drift.yml`; deliberate-cadence bumps per ADR-012 |
 | Digest pinning | [SEP-1766](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1766) | Closed completed 2026-06-24; not merged into upstream spec | Keep `TaskDigestGuard` as own Validator |
 | Extensions framework | SEP-2133 | Merged into upstream spec `main` by 2026-07-08 audit | Adopt reverse-DNS IDs; enforce default-off |
 | Tasks | SEP-2663 | Merged; SDK `mcp_types.Task*` is a frozen SEP-1686 fossil | Vendored wire (`tasks_wire.py`, ADR-015); relay-with-governance (ADR-014) |
