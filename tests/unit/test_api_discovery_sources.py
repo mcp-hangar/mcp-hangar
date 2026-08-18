@@ -209,9 +209,7 @@ class TestSourceManagementIsMarkedPreview:
     """
 
     def test_register_carries_the_preview_header(self, api_client):
-        response = api_client.post(
-            "/discovery/sources", json={"source_type": "filesystem", "mode": "additive"}
-        )
+        response = api_client.post("/discovery/sources", json={"source_type": "filesystem", "mode": "additive"})
         assert response.headers["X-Hangar-Preview"] == "discovery-source-management"
 
     def test_scan_carries_the_preview_header(self, api_client):

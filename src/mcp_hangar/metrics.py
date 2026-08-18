@@ -9,9 +9,7 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import wraps
 from typing import Any
-import platform
 import threading
 import time
 
@@ -1241,16 +1239,6 @@ def get_metrics() -> str:
     return REGISTRY.collect()
 
 
-def init_metrics(version: str = "1.0.0"):
-    """Initialize metrics on server startup."""
-    BUILD_INFO.info(
-        version=version,
-        python_version=platform.python_version(),
-        platform=platform.system(),
-    )
-    PROCESS_START_TIME.set(time.time())
-
-
 def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str | None = None):
     """Record a tool call observation.
 
@@ -1467,36 +1455,6 @@ def record_egress_policy_violation_observed(mcp_server: str, would_be_action: st
     EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL.inc(mcp_server=mcp_server, would_be_action=would_be_action)
 
 
-def record_behavioral_deviation(mcp_server: str, deviation_type: str) -> None:
-    """Record a behavioral deviation detection.
-
-    Args:
-        mcp_server: McpServer ID whose behavior deviated from baseline.
-        deviation_type: Type of deviation (new_destination, frequency_anomaly, etc.).
-    """
-    BEHAVIORAL_DEVIATIONS_TOTAL.inc(mcp_server=mcp_server, deviation_type=deviation_type)
-
-
-def record_tool_schema_drift(mcp_server: str, change_type: str) -> None:
-    """Record a tool schema change detection.
-
-    Args:
-        mcp_server: McpServer ID whose tool schema changed.
-        change_type: Type of change (added, removed, modified).
-    """
-    TOOL_SCHEMA_DRIFTS_TOTAL.inc(mcp_server=mcp_server, change_type=change_type)
-
-
-def record_detection_rule_match(rule_id: str, severity: str) -> None:
-    """Record a detection rule match from semantic analysis.
-
-    Args:
-        rule_id: Identifier of the matched detection rule.
-        severity: Severity of the match (critical, high, medium, low).
-    """
-    DETECTION_RULE_MATCHES_TOTAL.inc(rule_id=rule_id, severity=severity)
-
-
 def record_otlp_export_failure() -> None:
     """Record a failed OTLP span-export batch.
 
@@ -1506,16 +1464,6 @@ def record_otlp_export_failure() -> None:
     a down or unreachable collector (and of the spans dropped with that batch).
     """
     OTLP_EXPORT_FAILURES_TOTAL.inc()
-
-
-def record_enforcement_action(action: str, rule_id: str) -> None:
-    """Record an automated enforcement action taken for a detection rule match.
-
-    Args:
-        action: Response action type (alert, throttle, suspend, block).
-        rule_id: Identifier of the detection rule that triggered the action.
-    """
-    ENFORCEMENT_ACTIONS_TOTAL.inc(action=action, rule_id=rule_id)
 
 
 # =============================================================================
@@ -1623,15 +1571,6 @@ def record_discovery_deregistration(source_type: str, reason: str):
     DISCOVERY_DEREGISTRATIONS_TOTAL.inc(source_type=source_type, reason=reason)
 
 
-def record_discovery_conflict(conflict_type: str):
-    """Record a discovery conflict.
-
-    Args:
-        conflict_type: Type of conflict (static_wins, source_priority)
-    """
-    DISCOVERY_CONFLICTS_TOTAL.inc(conflict_type=conflict_type)
-
-
 def record_discovery_quarantine(reason: str):
     """Record a mcp_server quarantine.
 
@@ -1674,17 +1613,3 @@ def record_discovery_validation_duration(source_type: str, duration: float):
 # =============================================================================
 # Timing Decorator
 # =============================================================================
-
-
-def timed(histogram: Histogram, **labels):
-    """Decorator to time function execution."""
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            with histogram.labels(**labels).time():
-                return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator

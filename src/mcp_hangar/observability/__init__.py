@@ -17,7 +17,6 @@ Usage:
         # ... do work
 """
 
-from mcp_hangar.observability.health import get_health_endpoint, HealthCheck, HealthEndpoint, HealthStatus
 from mcp_hangar.observability.tracing import (
     extract_trace_context,
     get_current_span_id,
@@ -28,7 +27,6 @@ from mcp_hangar.observability.tracing import (
     scrub_baggage_for_tenant,
     shutdown_tracing,
     trace_span,
-    trace_tool_invocation,
 )
 from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, McpServer
 
@@ -37,7 +35,7 @@ __all__ = [
     "init_tracing",
     "shutdown_tracing",
     "get_tracer",
-    "trace_tool_invocation",
+    "",
     "trace_span",
     "inject_trace_context",
     "extract_trace_context",
@@ -45,10 +43,6 @@ __all__ = [
     "get_current_trace_id",
     "get_current_span_id",
     # Health
-    "HealthStatus",
-    "HealthCheck",
-    "HealthEndpoint",
-    "get_health_endpoint",
     # Semantic conventions
     "MCP",
     "McpServer",

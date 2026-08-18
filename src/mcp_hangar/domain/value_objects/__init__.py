@@ -15,7 +15,7 @@ All types are re-exported here for backward compatibility.
 """
 
 # Common / shared value objects
-from .common import CatalogItemId, CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
+from .common import CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
 
 # Capability declarations (Phase 1 enforcement)
 from .capabilities import (
@@ -126,7 +126,6 @@ __all__ = [
     "ToolArguments",
     "TenantId",
     "NamespaceId",
-    "CatalogItemId",
     "ResourceScope",
     # Tool Access Policy
     "ToolAccessPolicy",
