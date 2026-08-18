@@ -15,6 +15,7 @@ from ...application.commands.discovery_commands import (
     TriggerSourceScanCommand,
     UpdateDiscoverySourceCommand,
 )
+from ...domain.discovery import DiscoveryMode
 from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
@@ -181,6 +182,23 @@ async def reject_mcp_server(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+def _invalid_mode(mode: object) -> HangarJSONResponse | None:
+    """A 400 naming the bad mode and the valid spellings, or ``None`` when acceptable.
+
+    ``None`` passes: register_source guards presence via ``missing_fields`` before
+    this runs, and update_source treats an absent mode as "no change". Left
+    unvalidated, the value reaches ``DiscoveryMode(...)`` in the command handler,
+    whose bare ``ValueError`` the middleware reports as a 500 (#987).
+    """
+    valid = [m.value for m in DiscoveryMode]
+    if mode is None or mode in valid:
+        return None
+    return HangarJSONResponse(
+        {"error": "invalid_mode", "detail": f"invalid mode {mode!r}; valid modes: {', '.join(valid)}"},
+        status_code=400,
+    )
+
+
 async def register_source(request: Request) -> HangarJSONResponse:
     """Register a new discovery source.
 
@@ -202,6 +220,8 @@ async def register_source(request: Request) -> HangarJSONResponse:
     _require_orchestrator()  # Guard: discovery must be configured
     body = await request.json()
     if (invalid := missing_fields(body, "source_type", "mode")) is not None:
+        return invalid
+    if (invalid := _invalid_mode(body["mode"])) is not None:
         return invalid
     result = await dispatch_command(
         RegisterDiscoverySourceCommand(
@@ -236,6 +256,8 @@ async def update_source(request: Request) -> HangarJSONResponse:
     """
     source_id = request.path_params["source_id"]
     body = await request.json()
+    if (invalid := _invalid_mode(body.get("mode"))) is not None:
+        return invalid
     result = await dispatch_command(
         UpdateDiscoverySourceCommand(
             source_id=source_id,
