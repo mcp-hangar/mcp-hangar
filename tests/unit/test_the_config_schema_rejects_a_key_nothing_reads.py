@@ -88,6 +88,15 @@ def test_every_shipped_example_config_passes():
             assert validate_config(loaded) == [], f"{path.name} rejected"
 
 
+def test_the_schema_tracks_the_readers_not_itself():
+    """#1005: `max_concurrency` has a reader and docs but warned as unknown;
+    `working_dir` had a schema entry and no reader, so the schema blessed a
+    key that silently did nothing."""
+    read_and_documented = {"mcp_servers": {"m": {"mode": "subprocess", "command": ["python"], "max_concurrency": 5}}}
+    assert validate_config(read_and_documented) == []
+    assert validate_config({"mcp_servers": {"m": {"mode": "subprocess", "command": ["python"], "working_dir": "/x"}}})
+
+
 def test_the_server_spec_key_set_did_not_silently_empty():
     assert len(SERVER_SPEC_KEYS) > 20
     assert "command" in SERVER_SPEC_KEYS and "mode" in SERVER_SPEC_KEYS
