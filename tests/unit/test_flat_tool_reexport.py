@@ -791,3 +791,120 @@ class TestFlatCallToolHandler:
 # ---------------------------------------------------------------------------
 # Factory integration — mode-gated registration
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Groups behind the front door (#857)
+# ---------------------------------------------------------------------------
+
+
+def _fake_group(group_id: str, member_ids: list[str]):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=group_id, members=[SimpleNamespace(id=m) for m in member_ids])
+
+
+class TestGroupsBehindFrontDoor:
+    """Members of one group are ONE logical server, not a name collision."""
+
+    def _patches(self, registry, resolver, groups):
+        return (
+            patch(
+                "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_projection_registry",
+                return_value=registry,
+            ),
+            patch(
+                "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_access_resolver",
+                return_value=resolver,
+            ),
+            patch.dict("mcp_hangar.server.bootstrap.composition.GROUPS", groups, clear=True),
+        )
+
+    def test_group_members_do_not_collide_with_each_other(self, registry, resolver, caplog):
+        """The #857 shape: a group collided with itself and contributed nothing."""
+        _populate_registry(registry, "search-v1", ["read_item", "get_item"])
+        _populate_registry(registry, "search-v2", ["read_item", "get_item"])
+        groups = {"search": _fake_group("search", ["search-v1", "search-v2"])}
+
+        p1, p2, p3 = self._patches(registry, resolver, groups)
+        with p1, p2, p3, caplog.at_level(logging.WARNING, logger="mcp_hangar.fastmcp_server.flat_tool_projection"):
+            flat = _build_flat_map("tenant:a")
+
+        assert flat["read_item"] == ("search-v1", "read_item")
+        assert flat["get_item"] == ("search-v1", "get_item")
+        assert not any("flat_tool_name_collision" in r.getMessage() for r in caplog.records)
+
+    def test_cross_backend_collision_still_drops_both(self, registry, resolver, caplog):
+        """A group and an unrelated server sharing a name is still ambiguous."""
+        _populate_registry(registry, "search-v1", ["read_item"])
+        _populate_registry(registry, "server_b", ["read_item"])
+        groups = {"search": _fake_group("search", ["search-v1"])}
+
+        p1, p2, p3 = self._patches(registry, resolver, groups)
+        with p1, p2, p3, caplog.at_level(logging.WARNING, logger="mcp_hangar.fastmcp_server.flat_tool_projection"):
+            flat = _build_flat_map("tenant:a")
+
+        assert "read_item" not in flat
+        assert any("flat_tool_name_collision" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_group_call_dispatches_to_the_group_id(self, registry, resolver):
+        """The call targets the GROUP, so member selection stays with its strategy."""
+        _populate_registry(registry, "search-v1", ["read_item"])
+        groups = {"search": _fake_group("search", ["search-v1", "search-v2"])}
+
+        from mcp_hangar.server.tools.batch.models import BatchResult, CallResult
+
+        mock_executor = Mock()
+        mock_executor.execute.return_value = BatchResult(
+            batch_id="t",
+            success=True,
+            total=1,
+            succeeded=1,
+            failed=0,
+            elapsed_ms=1.0,
+            results=[CallResult(index=0, call_id="t", success=True, result={"ok": 1}, elapsed_ms=1.0)],
+        )
+
+        captured = {}
+        mcp_mock = MagicMock()
+
+        def fake_list_tools():
+            def decorator(fn):
+                captured["list"] = fn
+                return fn
+
+            return decorator
+
+        def fake_call_tool(*, validate_input=True):
+            def decorator(fn):
+                captured["call"] = fn
+                return fn
+
+            return decorator
+
+        mcp_mock._mcp_server.list_tools = fake_list_tools
+        mcp_mock._mcp_server.call_tool = fake_call_tool
+
+        p1, p2, p3 = self._patches(registry, resolver, groups)
+        with p1, p2:
+            register_flat_tool_handlers(mcp_mock)
+
+        identity = _make_identity("tenant:a")
+        token = identity_context_var.set(identity)
+        try:
+            p1, p2, p3 = self._patches(registry, resolver, groups)
+            with (
+                p1,
+                p2,
+                p3,
+                patch("mcp_hangar.server.tools.batch.BatchExecutor", return_value=mock_executor),
+            ):
+                result = await captured["call"]("read_item", {"x": "1"})
+        finally:
+            identity_context_var.reset(token)
+
+        assert result == {"ok": 1}
+        calls = mock_executor.execute.call_args.kwargs["calls"]
+        assert calls[0].mcp_server == "search"
+        assert calls[0].tool == "read_item"

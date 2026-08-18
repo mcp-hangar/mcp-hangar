@@ -122,6 +122,47 @@ class TestAnIncompleteBodyIsAClientError:
         assert response.json()["error"] == "invalid_body"
 
 
+class TestAMisspeltDiscoveryModeIsAClientError:
+    """A present-but-invalid `mode` was the same 500 by another road (#987).
+
+    The missing-field guard checks only presence; the value then reaches
+    `DiscoveryMode(command.mode)` in the command handler, whose bare
+    `ValueError` the middleware reports as "an internal server error occurred".
+    The routes now refuse the value themselves, the way they already refuse an
+    absent field -- mapping bare ValueError to 400 globally would instead turn
+    every internal ValueError below any route into a client error.
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("post", "/discovery/sources", {"source_type": "docker", "mode": "Authoritative"}),
+            ("put", "/discovery/sources/some-id", {"mode": "Authoritative"}),
+        ],
+        ids=["POST /discovery/sources", "PUT /discovery/sources/{source_id}"],
+    )
+    def test_it_answers_400_naming_the_value_and_the_valid_spellings(self, client, method, path, body):
+        response = getattr(client, method)(path, json=body)
+
+        assert response.status_code != 500, (
+            f"{method.upper()} {path} with mode 'Authoritative' still answers 500; the "
+            "caller is told the server broke rather than that they typo'd the mode"
+        )
+        assert response.status_code == 400
+        detail = response.json().get("detail", "")
+        assert "Authoritative" in detail, "the 400 must name the rejected value"
+        assert "additive" in detail and "authoritative" in detail, "the 400 must name the valid spellings"
+
+    def test_an_absent_mode_on_update_still_means_no_change(self, client, ctx, monkeypatch):
+        """PUT's mode is optional; the guard must not start requiring it."""
+        # This one request passes validation, so it reaches dispatch_command,
+        # which reads the context through the middleware module.
+        monkeypatch.setattr("mcp_hangar.server.api.middleware.get_context", lambda: ctx)
+        ctx.command_bus.send.return_value = {"source_id": "some-id", "updated": True}
+        response = client.put("/discovery/sources/some-id", json={"enabled": False})
+        assert response.status_code == 200
+
+
 class TestTheGuardIsSharedRatherThanCopied:
     """One helper, so the sixth endpoint added does not repeat the mistake."""
 
