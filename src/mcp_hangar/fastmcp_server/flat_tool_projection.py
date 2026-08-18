@@ -31,6 +31,12 @@ This is a deliberate security/correctness invariant: exposing an
 ambiguously-routed tool could silently send a call to the wrong backend.
 Single-backend deployments never hit this path.
 
+Members of ONE group are the exception (#857): they expose the same tool
+names by definition -- that is what makes them interchangeable -- so they are
+collapsed into their group rather than colliding with each other, and calls
+dispatch through the group id so member selection stays with the group's
+strategy.
+
 Mode gate
 ---------
 All logic here is active ONLY when the topology mode is ``"front_door"``.
@@ -145,6 +151,20 @@ def build_projected_list_cache_meta(tenant_id: str | None) -> dict[str, Any]:
     }
 
 
+def _member_to_group() -> dict[str, str]:
+    """Map each group member's server id to its owning group id.
+
+    Group members are interchangeable by definition, so the flat projection
+    must treat them as ONE logical server: policy keys on the group id (the
+    same key ``BatchExecutor._gate_tool_access`` uses) and dispatch goes to
+    the group so member selection stays with the group's strategy (#857).
+    """
+    # Imported lazily: `server.bootstrap` imports this module back (#894).
+    from ..server.bootstrap.composition import GROUPS
+
+    return {member.id: group.id for group in GROUPS.values() for member in group.members}
+
+
 def _build_flat_map(
     tenant_id: str | None,
 ) -> dict[str, tuple[str, str]]:
@@ -166,6 +186,7 @@ def _build_flat_map(
     """
     registry = get_tool_projection_registry()
     resolver = get_tool_access_resolver()
+    group_of = _member_to_group()
 
     flat: dict[str, tuple[str, str]] = {}
     # Track names that collide so we can skip them without re-logging.
@@ -186,10 +207,14 @@ def _build_flat_map(
         if resolved.is_withdrawn_for(tenant_id):
             continue
 
-        # Drop tools denied by the member-scope policy.
+        # Drop tools denied by policy. A group member is checked against the
+        # GROUP policy -- the same check `_gate_tool_access` applies at call
+        # time, so a tool shown here is the tool that check will allow.
+        owner_group = group_of.get(mcp_server)
         if not resolver.is_tool_allowed(
-            mcp_server_id=mcp_server,
+            mcp_server_id=owner_group or mcp_server,
             tool_name=tool_name,
+            group_id=owner_group,
             member_id=tenant_id,
         ):
             continue
@@ -201,8 +226,15 @@ def _build_flat_map(
             continue
 
         if flat_name in flat:
-            # Collision: drop the earlier entry too.
-            existing_server, _ = flat.pop(flat_name)
+            existing_server, _ = flat[flat_name]
+            if group_of.get(existing_server, existing_server) == (owner_group or mcp_server):
+                # Same logical server: members of one group expose the same
+                # names BY DEFINITION -- that is not ambiguity, keep the first
+                # member's entry as the schema source (#857).
+                continue
+            # Collision across different logical servers: drop the earlier
+            # entry too.
+            flat.pop(flat_name)
             collisions.add(flat_name)
             logger.warning(
                 "flat_tool_name_collision flat_name=%s server_a=%s server_b=%s",
@@ -449,6 +481,10 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
             raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
 
         mcp_server_id, tool_name = flat_map[name]
+        # A group member dispatches through its GROUP so member selection stays
+        # with the group's strategy (round-robin, canary, health) -- the
+        # executor resolves the group id to a concrete member itself (#857).
+        mcp_server_id = _member_to_group().get(mcp_server_id, mcp_server_id)
 
         # Delegate to BatchExecutor.  This reuses the full enforcement path:
         #   resolver.is_tool_allowed → withdrawal check → command_bus.send
