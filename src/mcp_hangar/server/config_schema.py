@@ -72,6 +72,7 @@ SERVER_SPEC_KEYS = frozenset(
         "http",
         "idle_ttl_s",
         "image",
+        "max_concurrency",
         "max_consecutive_failures",
         "members",
         "min_healthy",
@@ -86,7 +87,6 @@ SERVER_SPEC_KEYS = frozenset(
         "tools",
         "transport",
         "volumes",
-        "working_dir",
     }
 )
 
