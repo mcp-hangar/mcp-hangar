@@ -979,6 +979,14 @@ class McpServer(AggregateRoot):
         tool_list = tools_resp.get("result", {}).get("tools", [])
         self._tools.update_from_list(tool_list)
 
+        # Open the standing server->client channel (#882). Without it every
+        # upstream-initiated message -- progress, logs, tools/list_changed --
+        # is silently unreachable. HTTP-only: stdio has no such channel to
+        # open, its notifications arrive on the same pipe.
+        start_stream = getattr(client, "start_notification_stream", None)
+        if start_stream is not None:
+            start_stream(self._route_upstream_message)
+
         # Observability: the dynamic tools/list above is authoritative and has
         # just replaced any static pre-start projection. Surface the silent
         # mismatch when a statically pre-configured tool is not confirmed by
@@ -1021,6 +1029,40 @@ class McpServer(AggregateRoot):
                 "mcp_initialized_notification_failed",
                 mcp_server_id=self.mcp_server_id,
                 error=str(exc),
+            )
+
+    def _route_upstream_message(self, msg: dict[str, Any]) -> None:
+        """Route a server-initiated message from the standing GET stream (#882).
+
+        Runs on the stream's reader thread. One notification type has an
+        obvious home today: ``tools/list_changed`` triggers rediscovery (a
+        stale catalogue used to persist until the next restart).
+        ``notifications/progress`` gains its home with the caller-token mapping
+        (#883). The upstream's own MCP-protocol log notifications are
+        deliberately NOT routed: SEP-2577 deprecates the Logging surface and
+        this codebase guards against depending on it
+        (test_no_mcp_logging_dependency) -- they fall into the debug line
+        below with everything else. A server->client *request* (it has an
+        ``id``: sampling, elicitation, roots) is unsupported -- we declare no
+        such capabilities, so a spec-following upstream will not send one; a
+        line is logged for the one that does anyway.
+        """
+        method = msg.get("method")
+        if "id" in msg:
+            logger.warning(
+                "upstream_request_unsupported",
+                mcp_server_id=self.mcp_server_id,
+                method=method,
+            )
+            return
+        if method == "notifications/tools/list_changed":
+            logger.info("upstream_tools_list_changed", mcp_server_id=self.mcp_server_id)
+            self._refresh_tools()
+        else:
+            logger.debug(
+                "upstream_notification_unrouted",
+                mcp_server_id=self.mcp_server_id,
+                method=method,
             )
 
     def _log_client_error(self, client: Any, error_msg: str) -> None:
