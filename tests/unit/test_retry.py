@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.errors import ConfigurationError, TransientError
 from mcp_hangar.retry import (
     BackoffStrategy,
     calculate_backoff,
@@ -17,6 +16,21 @@ from mcp_hangar.retry import (
     should_retry,
     with_retry,
 )
+
+
+# Local stand-ins: the HangarError hierarchy was deleted in #970. Retryability
+# for generic exceptions is by name/message pattern, which these names hit and
+# miss exactly as the old types did.
+
+
+class TransientError(Exception):
+    def __init__(self, message: str, retryable: bool = True):
+        super().__init__(message)
+
+
+class ConfigurationError(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
 
 
 class TestRetryPolicy:

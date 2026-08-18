@@ -26,13 +26,12 @@ Example:
 
 from collections.abc import Callable
 from contextlib import contextmanager
-from functools import wraps
 import os
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
+from mcp_hangar.observability.conventions import GenAI, MCP
 
 logger = get_logger(__name__)
 
@@ -368,58 +367,6 @@ def get_tracer(name: str = __name__) -> Any:
         return _noop_tracer
 
     return trace.get_tracer(name)
-
-
-def trace_tool_invocation(
-    mcp_server_id: str,
-    tool_name: str,
-    timeout: float,
-) -> Callable[[F], F]:
-    """Decorator to trace tool invocations.
-
-    Args:
-        mcp_server_id: McpServer ID.
-        tool_name: Tool name.
-        timeout: Timeout in seconds.
-
-    Example:
-        @trace_tool_invocation("sqlite", "query", 30.0)
-        def invoke_tool(...):
-            ...
-    """
-
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            tracer = get_tracer(__name__)
-
-            with tracer.start_as_current_span(
-                f"execute_tool {tool_name}",
-                kind=trace.SpanKind.CLIENT if OTEL_AVAILABLE else None,
-            ) as span:
-                # Set standard attributes
-                span.set_attribute(McpServer.ID, mcp_server_id)
-                span.set_attribute(GenAI.TOOL_NAME, tool_name)
-                span.set_attribute(GenAI.OPERATION_NAME, "execute_tool")
-                span.set_attribute(MCP.METHOD_NAME, "tools/call")
-                span.set_attribute("mcp.timeout_seconds", timeout)
-
-                try:
-                    result = func(*args, **kwargs)
-                    span.set_attribute(MCP.TOOL_STATUS, "success")
-                    return result
-                except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing must not crash tool invocation; re-raises original
-                    span.set_attribute(MCP.TOOL_STATUS, "error")
-                    span.set_attribute("mcp.error.type", type(e).__name__)
-                    span.set_attribute("mcp.error.message", str(e)[:500])
-                    span.record_exception(e)
-                    if OTEL_AVAILABLE:
-                        span.set_status(Status(StatusCode.ERROR, str(e)))
-                    raise
-
-        return wrapper  # type: ignore[return-value]  # decorated wrapper preserves F signature via @wraps
-
-    return decorator
 
 
 @contextmanager

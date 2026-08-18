@@ -66,41 +66,9 @@ from .domain.value_objects import (
     ToolName,
 )
 
-# UX Improvements - Rich errors, retry, progress
-# New explicit names with Rich prefix; Backward compat aliases (deprecated)
-from .errors import (
-    ConfigurationError as HangarConfigurationError,
-)
-from .errors import (
-    ErrorCategory,
-    HangarError,
-    NetworkError,
-    McpServerCrashError,
-    McpServerProtocolError,
-    RateLimitError,
-    RichMcpServerNotFoundError,
-    RichToolInvocationError,
-    RichToolNotFoundError,
-    TransientError,
-    create_argument_tool_error,
-    create_crash_tool_error,
-    create_mcp_server_error,
-    create_timeout_tool_error,
-    is_retryable,
-    map_exception_to_hangar_error,
-)
-from .errors import (
-    McpServerDegradedError as HangarMcpServerDegradedError,
-)
-from .errors import (
-    McpServerNotFoundError as HangarMcpServerNotFoundError,
-)
-from .errors import (
-    TimeoutError as HangarTimeoutError,
-)
-from .errors import (
-    ToolNotFoundError as HangarToolNotFoundError,
-)
+# Retryability heuristic (the HangarError/Rich* zoo it belonged to was
+# deleted in #970 -- nothing in src/ ever raised those types).
+from .errors import is_retryable
 
 # High-level Facade API (recommended for most users)
 from .facade import (
@@ -115,14 +83,6 @@ from .facade import (
 )
 
 # Legacy imports - for backward compatibility
-from .progress import (
-    ProgressCallback,
-    ProgressEvent,
-    ProgressStage,
-    ProgressTracker,
-    create_progress_tracker,
-    get_stage_message,
-)
 from .retry import BackoffStrategy, RetryPolicy, RetryResult, get_retry_policy, get_retry_store, with_retry
 from .stdio_client import StdioClient
 
@@ -166,29 +126,8 @@ __all__ = [
     "ValidationError",
     "ConfigurationError",
     "RateLimitExceeded",
-    # UX - Rich Errors (with explicit Rich prefix)
-    "ErrorCategory",
-    "HangarError",
-    "RichMcpServerNotFoundError",
-    "RichToolNotFoundError",
-    "RichToolInvocationError",
-    "TransientError",
-    "McpServerProtocolError",
-    "McpServerCrashError",
-    "NetworkError",
-    "HangarConfigurationError",
-    "HangarTimeoutError",
-    "RateLimitError",
-    "HangarMcpServerDegradedError",
-    # UX - Rich Errors (backward compatibility aliases)
-    "HangarMcpServerNotFoundError",
-    "HangarToolNotFoundError",
-    "map_exception_to_hangar_error",
+    # Retryability heuristic (see errors.py)
     "is_retryable",
-    "create_timeout_tool_error",
-    "create_crash_tool_error",
-    "create_argument_tool_error",
-    "create_mcp_server_error",
     # UX - Retry
     "RetryPolicy",
     "BackoffStrategy",
@@ -196,13 +135,6 @@ __all__ = [
     "get_retry_policy",
     "get_retry_store",
     "with_retry",
-    # UX - Progress
-    "ProgressStage",
-    "ProgressEvent",
-    "ProgressTracker",
-    "ProgressCallback",
-    "create_progress_tracker",
-    "get_stage_message",
     # Legacy - for backward compatibility
     "ToolSchema",
     "StdioClient",

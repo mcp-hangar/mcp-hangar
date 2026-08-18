@@ -42,12 +42,10 @@ from .mcp_server_group import (
     GroupStateChanged,
     McpServerGroup,
 )
-from .catalog import McpServerEntry
 from .tool_catalog import ToolCatalog, ToolSchema
 
 __all__ = [
     # Catalog
-    "McpServerEntry",
     # Base
     "AggregateRoot",
     # Circuit Breaker

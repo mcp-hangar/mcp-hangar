@@ -12,7 +12,6 @@ from __future__ import annotations
 # Re-export exception from canonical location for convenience
 from ..exceptions import McpServerStartError
 from ..contracts.launcher import IMcpServerLauncher, LaunchResult, TransportClient
-from .audit_service import AuditService
 from .error_diagnostics import collect_startup_diagnostics, get_suggestion_for_error
 from .image_builder import BuildConfig, get_image_builder, ImageBuilder
 from .tool_access_resolver import (
@@ -47,7 +46,6 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
-    "AuditService",
     "IMcpServerLauncher",
     "LaunchResult",
     "TransportClient",

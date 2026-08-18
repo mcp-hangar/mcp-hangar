@@ -383,34 +383,3 @@ def create_runtime(
         observability_config=observability_config,
         observability=observability,
     )
-
-
-async def initialize_runtime(runtime: Runtime) -> None:
-    """Initialize runtime async components.
-
-    Should be called during application startup.
-
-    Args:
-        runtime: Runtime container to initialize
-    """
-    if runtime.database:
-        await runtime.database.initialize()
-
-    if runtime.recovery_service and runtime.persistence_config:
-        if runtime.persistence_config.auto_recover:
-            await runtime.recovery_service.recover_mcp_servers()
-
-
-async def shutdown_runtime(runtime: Runtime) -> None:
-    """Shutdown runtime async components.
-
-    Should be called during application shutdown.
-
-    Args:
-        runtime: Runtime container to shutdown
-    """
-    if runtime.observability:
-        runtime.observability.shutdown()
-
-    if runtime.database:
-        await runtime.database.close()

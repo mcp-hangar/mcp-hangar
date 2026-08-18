@@ -1,5 +1,37 @@
 # Upgrading MCP Hangar
 
+## Next — the unused-surface sweep (#969)
+
+Nine verified-dead surfaces left over from the factory cut are gone. None had
+a caller in `src/`; if you imported them in your own code, the replacements
+are listed:
+
+- **`HangarError` / `Rich*` errors, factories, `ErrorClassifier`**
+  (`mcp_hangar.errors`, also re-exported from the package root). The live
+  hierarchy is `mcp_hangar.domain.exceptions`; `is_retryable` stays and keeps
+  matching timeout/connection-style exceptions by pattern.
+- **`ProgressTracker` / `create_progress_tracker`** (`mcp_hangar.progress`,
+  module deleted). MCP progress notifications are a different, live feature.
+- **`HealthEndpoint` / `HealthCheck` / `get_health_endpoint`**
+  (`mcp_hangar.observability`). The live probes are the `/health/*` routes;
+  event-store durability get/set remains in `observability.health`.
+- **`mcp_hangar.domain.bundles`** (starter/developer/data bundle catalog).
+  Hot-loading from the registry (`hangar_load`) is the live path.
+- **`AuditService`** (`domain.services`). Live audit is `AuditEventHandler`
+  over `IAuditRepository`.
+- **Tenant/catalog/package exception cluster** (`TenantNotFoundError`,
+  `QuotaExceededError`, `CatalogItemNotFoundError`,
+  `PackageVerificationError`, ...) plus `McpServerEntry` and
+  `CatalogItemId`. There is no catalog API these could describe.
+- **`HangarLoadResult` / `HangarUnloadResult`** and REST
+  `serialize_tool_info` / `serialize_health_info`; the tools return dicts and
+  REST serializes via `.to_dict()`.
+- **Metrics helpers** `init_metrics`, `timed`, `record_*` for
+  detection/behavioral features that never shipped producers.
+- **`initialize_runtime` / `shutdown_runtime`** (`bootstrap.runtime`) and the
+  `trace_tool_invocation` decorator; `create_runtime`, `init_tracing` and
+  `get_tracer` stay.
+
 ## Upgrade to 2.10.0
 
 ### `config.yaml` warns about a key nothing reads
