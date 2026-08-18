@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.10.1...v2.11.0) (2026-08-18)
+
+### Added
+
+- `requireApproval` in an MCPEgressPolicy now routes matching tool calls into
+  the existing approval gate instead of failing closed as a slower deny. The
+  invoke path consults the L7 verdict alongside the MRTR tool-access policy,
+  blocks on `ApprovalGateService` (typed pending approval, `approval:resolve`
+  chokepoint, dispatch-time revalidation), and only a granted approval converts
+  the verdict -- deny still wins if the policy hardens during the hold, `Audit`
+  mode never asks a human, and a deployment with no approval channel stays
+  fail-closed exactly as before. ([#1001](https://github.com/mcp-hangar/mcp-hangar/pull/1001))
+
+### Removed
+
+- The #969 sweep: nine verified-unused surfaces left over from the factory cut
+  are deleted from `src/` -- the `HangarError`/`Rich*` error zoo with its
+  factories and `ErrorClassifier` (`is_retryable` stays), `ProgressTracker`,
+  the `HealthEndpoint` registry nothing served (event-store durability get/set
+  stays), `domain/bundles`, `AuditService`, the tenant/catalog/package
+  exception cluster with `McpServerEntry`/`CatalogItemId`,
+  `HangarLoadResult`/`HangarUnloadResult` and the unused REST serializers, the
+  never-called metrics helpers (`init_metrics`, `timed`, `record_*` for
+  unshipped detection features), and `initialize_runtime`/`shutdown_runtime`
+  plus the `trace_tool_invocation` decorator. None had a production caller;
+  see UPGRADE.md for the replacement surfaces. ([#1002](https://github.com/mcp-hangar/mcp-hangar/pull/1002))
+
+### Fixed
+
+- A browser CORS preflight is answered by the CORS layer instead of 401ing at
+  authentication. `OPTIONS` hit `AuthEnforcementMiddleware` before any
+  CORS middleware could speak -- with no `Access-Control-Allow-Origin` on the
+  refusal -- so a browser OAuth client could not call `/mcp` or `/api/*` at
+  all, allowed origin or not. Auth now skips `OPTIONS` (a preflight carries no
+  credentials by design, matching the authorization chokepoint), and
+  CORSMiddleware wraps the served combined app, which also gives `/mcp` CORS
+  headers for the first time. Refused requests carry the CORS header too, so a
+  browser can at least read the 401. ([#999](https://github.com/mcp-hangar/mcp-hangar/pull/999))
+
 ## [2.10.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.10.0...v2.10.1) (2026-08-17)
 
 ### Security

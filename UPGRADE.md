@@ -1,6 +1,8 @@
 # Upgrading MCP Hangar
 
-## Next — the unused-surface sweep (#969)
+## Upgrade to 2.11.0
+
+### the unused-surface sweep (#969)
 
 Nine verified-dead surfaces left over from the factory cut are gone. None had
 a caller in `src/`; if you imported them in your own code, the replacements
