@@ -46,6 +46,7 @@ surface is fully intact.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -63,6 +64,7 @@ from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import get_identity_context
 from ..logging_config import should_log_now
+from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
 
 logger = logging.getLogger(__name__)
@@ -351,6 +353,42 @@ def _report_empty_projection(tenant_id: str | None) -> None:
         )
 
 
+def _register_caller_progress_forwarder(mcp_ctx: Any) -> str | None:
+    """Mint and register an upstream progress token for this call, or ``None`` (#883).
+
+    ``None`` when the caller attached no ``progressToken`` or the context has
+    no session to deliver on (the SDK v1 path). The forwarder schedules the
+    session's ``send_progress_notification`` onto this loop, because upstream
+    progress arrives on the GET stream's reader thread (#882). The upstream is
+    asked with a MINTED token, not the caller's: caller tokens are opaque and
+    can collide across sessions on a shared upstream client.
+    """
+    caller_meta = getattr(mcp_ctx, "meta", None) or {}
+    caller_token = caller_meta.get("progress_token", caller_meta.get("progressToken"))
+    session = getattr(mcp_ctx, "session", None)
+    if caller_token is None or session is None:
+        return None
+
+    upstream_token = progress_relay.mint_token()
+    loop = asyncio.get_running_loop()
+    request_id = getattr(mcp_ctx, "request_id", None)
+
+    def _forward(progress: float, total: float | None, message: str | None) -> None:
+        asyncio.run_coroutine_threadsafe(
+            session.send_progress_notification(
+                caller_token,
+                progress,
+                total=total,
+                message=message,
+                related_request_id=request_id,
+            ),
+            loop,
+        )
+
+    progress_relay.register(upstream_token, _forward)
+    return upstream_token
+
+
 def register_flat_tool_handlers(mcp: FastMCP) -> None:
     """Replace the default tools/list and tools/call handlers with flat-projection ones.
 
@@ -486,26 +524,39 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # executor resolves the group id to a concrete member itself (#857).
         mcp_server_id = _member_to_group().get(mcp_server_id, mcp_server_id)
 
+        # Relay the caller's progressToken (#883): the upstream is asked with a
+        # freshly minted token, and progress arriving on the standing GET
+        # stream (#882) is translated back onto this caller's session.
+        upstream_token = _register_caller_progress_forwarder(mcp_ctx)
+
         # Delegate to BatchExecutor.  This reuses the full enforcement path:
         #   resolver.is_tool_allowed → withdrawal check → command_bus.send
-        # No enforcement logic is duplicated here.
+        # No enforcement logic is duplicated here.  Run in a worker thread: the
+        # executor BLOCKS until the upstream answers, and blocking this loop
+        # would freeze every other request on the connection -- including the
+        # very progress notifications this call asked for.
         call_id = uuid.uuid4().hex[:12]
         executor = BatchExecutor()
-        batch = executor.execute(
-            batch_id=call_id,
-            calls=[
-                CallSpec(
-                    index=0,
-                    call_id=call_id,
-                    mcp_server=mcp_server_id,
-                    tool=tool_name,
-                    arguments=arguments or {},
-                )
-            ],
-            max_concurrency=1,
-            global_timeout=30.0,
-            fail_fast=False,
-        )
+        try:
+            batch = await asyncio.to_thread(
+                executor.execute,
+                batch_id=call_id,
+                calls=[
+                    CallSpec(
+                        index=0,
+                        call_id=call_id,
+                        mcp_server=mcp_server_id,
+                        tool=tool_name,
+                        arguments=arguments or {},
+                        progress_token=upstream_token,
+                    )
+                ],
+                max_concurrency=1,
+                global_timeout=30.0,
+                fail_fast=False,
+            )
+        finally:
+            progress_relay.unregister(upstream_token)
 
         result = batch.results[0]
         if not result.success:

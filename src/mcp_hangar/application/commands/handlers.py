@@ -140,7 +140,11 @@ class InvokeToolHandler(BaseMcpServerHandler):
 
         try:
             result = mcp_server.invoke_tool(
-                command.tool_name, command.arguments, command.timeout, l7_approval_id=command.l7_approval_id
+                command.tool_name,
+                command.arguments,
+                command.timeout,
+                l7_approval_id=command.l7_approval_id,
+                progress_token=command.progress_token,
             )
             success = True
             return result

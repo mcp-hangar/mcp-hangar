@@ -1439,6 +1439,7 @@ class BatchExecutor:
                     # requireApproval verdict in the aggregate (#921); None
                     # when nothing was granted, and deny still wins inside.
                     l7_approval_id=getattr(_approval_loop_local, "approval_id", None),
+                    progress_token=call.progress_token,
                 )
                 result = ctx.command_bus.send(command)
                 cmd_span.set_attribute("command.result", "success")
