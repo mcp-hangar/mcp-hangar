@@ -16,6 +16,7 @@ import ssl
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Queue
@@ -870,6 +871,109 @@ class HttpClient:
 
         logger.debug("http_client_notification_sent", method=method, status=response.status_code)
 
+    def start_notification_stream(self, on_message: Callable[[dict[str, Any]], None]) -> None:
+        """Open and hold the standing ``GET`` stream for server-initiated messages (#882).
+
+        Streamable HTTP gives an upstream two ways to reach its client: the SSE
+        body of a POST response, and a standing ``GET`` stream. Until this
+        existed we opened neither for anything but request/response, so every
+        unprompted server message -- ``notifications/progress``,
+        ``notifications/tools/list_changed``, the upstream's own log lines --
+        was silently unreachable.
+
+        The stream is read on a daemon thread and reconnects with backoff while
+        the client is open. An upstream that answers the ``GET`` with 404/405
+        does not offer the channel; that is a normal answer, logged once, and
+        the thread exits rather than hammering it.
+
+        Args:
+            on_message: Called with each decoded JSON-RPC message from the
+                stream. Exceptions it raises are logged, not propagated -- a bad
+                handler must not kill the channel.
+        """
+        if self._sse_thread is not None or self._closed:
+            return
+        self._sse_running = True
+        self._sse_thread = threading.Thread(
+            target=self._notification_stream_loop,
+            args=(on_message,),
+            name=f"mcp-get-stream-{self._mcp_server_id or self._host}",
+            daemon=True,
+        )
+        self._sse_thread.start()
+
+    def _notification_stream_loop(self, on_message: Callable[[dict[str, Any]], None]) -> None:
+        mcp_server_label = self._mcp_server_id or self._host
+        backoff = 1.0
+        while self._sse_running and not self._closed:
+            try:
+                headers = {"Accept": "text/event-stream"}
+                if not self._http_config.stateless_upstream and self._mcp_session_id:
+                    headers["Mcp-Session-Id"] = self._mcp_session_id
+                # read=None: this stream is MEANT to sit idle between events.
+                timeout = httpx.Timeout(connect=self._http_config.connect_timeout, read=None, write=None, pool=None)
+                with self._client.stream("GET", self._endpoint, headers=headers, timeout=timeout) as response:
+                    if response.status_code in (404, 405):
+                        logger.info(
+                            "http_client_get_stream_unsupported",
+                            mcp_server=mcp_server_label,
+                            status=response.status_code,
+                        )
+                        return
+                    if response.status_code >= 300:
+                        raise ClientError(f"get_stream_rejected: HTTP {response.status_code}")
+                    logger.info("http_client_get_stream_open", mcp_server=mcp_server_label)
+                    backoff = 1.0
+                    buffer = ""
+                    for chunk in response.iter_text():
+                        if not self._sse_running or self._closed:
+                            return
+                        buffer += chunk
+                        while "\n\n" in buffer:
+                            event_data, buffer = buffer.split("\n\n", 1)
+                            self._dispatch_stream_event(event_data, on_message, mcp_server_label)
+            except Exception as e:  # noqa: BLE001 -- the channel outlives any single transport failure
+                if not self._sse_running or self._closed:
+                    return
+                logger.warning(
+                    "http_client_get_stream_error",
+                    mcp_server=mcp_server_label,
+                    error=str(e),
+                    retry_in_s=backoff,
+                )
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
+    def _dispatch_stream_event(
+        self,
+        event_data: str,
+        on_message: Callable[[dict[str, Any]], None],
+        mcp_server_label: str,
+    ) -> None:
+        data_lines = [line.strip()[5:].strip() for line in event_data.split("\n") if line.strip().startswith("data:")]
+        data = "\n".join(line for line in data_lines if line)
+        if not data:
+            return
+        try:
+            msg = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning("http_client_get_stream_invalid_json", mcp_server=mcp_server_label, data=data[:100])
+            return
+        if not isinstance(msg, dict):
+            return
+        prometheus_metrics.record_message_received(
+            mcp_server_label, prometheus_metrics.classify_jsonrpc_message(msg), len(data)
+        )
+        try:
+            on_message(msg)
+        except Exception as e:  # noqa: BLE001 -- a bad handler must not kill the channel
+            logger.error(
+                "http_client_stream_handler_failed",
+                mcp_server=mcp_server_label,
+                method=msg.get("method"),
+                error=str(e),
+            )
+
     def is_alive(self) -> bool:
         """Check if the HTTP client connection is alive.
 
@@ -893,6 +997,22 @@ class HttpClient:
 
         # Stop SSE reader if running
         self._sse_running = False
+
+        # SEP-2567 leftover duty (#882): a legacy session-based upstream gave us
+        # a session; abandoning it leaves server-side resources held until its
+        # own timer expires, and a restarting gateway accumulates them. A modern
+        # stateless upstream has no session, so this is skipped entirely. A
+        # teardown must not fail a shutdown -- log and move on.
+        if self._mcp_session_id and not self._http_config.stateless_upstream:
+            try:
+                self._client.delete(
+                    self._endpoint,
+                    headers={"Mcp-Session-Id": self._mcp_session_id},
+                    timeout=5.0,
+                )
+                logger.debug("http_client_session_deleted", session_id=self._mcp_session_id)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: teardown must not fail a shutdown
+                logger.warning("http_client_session_delete_failed", error=str(e))
 
         # Close httpx client
         try:
