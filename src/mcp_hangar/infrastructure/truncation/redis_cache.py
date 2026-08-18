@@ -53,6 +53,19 @@ class RedisResponseCache(IResponseCache):
         self._redis_url = redis_url
         self._client: redis.Redis = redis.from_url(redis_url, decode_responses=True)
 
+        # Probe with SETEX, not PING (#1007): a Sentinel listen port answers
+        # PING happily and then fails every data command, so a `:26379` typo
+        # initialised "successfully" and every store silently failed.
+        probe = f"{KEY_PREFIX}__probe__"
+        try:
+            self._client.setex(probe, 5, "1")
+            self._client.delete(probe)
+        except Exception as e:  # noqa: BLE001 -- probe must fail closed
+            raise RuntimeError(
+                f"Redis at {self._sanitize_url(redis_url)} does not accept SETEX "
+                "(a Sentinel listen port is not a data node)"
+            ) from e
+
         logger.info("redis_cache_initialized", url=self._sanitize_url(redis_url))
 
     def _sanitize_url(self, url: str) -> str:
@@ -68,13 +81,18 @@ class RedisResponseCache(IResponseCache):
         """Create the Redis key for a continuation ID."""
         return f"{KEY_PREFIX}{continuation_id}"
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> None:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
         """Store a full response in Redis.
 
         Args:
             continuation_id: Unique identifier for this cached response.
             full_response: The complete response data to cache.
             ttl_s: Time-to-live in seconds.
+
+        Returns:
+            Whether the payload is retrievable under ``continuation_id`` --
+            a failed store must not mint a continuation the client cannot
+            fetch (#1007).
         """
         if ttl_s <= 0:
             ttl_s = 300  # Default 5 minutes
@@ -87,7 +105,7 @@ class RedisResponseCache(IResponseCache):
                 continuation_id=continuation_id,
                 error=str(e),
             )
-            return
+            return False
 
         key = self._make_key(continuation_id)
 
@@ -99,12 +117,14 @@ class RedisResponseCache(IResponseCache):
                 size_bytes=len(serialized),
                 ttl_s=ttl_s,
             )
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
+            return True
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: store failure must not mint a continuation_id
             logger.error(
                 "redis_cache_store_failed",
                 continuation_id=continuation_id,
                 error=str(e),
             )
+            return False
 
     def retrieve(
         self,

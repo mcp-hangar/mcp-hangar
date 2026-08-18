@@ -97,6 +97,12 @@ opentelemetry = [
 postgres = [
     "psycopg2-binary>=2.9.9",
 ]
+# The truncation continuation cache's redis driver imports this (#1008). Same
+# class as [postgres]: cluster-only, off the base install AND off `full` so a
+# laptop stays small; the published image installs it (see Dockerfile).
+redis = [
+    "redis>=5.0.0",
+]
 full = [
     "fpdf2>=2.8.0",
 ]
@@ -326,7 +332,6 @@ unreferenced = [
   "infrastructure/persistence/database.py::initialize_database",
   "infrastructure/persistence/database.py::set_database",
   "infrastructure/persistence/database_common.py::create_connection_factory",
-  "server/bootstrap/truncation.py::reset_truncation",
 ]
 exported_unreferenced = [
   "application/event_handlers/alert_handler.py::reset_alert_handler",

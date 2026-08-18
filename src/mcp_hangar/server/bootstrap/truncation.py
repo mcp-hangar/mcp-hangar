@@ -59,46 +59,30 @@ def init_truncation(config: dict[str, Any]) -> TruncationManager | None:
         _truncation_manager = None
         return None
 
-    # Create cache backend
+    # Create cache backend. FAIL CLOSED (#1007): when the operator asked for
+    # Redis, a missing package, a bad URL, or a server that cannot SETEX must
+    # refuse the boot -- the old memory fallback produced a gateway whose logs
+    # said `cache_driver=redis` while every cross-replica continuation missed.
     if truncation_config.cache_driver == "redis":
-        try:
-            from ...infrastructure.truncation.redis_cache import RedisResponseCache
+        from ...infrastructure.truncation.redis_cache import RedisResponseCache
 
-            assert truncation_config.redis_url is not None
-            _response_cache = RedisResponseCache(truncation_config.redis_url)
-            logger.info(
-                "truncation_redis_cache_initialized",
-                max_batch_size=truncation_config.max_batch_size_bytes,
-            )
-        except ImportError:
-            logger.warning(
-                "truncation_redis_unavailable",
-                message="redis package not installed, falling back to memory cache",
-            )
-            _response_cache = MemoryResponseCache(
-                max_entries=truncation_config.max_cache_entries,
-                default_ttl_s=truncation_config.cache_ttl_s,
-            )
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: Redis init failure falls back to memory cache
-            logger.error(
-                "truncation_redis_init_failed",
-                error=str(e),
-                message="Falling back to memory cache",
-            )
-            _response_cache = MemoryResponseCache(
-                max_entries=truncation_config.max_cache_entries,
-                default_ttl_s=truncation_config.cache_ttl_s,
-            )
+        assert truncation_config.redis_url is not None
+        _response_cache = RedisResponseCache(truncation_config.redis_url)
+        cache_backend = "redis"
     else:
         _response_cache = MemoryResponseCache(
             max_entries=truncation_config.max_cache_entries,
             default_ttl_s=truncation_config.cache_ttl_s,
         )
-        logger.info(
-            "truncation_memory_cache_initialized",
-            max_entries=truncation_config.max_cache_entries,
-            ttl_s=truncation_config.cache_ttl_s,
-        )
+        cache_backend = "memory"
+        if config.get("coordination"):
+            # Legal (truncation is opt-in), but a continuation minted on one
+            # replica is unfetchable on any other -- worth one line at boot.
+            logger.warning(
+                "truncation_memory_cache_is_per_replica",
+                message="cache_driver: memory on a coordinated deploy -- a continuation "
+                "is only fetchable on the replica that truncated; use cache_driver: redis",
+            )
 
     # Create truncation manager
     _truncation_manager = TruncationManager(truncation_config, _response_cache)
@@ -108,7 +92,8 @@ def init_truncation(config: dict[str, Any]) -> TruncationManager | None:
         enabled=True,
         max_batch_size=truncation_config.max_batch_size_bytes,
         min_per_response=truncation_config.min_per_response_bytes,
-        cache_driver=truncation_config.cache_driver,
+        # The ACTUAL backend serving requests, not the configured wish.
+        cache_backend=cache_backend,
         preserve_json=truncation_config.preserve_json_structure,
     )
 

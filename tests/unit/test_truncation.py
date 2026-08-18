@@ -516,3 +516,145 @@ class TestCallResultContinuationId:
             continuation_id="cont_batch_0_abc12345",
         )
         assert result.continuation_id == "cont_batch_0_abc12345"
+
+
+class TestFailClosedBootstrap:
+    """cache_driver: redis must not silently become memory (#1007)."""
+
+    def setup_method(self):
+        from mcp_hangar.server.bootstrap.truncation import reset_truncation
+
+        reset_truncation()
+
+    teardown_method = setup_method
+
+    def _config(self, **truncation) -> dict:
+        base = {"enabled": True, "cache_driver": "redis", "redis_url": "redis://cache:6379/0"}
+        base.update(truncation)
+        return {"truncation": base}
+
+    def test_a_redis_init_failure_refuses_the_boot(self):
+        """No memory fallback: the gateway must not start with a lie."""
+        from unittest.mock import patch
+
+        from mcp_hangar.server.bootstrap.truncation import init_truncation
+
+        with patch(
+            "mcp_hangar.infrastructure.truncation.redis_cache.RedisResponseCache",
+            side_effect=RuntimeError("no SETEX"),
+        ):
+            with pytest.raises(RuntimeError):
+                init_truncation(self._config())
+
+    def test_a_missing_redis_package_refuses_the_boot(self):
+        from unittest.mock import patch
+
+        from mcp_hangar.server.bootstrap.truncation import init_truncation
+
+        with patch(
+            "mcp_hangar.infrastructure.truncation.redis_cache.RedisResponseCache",
+            side_effect=ImportError("No module named 'redis'"),
+        ):
+            with pytest.raises(ImportError):
+                init_truncation(self._config())
+
+    def test_the_boot_log_names_the_actual_backend(self):
+        """`cache_backend=memory`, never the configured wish."""
+        from unittest.mock import patch
+
+        from mcp_hangar.server.bootstrap import truncation as boot
+
+        with patch.object(boot, "logger") as log:
+            boot.init_truncation({"truncation": {"enabled": True, "cache_driver": "memory"}})
+
+        kwargs = log.info.call_args.kwargs
+        assert kwargs["cache_backend"] == "memory"
+        assert "cache_driver" not in kwargs, "the log must name the actual backend, not the configured wish"
+
+    def test_memory_on_a_coordinated_deploy_warns_but_boots(self):
+        """Truncation is opt-in; a warning is enough (#1006)."""
+        from unittest.mock import patch
+
+        from mcp_hangar.server.bootstrap import truncation as boot
+
+        with patch.object(boot, "logger") as log:
+            manager = boot.init_truncation(
+                {
+                    "truncation": {"enabled": True, "cache_driver": "memory"},
+                    "coordination": {"lease_ttl_s": 10},
+                }
+            )
+
+        assert manager is not None
+        log.warning.assert_called_once_with(
+            "truncation_memory_cache_is_per_replica",
+            message=log.warning.call_args.kwargs["message"],
+        )
+
+
+class TestSetexProbe:
+    """A Sentinel listen port answers PING and fails SETEX; probe with SETEX (#1007)."""
+
+    def _client(self, setex_ok: bool):
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        if not setex_ok:
+            client.setex.side_effect = Exception("ERR unknown command 'SETEX'")
+        return client
+
+    def _cache(self, client):
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        from mcp_hangar.infrastructure.truncation.redis_cache import RedisResponseCache
+
+        redis_mod = MagicMock()
+        redis_mod.from_url.return_value = client
+        with patch.dict(sys.modules, {"redis": redis_mod}):
+            return RedisResponseCache("redis://sentinel:26379/0")
+
+    def test_a_port_that_cannot_setex_fails_init(self):
+        with pytest.raises(RuntimeError) as excinfo:
+            self._cache(self._client(setex_ok=False))
+        assert "SETEX" in str(excinfo.value)
+
+    def test_a_data_node_passes_the_probe(self):
+        client = self._client(setex_ok=True)
+        cache = self._cache(client)
+        assert client.setex.called and client.delete.called
+        assert cache.store("cont_x_0_abc", {"a": 1}, 60) is True
+
+    def test_a_failed_store_returns_false(self):
+        client = self._client(setex_ok=True)
+        cache = self._cache(client)
+        client.setex.side_effect = Exception("connection reset")
+        assert cache.store("cont_x_0_abc", {"a": 1}, 60) is False
+
+
+class TestNoContinuationWithoutStore:
+    """A continuation_id is a promise; a failed store must not mint one (#1007)."""
+
+    def test_failed_store_truncates_without_continuation(self):
+        from mcp_hangar.domain.contracts.response_cache import NullResponseCache
+
+        config = TruncationConfig(enabled=True, max_batch_size_bytes=200, min_per_response_bytes=50, cache_ttl_s=300)
+        manager = TruncationManager(config, NullResponseCache())  # store always False
+        big = {"data": "x" * 1000}
+        results = [CallResult(index=0, call_id="c0", success=True, result=big, elapsed_ms=1.0)]
+
+        processed = manager.process_batch("batch1", results)
+
+        assert processed[0].truncated is True
+        assert processed[0].continuation_id is None
+
+    def test_successful_store_still_mints_one(self):
+        config = TruncationConfig(enabled=True, max_batch_size_bytes=200, min_per_response_bytes=50, cache_ttl_s=300)
+        manager = TruncationManager(config, MemoryResponseCache())
+        big = {"data": "x" * 1000}
+        results = [CallResult(index=0, call_id="c0", success=True, result=big, elapsed_ms=1.0)]
+
+        processed = manager.process_batch("batch1", results)
+
+        assert processed[0].truncated is True
+        assert processed[0].continuation_id is not None

@@ -31,7 +31,9 @@ COPY --from=py-builder /app/dist/*.whl /tmp/
 # `persistence.backend: postgresql` fails at startup on the one artefact where
 # it is the recommended configuration. Found by deploying it (#790, phase 4.4).
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir "$(ls /tmp/*.whl)[kubernetes,postgres]" opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp fpdf2 websockets && \
+    # [redis]: the truncation continuation cache on N>1 replicas needs a shared
+    # store, and the image is the HA artefact -- same class as [postgres] (#1008).
+    pip install --no-cache-dir "$(ls /tmp/*.whl)[kubernetes,postgres,redis]" opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp fpdf2 websockets && \
     rm /tmp/*.whl
 
 USER hangar

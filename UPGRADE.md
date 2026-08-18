@@ -1,5 +1,21 @@
 # Upgrading MCP Hangar
 
+## Next
+
+### `truncation.cache_driver: redis` now fails closed (#1007)
+
+If Redis cannot actually serve the continuation cache -- the `redis` package
+is missing, the URL does not parse, or the server cannot `SETEX` (a Sentinel
+listen port) -- the gateway now **refuses to start** instead of silently
+falling back to the per-replica memory cache. If your deployment booted with
+`cache_driver: redis` before this release, Redis was never actually in use;
+either fix the connection (the image now ships the `redis` extra, #1008) or
+set `cache_driver: memory` explicitly. A truncated response no longer carries
+a `continuation_id` unless the full payload was actually stored.
+
+`pip install mcp-hangar[redis]` provides the client; it is deliberately not
+part of the base install or the `full` extra.
+
 ## Upgrade to 2.11.0
 
 ### the unused-surface sweep (#969)
