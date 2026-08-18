@@ -38,6 +38,7 @@ from ...protocol import HANGAR_SERVER_NAME
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
 from ...fastmcp_server.governance_extensions import advertise_governance_extensions
 from ...fastmcp_server.modern_surface import register_modern_surface
+from ...fastmcp_server.resource_link_read_through import maybe_register_resource_read_through
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
@@ -220,6 +221,9 @@ def build_serving_mcp_server() -> FastMCP:
     # advertised and neither served (#888). Runs here as well as in the factory
     # -- wiring only the factory is dead on the shipped path (#596).
     withdraw_unserved_capabilities(mcp_server)
+    # AFTER the withdrawal, which would pop these handlers as unserved: the
+    # front-door read-through for handed-out resource_link references (#889).
+    maybe_register_resource_read_through(mcp_server)
     return mcp_server
 
 
