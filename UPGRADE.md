@@ -1,6 +1,6 @@
 # Upgrading MCP Hangar
 
-## Next
+## Upgrade to 2.12.0
 
 ### `truncation.cache_driver: redis` now fails closed (#1007)
 
