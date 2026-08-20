@@ -43,9 +43,7 @@ tenant keeps resolving even if the upstream stops listing it.
 
 Governed since #1028 through :func:`_deliverable`, which every listing, the
 handed-out-links union and ``resources/read`` share, so denied means absent AND
-unreadable. Policy matches the UPSTREAM uri, not the ``hangar://`` projection
-of it, and the ``ui://`` guard is the first gate inside that function rather
-than a mechanism beside it -- still fail-closed regardless of policy.
+unreadable.
 
 Out of scope here: subscriptions (#1027); if they ever need a policy hook it is
 :func:`_deliverable`. Registration must run AFTER

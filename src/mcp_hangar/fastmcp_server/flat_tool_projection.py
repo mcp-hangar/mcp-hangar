@@ -65,7 +65,7 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
-from ..domain.services.tool_access_resolver import get_tool_access_resolver
+from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from .resource_link_read_through import project_result_uris
 
 logger = logging.getLogger(__name__)
@@ -168,7 +168,7 @@ def _member_to_group() -> dict[str, str]:
     return {member.id: group.id for group in GROUPS.values() for member in group.members}
 
 
-def is_governed_allowed(mcp_server: str, name: str, *, kind: str, tenant_id: str | None) -> bool:
+def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:
     """May *tenant_id* see and use *name* on *mcp_server*? (#1028)
 
     The single decision behind every projected surface -- tools, prompts and
@@ -184,11 +184,8 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: str, tenant_id: str
     is answered exactly like a nonexistent one at every call site, which is what
     stops the front door being a cross-tenant enumeration oracle (#905).
 
-    For resources, *name* is the UPSTREAM URI (``demo://doc/1``), never the
-    ``hangar://<server>/…`` projection of it: the upstream form is the stable
-    identity an operator writes in config, the server half of the projected URI
-    is already the policy scope, and it is the form the SEP-1865 ``ui://`` guard
-    reads.
+    For resources, *name* is the UPSTREAM URI -- see
+    :func:`resource_link_read_through._deliverable` for why.
     """
     registry = get_tool_projection_registry()
     if registry.is_withdrawn(mcp_server, name, kind=kind, tenant_id=tenant_id):
@@ -197,7 +194,7 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: str, tenant_id: str
     return get_tool_access_resolver().is_allowed(
         owner_group or mcp_server,
         name,
-        kind=kind,  # type: ignore[arg-type]  # validated at the config boundary
+        kind=kind,
         group_id=owner_group,
         member_id=tenant_id,
     )

@@ -48,7 +48,6 @@ _DEFAULT_MODE: TopologyMode = "egress"
 # What a policy governs. A policy is keyed `(scope target, kind)`; the default
 # everywhere is "tool", which is what every pre-#1028 registration meant.
 PolicyKind = Literal["tool", "prompt", "resource"]
-POLICY_KINDS: tuple[PolicyKind, ...] = ("tool", "prompt", "resource")
 DEFAULT_KIND: PolicyKind = "tool"
 
 # Sentinel policy that denies every tool.  deny_list=("*",) matches any
@@ -122,9 +121,7 @@ class ToolAccessResolver:
         """Legacy alias for set_mcp_server_policy."""
         self.set_mcp_server_policy(provider_id, policy)
 
-    def get_configured_policy(
-        self, scope: str, target_id: str, *, kind: PolicyKind = DEFAULT_KIND
-    ) -> ToolAccessPolicy | None:
+    def get_configured_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
         """Return the policy currently configured for a scope/target, if any.
 
         Read access exists so callers performing a partial update can preserve
@@ -142,12 +139,12 @@ class ToolAccessResolver:
         """
         with self._lock:
             if scope in ("provider", "mcp_server"):
-                return self._mcp_server_policies.get((target_id, kind))
+                return self._mcp_server_policies.get((target_id, DEFAULT_KIND))
             if scope == "group":
-                return self._group_policies.get((target_id, kind))
+                return self._group_policies.get((target_id, DEFAULT_KIND))
             if scope == "member":
                 group_id, _, member_id = target_id.partition(":")
-                return self._member_policies.get((group_id, member_id or target_id, kind))
+                return self._member_policies.get((group_id, member_id or target_id, DEFAULT_KIND))
             return None
 
     def set_group_policy(self, group_id: str, policy: ToolAccessPolicy, *, kind: PolicyKind = DEFAULT_KIND) -> None:
@@ -282,30 +279,27 @@ class ToolAccessResolver:
         """Legacy alias for remove_mcp_server_policy."""
         self.remove_mcp_server_policy(provider_id)
 
-    def remove_group_policy(self, group_id: str, *, kind: PolicyKind = DEFAULT_KIND) -> None:
-        """Remove the access policy for a group.
+    def remove_group_policy(self, group_id: str) -> None:
+        """Remove the tool access policy for a group.
 
         Args:
             group_id: Group identifier.
-            kind: What the removed policy governs (see :meth:`set_mcp_server_policy`).
         """
         with self._lock:
-            self._group_policies.pop((group_id, kind), None)
+            self._group_policies.pop((group_id, DEFAULT_KIND), None)
             self._invalidate_group_cache(group_id)
 
-    def remove_member_policy(self, group_id: str, member_id: str, *, kind: PolicyKind = DEFAULT_KIND) -> None:
-        """Remove the access policy for a group member.
+    def remove_member_policy(self, group_id: str, member_id: str) -> None:
+        """Remove the tool access policy for a group member.
 
         Args:
             group_id: Group identifier.
             member_id: Member identifier.
-            kind: What the removed policy governs (see :meth:`set_mcp_server_policy`).
         """
         with self._lock:
-            self._member_policies.pop((group_id, member_id, kind), None)
-            if not any((group_id, member_id, k) in self._member_policies for k in POLICY_KINDS):
-                self._member_mcp_server_mapping.pop((group_id, member_id), None)
-            self._policy_cache.pop((kind, f"group:{group_id}:member:{member_id}"), None)
+            self._member_policies.pop((group_id, member_id, DEFAULT_KIND), None)
+            self._member_mcp_server_mapping.pop((group_id, member_id), None)
+            self._policy_cache.pop((DEFAULT_KIND, f"group:{group_id}:member:{member_id}"), None)
 
     def resolve_effective_policy(
         self,
@@ -456,9 +450,7 @@ class ToolAccessResolver:
         Args:
             mcp_server_id: McpServer identifier.
             name: Tool name, prompt name, or -- for resources -- the UPSTREAM
-                URI, not the ``hangar://`` projection of it. The upstream form
-                is the stable identity an operator writes in config, and it is
-                what the SEP-1865 ``ui://`` guard reads.
+                URI, not the ``hangar://`` projection of it.
             kind: What *name* is.
             group_id: Optional group identifier.
             member_id: Optional member identifier.
@@ -585,18 +577,17 @@ class ToolAccessResolver:
         for key in [k for k in self._policy_cache if k[1].startswith(f"group:{group_id}:")]:
             self._policy_cache.pop(key, None)
 
-    def get_policy_summary(self, mcp_server_id: str, *, kind: PolicyKind = DEFAULT_KIND) -> dict[str, Any]:
-        """Get a summary of the policy for a mcp_server (for observability).
+    def get_policy_summary(self, mcp_server_id: str) -> dict[str, Any]:
+        """Get a summary of the tool policy for a mcp_server (for observability).
 
         Args:
             mcp_server_id: McpServer identifier.
-            kind: Which kind's policy to summarise.
 
         Returns:
             Dictionary with policy status information.
         """
         with self._lock:
-            policy = self._mcp_server_policies.get((mcp_server_id, kind))
+            policy = self._mcp_server_policies.get((mcp_server_id, DEFAULT_KIND))
             if policy is None:
                 return {
                     "active": False,

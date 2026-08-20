@@ -395,19 +395,6 @@ def _register_access_policies(
         logger.debug("access_policy_set", where=where, kind=kind)
 
 
-def _member_access_registrar(
-    resolver: Any,
-    mcp_server_id: str,
-    tenant_id: str,
-) -> Callable[[Any, "PolicyKind"], None]:
-    """Bind a per-tenant ``access:`` registration to one server and tenant."""
-
-    def register(policy: Any, kind: "PolicyKind") -> None:
-        resolver.set_standalone_member_policy(mcp_server_id, tenant_id, policy, kind=kind)
-
-    return register
-
-
 def _register_config_withdrawals(
     tp_registry: Any,
     mcp_server_id: str,
@@ -580,9 +567,13 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             for tenant_id, member_policy_spec in member_policies_config.items():
                 if not isinstance(member_policy_spec, dict):
                     continue
+
+                def _register_member_access(policy: Any, kind: "PolicyKind", tenant_id: str = tenant_id) -> None:
+                    resolver.set_standalone_member_policy(mcp_server_id, tenant_id, policy, kind=kind)
+
                 _register_access_policies(
                     member_policy_spec.get("access"),
-                    _member_access_registrar(resolver, mcp_server_id, tenant_id),
+                    _register_member_access,
                     where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
                 )
                 try:
