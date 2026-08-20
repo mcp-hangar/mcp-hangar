@@ -136,6 +136,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
     from ..context import get_identity_context
     from .asgi import bind_caller_identity, release_caller_identity
     from .flat_tool_projection import build_projected_list_cache_meta
+    from .resource_link_read_through import project_result_uris
 
     def _tenant() -> str | None:
         identity = get_identity_context()
@@ -160,9 +161,10 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
         token = bind_caller_identity(ctx)
         try:
             name = params.name
+            tenant_id = _tenant()
             # Rebuilt per request, same TOCTOU stance as the flat tool call:
             # what was shown is fetchable, what was not stays unknown.
-            prompt_map = await asyncio.to_thread(_build_prompt_map, _tenant())
+            prompt_map = await asyncio.to_thread(_build_prompt_map, tenant_id)
             if name not in prompt_map:
                 raise make_mcp_error(INVALID_PARAMS, f"Unknown prompt: {name}")
             server_id, _prompt = prompt_map[name]
@@ -172,7 +174,12 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
             if "error" in response:
                 error = response["error"]
                 raise make_mcp_error(error.get("code", INVALID_PARAMS), error.get("message", "prompt error"))
-            return GetPromptResult.model_validate(response.get("result") or {})
+            result = response.get("result") or {}
+            # A prompt message may embed a resource_link too: same front-door
+            # URI rewrite as a tool result, or the client gets a URI the
+            # gateway cannot resolve (#1025).
+            project_result_uris(tenant_id, server_id, result)
+            return GetPromptResult.model_validate(result)
         finally:
             release_caller_identity(token)
 

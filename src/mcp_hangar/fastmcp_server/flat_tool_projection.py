@@ -66,7 +66,7 @@ from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
-from .resource_link_read_through import record_resource_links
+from .resource_link_read_through import project_result_uris
 
 logger = logging.getLogger(__name__)
 
@@ -570,9 +570,10 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                 }
             )
 
-        # Remember any resource_link references we are about to hand this
-        # tenant, so following one on this gateway resolves (#889).
-        record_resource_links(tenant_id, mcp_server_id, result.result)
+        # Namespace every resource URI we are about to hand this tenant with its
+        # owning upstream, and remember the resource_links, so following one on
+        # this gateway resolves and agrees with the catalogue (#889, #1025).
+        project_result_uris(tenant_id, mcp_server_id, result.result)
 
         # Success — return the raw result dict; the lowlevel handler wraps it.
         return result.result if result.result is not None else {}

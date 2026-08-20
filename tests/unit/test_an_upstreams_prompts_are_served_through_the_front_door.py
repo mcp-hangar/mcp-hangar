@@ -146,6 +146,41 @@ class TestProxyHandlers:
         assert result.messages[0].content.text == "hi bob"
 
     @pytest.mark.asyncio
+    async def test_a_resource_link_in_a_prompt_is_projected(self) -> None:
+        """Same front-door URI rewrite as a tool result (#1025), or the client
+        is handed a uri the gateway cannot resolve."""
+        from mcp_hangar.fastmcp_server import resource_link_read_through as rt
+
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with (
+                patch("mcp_hangar.domain.services.tool_access_resolver.is_front_door", return_value=True),
+                patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}),
+                patch.object(
+                    pp,
+                    "_relay",
+                    return_value={
+                        "result": {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": {"type": "resource_link", "uri": "demo://doc/1", "name": "d"},
+                                }
+                            ]
+                        }
+                    },
+                ),
+            ):
+                result = await low.handlers["prompts/get"](None, SimpleNamespace(name="greet", arguments=None))
+                assert rt._lookup("tenant:a", "hangar://server_a/demo://doc/1") is not None
+        finally:
+            identity_context_var.reset(token)
+            rt._links.clear()
+
+        assert result.messages[0].content.uri == "hangar://server_a/demo://doc/1"
+
+    @pytest.mark.asyncio
     async def test_an_unknown_prompt_is_a_generic_not_found(self) -> None:
         low = _register()
         token = identity_context_var.set(_identity("tenant:a"))
