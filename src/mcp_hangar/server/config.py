@@ -6,10 +6,11 @@ Configuration mutates the shared runtime repository and group registry during
 startup so the rest of the server observes the same mcp_server state.
 """
 
+from collections.abc import Callable
 import os
 from pathlib import Path
 import re
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -24,6 +25,9 @@ from ..logging_config import get_logger
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
+
+if TYPE_CHECKING:
+    from ..domain.services.tool_access_resolver import PolicyKind
 
 logger = get_logger(__name__)
 
@@ -331,6 +335,109 @@ def _register_config_pins(
         )
 
 
+#: Kinds an ``access:`` block may govern (#1028). Tools are NOT here: they keep
+#: their existing ``tools:`` block, because a second spelling for a policy that
+#: already has one is how two configs come to mean different things.
+_ACCESS_KINDS: tuple["PolicyKind", ...] = ("prompt", "resource")
+
+#: ``tool_projection`` keys that withdraw something, and what they withdraw.
+#: ``withdrawn`` keeps its bare, tool-only meaning (#1028 backward compat).
+_WITHDRAWAL_KEYS: dict[str, str] = {
+    "withdrawn": "tool",
+    "withdrawn_prompts": "prompt",
+    "withdrawn_resources": "resource",
+}
+
+
+def _register_access_policies(
+    access_config: Any,
+    register: Callable[[Any, "PolicyKind"], None],
+    *,
+    where: str,
+) -> None:
+    """Register one ``access:`` block's per-kind policies (#1028).
+
+    ::
+
+        access:
+          prompt:   {deny_list: ["draft_*"]}
+          resource: {allow_list: ["docs://*"], approval_list: ["secret://*"]}
+
+    Same parser, same value object and same resolver as ``tools:`` -- only the
+    kind the policy is keyed under differs, so prompts and resources inherit the
+    merge semantics, the approval gate and the fail-closed front-door branch
+    instead of growing a weaker copy of them.
+
+    A missing or non-mapping block registers nothing, which leaves that kind
+    unrestricted for this scope -- the rule tools have always followed for an
+    undefined scope, applied per kind.
+    """
+    if not isinstance(access_config, dict):
+        return
+
+    from ..domain.model.mcp_server_config import parse_tools_access_config
+
+    for unknown in sorted(set(access_config) - set(_ACCESS_KINDS)):
+        logger.warning("unknown_access_kind", where=where, kind=unknown, known=list(_ACCESS_KINDS))
+
+    for kind in _ACCESS_KINDS:
+        spec = access_config.get(kind)
+        if not isinstance(spec, dict):
+            continue
+        try:
+            parsed = parse_tools_access_config(spec)
+        except ValueError as e:
+            logger.warning("invalid_access_config", where=where, kind=kind, error=str(e))
+            continue
+        if parsed is None:
+            continue
+        register(parsed.to_policy(), kind)
+        logger.debug("access_policy_set", where=where, kind=kind)
+
+
+def _member_access_registrar(
+    resolver: Any,
+    mcp_server_id: str,
+    tenant_id: str,
+) -> Callable[[Any, "PolicyKind"], None]:
+    """Bind a per-tenant ``access:`` registration to one server and tenant."""
+
+    def register(policy: Any, kind: "PolicyKind") -> None:
+        resolver.set_standalone_member_policy(mcp_server_id, tenant_id, policy, kind=kind)
+
+    return register
+
+
+def _register_config_withdrawals(
+    tp_registry: Any,
+    mcp_server_id: str,
+    block: dict[str, Any],
+    tenant_id: str | None,
+) -> None:
+    """Apply every ``withdrawn*`` list in one ``tool_projection`` scope.
+
+    ``withdrawn:`` still means tools and only tools; ``withdrawn_prompts:`` and
+    ``withdrawn_resources:`` withdraw the other two kinds through the same
+    overlay (#1028). Resources are named by their UPSTREAM uri, the form the
+    policy patterns and the ``ui://`` guard also read.
+    """
+    for key, kind in _WITHDRAWAL_KEYS.items():
+        names = block.get(key, [])
+        if not isinstance(names, list):
+            continue
+        for name in names:
+            if not (isinstance(name, str) and name):
+                continue
+            tp_registry.set_config_withdrawal(mcp_server_id, name, tenant_id=tenant_id, kind=kind)
+            logger.debug(
+                "config_withdrawal_registered",
+                mcp_server_id=mcp_server_id,
+                tool=name,
+                kind=kind,
+                tenant_id=tenant_id,
+            )
+
+
 def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:  # noqa: C901 -- baseline CC=37; split before extending
     """Load a single mcp_server configuration."""
     from ..domain.model.mcp_server_config import parse_tools_access_config
@@ -449,11 +556,22 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             has_approval_list=bool(tools_access_policy.approval_list),
         )
 
+    # Parse the mcp_server-level prompt / resource policies (#1028). Keyed by
+    # kind in the SAME resolver the `tools:` block above feeds, so one config
+    # reload cannot leave the two surfaces disagreeing.
+    _register_access_policies(
+        spec_dict.get("access"),
+        lambda policy, kind: get_tool_access_resolver().set_mcp_server_policy(mcp_server_id, policy, kind=kind),
+        where=f"mcp_servers.{mcp_server_id}",
+    )
+
     # Parse per-tenant (member-scope) tool access policies:
     # tool_access:
     #   member:
     #     "tenant:a":
     #       deny_list: [dangerous_tool]
+    #       access:
+    #         prompt: {deny_list: [internal_*]}
     tool_access_config = spec_dict.get("tool_access")
     if isinstance(tool_access_config, dict):
         member_policies_config = tool_access_config.get("member", {})
@@ -462,6 +580,11 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             for tenant_id, member_policy_spec in member_policies_config.items():
                 if not isinstance(member_policy_spec, dict):
                     continue
+                _register_access_policies(
+                    member_policy_spec.get("access"),
+                    _member_access_registrar(resolver, mcp_server_id, tenant_id),
+                    where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
+                )
                 try:
                     member_tools_cfg = parse_tools_access_config(member_policy_spec)
                     if member_tools_cfg is not None:
@@ -522,18 +645,8 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             tenant_id=None,
         )
 
-        # Global withdrawals (all tenants)
-        global_withdrawn = tool_projection_config.get("withdrawn", [])
-        if isinstance(global_withdrawn, list):
-            for tool_name in global_withdrawn:
-                if isinstance(tool_name, str) and tool_name:
-                    tp_registry.set_config_withdrawal(mcp_server_id, tool_name, tenant_id=None)
-                    logger.debug(
-                        "config_withdrawal_registered",
-                        mcp_server_id=mcp_server_id,
-                        tool=tool_name,
-                        tenant_id=None,
-                    )
+        # Global withdrawals (all tenants), of every kind.
+        _register_config_withdrawals(tp_registry, mcp_server_id, tool_projection_config, tenant_id=None)
 
         # Per-tenant withdrawals
         tenant_overrides_config = tool_projection_config.get("tenant_overrides", {})
@@ -541,17 +654,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             for tenant_id_key, tenant_spec in tenant_overrides_config.items():
                 if not isinstance(tenant_spec, dict):
                     continue
-                tenant_withdrawn = tenant_spec.get("withdrawn", [])
-                if isinstance(tenant_withdrawn, list):
-                    for tool_name in tenant_withdrawn:
-                        if isinstance(tool_name, str) and tool_name:
-                            tp_registry.set_config_withdrawal(mcp_server_id, tool_name, tenant_id=tenant_id_key)
-                            logger.debug(
-                                "config_withdrawal_registered",
-                                mcp_server_id=mcp_server_id,
-                                tool=tool_name,
-                                tenant_id=tenant_id_key,
-                            )
+                _register_config_withdrawals(tp_registry, mcp_server_id, tenant_spec, tenant_id=tenant_id_key)
 
                 # Per-tenant digest pins: {tool_name: sha256_hex}.
                 _register_config_pins(
@@ -639,6 +742,14 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
             has_deny_list=bool(group_tools_policy.deny_list),
             has_approval_list=bool(group_tools_policy.approval_list),
         )
+
+    # Group-level prompt / resource policies (#1028), same block shape as a
+    # server's. A group member is checked against its group on every surface.
+    _register_access_policies(
+        spec_dict.get("access"),
+        lambda policy, kind: get_tool_access_resolver().set_group_policy(group_id, policy, kind=kind),
+        where=f"mcp_servers.{group_id}",
+    )
 
     _load_group_members(group, group_id, spec_dict.get("members", []))
 

@@ -189,6 +189,11 @@ class TestReadThrough:
         Also pins that the guard reads the DECODED upstream uri -- namespacing
         hides the ``ui://`` scheme from a guard that looks at what the client
         sent.
+
+        Since #1028 the guard is the first gate inside ``_deliverable``, so the
+        refusal arrives as the same generic not-found a nonexistent resource
+        gets. That is the stronger answer, not a weaker one: a denial that
+        announces itself is an enumeration oracle (#905).
         """
         ui_link = {"type": "resource_link", "uri": "ui://widget/1", "name": "w"}
         rt.project_result_uris("tenant:a", "server_a", {"content": [ui_link]})
@@ -201,7 +206,7 @@ class TestReadThrough:
         finally:
             identity_context_var.reset(token)
         relay.assert_not_called()
-        assert "not deliverable" in str(excinfo.value)
+        assert "Unknown resource" in str(excinfo.value)
 
     @pytest.mark.asyncio
     async def test_list_answers_with_the_callers_links_only(self) -> None:

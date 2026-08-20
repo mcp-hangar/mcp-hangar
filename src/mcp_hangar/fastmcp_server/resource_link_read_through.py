@@ -41,11 +41,16 @@ returns. It also remembers each handed-out ``resource_link`` as
 (tenant, projected uri) -> owning server, capability-style: a link handed to a
 tenant keeps resolving even if the upstream stops listing it.
 
-Out of scope here: subscriptions (#1027) and the resource policy seam (#1028)
--- anything from the tenant's own upstreams is allowed. Registration must run
-AFTER ``withdraw_unserved_capabilities``: that pass pops resources handlers
-nothing serves, and would silently pop these too (the recurring hidden-wiring
-shape).
+Governed since #1028 through :func:`_deliverable`, which every listing, the
+handed-out-links union and ``resources/read`` share, so denied means absent AND
+unreadable. Policy matches the UPSTREAM uri, not the ``hangar://`` projection
+of it, and the ``ui://`` guard is the first gate inside that function rather
+than a mechanism beside it -- still fail-closed regardless of policy.
+
+Out of scope here: subscriptions (#1027); if they ever need a policy hook it is
+:func:`_deliverable`. Registration must run AFTER
+``withdraw_unserved_capabilities``: that pass pops resources handlers nothing
+serves, and would silently pop these too (the recurring hidden-wiring shape).
 """
 
 from __future__ import annotations
@@ -158,8 +163,21 @@ def _lookup(tenant_id: str | None, uri: str) -> tuple[str, dict[str, Any]] | Non
 
 
 def _links_for(tenant_id: str | None) -> list[dict[str, Any]]:
+    """This tenant's handed-out links that policy still lets it see (#1028).
+
+    Filtered here and not only in the catalogue: the links union is a second
+    way into ``resources/list``, and an unfiltered one would list what
+    ``resources/read`` now refuses -- the drift this seam exists to prevent.
+    """
     with _lock:
-        return [block for (tenant, _uri), (_server, block) in _links.items() if tenant == tenant_id]
+        remembered = [(server, block) for (tenant, _uri), (server, block) in _links.items() if tenant == tenant_id]
+
+    visible: list[dict[str, Any]] = []
+    for server, block in remembered:
+        resolved = resolve_uri(block["uri"])
+        if resolved is not None and _deliverable(tenant_id, server, resolved[1]):
+            visible.append(block)
+    return visible
 
 
 def _relay_read(mcp_server_id: str, uri: str) -> dict[str, Any]:
@@ -181,6 +199,34 @@ def _relay_list(mcp_server_id: str, method: str) -> dict[str, Any]:
     from .prompt_proxy import _relay
 
     return _relay(mcp_server_id, method, {})
+
+
+def _deliverable(tenant_id: str | None, mcp_server_id: str, upstream_uri: str) -> bool:
+    """May this tenant see and read *upstream_uri* on *mcp_server_id*? (#1028)
+
+    Two fail-closed gates, both on the UPSTREAM uri -- the projected
+    ``hangar://`` form namespaces the scheme, and neither a policy pattern an
+    operator wrote nor the SEP-1865 guard can read a scheme that has been
+    rewritten:
+
+    1. The ``ui://`` guard's pure allowlist decision. It is a *case* of this
+       surface rather than a mechanism beside it, and it is checked first
+       precisely so it cannot be weakened by policy: an un-allowlisted ``ui://``
+       resource is denied whatever the resource policy says, and is now absent
+       from the catalogue as well as unreadable. Consent, which ``evaluate``
+       cannot resolve, still runs at read time via ``enforce``.
+    2. The shared ``(mcp_server, kind, name)`` decision -- withdrawal overlay
+       plus effective policy.
+
+    Called from the catalogue build, the handed-out-links union and
+    ``_resolve_target``, so listing and reading make one decision.
+    """
+    if not _ui_guard.evaluate(upstream_uri, tenant_id).allowed:
+        return False
+
+    from .flat_tool_projection import is_governed_allowed
+
+    return is_governed_allowed(mcp_server_id, upstream_uri, kind="resource", tenant_id=tenant_id)
 
 
 #: ``(relay method, result key, URI field)`` for the two catalogue listings.
@@ -215,7 +261,12 @@ def _build_catalog(tenant_id: str | None, listing: tuple[str, str, str]) -> list
         entries += [
             {**entry, field: project_uri(mcp_server_id, entry[field])}
             for entry in listed
-            if isinstance(entry, dict) and isinstance(entry.get(field), str)
+            if isinstance(entry, dict)
+            and isinstance(entry.get(field), str)
+            # Denied => absent, so not-shown and not-readable are one decision.
+            # A template is matched as the template string it is: a policy that
+            # denies `secret://*` denies `secret://{id}` too.
+            and _deliverable(tenant_id, mcp_server_id, entry[field])
         ]
     return entries
 
@@ -230,7 +281,12 @@ def _resolve_target(tenant_id: str | None, uri: str) -> tuple[str, str] | None:
     resolved = resolve_uri(uri)
     if resolved is None:
         return None
-    mcp_server_id, _upstream_uri = resolved
+    mcp_server_id, upstream_uri = resolved
+    # Governance re-check on the read path (#1028). A link handed out before a
+    # deny landed stops resolving, and the TOCTOU window between listing and
+    # reading closes -- the same stance `BatchExecutor` takes for tools.
+    if not _deliverable(tenant_id, mcp_server_id, upstream_uri):
+        return None
     if _lookup(tenant_id, uri) is not None:
         return resolved
 

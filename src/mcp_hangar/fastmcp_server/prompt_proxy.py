@@ -17,11 +17,17 @@ Carries ``prompts/list`` and ``prompts/get`` through the gateway in
   :mod:`resource_link_read_through`. An unknown name answers a generic
   not-found without leaking whether it exists for someone else.
 
-Ungoverned by design in this MVP: anything from the tenant's own upstreams is
-allowed -- the prompt/resource policy seam is #1028. Registration must run
-AFTER ``withdraw_unserved_capabilities``: that pass pops the prompt handlers
-nothing serves, and registering real handlers afterwards is exactly what
-brings the ``prompts`` capability back (#888, "derived, not inverted").
+Governed since #1028: every prompt goes through ``is_governed_allowed`` with
+``kind="prompt"`` -- the same resolver, withdrawal overlays and front-door
+fail-closed branch the tools surface uses, keyed ``(mcp_server, kind, name)``.
+Because ``prompts/get`` rebuilds the map, the filter is the list projection and
+the fetch-time re-check at once, and a denied prompt answers exactly like one
+that does not exist.
+
+Registration must run AFTER ``withdraw_unserved_capabilities``: that pass pops
+the prompt handlers nothing serves, and registering real handlers afterwards is
+exactly what brings the ``prompts`` capability back (#888, "derived, not
+inverted").
 """
 
 from __future__ import annotations
@@ -75,6 +81,8 @@ def _build_prompt_map(tenant_id: str | None) -> dict[str, tuple[str, dict[str, A
     ponytail: sequential per-request relay to every upstream, no cache; add a
     prompt projection (discovery-time, like tools) if list latency matters.
     """
+    from .flat_tool_projection import is_governed_allowed
+
     flat: dict[str, tuple[str, dict[str, Any]]] = {}
     collisions: set[str] = set()
 
@@ -91,6 +99,11 @@ def _build_prompt_map(tenant_id: str | None) -> dict[str, tuple[str, dict[str, A
             if not (isinstance(prompt, dict) and isinstance(prompt.get("name"), str)):
                 continue
             name = prompt["name"]
+            # Governance (#1028): a prompt denied or withdrawn for this tenant
+            # is dropped here, which is both the list filter and -- because
+            # `prompts/get` rebuilds this map -- the fetch-time re-check.
+            if not is_governed_allowed(server_id, name, kind="prompt", tenant_id=tenant_id):
+                continue
             if name in collisions:
                 continue
             if name in flat:

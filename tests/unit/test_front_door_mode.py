@@ -169,12 +169,13 @@ class TestTopologyModeResolver:
         # Populate cache
         resolver.resolve_effective_policy("srv")
         with resolver._lock:
-            assert "mcp_server:srv" in resolver._policy_cache
+            # Keyed (kind, scope) since #1028; "tool" is what a bare resolve means.
+            assert ("tool", "mcp_server:srv") in resolver._policy_cache
 
         # Switch to front_door — cache must be cleared
         resolver.set_topology_mode("front_door")
         with resolver._lock:
-            assert "mcp_server:srv" not in resolver._policy_cache
+            assert ("tool", "mcp_server:srv") not in resolver._policy_cache
 
     def test_clear_all_resets_topology_mode_to_egress(self, resolver):
         """clear_all() must reset topology mode to the safe default (egress)."""
