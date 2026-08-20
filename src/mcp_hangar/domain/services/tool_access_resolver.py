@@ -264,15 +264,21 @@ class ToolAccessResolver:
             for key in keys_to_remove:
                 self._policy_cache.pop(key, None)
 
-    def remove_mcp_server_policy(self, mcp_server_id: str, *, kind: PolicyKind = DEFAULT_KIND) -> None:
-        """Remove the access policy for a mcp_server.
+    def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
+        """Remove EVERY access policy for a mcp_server -- tool, prompt and resource.
+
+        The one caller is the hot-unload path, and unloading a server retires
+        the whole server, not one kind of policy about it. Removing a single
+        kind would leave the other two behind for an id that is free to be
+        loaded again, so a later server inheriting that id would be governed by
+        its predecessor's rules (#1028).
 
         Args:
             mcp_server_id: McpServer identifier.
-            kind: What the removed policy governs (see :meth:`set_mcp_server_policy`).
         """
         with self._lock:
-            self._mcp_server_policies.pop((mcp_server_id, kind), None)
+            for key in [k for k in self._mcp_server_policies if k[0] == mcp_server_id]:
+                self._mcp_server_policies.pop(key, None)
             self._invalidate_mcp_server_cache(mcp_server_id)
 
     def remove_provider_policy(self, provider_id: str) -> None:

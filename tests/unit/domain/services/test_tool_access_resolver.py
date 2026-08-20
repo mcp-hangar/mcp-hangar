@@ -408,3 +408,39 @@ class TestToolAccessResolverGlobalPolicy:
 
         assert policy.requires_approval("power_delete")
         assert not policy.requires_approval("get_data")
+
+
+class TestUnloadingAServerRetiresEveryKind:
+    """Unloading a mcp_server must not leave a predecessor's policy behind.
+
+    `remove_mcp_server_policy` is the hot-unload path. Since #1028 a server can
+    carry three policies -- tool, prompt and resource -- and an id that has been
+    unloaded is free to be loaded again, so anything left behind would govern
+    whatever server inherits the id next.
+    """
+
+    def test_every_kind_is_removed(self, resolver):
+        for kind in ("tool", "prompt", "resource"):
+            resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("secret_*",)), kind=kind)
+
+        resolver.remove_mcp_server_policy("srv")
+
+        for kind in ("tool", "prompt", "resource"):
+            assert resolver.resolve_effective_policy("srv", kind=kind).is_unrestricted(), (
+                f"{kind} policy survived the unload"
+            )
+
+    def test_a_reloaded_id_is_not_governed_by_its_predecessor(self, resolver):
+        resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("*",)), kind="prompt")
+        resolver.remove_mcp_server_policy("srv")
+
+        # A new server takes the id and declares nothing about prompts.
+        assert resolver.is_allowed("srv", "any_prompt", kind="prompt")
+
+    def test_another_server_is_untouched(self, resolver):
+        resolver.set_mcp_server_policy("other", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")
+        resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")
+
+        resolver.remove_mcp_server_policy("srv")
+
+        assert not resolver.is_allowed("other", "secret_x", kind="prompt")
