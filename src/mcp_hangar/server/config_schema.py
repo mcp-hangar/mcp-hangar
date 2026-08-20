@@ -56,6 +56,9 @@ class ConfigSchemaError(ValueError):
 # `_load_group_config` in `server/config.py`.
 SERVER_SPEC_KEYS = frozenset(
     {
+        # The per-kind prompt/resource policy block (#1028). Tools keep `tools`,
+        # and `resources` below is the container limit block -- not a policy.
+        "access",
         "args",
         "auth",
         "auto_start",

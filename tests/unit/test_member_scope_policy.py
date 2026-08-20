@@ -139,8 +139,9 @@ class TestStandaloneMemberPolicyResolver:
         resolver.resolve_effective_policy("srv", member_id="tenant:t1")
 
         with resolver._lock:
-            assert "mcp_server:srv" in resolver._policy_cache
-            assert "mcp_server:srv:member:tenant:t1" in resolver._policy_cache
+            # Keyed (kind, scope) since #1028.
+            assert ("tool", "mcp_server:srv") in resolver._policy_cache
+            assert ("tool", "mcp_server:srv:member:tenant:t1") in resolver._policy_cache
 
     def test_set_unrestricted_standalone_member_policy_removes_it(self, resolver):
         """Setting an unrestricted member policy clears it from the store."""
@@ -148,7 +149,7 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_standalone_member_policy("srv", "tenant:t1", ToolAccessPolicy())
 
         with resolver._lock:
-            assert ("srv", "tenant:t1") not in resolver._standalone_member_policies
+            assert ("srv", "tenant:t1", "tool") not in resolver._standalone_member_policies
 
     def test_clear_all_removes_standalone_member_policies(self, resolver):
         """clear_all() must also wipe standalone member policies."""

@@ -65,7 +65,7 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
-from ..domain.services.tool_access_resolver import get_tool_access_resolver
+from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from .resource_link_read_through import project_result_uris
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,38 @@ def _member_to_group() -> dict[str, str]:
     return {member.id: group.id for group in GROUPS.values() for member in group.members}
 
 
+def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:
+    """May *tenant_id* see and use *name* on *mcp_server*? (#1028)
+
+    The single decision behind every projected surface -- tools, prompts and
+    resources alike. Both halves of the tool answer, applied per kind:
+
+    * the withdrawal overlay (config or runtime, per tenant or for all), and
+    * the effective access policy from the one resolver, with a group member
+      checked against its GROUP the way ``_build_flat_map`` has always done it.
+
+    Listing and fetching call this same function, so a thing that was not shown
+    cannot be fetched and a thing that was shown can be -- and neither surface
+    can drift from the other by growing its own copy of the rule. A denied item
+    is answered exactly like a nonexistent one at every call site, which is what
+    stops the front door being a cross-tenant enumeration oracle (#905).
+
+    For resources, *name* is the UPSTREAM URI -- see
+    :func:`resource_link_read_through._deliverable` for why.
+    """
+    registry = get_tool_projection_registry()
+    if registry.is_withdrawn(mcp_server, name, kind=kind, tenant_id=tenant_id):
+        return False
+    owner_group = _member_to_group().get(mcp_server)
+    return get_tool_access_resolver().is_allowed(
+        owner_group or mcp_server,
+        name,
+        kind=kind,
+        group_id=owner_group,
+        member_id=tenant_id,
+    )
+
+
 def _build_flat_map(
     tenant_id: str | None,
 ) -> dict[str, tuple[str, str]]:
@@ -188,7 +220,6 @@ def _build_flat_map(
         Mapping of flat tool name to ``(mcp_server_id, tool_name)``.
     """
     registry = get_tool_projection_registry()
-    resolver = get_tool_access_resolver()
     group_of = _member_to_group()
 
     flat: dict[str, tuple[str, str]] = {}
@@ -212,14 +243,10 @@ def _build_flat_map(
 
         # Drop tools denied by policy. A group member is checked against the
         # GROUP policy -- the same check `_gate_tool_access` applies at call
-        # time, so a tool shown here is the tool that check will allow.
+        # time, so a tool shown here is the tool that check will allow. Shared
+        # with the prompts and resources surfaces since #1028.
         owner_group = group_of.get(mcp_server)
-        if not resolver.is_tool_allowed(
-            mcp_server_id=owner_group or mcp_server,
-            tool_name=tool_name,
-            group_id=owner_group,
-            member_id=tenant_id,
-        ):
+        if not is_governed_allowed(mcp_server, tool_name, kind="tool", tenant_id=tenant_id):
             continue
 
         flat_name = tool_name  # FLAT naming: tool name as-is, no server prefix.

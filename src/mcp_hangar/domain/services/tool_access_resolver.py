@@ -1,8 +1,22 @@
 """Tool access resolver domain service.
 
-Resolves effective tool access policy for any mcp_server/group/member combination.
+Resolves the effective access policy for any mcp_server/group/member combination.
 Handles the three-level merge: mcp_server -> group -> member.
 Caches effective policies per-member for performance.
+
+Keyed by *kind* since #1028: a policy is registered for ``(scope target, kind)``
+where kind is ``tool``, ``prompt`` or ``resource``. Prompts and resources are
+worth governing too, and giving them their own resolver would have grown a
+second, weaker copy of the merge semantics, the front-door fail-closed branch
+and the withdrawal overlays. One resolver, three kinds -- so listing and
+fetching cannot drift apart on any of them.
+
+``kind`` defaults to ``"tool"`` on every entry point, so a config written before
+#1028 registers and resolves exactly the policies it always did. Kinds are
+independent: a policy defined for prompts on one server says nothing about
+tools on that server, and nothing about prompts on another -- the same
+"undefined scope is unrestricted, defined scope is enforced" rule tools have
+always had, applied per kind rather than reinvented for the new ones.
 """
 
 import logging
@@ -31,9 +45,19 @@ logger = logging.getLogger(__name__)
 TopologyMode = Literal["egress", "front_door"]
 _DEFAULT_MODE: TopologyMode = "egress"
 
+# What a policy governs. A policy is keyed `(scope target, kind)`; the default
+# everywhere is "tool", which is what every pre-#1028 registration meant.
+PolicyKind = Literal["tool", "prompt", "resource"]
+DEFAULT_KIND: PolicyKind = "tool"
+
 # Sentinel policy that denies every tool.  deny_list=("*",) matches any
 # tool name via fnmatch, so is_tool_allowed() returns False for all names.
 _DENY_ALL_POLICY: ToolAccessPolicy = ToolAccessPolicy(deny_list=("*",))
+
+
+def _scope_label(scope: str, kind: str) -> str:
+    """Describe a registered scope, naming the kind only when it is not tool."""
+    return scope if kind == DEFAULT_KIND else f"{scope}[{kind}]"
 
 
 class ToolAccessResolver:
@@ -49,41 +73,47 @@ class ToolAccessResolver:
     def __init__(self) -> None:
         """Initialize the resolver with empty caches."""
         self._lock = threading.RLock()
-        # Cache key format:
+        # Cache key format: (kind, scope key), where scope key is
         # - "mcp_server:{mcp_server_id}" for standalone mcp_servers
         # - "group:{group_id}:member:{member_id}" for group members
         # - "mcp_server:{mcp_server_id}:member:{member_id}" for standalone server→member
-        self._policy_cache: dict[str, ToolAccessPolicy] = {}
+        self._policy_cache: dict[tuple[str, str], ToolAccessPolicy] = {}
 
-        # Policy sources - set by external config loader
-        # Maps mcp_server_id -> ToolAccessPolicy
-        self._mcp_server_policies: dict[str, ToolAccessPolicy] = {}
-        # Maps group_id -> ToolAccessPolicy
-        self._group_policies: dict[str, ToolAccessPolicy] = {}
-        # Maps (group_id, member_id) -> ToolAccessPolicy
-        self._member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
-        # Maps (group_id, member_id) -> mcp_server_id (for resolving member's mcp_server)
+        # Policy sources - set by external config loader. Every key carries the
+        # kind it governs, so one kind's policy never resolves for another.
+        # Maps (mcp_server_id, kind) -> ToolAccessPolicy
+        self._mcp_server_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
+        # Maps (group_id, kind) -> ToolAccessPolicy
+        self._group_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
+        # Maps (group_id, member_id, kind) -> ToolAccessPolicy
+        self._member_policies: dict[tuple[str, str, str], ToolAccessPolicy] = {}
+        # Maps (group_id, member_id) -> mcp_server_id (for resolving member's mcp_server).
+        # Kind-independent: which server a member is, is not a policy.
         self._member_mcp_server_mapping: dict[tuple[str, str], str] = {}
-        # Maps (mcp_server_id, tenant_id) -> ToolAccessPolicy for standalone server→member merge
-        self._standalone_member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
+        # Maps (mcp_server_id, tenant_id, kind) -> ToolAccessPolicy for standalone server→member merge
+        self._standalone_member_policies: dict[tuple[str, str, str], ToolAccessPolicy] = {}
 
         # Topology mode controls what happens when caller has no identity
         # (member_id is None and no group context).
         # See module-level TopologyMode for semantics.
         self._topology_mode: TopologyMode = _DEFAULT_MODE
 
-    def set_mcp_server_policy(self, mcp_server_id: str, policy: ToolAccessPolicy) -> None:
-        """Set the tool access policy for a mcp_server.
+    def set_mcp_server_policy(
+        self, mcp_server_id: str, policy: ToolAccessPolicy, *, kind: PolicyKind = DEFAULT_KIND
+    ) -> None:
+        """Set the access policy for a mcp_server.
 
         Args:
             mcp_server_id: McpServer identifier.
-            policy: Tool access policy to apply.
+            policy: Access policy to apply.
+            kind: What the policy governs -- tools (the default and the only
+                pre-#1028 meaning), prompts, or resources.
         """
         with self._lock:
             if policy.is_unrestricted():
-                self._mcp_server_policies.pop(mcp_server_id, None)
+                self._mcp_server_policies.pop((mcp_server_id, kind), None)
             else:
-                self._mcp_server_policies[mcp_server_id] = policy
+                self._mcp_server_policies[(mcp_server_id, kind)] = policy
             # Invalidate cache for this mcp_server
             self._invalidate_mcp_server_cache(mcp_server_id)
 
@@ -109,27 +139,27 @@ class ToolAccessResolver:
         """
         with self._lock:
             if scope in ("provider", "mcp_server"):
-                return self._mcp_server_policies.get(target_id)
+                return self._mcp_server_policies.get((target_id, DEFAULT_KIND))
             if scope == "group":
-                return self._group_policies.get(target_id)
+                return self._group_policies.get((target_id, DEFAULT_KIND))
             if scope == "member":
                 group_id, _, member_id = target_id.partition(":")
-                key = (group_id, member_id or target_id)
-                return self._member_policies.get(key)
+                return self._member_policies.get((group_id, member_id or target_id, DEFAULT_KIND))
             return None
 
-    def set_group_policy(self, group_id: str, policy: ToolAccessPolicy) -> None:
-        """Set the tool access policy for a group.
+    def set_group_policy(self, group_id: str, policy: ToolAccessPolicy, *, kind: PolicyKind = DEFAULT_KIND) -> None:
+        """Set the access policy for a group.
 
         Args:
             group_id: Group identifier.
-            policy: Tool access policy to apply to all members.
+            policy: Access policy to apply to all members.
+            kind: What the policy governs (see :meth:`set_mcp_server_policy`).
         """
         with self._lock:
             if policy.is_unrestricted():
-                self._group_policies.pop(group_id, None)
+                self._group_policies.pop((group_id, kind), None)
             else:
-                self._group_policies[group_id] = policy
+                self._group_policies[(group_id, kind)] = policy
             # Invalidate cache for all members in this group
             self._invalidate_group_cache(group_id)
 
@@ -140,17 +170,19 @@ class ToolAccessResolver:
         policy: ToolAccessPolicy,
         mcp_server_id: str | None = None,
         provider_id: str | None = None,
+        kind: PolicyKind = DEFAULT_KIND,
     ) -> None:
-        """Set the tool access policy for a specific group member.
+        """Set the access policy for a specific group member.
 
         Args:
             group_id: Group identifier.
             member_id: Member identifier within the group.
-            policy: Tool access policy for this member.
+            policy: Access policy for this member.
             mcp_server_id: The mcp_server_id this member maps to (for policy inheritance).
+            kind: What the policy governs (see :meth:`set_mcp_server_policy`).
         """
         resolved_mcp_server_id = mcp_server_id or provider_id
-        key = (group_id, member_id)
+        key = (group_id, member_id, kind)
         with self._lock:
             if policy.is_unrestricted():
                 self._member_policies.pop(key, None)
@@ -158,34 +190,35 @@ class ToolAccessResolver:
                 self._member_policies[key] = policy
 
             if resolved_mcp_server_id:
-                self._member_mcp_server_mapping[key] = resolved_mcp_server_id
+                self._member_mcp_server_mapping[(group_id, member_id)] = resolved_mcp_server_id
 
             # Invalidate cache for this member
-            cache_key = f"group:{group_id}:member:{member_id}"
-            self._policy_cache.pop(cache_key, None)
+            self._policy_cache.pop((kind, f"group:{group_id}:member:{member_id}"), None)
 
     def set_standalone_member_policy(
         self,
         mcp_server_id: str,
         member_id: str,
         policy: ToolAccessPolicy,
+        *,
+        kind: PolicyKind = DEFAULT_KIND,
     ) -> None:
         """Set a per-tenant policy for a standalone mcp_server (server→member merge).
 
         Args:
             mcp_server_id: McpServer identifier.
             member_id: Tenant/member identifier (e.g. ``tenant:a``).
-            policy: Tool access policy for this member.
+            policy: Access policy for this member.
+            kind: What the policy governs (see :meth:`set_mcp_server_policy`).
         """
-        key = (mcp_server_id, member_id)
+        key = (mcp_server_id, member_id, kind)
         with self._lock:
             if policy.is_unrestricted():
                 self._standalone_member_policies.pop(key, None)
             else:
                 self._standalone_member_policies[key] = policy
             # Invalidate cache for this (server, member) pair
-            cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
-            self._policy_cache.pop(cache_key, None)
+            self._policy_cache.pop((kind, f"mcp_server:{mcp_server_id}:member:{member_id}"), None)
 
     def iter_registered_policies(self) -> list[tuple[str, ToolAccessPolicy]]:
         """Return every registered policy as ``(scope_description, policy)``.
@@ -193,17 +226,20 @@ class ToolAccessResolver:
         Used by the startup reachability check to answer "does this
         configuration actually ask for the approval gate?" without reaching into
         the resolver's private dicts. Reads a snapshot under the lock.
+
+        The description of a tool policy is unchanged; a policy of another kind
+        carries a ``[kind]`` suffix so the two are distinguishable in a log line.
         """
         with self._lock:
             registered: list[tuple[str, ToolAccessPolicy]] = []
-            for mcp_server_id, policy in self._mcp_server_policies.items():
-                registered.append((f"mcp_server:{mcp_server_id}", policy))
-            for group_id, policy in self._group_policies.items():
-                registered.append((f"group:{group_id}", policy))
-            for (group_id, member_id), policy in self._member_policies.items():
-                registered.append((f"group:{group_id}:member:{member_id}", policy))
-            for (mcp_server_id, member_id), policy in self._standalone_member_policies.items():
-                registered.append((f"mcp_server:{mcp_server_id}:member:{member_id}", policy))
+            for (mcp_server_id, kind), policy in self._mcp_server_policies.items():
+                registered.append((_scope_label(f"mcp_server:{mcp_server_id}", kind), policy))
+            for (group_id, kind), policy in self._group_policies.items():
+                registered.append((_scope_label(f"group:{group_id}", kind), policy))
+            for (group_id, member_id, kind), policy in self._member_policies.items():
+                registered.append((_scope_label(f"group:{group_id}:member:{member_id}", kind), policy))
+            for (mcp_server_id, member_id, kind), policy in self._standalone_member_policies.items():
+                registered.append((_scope_label(f"mcp_server:{mcp_server_id}:member:{member_id}", kind), policy))
             return registered
 
     @property
@@ -224,18 +260,19 @@ class ToolAccessResolver:
             self._topology_mode = mode
             # Invalidate the cache keyed without a member_id so the new
             # mode is reflected immediately on the next resolve call.
-            keys_to_remove = [k for k in self._policy_cache if ":member:" not in k]
+            keys_to_remove = [k for k in self._policy_cache if ":member:" not in k[1]]
             for key in keys_to_remove:
                 self._policy_cache.pop(key, None)
 
-    def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
-        """Remove tool access policy for a mcp_server.
+    def remove_mcp_server_policy(self, mcp_server_id: str, *, kind: PolicyKind = DEFAULT_KIND) -> None:
+        """Remove the access policy for a mcp_server.
 
         Args:
             mcp_server_id: McpServer identifier.
+            kind: What the removed policy governs (see :meth:`set_mcp_server_policy`).
         """
         with self._lock:
-            self._mcp_server_policies.pop(mcp_server_id, None)
+            self._mcp_server_policies.pop((mcp_server_id, kind), None)
             self._invalidate_mcp_server_cache(mcp_server_id)
 
     def remove_provider_policy(self, provider_id: str) -> None:
@@ -243,36 +280,36 @@ class ToolAccessResolver:
         self.remove_mcp_server_policy(provider_id)
 
     def remove_group_policy(self, group_id: str) -> None:
-        """Remove tool access policy for a group.
+        """Remove the tool access policy for a group.
 
         Args:
             group_id: Group identifier.
         """
         with self._lock:
-            self._group_policies.pop(group_id, None)
+            self._group_policies.pop((group_id, DEFAULT_KIND), None)
             self._invalidate_group_cache(group_id)
 
     def remove_member_policy(self, group_id: str, member_id: str) -> None:
-        """Remove tool access policy for a group member.
+        """Remove the tool access policy for a group member.
 
         Args:
             group_id: Group identifier.
             member_id: Member identifier.
         """
-        key = (group_id, member_id)
         with self._lock:
-            self._member_policies.pop(key, None)
-            self._member_mcp_server_mapping.pop(key, None)
-            cache_key = f"group:{group_id}:member:{member_id}"
-            self._policy_cache.pop(cache_key, None)
+            self._member_policies.pop((group_id, member_id, DEFAULT_KIND), None)
+            self._member_mcp_server_mapping.pop((group_id, member_id), None)
+            self._policy_cache.pop((DEFAULT_KIND, f"group:{group_id}:member:{member_id}"), None)
 
     def resolve_effective_policy(
         self,
         mcp_server_id: str,
         group_id: str | None = None,
         member_id: str | None = None,
+        *,
+        kind: PolicyKind = DEFAULT_KIND,
     ) -> ToolAccessPolicy:
-        """Get the effective tool access policy for a specific context.
+        """Get the effective access policy for a specific context.
 
         For standalone mcp_servers: returns mcp_server-level policy.
         For group members: merges mcp_server -> group -> member policies.
@@ -281,17 +318,21 @@ class ToolAccessResolver:
             mcp_server_id: McpServer identifier.
             group_id: Optional group identifier (for group member context).
             member_id: Optional member identifier (for group member context).
+            kind: What is being governed -- tools, prompts or resources. Each
+                kind resolves against the policies registered for that kind
+                alone, so a tool deny never silently governs a prompt.
 
         Returns:
             The effective ToolAccessPolicy for this context.
         """
         # Build cache key
         if group_id and member_id:
-            cache_key = f"group:{group_id}:member:{member_id}"
+            scope_key = f"group:{group_id}:member:{member_id}"
         elif member_id and not group_id:
-            cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
+            scope_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
         else:
-            cache_key = f"mcp_server:{mcp_server_id}"
+            scope_key = f"mcp_server:{mcp_server_id}"
+        cache_key = (kind, scope_key)
 
         # Check cache first
         with self._lock:
@@ -299,7 +340,7 @@ class ToolAccessResolver:
                 return self._policy_cache[cache_key]
 
             # Compute effective policy
-            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id)
+            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id, kind)
 
             # Cache it
             self._policy_cache[cache_key] = effective
@@ -310,6 +351,7 @@ class ToolAccessResolver:
         mcp_server_id: str,
         group_id: str | None,
         member_id: str | None,
+        kind: PolicyKind = DEFAULT_KIND,
     ) -> ToolAccessPolicy:
         """Compute effective policy by merging all applicable levels.
 
@@ -324,8 +366,8 @@ class ToolAccessResolver:
         a mcp_server-specific policy exists the two are merged so the narrower
         of the two wins (deny union, allow intersection).
         """
-        explicit_mcp_server_policy = self._mcp_server_policies.get(mcp_server_id)
-        global_policy = self._mcp_server_policies.get("_global", ToolAccessPolicy())
+        explicit_mcp_server_policy = self._mcp_server_policies.get((mcp_server_id, kind))
+        global_policy = self._mcp_server_policies.get(("_global", kind), ToolAccessPolicy())
 
         if explicit_mcp_server_policy is None:
             mcp_server_policy = global_policy
@@ -359,7 +401,7 @@ class ToolAccessResolver:
         # If member_id present but no group_id: server→member merge (standalone tenant policy)
         if member_id and not group_id:
             standalone_member_policy = self._standalone_member_policies.get(
-                (mcp_server_id, member_id), ToolAccessPolicy()
+                (mcp_server_id, member_id, kind), ToolAccessPolicy()
             )
             return ToolAccessPolicy.merge(mcp_server_policy, standalone_member_policy)
 
@@ -369,18 +411,17 @@ class ToolAccessResolver:
             return mcp_server_policy
 
         # Get group policy
-        group_policy = self._group_policies.get(group_id, ToolAccessPolicy())
+        group_policy = self._group_policies.get((group_id, kind), ToolAccessPolicy())
 
         # Get member policy (only when a concrete member_id is present;
         # a group context without a member resolves to server+group only).
         member_policy = ToolAccessPolicy()
         mapped_mcp_server_id: str | None = None
         if member_id is not None:
-            member_key = (group_id, member_id)
-            member_policy = self._member_policies.get(member_key, ToolAccessPolicy())
-            mapped_mcp_server_id = self._member_mcp_server_mapping.get(member_key)
+            member_policy = self._member_policies.get((group_id, member_id, kind), ToolAccessPolicy())
+            mapped_mcp_server_id = self._member_mcp_server_mapping.get((group_id, member_id))
         if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
-            mapped_mcp_server_policy = self._mcp_server_policies.get(mapped_mcp_server_id, ToolAccessPolicy())
+            mapped_mcp_server_policy = self._mcp_server_policies.get((mapped_mcp_server_id, kind), ToolAccessPolicy())
             # Merge mapped mcp_server policy with base mcp_server policy
             mcp_server_policy = ToolAccessPolicy.merge(mcp_server_policy, mapped_mcp_server_policy)
 
@@ -389,6 +430,36 @@ class ToolAccessResolver:
         step2 = ToolAccessPolicy.merge(step1, member_policy)
 
         return step2
+
+    def is_allowed(
+        self,
+        mcp_server_id: str,
+        name: str,
+        *,
+        kind: PolicyKind = DEFAULT_KIND,
+        group_id: str | None = None,
+        member_id: str | None = None,
+    ) -> bool:
+        """Quick check if a named tool / prompt / resource is allowed in context.
+
+        The one decision every projected surface asks (#1028). A prompt name and
+        a resource URI are matched by the same fnmatch patterns a tool name is:
+        the pattern language does not change with the kind, only which policies
+        are consulted does.
+
+        Args:
+            mcp_server_id: McpServer identifier.
+            name: Tool name, prompt name, or -- for resources -- the UPSTREAM
+                URI, not the ``hangar://`` projection of it.
+            kind: What *name* is.
+            group_id: Optional group identifier.
+            member_id: Optional member identifier.
+
+        Returns:
+            True if allowed (including approval-gated), False otherwise.
+        """
+        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id, kind=kind)
+        return policy.is_tool_allowed(name)
 
     def is_tool_allowed(
         self,
@@ -408,8 +479,7 @@ class ToolAccessResolver:
         Returns:
             True if the tool is allowed, False otherwise.
         """
-        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
-        return policy.is_tool_allowed(tool_name)
+        return self.is_allowed(mcp_server_id, tool_name, group_id=group_id, member_id=member_id)
 
     def filter_tools(
         self,
@@ -481,38 +551,34 @@ class ToolAccessResolver:
     def _invalidate_mcp_server_cache(self, mcp_server_id: str) -> None:
         """Invalidate cache entries related to a mcp_server.
 
-        Must be called with lock held.
+        Must be called with lock held. Every kind is dropped: cheaper than
+        tracking which one changed, and a stale entry for another kind is the
+        kind of bug that only shows up under a reload.
         """
-        # Remove direct mcp_server cache
-        cache_key = f"mcp_server:{mcp_server_id}"
-        self._policy_cache.pop(cache_key, None)
+        # The direct mcp_server cache, plus standalone server→member entries.
+        stale = {f"mcp_server:{mcp_server_id}"}
+        stale |= {k[1] for k in self._policy_cache if k[1].startswith(f"mcp_server:{mcp_server_id}:member:")}
 
-        # Remove standalone server→member cache entries for this mcp_server
-        keys_to_remove = [k for k in self._policy_cache if k.startswith(f"mcp_server:{mcp_server_id}:member:")]
-        for key in keys_to_remove:
-            self._policy_cache.pop(key, None)
+        # Any group member caches that reference this mcp_server.
+        stale |= {
+            f"group:{group_id}:member:{member_id}"
+            for (group_id, member_id), mapped in self._member_mcp_server_mapping.items()
+            if mapped == mcp_server_id
+        }
 
-        # Remove any group member caches that reference this mcp_server
-        keys_to_remove = []
-        for member_key, mapped_mcp_server in self._member_mcp_server_mapping.items():
-            if mapped_mcp_server == mcp_server_id:
-                group_id, member_id = member_key
-                keys_to_remove.append(f"group:{group_id}:member:{member_id}")
-
-        for key in keys_to_remove:
+        for key in [k for k in self._policy_cache if k[1] in stale]:
             self._policy_cache.pop(key, None)
 
     def _invalidate_group_cache(self, group_id: str) -> None:
-        """Invalidate cache entries related to a group.
+        """Invalidate cache entries related to a group (all kinds).
 
         Must be called with lock held.
         """
-        keys_to_remove = [k for k in self._policy_cache if k.startswith(f"group:{group_id}:")]
-        for key in keys_to_remove:
+        for key in [k for k in self._policy_cache if k[1].startswith(f"group:{group_id}:")]:
             self._policy_cache.pop(key, None)
 
     def get_policy_summary(self, mcp_server_id: str) -> dict[str, Any]:
-        """Get a summary of the policy for a mcp_server (for observability).
+        """Get a summary of the tool policy for a mcp_server (for observability).
 
         Args:
             mcp_server_id: McpServer identifier.
@@ -521,7 +587,7 @@ class ToolAccessResolver:
             Dictionary with policy status information.
         """
         with self._lock:
-            policy = self._mcp_server_policies.get(mcp_server_id)
+            policy = self._mcp_server_policies.get((mcp_server_id, DEFAULT_KIND))
             if policy is None:
                 return {
                     "active": False,
