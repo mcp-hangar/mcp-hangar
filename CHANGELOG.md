@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.12.0...v2.13.0) (2026-08-20)
+
+### Added
+
+- **core:** prompts and resources are governed. Both surfaces shipped ungoverned
+  within the tenant boundary; they now go through the *same* policy surface tools
+  use, re-keyed `(mcp_server, kind, name)` rather than grown a second time as
+  parallel `PromptAccessPolicy` / `ResourceAccessPolicy` objects. One resolver
+  chokepoint, so a listing and a fetch cannot drift apart, and prompts and
+  resources inherit the merge semantics, the approval gate, the per-tenant
+  overlays and the fail-closed front-door branch instead of a weaker copy of each.
+
+  New config, alongside the existing `tools:` block on an mcp_server or a group
+  (and inside a `tool_access.member.<tenant>` entry):
+
+  ```yaml
+  access:
+    prompt:   {deny_list: ["draft_*"]}
+    resource: {allow_list: ["docs://*"]}
+  tool_projection:
+    withdrawn_prompts: [retired_prompt]
+    withdrawn_resources: ["demo://gone/1"]
+  ```
+
+  `allow_list` / `deny_list` / `approval_list` mean exactly what they mean for
+  tools. Enforcement lands at both ends of every surface -- `prompts/list` +
+  `prompts/get`, `resources/list` + `resources/templates/list` + `resources/read`,
+  and the handed-out `resource_link` catalogue -- so a denied item is absent from
+  the listing AND refused on fetch, with the refusal indistinguishable from the
+  one a nonexistent item gets. A resource is matched by its **upstream** uri
+  (`demo://doc/1`), not the `hangar://<upstream>/…` projection of it: the upstream
+  form is the stable identity an operator writes, and the owning server is already
+  the policy scope.
+
+  Backward compatible by construction: every entry point defaults to
+  `kind: tool`, so a config written before this parses and decides identically and
+  governs tools only. The SEP-1865 `ui://` guard becomes a *case* of this surface
+  rather than a mechanism beside it -- it is the first gate on the resource path,
+  so an un-allowlisted `ui://` resource is now absent from the catalogue as well
+  as unreadable, and no resource policy, however permissive, can open it ([#1032](https://github.com/mcp-hangar/mcp-hangar/pull/1032))
+- **core:** `front_door` now serves an upstream's resources, not just the
+  `resource_link`s it handed out. `resources/list` and `resources/templates/list`
+  aggregate live across the tenant's own projected upstreams (the same per-tenant
+  scoping as the prompts proxy), and `resources/read` reaches anything in that
+  catalogue — still through `relay_request` and still behind the fail-closed
+  `ui://` guard (SEP-1865).
+
+  Because a resource URI does not say which upstream owns it, and two upstreams
+  may legitimately serve the same one, **every URI the gateway hands out is now
+  namespaced** as `hangar://<upstream id>/<the upstream's own URI>` and translated
+  back on `resources/read`. The rewrite is unconditional, so a URI does not change
+  shape when an unrelated upstream appears, and it is applied wherever an upstream
+  payload crosses the front door: `resource_link` and embedded `resource` blocks
+  in tool results, prompt results and relayed task results, plus the `contents` of
+  a `resources/read` answer. Nothing is dropped on collision — two upstreams
+  serving `demo://doc/1` both stay listed, under distinct projected URIs. Clients
+  that captured a `resource_link` from 2.12.0 will see the new shape; the links
+  are per-replica and in-memory, so an upgrade re-issues them either way. ([#1031](https://github.com/mcp-hangar/mcp-hangar/pull/1031))
+- **core:** an upstream's prompts are served through the front door. In
+  `front_door` mode `prompts/list` aggregates prompts per tenant across the
+  tenant's own projected upstreams (flat naming per the tool convention: bare
+  name, cross-server collisions drop both entries) and `prompts/get` relays to
+  the owning upstream, so the `prompts` capability is advertised exactly when
+  the proxy is active (#888 honesty rule preserved). MVP boundaries: no
+  prompt-level policy yet (anything from the tenant's own upstreams is allowed,
+  never another tenant's -- the governance seam is #1028) and no
+  `completion/complete` (#1026) ([#1029](https://github.com/mcp-hangar/mcp-hangar/pull/1029))
+
+### Fixed
+
+- **core:** hot-unloading an mcp_server now retires its prompt and resource
+  policies too, not only its tool policy. Since the policy surface became
+  kind-keyed, `remove_mcp_server_policy` dropped one kind and left the other two
+  registered for an id that is free to be loaded again -- so a server taking that
+  id later would have been governed by its predecessor's prompt/resource rules,
+  in either direction: a stale `deny_list` restricting a server that never
+  declared one, or a stale `allow_list` filtering its catalogue. Unloading a
+  server retires the whole server. ([#1034](https://github.com/mcp-hangar/mcp-hangar/pull/1034))
+
 ## [2.12.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.11.0...v2.12.0) (2026-08-18)
 
 ### Added
