@@ -223,7 +223,8 @@ def build_serving_mcp_server() -> FastMCP:
     # -- wiring only the factory is dead on the shipped path (#596).
     withdraw_unserved_capabilities(mcp_server)
     # AFTER the withdrawal, which would pop these handlers as unserved: the
-    # front-door read-through for handed-out resource_link references (#889).
+    # front-door resources projection -- the tenant's upstream catalogue plus
+    # the read-through for handed-out resource_link references (#1021, #1025).
     maybe_register_resource_read_through(mcp_server)
     # Same ordering rule: registering the prompt handlers after the withdrawal
     # is what re-advertises the `prompts` capability exactly when the proxy is

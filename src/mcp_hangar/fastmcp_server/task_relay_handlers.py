@@ -98,6 +98,7 @@ from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import get_identity_context, identity_context_var
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.fastmcp_server.asgi import _principal_to_identity_context
+from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -415,6 +416,13 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             projected["result"] = upstream.get("result")
             projected["error"] = upstream.get("error")
             projected["input_requests"] = upstream.get("inputRequests") or upstream.get("input_requests")
+            # An inlined task outcome is a tool result: it can carry a
+            # resource_link, which crosses the front door here and so needs the
+            # same upstream-namespacing rewrite as the direct call (#1025).
+            # A no-op outside front_door mode.
+            identity = get_identity_context()
+            tenant_id = identity.caller.tenant_id if identity is not None else None
+            project_result_uris(tenant_id, key[0], projected["result"])
         return GetTaskResult(**projected)
 
     async def _get(ctx: Any, params: Any) -> Any:
