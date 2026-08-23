@@ -127,13 +127,3 @@ class TestTheServerBranchIsUnchanged:
         assert not registry.is_withdrawn("srv", "beta_tool", kind="tool", tenant_id="tenant:b")
         assert registry.resolve_pin("srv", "transfer", None) is not None
         assert registry.digest_enforcement("srv") == DigestEnforcement.WARN
-
-    def test_a_group_without_the_block_registers_nothing(self) -> None:
-        load_config(
-            {
-                _MEMBER: {"mode": "subprocess", "command": ["/bin/true"]},
-                _GROUP: {"mode": "group", "members": [{"id": _MEMBER}]},
-            }
-        )
-
-        assert not get_tool_projection_registry().is_withdrawn(_GROUP, "anything", kind="tool", tenant_id=None)

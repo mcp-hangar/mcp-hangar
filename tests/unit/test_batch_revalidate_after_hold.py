@@ -136,27 +136,6 @@ class TestPolicyRecheck:
         assert result.error_type == "ToolAccessDenied"
         assert "no longer allowed by policy" in result.error
 
-    def test_unrestricted_server_policy_falls_back_to_global(self, executor):
-        """An unrestricted per-server policy must not shadow the global one.
-
-        The caller's tenant travels into the fallback as well (#1039): resolved
-        without it, `_global` is the front_door missing-identity branch, which
-        denies everything and refused every approved call at dispatch.
-        """
-        resolver = Mock()
-        server_policy = Mock()
-        server_policy.is_unrestricted.return_value = True
-        global_policy = Mock()
-        global_policy.is_unrestricted.return_value = False
-        global_policy.is_tool_allowed.return_value = False
-        resolver.resolve_effective_policy.side_effect = [server_policy, global_policy]
-
-        result = _revalidate(executor, resolver=resolver)
-
-        assert result is not None
-        assert result.error_type == "ToolAccessDenied"
-        resolver.resolve_effective_policy.assert_any_call("_global", None, None)
-
     def test_fully_unrestricted_proceeds(self, executor):
         resolver = Mock()
         policy = Mock()

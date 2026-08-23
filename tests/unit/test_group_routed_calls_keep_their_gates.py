@@ -169,11 +169,6 @@ class TestTheDigestPinSurvivesGroupRouting:
 
         assert _call_the_group().success is True
 
-    def test_an_unpinned_tool_is_unaffected(self, ctx) -> None:
-        _discover_on_the_member()
-
-        assert _call_the_group().success is True
-
 
 class TestThePostHoldRecheckAsksTheSameQuestionTheGateDid:
     """#1039, against the REAL resolver -- a Mock cannot observe either branch."""

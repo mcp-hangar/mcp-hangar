@@ -450,17 +450,6 @@ def _register_config_withdrawals(
 def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) -> None:
     """Apply one ``tool_projection:`` block, whatever scope declared it (#1038).
 
-    Schema (under an mcp_server OR a group entry)::
-
-        tool_projection:
-          withdrawn: [legacy_tool]                      # withdrawn for ALL tenants
-          withdrawn_prompts: [draft_email]              # the other two kinds (#1028)
-          withdrawn_resources: ["secret://x"]
-          pins: {transfer: "<sha256>"}
-          digest_enforcement: block
-          tenant_overrides:
-            "tenant:a": {withdrawn: [beta_tool]}        # that tenant only
-
     Withdrawals are a config overlay on the ToolProjectionRegistry, so
     ``resolve()`` returns a withdrawn projection for the named tools even before
     they are discovered by ``build_from_tools`` (see #244 design note).

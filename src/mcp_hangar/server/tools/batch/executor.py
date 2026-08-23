@@ -506,16 +506,17 @@ class BatchExecutor:
         # Effective policy, re-resolved. A tool moved to deny during the hold
         # must not execute on the pre-change decision.
         try:
-            # The caller's tenant is carried, not dropped: in front_door a
-            # resolve with no member_id is the fail-closed missing-identity
-            # branch, which refused EVERY approved call at dispatch (#1039).
+            # The caller's tenant and the target group are carried, not dropped:
+            # asked without them this was a different question than the pre-hold
+            # gate asked, and in front_door a resolve with no member_id is the
+            # fail-closed missing-identity branch, which refused EVERY approved
+            # call at dispatch (#1039).
+            #
+            # No `_global` second lookup: `_compute_effective_policy` merges the
+            # `_global` policy into every scope it resolves, so a result that is
+            # unrestricted means `_global` was empty too -- the fallback could
+            # only ever re-answer the same question.
             policy = resolver.resolve_effective_policy(call.mcp_server, group_id, caller_tenant_id)
-            if policy.is_unrestricted():
-                # The tenant travels here too: `_global` resolved without it is
-                # the front_door missing-identity branch, which denies
-                # everything -- so this fallback turned "no policy applies" into
-                # "refuse the approved call" (#1039).
-                policy = resolver.resolve_effective_policy("_global", None, caller_tenant_id)
             if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
                 return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
         except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy

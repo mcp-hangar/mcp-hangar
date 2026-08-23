@@ -162,27 +162,14 @@ def _member_to_group() -> dict[str, str]:
     same key ``BatchExecutor._gate_tool_access`` uses) and dispatch goes to
     the group so member selection stays with the group's strategy (#857).
     """
-    # Imported lazily: `server.bootstrap` imports this module back (#894).
+    return {member.id: group.id for group in _groups().values() for member in group.members}
+
+
+def _groups() -> dict[str, Any]:
+    """The loaded groups. Imported lazily: `server.bootstrap` imports this module back (#894)."""
     from ..server.bootstrap.composition import GROUPS
 
-    return {member.id: group.id for group in GROUPS.values() for member in group.members}
-
-
-def _group_scope(mcp_server: str) -> str | None:
-    """The group id *mcp_server* is governed by, if any.
-
-    Both spellings resolve to the same scope: a group MEMBER id (how the tool
-    projection is keyed) and the GROUP id itself (what ``prompt_proxy._upstream_ids``
-    hands the prompts and resources surfaces, having already collapsed the member).
-    Without the second half a group-scope ``access:`` policy is registered and
-    never read -- a declared deny that enforces nothing (#1036).
-    """
-    from ..server.bootstrap.composition import GROUPS
-
-    owner_group = _member_to_group().get(mcp_server)
-    if owner_group is None and mcp_server in GROUPS:
-        return mcp_server
-    return owner_group
+    return GROUPS
 
 
 def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
@@ -197,9 +184,7 @@ def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
 
     For anything else it is the id itself, which is what every caller had.
     """
-    from ..server.bootstrap.composition import GROUPS
-
-    group = GROUPS.get(mcp_server)
+    group = _groups().get(mcp_server)
     if group is None:
         return (mcp_server,)
     return (mcp_server, *(member.id for member in group.members))
@@ -229,14 +214,14 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
         if registry.is_withdrawn(scope, name, kind=kind, tenant_id=tenant_id):
             if scope != mcp_server:
                 logger.debug(
-                    "withdrawn_by_group_member scope=%s asked_as=%s kind=%s name=%s",
-                    scope,
-                    mcp_server,
-                    kind,
-                    name,
+                    "withdrawn_by_group_member scope=%s asked_as=%s kind=%s name=%s", scope, mcp_server, kind, name
                 )
             return False
-    owner_group = _group_scope(mcp_server)
+    # Both spellings of one scope resolve to the group: a MEMBER id (how the tool
+    # projection is keyed) and the GROUP id itself (what `_upstream_ids` hands the
+    # prompts and resources surfaces, having already collapsed the member). Without
+    # the second half a group `access:` policy is registered and never read (#1036).
+    owner_group = _member_to_group().get(mcp_server) or (mcp_server if mcp_server in _groups() else None)
     return get_tool_access_resolver().is_allowed(
         owner_group or mcp_server,
         name,
