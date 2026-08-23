@@ -168,6 +168,43 @@ def _member_to_group() -> dict[str, str]:
     return {member.id: group.id for group in GROUPS.values() for member in group.members}
 
 
+def _group_scope(mcp_server: str) -> str | None:
+    """The group id *mcp_server* is governed by, if any.
+
+    Both spellings resolve to the same scope: a group MEMBER id (how the tool
+    projection is keyed) and the GROUP id itself (what ``prompt_proxy._upstream_ids``
+    hands the prompts and resources surfaces, having already collapsed the member).
+    Without the second half a group-scope ``access:`` policy is registered and
+    never read -- a declared deny that enforces nothing (#1036).
+    """
+    from ..server.bootstrap.composition import GROUPS
+
+    owner_group = _member_to_group().get(mcp_server)
+    if owner_group is None and mcp_server in GROUPS:
+        return mcp_server
+    return owner_group
+
+
+def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
+    """Every id a withdrawal for *mcp_server* can have been declared under (#1037).
+
+    For a group id that is the group AND each of its members, and the union is
+    fail-closed: any member's withdrawal hides the item for the whole group.
+    Members are interchangeable by definition (#857), so an item withdrawn on
+    one of two identical backends is not a state an operator can have meant --
+    and the surfaces that ask about a group (prompts, resources) ask under the
+    group id alone, so a member's declaration was previously invisible to them.
+
+    For anything else it is the id itself, which is what every caller had.
+    """
+    from ..server.bootstrap.composition import GROUPS
+
+    group = GROUPS.get(mcp_server)
+    if group is None:
+        return (mcp_server,)
+    return (mcp_server, *(member.id for member in group.members))
+
+
 def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:
     """May *tenant_id* see and use *name* on *mcp_server*? (#1028)
 
@@ -188,9 +225,18 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
     :func:`resource_link_read_through._deliverable` for why.
     """
     registry = get_tool_projection_registry()
-    if registry.is_withdrawn(mcp_server, name, kind=kind, tenant_id=tenant_id):
-        return False
-    owner_group = _member_to_group().get(mcp_server)
+    for scope in _withdrawal_scopes(mcp_server):
+        if registry.is_withdrawn(scope, name, kind=kind, tenant_id=tenant_id):
+            if scope != mcp_server:
+                logger.debug(
+                    "withdrawn_by_group_member scope=%s asked_as=%s kind=%s name=%s",
+                    scope,
+                    mcp_server,
+                    kind,
+                    name,
+                )
+            return False
+    owner_group = _group_scope(mcp_server)
     return get_tool_access_resolver().is_allowed(
         owner_group or mcp_server,
         name,

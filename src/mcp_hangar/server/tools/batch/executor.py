@@ -200,9 +200,24 @@ class _CallPipeline:
         making one of them responsible for populating it for the other is an
         ordering dependency that fails silently -- reorder the two and the pin
         check quietly defers instead of running.
+
+        Two ids, because a group has two names (#1040). ``call.mcp_server`` is
+        the GROUP id whenever a group is the target -- front_door collapses the
+        member so selection stays with the group's strategy, and an egress caller
+        names the group directly -- while the registry is keyed by the id that
+        STARTED, which is always a member. Resolving only the group id returned
+        ``None``, and ``None`` means "unknown tool, do not block": the withdrawal
+        gate waved every group-routed call through and the pin gate returned
+        before checking anything. The group id is asked first because a
+        group-declared withdrawal is the narrower statement (it covers the group
+        however a member is selected); the selected member answers otherwise, and
+        is also where the discovered schema the pin is validated against lives.
         """
         if self._projection is _UNRESOLVED:
-            self._projection = self.proj_registry.resolve(self.call.mcp_server, self.call.tool, self.caller_tenant_id)
+            resolved = self.proj_registry.resolve(self.call.mcp_server, self.call.tool, self.caller_tenant_id)
+            if resolved is None and self.target_server_id and self.target_server_id != self.call.mcp_server:
+                resolved = self.proj_registry.resolve(self.target_server_id, self.call.tool, self.caller_tenant_id)
+            self._projection = resolved
         return self._projection
 
     def elapsed_ms(self) -> float:
@@ -437,11 +452,23 @@ class BatchExecutor:
         proj_registry: Any,
         caller_tenant_id: Any,
         enforce_digest_pin: Any,
+        *,
+        group_id: str | None = None,
+        target_server_id: str = "",
     ) -> CallResult | None:
         """Re-check, after an approval hold, everything decided before it.
 
         Returns a refusal ``CallResult`` when the approved call may no longer
         run, or ``None`` to proceed.
+
+        Args:
+            group_id: The group the call targets, if any -- the same value
+                ``_gate_tool_access`` passes. Without it (#1039) this asked the
+                resolver a different question than the pre-hold gate did: a
+                group's policy was never merged, so a deny added to a group
+                during the hold did not refuse the approved call.
+            target_server_id: The member a group selected, for the projection
+                and pin re-resolve (#1040).
         """
 
         def _refuse(reason: str, code: str) -> CallResult:
@@ -479,9 +506,16 @@ class BatchExecutor:
         # Effective policy, re-resolved. A tool moved to deny during the hold
         # must not execute on the pre-change decision.
         try:
-            policy = resolver.resolve_effective_policy(call.mcp_server)
+            # The caller's tenant is carried, not dropped: in front_door a
+            # resolve with no member_id is the fail-closed missing-identity
+            # branch, which refused EVERY approved call at dispatch (#1039).
+            policy = resolver.resolve_effective_policy(call.mcp_server, group_id, caller_tenant_id)
             if policy.is_unrestricted():
-                policy = resolver.resolve_effective_policy("_global")
+                # The tenant travels here too: `_global` resolved without it is
+                # the front_door missing-identity branch, which denies
+                # everything -- so this fallback turned "no policy applies" into
+                # "refuse the approved call" (#1039).
+                policy = resolver.resolve_effective_policy("_global", None, caller_tenant_id)
             if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
                 return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
         except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
@@ -491,6 +525,8 @@ class BatchExecutor:
         # now. The pre-gate check spoke for a schema that may since have moved.
         if pin is not None:
             projection = proj_registry.resolve(call.mcp_server, call.tool, caller_tenant_id)
+            if projection is None and target_server_id and target_server_id != call.mcp_server:
+                projection = proj_registry.resolve(target_server_id, call.tool, caller_tenant_id)
             if projection is not None:
                 rejection: CallResult | None = enforce_digest_pin(projection, pin)
                 if rejection is not None:
@@ -1200,6 +1236,12 @@ class BatchExecutor:
         catalogue.
         """
         p.pin = p.proj_registry.resolve_pin(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
+        if p.pin is None and p.target_server_id and p.target_server_id != p.call.mcp_server:
+            # A pin declared on the member a group selected. Same two-name
+            # problem as the projection above (#1040): without this, a pinned
+            # tool served through a group was never validated against its pin,
+            # in either topology and with no listing filter behind it.
+            p.pin = p.proj_registry.resolve_pin(p.target_server_id, p.call.tool, p.caller_tenant_id)
         if p.pin is None:
             return None
         if p.projection is None:
@@ -1262,6 +1304,8 @@ class BatchExecutor:
                     p.proj_registry,
                     p.caller_tenant_id,
                     lambda projection, pin: self._enforce_digest_pin(p, projection, pin),
+                    group_id=p.call.mcp_server if p.is_group else None,
+                    target_server_id=p.target_server_id,
                 )
                 if refusal is not None:
                     approval_span.set_attribute("approval.result", "revalidation_failed")

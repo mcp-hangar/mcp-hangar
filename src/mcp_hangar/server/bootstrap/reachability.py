@@ -68,6 +68,13 @@ def _approval_gate_requirements(config: dict[str, Any], context: Any) -> list[Su
     Read off the resolver rather than the raw YAML on purpose: the resolver is
     what the executor consults, so this measures the policies that will actually
     be enforced, whatever loaded them (config file, hot reload, REST).
+
+    Tool policies ONLY (#1043). Since #1028 the resolver also holds prompt and
+    resource policies, and ``requires_approval()`` has one consumer -- the tool
+    call path -- so a non-tool ``approval_list`` demanded a gate that could
+    never hold anything, and refused the boot for it. That configuration is now
+    refused at load (#1042); this keeps the check honest for a policy that
+    arrives any other way.
     """
     from ...domain.services import get_tool_access_resolver
 
@@ -75,7 +82,7 @@ def _approval_gate_requirements(config: dict[str, Any], context: Any) -> list[Su
     reachable = gate is not None
 
     requirements: list[SubsystemRequirement] = []
-    for scope, policy in get_tool_access_resolver().iter_registered_policies():
+    for scope, policy in get_tool_access_resolver().iter_registered_policies(kind="tool"):
         if not getattr(policy, "approval_list", ()):
             continue
         requirements.append(
@@ -123,7 +130,7 @@ def _approval_delivery_requirements(config: dict[str, Any], context: Any) -> lis
     reachable_channels: dict[str, bool] = {}
 
     requirements: list[SubsystemRequirement] = []
-    for scope, policy in get_tool_access_resolver().iter_registered_policies():
+    for scope, policy in get_tool_access_resolver().iter_registered_policies(kind="tool"):
         if not getattr(policy, "approval_list", ()):
             continue
 
