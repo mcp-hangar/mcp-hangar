@@ -239,7 +239,9 @@ class ToolAccessResolver:
                 every-kind view for callers that want an inventory.
         """
         with self._lock:
-            registered: list[tuple[str, PolicyKind, ToolAccessPolicy]] = []
+            # str, not PolicyKind: the policy dicts key their kind as a plain
+            # str, and narrowing here would only be a cast dressed as a type.
+            registered: list[tuple[str, str, ToolAccessPolicy]] = []
             for (mcp_server_id, policy_kind), policy in self._mcp_server_policies.items():
                 registered.append((f"mcp_server:{mcp_server_id}", policy_kind, policy))
             for (group_id, policy_kind), policy in self._group_policies.items():
