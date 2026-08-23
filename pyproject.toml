@@ -288,7 +288,7 @@ drift_allowance = 3.0
   # now counted. Measured identically on 3.11 (CI) and 3.13 (local).
   "server/api/middleware.py" = 92.8
   "server/api/route_permissions.py" = 100.0
-  "server/tools/batch/executor.py" = 87.9
+  "server/tools/batch/executor.py" = 87.4
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

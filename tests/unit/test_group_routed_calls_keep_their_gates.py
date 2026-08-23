@@ -214,3 +214,49 @@ class TestThePostHoldRecheckAsksTheSameQuestionTheGateDid:
     @pytest.mark.parametrize("mode", ["egress", "front_door"])
     def test_a_group_call_the_policy_still_allows_dispatches(self, mode: str) -> None:
         assert self._revalidate(mode=mode, target=_GROUP, group_id=_GROUP, deny=("something_else",)) is None
+
+    def test_a_pin_is_re_verified_against_the_selected_member(self) -> None:
+        """The pin re-check has the same two-name problem as the gate (#1040).
+
+        Resolved under the group id alone the projection is `None`, and `None`
+        skips the re-verification entirely -- so a pin that stopped matching
+        during the hold was not noticed at dispatch.
+        """
+        get_tool_projection_registry().build_from_tools(
+            _MEMBER, [ToolSchema(name=_TOOL, description="t", input_schema={})]
+        )
+        seen: list[str] = []
+        refusal = BatchExecutor()._revalidate_after_hold(
+            CallSpec(index=0, call_id="c-1", mcp_server=_GROUP, tool=_TOOL, arguments={}),
+            get_tool_access_resolver(),
+            Mock(approval_gate=None),
+            "approval-1",
+            ToolDigest(tool_name=_TOOL, sha256=_STALE_DIGEST),
+            get_tool_projection_registry(),
+            _TENANT,
+            lambda projection, _pin: seen.append(projection.mcp_server) or None,
+            group_id=_GROUP,
+            target_server_id=_MEMBER,
+        )
+
+        assert refusal is None
+        assert seen == [_MEMBER], "the member's projection is the schema the pin is checked against"
+
+    def test_a_pin_on_a_tool_no_catalogue_knows_re_verifies_nothing(self) -> None:
+        """Both ids answer `None`: nothing to check against, and no crash."""
+        called: list[object] = []
+        refusal = BatchExecutor()._revalidate_after_hold(
+            CallSpec(index=0, call_id="c-1", mcp_server=_GROUP, tool="unknown_tool", arguments={}),
+            get_tool_access_resolver(),
+            Mock(approval_gate=None),
+            "approval-1",
+            ToolDigest(tool_name="unknown_tool", sha256=_STALE_DIGEST),
+            get_tool_projection_registry(),
+            _TENANT,
+            lambda projection, _pin: called.append(projection) or None,
+            group_id=_GROUP,
+            target_server_id=_MEMBER,
+        )
+
+        assert refusal is None
+        assert called == []
