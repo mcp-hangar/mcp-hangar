@@ -44,6 +44,7 @@ from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 _SERVER = "server_a"
 _TENANT = "tenant:a"
 _OTHER = "tenant:b"
+_GROUP = "group_g"
 
 _GREET = {"name": "greet", "description": "Say hello"}
 _DRAFT = {"name": "draft_email", "description": "Draft an email"}
@@ -81,6 +82,15 @@ def _identity(tenant_id: str | None) -> IdentityContext:
 
 def _deny(kind: str, *patterns: str, server: str = _SERVER) -> None:
     get_tool_access_resolver().set_mcp_server_policy(server, ToolAccessPolicy(deny_list=patterns), kind=kind)  # type: ignore[arg-type]
+
+
+def _groups():
+    """Make ``_GROUP`` a real group id for the duration of a test."""
+    return patch.dict(
+        "mcp_hangar.server.bootstrap.composition.GROUPS",
+        {_GROUP: SimpleNamespace(id=_GROUP, members=[SimpleNamespace(id="member_1")])},
+        clear=True,
+    )
 
 
 def _prompt_map(tenant_id: str | None, responses: dict[str, dict]) -> dict:
@@ -347,6 +357,110 @@ class TestResourcePolicyMatchesTheUpstreamUri:
 
         assert rt._links_for(_TENANT) == [], "and gone from the listing too"
         assert rt._resolve_target(_TENANT, f"hangar://{_SERVER}/demo://secret/1") is None
+
+
+class TestAGroupScopePolicyGovernsEverySurface:
+    """#1036: these surfaces are handed the GROUP id, not a member id.
+
+    ``prompt_proxy._upstream_ids`` collapses a group member to its group id
+    BEFORE any check runs, so the projection only ever asks about the group.
+    A group-scope ``access:`` policy that is only consulted for a member id is
+    registered and inert -- a declared deny that enforces nothing. These drive
+    the projection entry points, which is the shape production actually takes.
+    """
+
+    def test_a_group_scope_prompt_deny_hides_the_prompt(self) -> None:
+        get_tool_access_resolver().set_group_policy(_GROUP, ToolAccessPolicy(deny_list=("draft_*",)), kind="prompt")
+
+        with _groups():
+            prompts = _prompt_map(_TENANT, {_GROUP: {"result": {"prompts": [_GREET, _DRAFT]}}})
+
+        assert list(prompts) == ["greet"]
+
+    def test_a_group_scope_resource_deny_hides_the_uri_and_the_template(self) -> None:
+        get_tool_access_resolver().set_group_policy(
+            _GROUP, ToolAccessPolicy(deny_list=("demo://secret/*",)), kind="resource"
+        )
+
+        with _groups():
+            listed = _catalog(_TENANT, rt.RESOURCES, {_GROUP: {"result": {"resources": [_DOC, _SECRET]}}})
+            templates = _catalog(_TENANT, rt.TEMPLATES, {_GROUP: {"result": {"resourceTemplates": [_TEMPLATE]}}})
+
+        assert [e["uri"] for e in listed] == [f"hangar://{_GROUP}/demo://doc/1"]
+        assert templates == []
+
+    def test_a_group_scope_resource_deny_makes_the_read_unresolvable(self) -> None:
+        """Not-shown == not-readable: the read path takes the same decision."""
+        get_tool_access_resolver().set_group_policy(
+            _GROUP, ToolAccessPolicy(deny_list=("demo://secret/*",)), kind="resource"
+        )
+
+        with _groups(), patch.object(pp, "_upstream_ids", return_value=[_GROUP]):
+            assert rt._resolve_target(_TENANT, f"hangar://{_GROUP}/demo://doc/1") is not None, "sanity: reachable"
+            assert rt._resolve_target(_TENANT, f"hangar://{_GROUP}/demo://secret/1") is None
+
+    def test_a_handed_out_link_stops_being_listed(self) -> None:
+        """The links union is the second way into ``resources/list``."""
+        block = {"type": "resource_link", "uri": f"hangar://{_GROUP}/demo://secret/1"}
+        rt._remember(_TENANT, _GROUP, block)
+
+        with _groups():
+            assert rt._links_for(_TENANT) == [block]
+            get_tool_access_resolver().set_group_policy(
+                _GROUP, ToolAccessPolicy(deny_list=("demo://secret/*",)), kind="resource"
+            )
+            assert rt._links_for(_TENANT) == []
+
+    def test_a_withdrawal_declared_on_a_member_hides_it_for_the_group(self) -> None:
+        """#1037: members are interchangeable, so any member's withdrawal wins.
+
+        The declaration is invisible to these surfaces otherwise -- they ask
+        under the GROUP id, and the overlay is keyed by the id it was declared
+        under. Fail-closed: an item withdrawn on one of two identical backends
+        is not a state an operator can have meant.
+        """
+        get_tool_projection_registry().withdraw("member_1", "greet", None, kind="prompt")
+
+        with (
+            _groups(),
+            patch(
+                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
+                return_value={"member_1": _GROUP},
+            ),
+            patch.object(pp, "_relay", side_effect=lambda _s, _m, _p: {"result": {"prompts": [_GREET, _DRAFT]}}),
+            patch.object(pp, "_upstream_ids", return_value=[_GROUP]),
+        ):
+            prompts = pp._build_prompt_map(_TENANT)
+
+        assert list(prompts) == ["draft_email"]
+
+    def test_a_withdrawal_declared_on_the_group_hides_it_too(self) -> None:
+        get_tool_projection_registry().withdraw(_GROUP, "greet", None, kind="prompt")
+
+        with _groups():
+            prompts = _prompt_map(_TENANT, {_GROUP: {"result": {"prompts": [_GREET, _DRAFT]}}})
+
+        assert list(prompts) == ["draft_email"]
+
+    def test_a_standalone_server_is_unaffected_by_the_union(self) -> None:
+        """The scope list is the id itself for anything that is not a group."""
+        get_tool_projection_registry().withdraw("member_1", "greet", None, kind="prompt")
+
+        assert list(_prompt_map(_TENANT, {_SERVER: {"result": {"prompts": [_GREET]}}})) == ["greet"]
+
+    def test_a_member_id_still_resolves_to_its_group(self) -> None:
+        """No regression on the tool path, which keys by MEMBER id."""
+        get_tool_access_resolver().set_group_policy(_GROUP, ToolAccessPolicy(deny_list=("draft_*",)), kind="prompt")
+
+        with (
+            _groups(),
+            patch(
+                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
+                return_value={"member_1": _GROUP},
+            ),
+        ):
+            assert not is_governed_allowed("member_1", "draft_email", kind="prompt", tenant_id=_TENANT)
+            assert is_governed_allowed("member_1", "greet", kind="prompt", tenant_id=_TENANT)
 
 
 class TestTheUiGuardStaysFailClosed:

@@ -279,14 +279,14 @@ drift_allowance = 3.0
   "domain/services/task_consent.py" = 92.7
   "domain/services/task_digest_guard.py" = 97.7
   "domain/services/task_ownership.py" = 97.9
-  "domain/services/tool_access_resolver.py" = 90.7
+  "domain/services/tool_access_resolver.py" = 94.1
   "domain/services/ui_resource_guard.py" = 100.0
   "domain/value_objects/tool_access_policy.py" = 84.7
   # 88.7 -> 92.7 because the two security regression files moved from
   # tests/security/ into tests/unit, and this gate's pinned selection is
   # `tests/unit tests/integration` -- it never saw them. Same tests, same code,
   # now counted. Measured identically on 3.11 (CI) and 3.13 (local).
-  "server/api/middleware.py" = 92.7
+  "server/api/middleware.py" = 92.8
   "server/api/route_permissions.py" = 100.0
   "server/tools/batch/executor.py" = 87.4
 

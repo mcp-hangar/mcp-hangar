@@ -361,16 +361,29 @@ def _register_access_policies(
 
         access:
           prompt:   {deny_list: ["draft_*"]}
-          resource: {allow_list: ["docs://*"], approval_list: ["secret://*"]}
+          resource: {allow_list: ["docs://*"]}
 
     Same parser, same value object and same resolver as ``tools:`` -- only the
     kind the policy is keyed under differs, so prompts and resources inherit the
-    merge semantics, the approval gate and the fail-closed front-door branch
-    instead of growing a weaker copy of them.
+    merge semantics, the per-tenant overlays and the fail-closed front-door
+    branch instead of growing a weaker copy of them.
+
+    ``approval_list`` is the exception, and it is REFUSED here (#1042). It was
+    documented as inherited too, and it is not: ``requires_approval()`` has one
+    consumer, the tool call path, so an approval-listed prompt or resource was
+    served immediately -- fail-open, while the startup check refused the boot
+    over the same three lines. A configuration that asks for enforcement no path
+    performs is refused rather than accepted quietly, the way per-tenant pins
+    without an identity are (#902). Whether the hold belongs on
+    ``resources/read`` / ``prompts/get`` at all is #1045; until that is answered
+    the answer here is "not supported", not "invalid".
 
     A missing or non-mapping block registers nothing, which leaves that kind
     unrestricted for this scope -- the rule tools have always followed for an
     undefined scope, applied per kind.
+
+    Raises:
+        ConfigurationError: When a non-tool kind carries an ``approval_list``.
     """
     if not isinstance(access_config, dict):
         return
@@ -391,6 +404,15 @@ def _register_access_policies(
             continue
         if parsed is None:
             continue
+        if parsed.approval_list:
+            from ..domain.exceptions import ConfigurationError
+
+            raise ConfigurationError(
+                f"access.{kind}.approval_list on {where} asks for a human approval hold that no "
+                f"{kind} path performs: the gate runs on tool calls only, so an approval-listed "
+                f"{kind} would be served immediately while the startup check refused the boot over "
+                "it. Use deny_list to withhold it, or track #1045 for the hold itself."
+            )
         register(parsed.to_policy(), kind)
         logger.debug("access_policy_set", where=where, kind=kind)
 
@@ -423,6 +445,58 @@ def _register_config_withdrawals(
                 kind=kind,
                 tenant_id=tenant_id,
             )
+
+
+def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) -> None:
+    """Apply one ``tool_projection:`` block, whatever scope declared it (#1038).
+
+    Withdrawals are a config overlay on the ToolProjectionRegistry, so
+    ``resolve()`` returns a withdrawn projection for the named tools even before
+    they are discovered by ``build_from_tools`` (see #244 design note).
+
+    Groups were silently excluded until #1038: only the server branch read this
+    block, so a group could declare neither a withdrawal nor a pin, and the
+    prompts and resources surfaces -- which look a group up under its GROUP id --
+    had no id under which either control could be both declared and read.
+
+    Args:
+        scope_id: The mcp_server or group id the entries are keyed under.
+        tool_projection_config: The block, or anything else (ignored).
+    """
+    if not isinstance(tool_projection_config, dict):
+        return
+
+    from ..application.read_models.tool_projection import get_tool_projection_registry
+
+    tp_registry = get_tool_projection_registry()
+
+    # Digest-enforcement mode for pin mismatches (audit/warn/block).
+    enforcement_raw = tool_projection_config.get("digest_enforcement")
+    if enforcement_raw is not None:
+        try:
+            tp_registry.set_digest_enforcement(scope_id, DigestEnforcement(enforcement_raw))
+        except ValueError:
+            logger.warning(
+                "invalid_digest_enforcement_config",
+                mcp_server_id=scope_id,
+                value=enforcement_raw,
+            )
+
+    # All-tenants digest pins: {tool_name: sha256}. The counterpart of
+    # `withdrawn:`, and the only pin that holds a caller carrying no tenant
+    # identity -- which is every caller when auth is off (#902).
+    _register_config_pins(tp_registry, scope_id, tool_projection_config.get("pins", {}), tenant_id=None)
+
+    # Global withdrawals (all tenants), of every kind.
+    _register_config_withdrawals(tp_registry, scope_id, tool_projection_config, tenant_id=None)
+
+    tenant_overrides_config = tool_projection_config.get("tenant_overrides", {})
+    if isinstance(tenant_overrides_config, dict):
+        for tenant_id_key, tenant_spec in tenant_overrides_config.items():
+            if not isinstance(tenant_spec, dict):
+                continue
+            _register_config_withdrawals(tp_registry, scope_id, tenant_spec, tenant_id=tenant_id_key)
+            _register_config_pins(tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key)
 
 
 def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:  # noqa: C901 -- baseline CC=37; split before extending
@@ -597,63 +671,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                         error=str(e),
                     )
 
-    # Parse per-server config-declared tool withdrawals.
-    # Schema (under each mcp_server entry):
-    #
-    #   tool_projection:
-    #     withdrawn: [legacy_tool]                      # withdrawn for ALL tenants
-    #     tenant_overrides:
-    #       "tenant:a": { withdrawn: [beta_tool] }      # withdrawn for that tenant only
-    #
-    # These withdrawals are applied as a config-overlay on the ToolProjectionRegistry
-    # so that resolve() returns a withdrawn projection for the named tools even before
-    # they are discovered by build_from_tools (see #244 design note).
-    tool_projection_config = spec_dict.get("tool_projection")
-    if isinstance(tool_projection_config, dict):
-        from ..application.read_models.tool_projection import get_tool_projection_registry
-
-        tp_registry = get_tool_projection_registry()
-
-        # Digest-enforcement mode for pin mismatches (audit/warn/block).
-        enforcement_raw = tool_projection_config.get("digest_enforcement")
-        if enforcement_raw is not None:
-            try:
-                tp_registry.set_digest_enforcement(mcp_server_id, DigestEnforcement(enforcement_raw))
-            except ValueError:
-                logger.warning(
-                    "invalid_digest_enforcement_config",
-                    mcp_server_id=mcp_server_id,
-                    value=enforcement_raw,
-                )
-
-        # All-tenants digest pins: {tool_name: sha256}. The counterpart of
-        # `withdrawn:` below, and the only pin that holds a caller carrying no
-        # tenant identity -- which is every caller when auth is off (#902).
-        _register_config_pins(
-            tp_registry,
-            mcp_server_id,
-            tool_projection_config.get("pins", {}),
-            tenant_id=None,
-        )
-
-        # Global withdrawals (all tenants), of every kind.
-        _register_config_withdrawals(tp_registry, mcp_server_id, tool_projection_config, tenant_id=None)
-
-        # Per-tenant withdrawals
-        tenant_overrides_config = tool_projection_config.get("tenant_overrides", {})
-        if isinstance(tenant_overrides_config, dict):
-            for tenant_id_key, tenant_spec in tenant_overrides_config.items():
-                if not isinstance(tenant_spec, dict):
-                    continue
-                _register_config_withdrawals(tp_registry, mcp_server_id, tenant_spec, tenant_id=tenant_id_key)
-
-                # Per-tenant digest pins: {tool_name: sha256_hex}.
-                _register_config_pins(
-                    tp_registry,
-                    mcp_server_id,
-                    tenant_spec.get("pins", {}),
-                    tenant_id=tenant_id_key,
-                )
+    _register_tool_projection_block(mcp_server_id, spec_dict.get("tool_projection"))
 
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
@@ -741,6 +759,11 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
         lambda policy, kind: get_tool_access_resolver().set_group_policy(group_id, policy, kind=kind),
         where=f"mcp_servers.{group_id}",
     )
+
+    # A group is a governed scope like a server: its own withdrawals and pins,
+    # keyed under the group id -- which is the id the prompts and resources
+    # surfaces resolve a group by (#1038).
+    _register_tool_projection_block(group_id, spec_dict.get("tool_projection"))
 
     _load_group_members(group, group_id, spec_dict.get("members", []))
 

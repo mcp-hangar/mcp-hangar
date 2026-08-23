@@ -220,7 +220,7 @@ class ToolAccessResolver:
             # Invalidate cache for this (server, member) pair
             self._policy_cache.pop((kind, f"mcp_server:{mcp_server_id}:member:{member_id}"), None)
 
-    def iter_registered_policies(self) -> list[tuple[str, ToolAccessPolicy]]:
+    def iter_registered_policies(self, *, kind: PolicyKind | None = None) -> list[tuple[str, ToolAccessPolicy]]:
         """Return every registered policy as ``(scope_description, policy)``.
 
         Used by the startup reachability check to answer "does this
@@ -229,18 +229,34 @@ class ToolAccessResolver:
 
         The description of a tool policy is unchanged; a policy of another kind
         carries a ``[kind]`` suffix so the two are distinguishable in a log line.
+
+        Args:
+            kind: Return only policies of this kind. A caller that asks a
+                kind-specific question must pass it: since #1028 this list
+                carries prompt and resource policies too, and the reachability
+                check read them as if they were tools -- demanding an approval
+                gate for a policy no path can gate (#1043). ``None`` keeps the
+                every-kind view for callers that want an inventory.
         """
         with self._lock:
-            registered: list[tuple[str, ToolAccessPolicy]] = []
-            for (mcp_server_id, kind), policy in self._mcp_server_policies.items():
-                registered.append((_scope_label(f"mcp_server:{mcp_server_id}", kind), policy))
-            for (group_id, kind), policy in self._group_policies.items():
-                registered.append((_scope_label(f"group:{group_id}", kind), policy))
-            for (group_id, member_id, kind), policy in self._member_policies.items():
-                registered.append((_scope_label(f"group:{group_id}:member:{member_id}", kind), policy))
-            for (mcp_server_id, member_id, kind), policy in self._standalone_member_policies.items():
-                registered.append((_scope_label(f"mcp_server:{mcp_server_id}:member:{member_id}", kind), policy))
-            return registered
+            # str, not PolicyKind: the policy dicts key their kind as a plain
+            # str, and narrowing here would only be a cast dressed as a type.
+            registered: list[tuple[str, str, ToolAccessPolicy]] = []
+            for (mcp_server_id, policy_kind), policy in self._mcp_server_policies.items():
+                registered.append((f"mcp_server:{mcp_server_id}", policy_kind, policy))
+            for (group_id, policy_kind), policy in self._group_policies.items():
+                registered.append((f"group:{group_id}", policy_kind, policy))
+            for (group_id, member_id, policy_kind), policy in self._member_policies.items():
+                registered.append((f"group:{group_id}:member:{member_id}", policy_kind, policy))
+            for (mcp_server_id, member_id, policy_kind), policy in self._standalone_member_policies.items():
+                registered.append((f"mcp_server:{mcp_server_id}:member:{member_id}", policy_kind, policy))
+        # One filter over the collected list rather than a condition inside each
+        # loop: same answer, four fewer decision paths to keep covered.
+        return [
+            (_scope_label(scope, policy_kind), policy)
+            for scope, policy_kind, policy in registered
+            if kind is None or policy_kind == kind
+        ]
 
     @property
     def topology_mode(self) -> TopologyMode:
