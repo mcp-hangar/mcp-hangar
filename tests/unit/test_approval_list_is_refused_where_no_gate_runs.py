@@ -124,6 +124,51 @@ class TestWhatKeepsWorking:
         assert registered[f"mcp_server:{_SERVER}"].approval_list == ("transfer",)
 
 
+class TestTheKindFilterCoversEveryScope:
+    """All four policy stores, filtered and unfiltered.
+
+    The reachability check asks for one kind; the inventory view (no filter) is
+    what a policy dump reads. Both shapes are pinned here so a scope cannot be
+    dropped from one and not the other.
+    """
+
+    def _register_one_of_each(self) -> None:
+        resolver = get_tool_access_resolver()
+        resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("a",)))
+        resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("b",)), kind="prompt")
+        resolver.set_group_policy("grp", ToolAccessPolicy(deny_list=("c",)), kind="resource")
+        resolver.set_member_policy(group_id="grp", member_id="tenant:a", policy=ToolAccessPolicy(deny_list=("d",)))
+        resolver.set_standalone_member_policy("srv", "tenant:b", ToolAccessPolicy(deny_list=("e",)), kind="prompt")
+
+    def test_no_filter_returns_every_scope_and_kind(self) -> None:
+        self._register_one_of_each()
+
+        scopes = {scope for scope, _policy in get_tool_access_resolver().iter_registered_policies()}
+
+        assert scopes == {
+            "mcp_server:srv",
+            "mcp_server:srv[prompt]",
+            "group:grp[resource]",
+            "group:grp:member:tenant:a",
+            "mcp_server:srv:member:tenant:b[prompt]",
+        }
+
+    @pytest.mark.parametrize(
+        ("kind", "expected"),
+        [
+            ("tool", {"mcp_server:srv", "group:grp:member:tenant:a"}),
+            ("prompt", {"mcp_server:srv[prompt]", "mcp_server:srv:member:tenant:b[prompt]"}),
+            ("resource", {"group:grp[resource]"}),
+        ],
+    )
+    def test_a_filter_returns_only_that_kind(self, kind: str, expected: set[str]) -> None:
+        self._register_one_of_each()
+
+        scopes = {scope for scope, _p in get_tool_access_resolver().iter_registered_policies(kind=kind)}  # type: ignore[arg-type]
+
+        assert scopes == expected
+
+
 class TestTheStartupCheckAsksAboutTheKindItCanEnforce:
     """A policy reaching the resolver another way (REST, replay) must not refuse the boot."""
 

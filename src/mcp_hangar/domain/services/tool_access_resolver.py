@@ -239,22 +239,22 @@ class ToolAccessResolver:
                 every-kind view for callers that want an inventory.
         """
         with self._lock:
-            registered: list[tuple[str, ToolAccessPolicy]] = []
+            registered: list[tuple[str, PolicyKind, ToolAccessPolicy]] = []
             for (mcp_server_id, policy_kind), policy in self._mcp_server_policies.items():
-                if kind is None or policy_kind == kind:
-                    registered.append((_scope_label(f"mcp_server:{mcp_server_id}", policy_kind), policy))
+                registered.append((f"mcp_server:{mcp_server_id}", policy_kind, policy))
             for (group_id, policy_kind), policy in self._group_policies.items():
-                if kind is None or policy_kind == kind:
-                    registered.append((_scope_label(f"group:{group_id}", policy_kind), policy))
+                registered.append((f"group:{group_id}", policy_kind, policy))
             for (group_id, member_id, policy_kind), policy in self._member_policies.items():
-                if kind is None or policy_kind == kind:
-                    registered.append((_scope_label(f"group:{group_id}:member:{member_id}", policy_kind), policy))
+                registered.append((f"group:{group_id}:member:{member_id}", policy_kind, policy))
             for (mcp_server_id, member_id, policy_kind), policy in self._standalone_member_policies.items():
-                if kind is None or policy_kind == kind:
-                    registered.append(
-                        (_scope_label(f"mcp_server:{mcp_server_id}:member:{member_id}", policy_kind), policy)
-                    )
-            return registered
+                registered.append((f"mcp_server:{mcp_server_id}:member:{member_id}", policy_kind, policy))
+        # One filter over the collected list rather than a condition inside each
+        # loop: same answer, four fewer decision paths to keep covered.
+        return [
+            (_scope_label(scope, policy_kind), policy)
+            for scope, policy_kind, policy in registered
+            if kind is None or policy_kind == kind
+        ]
 
     @property
     def topology_mode(self) -> TopologyMode:
