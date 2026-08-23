@@ -374,9 +374,11 @@ def _register_access_policies(
     served immediately -- fail-open, while the startup check refused the boot
     over the same three lines. A configuration that asks for enforcement no path
     performs is refused rather than accepted quietly, the way per-tenant pins
-    without an identity are (#902). Whether the hold belongs on
-    ``resources/read`` / ``prompts/get`` at all is #1045; until that is answered
-    the answer here is "not supported", not "invalid".
+    without an identity are (#902). Whether a hold belongs on ``resources/read``
+    / ``prompts/get`` at all was the open question; ADR-024 decides it does not
+    (#1045), so this refusal is the answer rather than a placeholder. The one
+    human decision on a fetch stays the SEP-1865 ``ui://`` consent, which is
+    justified by what is delivered rather than by a declared pattern.
 
     A missing or non-mapping block registers nothing, which leaves that kind
     unrestricted for this scope -- the rule tools have always followed for an
@@ -411,7 +413,8 @@ def _register_access_policies(
                 f"access.{kind}.approval_list on {where} asks for a human approval hold that no "
                 f"{kind} path performs: the gate runs on tool calls only, so an approval-listed "
                 f"{kind} would be served immediately while the startup check refused the boot over "
-                "it. Use deny_list to withhold it, or track #1045 for the hold itself."
+                "it. Use deny_list: it hides the item from every listing and answers a fetch the way a "
+                "nonexistent one is answered. A hold on a fetch is decided against in ADR-024 (#1045)."
             )
         register(parsed.to_policy(), kind)
         logger.debug("access_policy_set", where=where, kind=kind)
