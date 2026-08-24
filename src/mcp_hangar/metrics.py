@@ -1127,7 +1127,14 @@ TASK_CONSENT_DECIDED_TOTAL = Counter(
 
 
 def _register_all_metrics():
-    """Register all predefined metrics."""
+    """Register all predefined metrics.
+
+    This hand-maintained list is the failure mode, not any one metric: a
+    collector defined above and forgotten here accumulates in process memory
+    and never reaches a scrape, which looks from outside exactly like a feature
+    that was never built. Four had (#1059). If you add a metric, add it here --
+    `test_every_metric_is_registered.py` walks this module and fails if you do
+    not."""
     metrics = [
         BUILD_INFO,
         PROCESS_START_TIME,
@@ -1251,6 +1258,19 @@ def _register_all_metrics():
             PROJECTED_TOOLS,
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
             PROJECTION_WITHDRAWALS_TOTAL,
+        ]
+    )
+
+    # Approval gate (#920) and Audit-mode egress observations (ADR-013). Both
+    # were defined, incremented on the live path, and documented with PromQL --
+    # and absent from every /metrics scrape, because nothing appended them here
+    # (#1059).
+    metrics.extend(
+        [
+            APPROVAL_REQUESTS_TOTAL,
+            APPROVAL_DELIVERIES_TOTAL,
+            APPROVAL_DECISIONS_TOTAL,
+            EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL,
         ]
     )
 
