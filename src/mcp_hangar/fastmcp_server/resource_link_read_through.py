@@ -61,7 +61,7 @@ from typing import Any
 
 from mcp_hangar._sdk_compat import lowlevel_server, make_mcp_error
 
-from ..domain.services.ui_resource_guard import UiResourceGuard
+from ..domain.services.ui_resource_guard import UiResourceGuard, get_ui_resource_guard
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +82,12 @@ _MAX_LINKS = 4096
 _links: OrderedDict[tuple[str | None, str], tuple[str, dict[str, Any]]] = OrderedDict()
 _lock = threading.Lock()
 
+
 #: Default guard: empty allowlist and no consent gate, so every ``ui://``
 #: resource is denied until an operator wires policies -- fail-closed.
-_ui_guard = UiResourceGuard()
+def _ui_guard() -> UiResourceGuard:
+    """The process guard: config fills its policies, bootstrap its consent gate."""
+    return get_ui_resource_guard()
 
 
 def project_uri(mcp_server_id: str, uri: str) -> str:
@@ -219,7 +222,7 @@ def _deliverable(tenant_id: str | None, mcp_server_id: str, upstream_uri: str) -
     Called from the catalogue build, the handed-out-links union and
     ``_resolve_target``, so listing and reading make one decision.
     """
-    if not _ui_guard.evaluate(upstream_uri, tenant_id).allowed:
+    if not _ui_guard().evaluate(upstream_uri, tenant_id).allowed:
         return False
 
     from .flat_tool_projection import is_governed_allowed
@@ -336,7 +339,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
             # The guard reads the UPSTREAM uri: `ui://` is invisible once the
             # scheme has been namespaced, and a guard that cannot see the
             # scheme it guards is not fail-closed (SEP-1865).
-            decision = await _ui_guard.enforce(upstream_uri, tenant_id, mcp_server_id)
+            decision = await _ui_guard().enforce(upstream_uri, tenant_id, mcp_server_id)
             if not decision.allowed:
                 raise make_mcp_error(RESOURCE_NOT_FOUND, f"Resource not deliverable: {uri}")
             response = await asyncio.to_thread(_relay_read, mcp_server_id, upstream_uri)

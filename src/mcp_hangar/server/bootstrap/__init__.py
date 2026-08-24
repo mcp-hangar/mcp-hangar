@@ -605,6 +605,14 @@ def bootstrap(
     ctx.full_config = full_config  # Store for config round-trip serialization
     if components.approval_service is not None:
         ctx.approval_gate = components.approval_service
+        # The SEP-1865 `ui://` consent, which the guard mandates and could not
+        # satisfy until now: an allowlisted ui:// resource was denied for want of
+        # anyone to ask (#1048). Attached here because the gate is an adapter
+        # over the approval service, which does not exist earlier.
+        from ...approvals.consent import ApprovalConsentGate
+        from ...domain.services.ui_resource_guard import get_ui_resource_guard
+
+        get_ui_resource_guard().attach_consent_gate(ApprovalConsentGate(components.approval_service))
 
     # Last gate before the process serves: every subsystem this configuration
     # asks for must be reachable on the path this process actually took. Placed

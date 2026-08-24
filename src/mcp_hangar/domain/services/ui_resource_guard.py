@@ -21,11 +21,19 @@ Non-``ui://`` resources are completely unaffected: :meth:`UiResourceGuard.evalua
 returns a pass-through decision and :meth:`UiResourceGuard.enforce` never invokes
 the consent gate for them.
 
-Dormancy note (be honest): Hangar does not relay ``ui://`` resources today --
-there is no ``resources/read`` proxy path in ``src/``. This guard is the
-ready-but-dormant enforcement point. When a ``ui://`` resource relay is added,
-call :meth:`UiResourceGuard.enforce` on each resource before it is delivered to
-the client; that is the single wiring hook.
+Wiring (#1048). The front door relays resources since #1031, and
+``resource_link_read_through`` calls :meth:`UiResourceGuard.evaluate` on every
+catalogue entry and :meth:`UiResourceGuard.enforce` before delivering a read. The
+process guard is the one :func:`get_ui_resource_guard` returns: configuration
+fills its per-tenant policies (``ui_resources.tenants`` in the config file) and
+bootstrap attaches the consent gate once the approval service exists.
+
+Both halves have to be present for a ``ui://`` resource to be delivered at all,
+and they fail closed independently: no allowlist entry denies before consent is
+ever asked for, and an allowlisted resource with no consent gate attached is
+denied too. That is deliberate -- ADR-024 records why this consent is the one
+human decision that belongs on a fetch, and it is only a decision if there is
+somebody to make it.
 """
 
 from __future__ import annotations
@@ -116,6 +124,18 @@ class UiResourceGuard:
         # The default is an empty-allowlist policy: deny all ui:// unless a
         # tenant explicitly allowlists a resource.
         self._default_policy = default_policy or UiResourcePolicy()
+        self._consent_gate = consent_gate
+
+    def attach_consent_gate(self, consent_gate: UiConsentGate | None) -> None:
+        """Attach the consent provider after construction (#1048).
+
+        The guard is configured in two steps because its two inputs become
+        available at different times: the per-tenant policies come from the
+        config file, and the gate is an adapter over the approval service, which
+        does not exist until components are built. Until this is called an
+        allowlisted ``ui://`` resource is denied -- consent is mandated, and a
+        mandate with nobody to ask is a denial.
+        """
         self._consent_gate = consent_gate
 
     def policy_for(self, tenant_id: str | None) -> UiResourcePolicy:
@@ -246,3 +266,32 @@ class UiResourceGuard:
             requires_consent=False,
             reason="ui:// resource allowlisted and consent granted",
         )
+
+
+#: The process-wide guard. Configuration fills its policies, bootstrap attaches
+#: its consent gate, and the resources projection asks it about every entry.
+_guard: UiResourceGuard | None = None
+
+
+def get_ui_resource_guard() -> UiResourceGuard:
+    """Return the process guard, creating the fail-closed default on first use.
+
+    A guard nobody configured denies every ``ui://`` resource, which is the
+    right answer for a deployment that never opted in.
+    """
+    global _guard
+    if _guard is None:
+        _guard = UiResourceGuard()
+    return _guard
+
+
+def set_ui_resource_guard(guard: UiResourceGuard) -> None:
+    """Replace the process guard -- config load builds it from the file."""
+    global _guard
+    _guard = guard
+
+
+def reset_ui_resource_guard() -> None:
+    """Drop the process guard, so the next read builds the default again."""
+    global _guard
+    _guard = None

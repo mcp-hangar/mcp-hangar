@@ -853,6 +853,62 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     logger.debug("tool_access_topology_mode_set", mode=mode)
 
 
+def _init_ui_resources_from_config(full_config: dict[str, Any]) -> None:
+    """Build the process ``ui://`` guard from the config file (#1048).
+
+    ::
+
+        ui_resources:
+          tenants:
+            "tenant:a":
+              allowlist: ["ui://reports/", "ui://dash/q3"]
+              csp: "default-src 'none'; …"   # optional; the restrictive default otherwise
+
+    A tenant with no entry keeps the fail-closed default -- an empty allowlist,
+    which denies every ``ui://`` resource -- and so does a caller with no tenant
+    at all. There is deliberately no way to turn consent off here: SEP-1865
+    mandates it, and ``UiResourcePolicy.require_consent`` is not read from the
+    file (ADR-024).
+
+    An unparseable entry is warn-skipped rather than fatal, which leaves that
+    tenant denied: the failure of this block cannot open the surface it guards.
+
+    Args:
+        full_config: Full configuration dictionary.
+    """
+    from ..domain.services.ui_resource_guard import UiResourceGuard, set_ui_resource_guard
+    from ..domain.value_objects.ui_resource import UiResourcePolicy
+
+    ui_config = full_config.get("ui_resources")
+    tenants_config = ui_config.get("tenants") if isinstance(ui_config, dict) else None
+    if not isinstance(tenants_config, dict):
+        return
+
+    policies: dict[str, UiResourcePolicy] = {}
+    for tenant_id, spec in tenants_config.items():
+        if not isinstance(spec, dict):
+            logger.warning("invalid_ui_resource_policy", tenant_id=tenant_id, reason="not a mapping")
+            continue
+        raw_allowlist = spec.get("allowlist", [])
+        if not isinstance(raw_allowlist, list) or not all(isinstance(entry, str) and entry for entry in raw_allowlist):
+            logger.warning("invalid_ui_resource_policy", tenant_id=tenant_id, reason="allowlist must be a list of str")
+            continue
+        csp = spec.get("csp")
+        try:
+            policy = (
+                UiResourcePolicy(allowlist=frozenset(raw_allowlist), csp=csp)
+                if isinstance(csp, str) and csp
+                else UiResourcePolicy(allowlist=frozenset(raw_allowlist))
+            )
+        except (TypeError, ValueError) as e:
+            logger.warning("invalid_ui_resource_policy", tenant_id=tenant_id, error=str(e))
+            continue
+        policies[str(tenant_id)] = policy
+        logger.debug("ui_resource_policy_set", tenant_id=tenant_id, allowlist_size=len(policy.allowlist))
+
+    set_ui_resource_guard(UiResourceGuard(policies))
+
+
 def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     """Initialize the ConcurrencyManager from configuration.
 
@@ -979,6 +1035,7 @@ def load_configuration(config_path: str | None = None, *, load_servers: bool = T
         _init_concurrency_from_config(full_config)
         _init_topology_mode_from_config(full_config)
         _init_interceptors_from_config(full_config)
+        _init_ui_resources_from_config(full_config)
         if load_servers:
             load_config(full_config.get("mcp_servers", {}))
         return full_config
