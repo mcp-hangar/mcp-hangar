@@ -1,8 +1,6 @@
 # Upgrading MCP Hangar
 
-## Upgrade to 2.14.0
-
-### A front-door tool can disappear, with no config change (#1056)
+## Next — A front-door tool can disappear, with no config change (#1056)
 
 SEP-2243 makes it a client-side **MUST**: a client drops any tool whose
 `x-mcp-header` annotations are invalid. Hangar forwarded the upstream definition
@@ -23,7 +21,7 @@ An annotation is valid only when it sits on a property reachable through a pure
 Hangar does not edit a projected schema, because that would move its digest and
 break every pin.
 
-### A legacy-era header/body mismatch now answers `-32020` (#1051)
+## Next — A legacy-era header/body mismatch now answers `-32020` (#1051)
 
 The handshake-era front door refused a mismatch with `-32600` (`InvalidRequest`)
 while `tasks/*` used `HEADER_MISMATCH` (`-32020`) for the same class of failure.
@@ -32,7 +30,7 @@ before is accepted now. **Update any client branch or log query keyed on
 `-32600` for this case.** Modern-protocol clients are unaffected — the SDK ladder
 already answered `-32020` there.
 
-### Eight metrics appear on `/metrics` for the first time (#1059, #1049)
+## Next — Eight metrics appear on `/metrics` for the first time (#1059, #1049)
 
 These were defined and incremented on the live path, and never registered, so
 they were absent from every scrape — indistinguishable from a feature that was
@@ -53,7 +51,7 @@ egress counter is the signal ADR-013 calls the safe adoption path for an
 
 Nothing to change; expect graphs that were flat to start moving.
 
-### Optional: govern what an upstream may ask a client to expose (#1057)
+## Next — Optional: govern what an upstream may ask a client to expose (#1057)
 
 A new `header_exposure:` block sits beside `tool_projection:` on an mcp_server or
 a group. It is **off unless you configure it**, and its default action is `warn`,
@@ -71,7 +69,7 @@ mcp_servers:
 violation is only knowable after discovery. An unknown `on_violation` is refused
 at parse rather than defaulted.
 
-### Optional: `Mcp-Param-*` selectors in an egress policy (#1058)
+## Next — Optional: `Mcp-Param-*` selectors in an egress policy (#1058)
 
 `L7Policy` can now select on SEP-2243 `Mcp-Param-*` headers with the same glob
 precedence as the tool-name rules. A request whose `MCP-Protocol-Version`
