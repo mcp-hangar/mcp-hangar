@@ -19,13 +19,8 @@ pip install mcp-hangar
 # or: uv pip install mcp-hangar
 ```
 
-This resolves to **2.0.0**. Coming from 1.6.x, read the
-[upgrade guide](https://mcp-hangar.io/docs/upgrade) first — two of the changes
-need a decision before you upgrade, not after: Slack approval delivery now needs
-an adapter you run yourself, and approval resolution is authorized. Your upstream
-MCP servers do **not** have to move; a connection that negotiates the 2025-11-25
-protocol keeps working. To stay on the old line while you plan, pin
-`"mcp-hangar>=1.6,<2"` — note that it is closed and receives no fixes.
+Upgrading rather than installing fresh? The migration steps live in the
+[upgrade guide](https://mcp-hangar.io/docs/upgrade).
 
 ## Quickstart
 
