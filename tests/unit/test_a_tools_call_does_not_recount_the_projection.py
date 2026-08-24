@@ -133,13 +133,13 @@ class TestThePreDispatchListingSeesTheCallersPrincipal:
             lambda _ctx: set(),
         )
 
-        memoised = flat_tool_projection._flat_map_for_request
+        memoised = flat_tool_projection._memoised_flat_map
 
         def _spy(mcp_ctx: Any, tenant_id: str | None) -> dict[str, tuple[str, str]]:
             seen["call"] = tenant_id
             return memoised(mcp_ctx, tenant_id)
 
-        monkeypatch.setattr(flat_tool_projection, "_flat_map_for_request", _spy)
+        monkeypatch.setattr(flat_tool_projection, "_memoised_flat_map", _spy)
 
         handlers = _registered()
         ctx = _ctx(_principal(), envelope="tools/call")

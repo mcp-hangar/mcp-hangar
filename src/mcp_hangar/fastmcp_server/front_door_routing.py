@@ -77,12 +77,9 @@ def _decoded_routing_header(value: bytes) -> str | None:
     after decode so a whitespace-wrapped value agrees with ``route_from_body``,
     which also strips.
     """
-    raw = value.decode("latin-1").strip() or None
-    if raw is None:
-        return None
-    decoded = decode_header_value(raw)
-    text = decoded if decoded is not None else raw
-    return text.strip() or None
+    raw = value.decode("latin-1").strip()
+    decoded = decode_header_value(raw) if raw else None
+    return (raw if decoded is None else decoded).strip() or None
 
 
 def extract_route_headers(raw_headers: Iterable[tuple[bytes, bytes]]) -> tuple[str | None, str | None]:
