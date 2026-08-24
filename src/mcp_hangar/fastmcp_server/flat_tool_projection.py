@@ -284,6 +284,12 @@ def _build_flat_map(
         if not is_governed_allowed(mcp_server, tool_name, kind="tool", tenant_id=tenant_id):
             continue
 
+        # Shown == callable, and a conforming client drops this one on arrival
+        # (#1056). Dropping it here keeps both halves of that invariant: it is
+        # absent from the listing and `-32601` on the call.
+        if _invalid_header_annotation(resolved) is not None:
+            continue
+
         flat_name = tool_name  # FLAT naming: tool name as-is, no server prefix.
 
         if flat_name in collisions:
@@ -312,6 +318,45 @@ def _build_flat_map(
         flat[flat_name] = (mcp_server, tool_name)
 
     return flat
+
+
+#: Per-(tool, schema version) verdict on the tool's own ``x-mcp-header``
+#: annotations. The answer depends only on the schema, so it is settled once
+#: per digest rather than on every listing -- a metric that fires per request
+#: measures traffic, not the catalogue (#1049).
+# ponytail: never evicted; bounded by catalogue size x schema drift. Upgrade:
+# clear it where the registry invalidates.
+_ANNOTATION_VERDICTS: dict[tuple[str, str, str], str | None] = {}
+
+
+def _invalid_header_annotation(proj: Any) -> str | None:
+    """Why a conforming client must drop this tool, or ``None`` (#1056).
+
+    SEP-2243 makes it a client-side **MUST**: a tool whose ``x-mcp-header``
+    annotations fail ``find_invalid_x_mcp_header`` is dropped by the client
+    that receives it. Projecting it anyway advertises a tool nobody can call
+    and counts it as governance surface we delivered.
+
+    The annotation is not stripped in place: the JCS digest is taken over
+    ``{name, description, inputSchema, outputSchema}``, so editing the schema
+    would move the digest and read as upstream drift. The tool goes away
+    instead, with a reason.
+    """
+    key = (proj.mcp_server, proj.tool, proj.digest.sha256)
+    if key in _ANNOTATION_VERDICTS:
+        return _ANNOTATION_VERDICTS[key]
+
+    reason = find_invalid_x_mcp_header(proj.schema.get("inputSchema"))
+    _ANNOTATION_VERDICTS[key] = reason
+    if reason is not None:
+        logger.warning(
+            "tool_withheld_invalid_x_mcp_header mcp_server=%s tool=%s reason=%s",
+            proj.mcp_server,
+            proj.tool,
+            reason,
+        )
+        prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason="invalid_x_mcp_header")
+    return reason
 
 
 def _build_mcp_tool_list(

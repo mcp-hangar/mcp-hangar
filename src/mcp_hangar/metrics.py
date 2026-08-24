@@ -1034,6 +1034,16 @@ PARAM_HEADER_VALIDATION_SKIPPED_TOTAL = Counter(
     labels=["reason"],
 )
 
+# A tool Hangar declines to project, though nothing withdrew it and policy
+# allows it: the definition itself is unusable to a conforming client (#1056).
+# Counted once per tool per schema version, not per listing.
+PROJECTION_WITHDRAWALS_TOTAL = Counter(
+    name="mcp_hangar_projection_withdrawals",
+    description="Tools withheld from the front-door projection by their own definition, by cause",
+    # invalid_x_mcp_header
+    labels=["reason"],
+)
+
 # -----------------------------------------------------------------------------
 # Approval Gate Metrics
 # -----------------------------------------------------------------------------
@@ -1240,6 +1250,7 @@ def _register_all_metrics():
             EMPTY_PROJECTION_TOTAL,
             PROJECTED_TOOLS,
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
+            PROJECTION_WITHDRAWALS_TOTAL,
         ]
     )
 
