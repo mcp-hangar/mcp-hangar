@@ -580,6 +580,43 @@ async def test_an_mcp_name_header_disagreeing_with_the_body_is_refused(store: Go
     assert router.calls == []
 
 
+async def test_a_base64_wrapped_mcp_name_matching_the_task_id_is_accepted(store: GovernedTaskStore) -> None:
+    from mcp.shared.inbound import encode_header_value
+
+    task_id = "zadanie-żółć"
+    _register(store, "S1", task_id, "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task(task_id)}})
+    handlers = _handlers(store, router)
+    wrapped = encode_header_value(task_id)
+    assert wrapped != task_id
+
+    result = await handlers["tasks/get"][1](
+        _ctx("alice", "tenant-a", task_id=wrapped), SimpleNamespace(task_id=task_id)
+    )
+
+    assert isinstance(result, GetTaskResult)
+    assert router.calls != []
+
+
+async def test_a_base64_wrapped_mcp_name_that_decodes_to_a_different_id_is_refused(
+    store: GovernedTaskStore,
+) -> None:
+    from mcp.shared.inbound import encode_header_value
+
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    handlers = _handlers(store, router)
+
+    with pytest.raises(McpError) as exc:
+        await handlers["tasks/get"][1](
+            _ctx("alice", "tenant-a", task_id=encode_header_value("inny-żółć")),
+            SimpleNamespace(task_id="T1"),
+        )
+
+    assert exc.value.error.code == HEADER_MISMATCH
+    assert router.calls == []
+
+
 async def test_the_ladder_is_ordered_header_before_capability(store: GovernedTaskStore) -> None:
     """A misrouted request is refused as misrouted whatever the client declared.
 

@@ -48,15 +48,19 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import uuid
 from typing import Any
+
+from mcp.shared.inbound import MCP_PARAM_HEADER_PREFIX, find_invalid_x_mcp_header
 
 from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
     ListToolsResult,
     Tool as MCPTool,
+    is_modern_protocol_version,
     make_mcp_error,
 )
 
@@ -358,6 +362,121 @@ EMPTY_NO_IDENTITY = "no_identity"
 EMPTY_NOTHING_DISCOVERED = "nothing_discovered"
 EMPTY_FILTERED = "filtered"
 
+# Per-HTTP-request memo of the identity-scoped flat map. The SDK's modern
+# transport re-invokes tools/list pre-dispatch to resolve Mcp-Param schemas
+# (#1049); without this the call rebuilds the map that listing just built.
+_MEMO_ATTR = "hangar_projection"
+
+_MCP_PARAM_PREFIX_LOWER = MCP_PARAM_HEADER_PREFIX.lower()
+
+
+def _http_request(mcp_ctx: Any) -> Any:
+    inner = getattr(mcp_ctx, "request_context", None) or mcp_ctx
+    return getattr(inner, "request", None)
+
+
+def _envelope(mcp_ctx: Any) -> dict[str, Any]:
+    """The JSON-RPC message the HTTP request carried, not the nested handler's.
+
+    A pre-dispatch tools/list runs with ctx.method == "tools/list" even when
+    the POST was tools/call, so the body -- already buffered on the Starlette
+    request as ``_body`` -- is the one source that names the envelope.
+    """
+    # ponytail: envelope read off the buffered request._body. Upgrade path:
+    # the transport passes the envelope method down to the handler.
+    body = getattr(_http_request(mcp_ctx), "_body", None)
+    if not isinstance(body, (bytes, bytearray)):
+        return {}
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _carries_param_header(mcp_ctx: Any) -> bool:
+    headers = getattr(_http_request(mcp_ctx), "headers", None)
+    return any(str(key).lower().startswith(_MCP_PARAM_PREFIX_LOWER) for key in headers or ())
+
+
+def _call_carries_param_check(mcp_ctx: Any) -> bool:
+    """The SDK only resolves a schema when arguments or Mcp-Param-* headers exist."""
+    params = _envelope(mcp_ctx).get("params")
+    arguments = params.get("arguments") if isinstance(params, dict) else None
+    return bool(isinstance(arguments, dict) and arguments) or _carries_param_header(mcp_ctx)
+
+
+def _observe_param_header_skips(mcp_ctx: Any, governed: list[MCPTool], management: list[MCPTool]) -> None:
+    """Count an SDK Mcp-Param skip that this pre-dispatch listing made visible (#1053)."""
+    if not _call_carries_param_check(mcp_ctx):
+        return
+    params = _envelope(mcp_ctx).get("params")
+    name = params.get("name") if isinstance(params, dict) else None
+    match = next((tool for tool in (*governed, *management) if tool.name == name), None)
+    if match is None:
+        prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="tool_not_listed")
+        return
+    if find_invalid_x_mcp_header(match.input_schema) is not None:
+        prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="invalid_annotation")
+
+
+def _observe_legacy_param_skip(mcp_ctx: Any) -> None:
+    """Handshake-era traffic never runs the Mcp-Param ladder (#1053)."""
+    headers = getattr(_http_request(mcp_ctx), "headers", None)
+    if headers is None or not hasattr(headers, "get") or not _carries_param_header(mcp_ctx):
+        return
+    if is_modern_protocol_version(headers.get("mcp-protocol-version")):
+        return
+    prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="legacy_protocol")
+
+
+def _memoised_flat_map(mcp_ctx: Any, tenant_id: str | None) -> dict[str, tuple[str, str]]:
+    """The map the pre-dispatch listing built on this same POST, or a fresh one."""
+    memo = getattr(getattr(_http_request(mcp_ctx), "state", None), _MEMO_ATTR, None)
+    if isinstance(memo, tuple) and len(memo) == 2 and memo[0] == tenant_id and isinstance(memo[1], dict):
+        return memo[1]
+    return _build_flat_map(tenant_id)
+
+
+def _memoise_flat_map(mcp_ctx: Any, tenant_id: str | None, flat_map: dict[str, tuple[str, str]]) -> None:
+    state = getattr(_http_request(mcp_ctx), "state", None)
+    if state is not None:
+        setattr(state, _MEMO_ATTR, (tenant_id, flat_map))
+
+
+async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListToolsResult:
+    """Build this caller's projection, count it only if the client asked for it."""
+    identity = get_identity_context()
+    tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
+
+    try:
+        flat_map = _build_flat_map(tenant_id)
+        governed = _build_mcp_tool_list(flat_map)
+        management = await load_management(mcp_ctx)
+    except Exception:  # noqa: BLE001 -- the SDK fail-opens on a failed listing; count, then re-raise
+        if _envelope(mcp_ctx).get("method") == "tools/call" and _call_carries_param_check(mcp_ctx):
+            prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="listing_failed")
+        raise
+
+    # The SDK's pre-dispatch tools/list on a tools/call (#1049) is not a listing
+    # the client received: it must not be counted as one.
+    if _envelope(mcp_ctx).get("method") != "tools/call":
+        # Reported on the governed tools alone. An operator who can see the
+        # control plane but no upstream tools is still looking at an empty
+        # catalogue, and that is the condition worth a line in the log.
+        if not governed:
+            _report_empty_projection(tenant_id)
+        prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
+        prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+    else:
+        _observe_param_header_skips(mcp_ctx, governed, management)
+
+    _memoise_flat_map(mcp_ctx, tenant_id, flat_map)
+    return ListToolsResult(
+        tools=governed + management,
+        _meta=build_projected_list_cache_meta(tenant_id),
+    )
+
 
 def _classify_empty_projection(tenant_id: str | None) -> str:
     """Why did this projection resolve to nothing?
@@ -506,26 +625,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         tenant is unknown) so a downstream cache can never serve one tenant's
         list to another (issue #292).
         """
-        identity = get_identity_context()
-        tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
-
-        flat_map = _build_flat_map(tenant_id)
-        governed = _build_mcp_tool_list(flat_map)
-        management = await _management_tools(mcp_ctx)
-
-        # Reported on the governed tools alone. An operator who can see the
-        # control plane but no upstream tools is still looking at an empty
-        # catalogue, and that is the condition worth a line in the log.
-        if not governed:
-            _report_empty_projection(tenant_id)
-
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
-
-        return ListToolsResult(
-            tools=governed + management,
-            _meta=build_projected_list_cache_meta(tenant_id),
-        )
+        return await _list_projected_tools(mcp_ctx, _management_tools)
 
     async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
         """Flat tool call dispatch for front_door mode.
@@ -561,10 +661,13 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
+        _observe_legacy_param_skip(mcp_ctx)
 
         # Re-build flat map for this request's tenant (handles TOCTOU at the
-        # map level; enforcement below also re-checks independently).
-        flat_map = _build_flat_map(tenant_id)
+        # map level; enforcement below also re-checks independently). Reuse
+        # the per-request memo when the SDK already listed for Mcp-Param
+        # validation on this same POST (#1049).
+        flat_map = _memoised_flat_map(mcp_ctx, tenant_id)
 
         if name not in flat_map:
             if name in management_tools_for(mcp_ctx):

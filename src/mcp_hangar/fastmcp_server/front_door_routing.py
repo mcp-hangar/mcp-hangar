@@ -34,10 +34,12 @@ from dataclasses import dataclass
 import json
 from typing import Any, Literal
 
+from mcp.shared.inbound import decode_header_value
 from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from .._sdk_compat import is_modern_protocol_version
+from ..tasks_wire import HEADER_MISMATCH
 
 #: Lower-cased ASGI header names (ASGI delivers header names lower-cased).
 MCP_METHOD_HEADER = b"mcp-method"
@@ -67,20 +69,34 @@ class RouteDecision:
     source: RouteSource
 
 
+def _decoded_routing_header(value: bytes) -> str | None:
+    """Decode one SEP-2243 routing header, including the ``=?base64?…?=`` sentinel.
+
+    A malformed sentinel is kept as the raw field so it cannot match a body value
+    by accident (``decode_header_value`` returns ``None`` for those). Stripped
+    after decode so a whitespace-wrapped value agrees with ``route_from_body``,
+    which also strips.
+    """
+    raw = value.decode("latin-1").strip()
+    decoded = decode_header_value(raw) if raw else None
+    return (raw if decoded is None else decoded).strip() or None
+
+
 def extract_route_headers(raw_headers: Iterable[tuple[bytes, bytes]]) -> tuple[str | None, str | None]:
     """Return ``(mcp_method, mcp_name)`` decoded from ASGI ``raw_headers``.
 
-    Missing headers yield ``None``. Values are latin-1 decoded and stripped;
-    empty values are treated as absent.
+    Missing headers yield ``None``. Values go through the SDK's inbound codec
+    (``decode_header_value``) so a sentinel-wrapped ``Mcp-Name`` compares equal
+    to the body; empty values are treated as absent.
     """
     method: str | None = None
     name: str | None = None
     for key, value in raw_headers:
         lowered = key.lower()
         if lowered == MCP_METHOD_HEADER:
-            method = value.decode("latin-1").strip() or None
+            method = _decoded_routing_header(value)
         elif lowered == MCP_NAME_HEADER:
-            name = value.decode("latin-1").strip() or None
+            name = _decoded_routing_header(value)
     return method, name
 
 
@@ -248,14 +264,19 @@ def _replay(body: bytes) -> Receive:
 
 
 async def _reject(scope: Scope, send: Send, message: str, payload: Any) -> None:
-    """Send a JSON-RPC-shaped 400 error for a header/body mismatch."""
+    """Send a JSON-RPC-shaped 400 error for a header/body mismatch.
+
+    The code is ``HEADER_MISMATCH`` (-32020), the same one ``tasks/*`` and the
+    SDK's modern inbound ladder use, so a client does not have to know which
+    module answered.
+    """
     request_id = payload.get("id") if isinstance(payload, dict) else None
     response = JSONResponse(
         status_code=400,
         content={
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {"code": -32600, "message": message},
+            "error": {"code": HEADER_MISMATCH, "message": message},
         },
     )
     await response(scope, _replay(b""), send)
