@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.14.0...v2.14.1) (2026-08-24)
+
+### Fixed
+
+- **core:** the project page on PyPI told every visitor `pip install mcp-hangar`
+  resolves to **2.0.0**. The README is baked into the distribution at build time,
+  so correcting it in the repository does not correct what PyPI renders -- only a
+  new release does. This one carries the corrected Install section, which no
+  longer names a version at all: migration steps live in the upgrade guide, and
+  the tested core / operator / chart combinations in the compatibility matrix. ([#1073](https://github.com/mcp-hangar/mcp-hangar/pull/1073))
+
 ## [2.14.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.13.1...v2.14.0) (2026-08-24)
 
 Hangar's side of SEP-2243. A tool whose `x-mcp-header` annotations are invalid
