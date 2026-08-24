@@ -447,6 +447,28 @@ def _register_config_withdrawals(
             )
 
 
+def _register_header_exposure_block(scope_id: str, block: Any) -> None:
+    """Apply one ``header_exposure:`` block (#1057), whatever scope declared it.
+
+    A malformed block is refused rather than warn-skipped. `deny_annotated`
+    exists to stop a secret being handed to every intermediary on the path; a
+    typo that silently resolves to the default would report the control as on
+    while nothing is denied.
+    """
+    from ..domain.policies.header_exposure import HeaderExposurePolicy, set_header_exposure_policy
+
+    policy = HeaderExposurePolicy.from_config(block)
+    if policy is None:
+        return
+    set_header_exposure_policy(scope_id, policy)
+    logger.debug(
+        "header_exposure_registered",
+        scope_id=scope_id,
+        on_violation=policy.on_violation,
+        patterns=len(policy.deny_annotated),
+    )
+
+
 def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) -> None:
     """Apply one ``tool_projection:`` block, whatever scope declared it (#1038).
 
@@ -672,6 +694,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     )
 
     _register_tool_projection_block(mcp_server_id, spec_dict.get("tool_projection"))
+    _register_header_exposure_block(mcp_server_id, spec_dict.get("header_exposure"))
 
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
@@ -764,6 +787,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     # keyed under the group id -- which is the id the prompts and resources
     # surfaces resolve a group by (#1038).
     _register_tool_projection_block(group_id, spec_dict.get("tool_projection"))
+    _register_header_exposure_block(group_id, spec_dict.get("header_exposure"))
 
     _load_group_members(group, group_id, spec_dict.get("members", []))
 

@@ -55,6 +55,9 @@ from typing import Any
 
 from mcp.shared.inbound import MCP_PARAM_HEADER_PREFIX, find_invalid_x_mcp_header
 
+from mcp_hangar.domain.exceptions import ConfigurationError
+from mcp_hangar.domain.policies.header_exposure import get_header_exposure_policy
+
 from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
@@ -290,6 +293,11 @@ def _build_flat_map(
         if _invalid_header_annotation(resolved) is not None:
             continue
 
+        # What the tool asks a client to put in a header, versus what this
+        # operator is willing to have exposed there (#1057).
+        if _denied_header_exposure(resolved) is not None:
+            continue
+
         flat_name = tool_name  # FLAT naming: tool name as-is, no server prefix.
 
         if flat_name in collisions:
@@ -357,6 +365,60 @@ def _invalid_header_annotation(proj: Any) -> str | None:
         )
         prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason="invalid_x_mcp_header")
     return reason
+
+
+#: Per-(tool, schema version, policy) verdict on what the tool asks a client to
+#: expose. Keyed like `_ANNOTATION_VERDICTS` and for the same reason: the answer
+#: depends on the schema and the block, never on how often the tool is listed.
+_EXPOSURE_VERDICTS: dict[tuple[str, str, str, Any], str | None] = {}
+
+
+def _denied_header_exposure(proj: Any) -> str | None:
+    """The `header_exposure` verdict for this tool, or ``None`` to keep it (#1057).
+
+    SEP-2243's only defence against annotating a secret is a SHOULD NOT. An
+    upstream that annotates `api_key` obliges every conforming client to put
+    the key in an HTTP header, where every intermediary on the path can read
+    it. This is the enforcement point that SHOULD is missing.
+
+    Returns a reason only when the tool must be withheld. ``warn`` -- the
+    default, so adopting the block changes nobody's surface -- logs and counts
+    but keeps the tool. ``refuse_boot`` raises: the operator asked for the
+    catalogue to be unavailable rather than quietly smaller.
+
+    The schema is never edited; see `_invalid_header_annotation`.
+    """
+    policy = get_header_exposure_policy(proj.mcp_server) or _group_exposure_policy(proj.mcp_server)
+    if policy is None or not policy:
+        return None
+
+    # Keyed on the policy VALUE, not its identity: a reload rebuilds the block,
+    # and a recycled id() would answer for a policy that no longer exists.
+    key = (proj.mcp_server, proj.tool, proj.digest.sha256, policy)
+    if key not in _EXPOSURE_VERDICTS:
+        _EXPOSURE_VERDICTS[key] = policy.violation(proj.schema.get("inputSchema"))
+        if _EXPOSURE_VERDICTS[key] is not None:
+            logger.warning(
+                "tool_header_exposure_denied mcp_server=%s tool=%s action=%s reason=%s",
+                proj.mcp_server,
+                proj.tool,
+                policy.on_violation,
+                _EXPOSURE_VERDICTS[key],
+            )
+            prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason=f"header_exposure_{policy.on_violation}")
+
+    reason = _EXPOSURE_VERDICTS[key]
+    if reason is None:
+        return None
+    if policy.on_violation == "refuse_boot":
+        raise ConfigurationError(f"header_exposure refuses to serve {proj.mcp_server}/{proj.tool}: {reason}")
+    return reason if policy.on_violation == "withdraw" else None
+
+
+def _group_exposure_policy(mcp_server: str) -> Any:
+    """A member inherits the block its group declared (#1038 scope shape)."""
+    group = _member_to_group().get(mcp_server)
+    return get_header_exposure_policy(group) if group else None
 
 
 def _build_mcp_tool_list(

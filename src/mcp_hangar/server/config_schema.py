@@ -70,6 +70,7 @@ SERVER_SPEC_KEYS = frozenset(
         "description",
         "endpoint",
         "env",
+        "header_exposure",
         "health",
         "health_check_interval_s",
         "http",

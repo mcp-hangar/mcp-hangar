@@ -25,6 +25,13 @@ from .egress_l7 import (
     ToolAction,
     ToolRules,
 )
+from .header_exposure import (
+    clear_header_exposure_policies,
+    get_header_exposure_policy,
+    HeaderExposurePolicy,
+    ON_VIOLATION_ACTIONS,
+    set_header_exposure_policy,
+)
 from .mcp_server_health import (
     classify_mcp_server_health,
     classify_mcp_server_health_from_mcp_server,
@@ -37,22 +44,27 @@ __all__ = [
     "ALLOWED_HOOKS",
     "ArgumentRules",
     "Decision",
+    "HeaderExposurePolicy",
     "HeaderMatch",
     "HeaderRules",
     "HookRule",
     "KNOWN_SECRET_PATTERN_GROUPS",
     "L7Policy",
     "McpServerHealthClassification",
+    "ON_VIOLATION_ACTIONS",
     "PolicyDSL",
     "ToolAction",
     "ToolRules",
     "classify_mcp_server_health",
     "classify_mcp_server_health_from_mcp_server",
+    "clear_header_exposure_policies",
     "evaluate",
     "evaluate_headers",
     "evaluate_tool",
+    "get_header_exposure_policy",
     "parse_policy",
     "scan_arguments",
+    "set_header_exposure_policy",
     "to_health_status_string",
 ]
 
