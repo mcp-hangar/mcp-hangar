@@ -1,5 +1,86 @@
 # Upgrading MCP Hangar
 
+## Next — A front-door tool can disappear, with no config change (#1056)
+
+SEP-2243 makes it a client-side **MUST**: a client drops any tool whose
+`x-mcp-header` annotations are invalid. Hangar forwarded the upstream definition
+verbatim, so it advertised such a tool and counted it as surface delivered while
+every conforming client silently dropped it.
+
+Since this release the tool is withheld at the projection instead: absent from
+`tools/list`, and `-32601` on the call. **If an upstream ships a malformed
+annotation, a tool that was listed yesterday is gone today**, and nothing in your
+configuration changed. The reason is in the log
+(`tool_withheld_invalid_x_mcp_header`, naming the tool and what was wrong) and on
+`mcp_hangar_projection_withdrawals_total{reason="invalid_x_mcp_header"}`. Scrape
+that counter after the upgrade if you want to know before your users do.
+
+An annotation is valid only when it sits on a property reachable through a pure
+`properties` chain, names an RFC 9110 token, is on an `integer`/`string`/
+`boolean` property, and is unique across the schema. The fix belongs upstream;
+Hangar does not edit a projected schema, because that would move its digest and
+break every pin.
+
+## Next — A legacy-era header/body mismatch now answers `-32020` (#1051)
+
+The handshake-era front door refused a mismatch with `-32600` (`InvalidRequest`)
+while `tasks/*` used `HEADER_MISMATCH` (`-32020`) for the same class of failure.
+Both now answer `-32020`; the HTTP status stays 400 and nothing that was refused
+before is accepted now. **Update any client branch or log query keyed on
+`-32600` for this case.** Modern-protocol clients are unaffected — the SDK ladder
+already answered `-32020` there.
+
+## Next — Eight metrics appear on `/metrics` for the first time (#1059, #1049)
+
+These were defined and incremented on the live path, and never registered, so
+they were absent from every scrape — indistinguishable from a feature that was
+never built:
+
+`mcp_hangar_approval_requests_total`, `mcp_hangar_approval_deliveries_total`,
+`mcp_hangar_approval_decisions_total`,
+`mcp_hangar_egress_policy_violations_observed_total`,
+`mcp_hangar_projected_tools`, `mcp_hangar_empty_projection_total`,
+`mcp_hangar_param_header_validation_skipped_total`,
+`mcp_hangar_projection_withdrawals_total`.
+
+A panel or alert that has been quietly returning no data starts returning rows.
+The three approval counters have been dead since 2.10.0, and the queries in the
+observability guide were written against them — those work now. The Audit-mode
+egress counter is the signal ADR-013 calls the safe adoption path for an
+`MCPEgressPolicy`, so an Audit rollout is measurable for the first time.
+
+Nothing to change; expect graphs that were flat to start moving.
+
+## Next — Optional: govern what an upstream may ask a client to expose (#1057)
+
+A new `header_exposure:` block sits beside `tool_projection:` on an mcp_server or
+a group. It is **off unless you configure it**, and its default action is `warn`,
+so adopting it does not change what any client sees until you say otherwise.
+
+```yaml
+mcp_servers:
+  payments:
+    header_exposure:
+      deny_annotated: ["*token*", "*secret*", "*password*", "api_key", "*_key"]
+      on_violation: warn          # warn | withdraw | refuse_boot
+```
+
+`refuse_boot` refuses to **serve the catalogue**, not to start the process: the
+violation is only knowable after discovery. An unknown `on_violation` is refused
+at parse rather than defaulted.
+
+## Next — Optional: `Mcp-Param-*` selectors in an egress policy (#1058)
+
+`L7Policy` can now select on SEP-2243 `Mcp-Param-*` headers with the same glob
+precedence as the tool-name rules. A request whose `MCP-Protocol-Version`
+predates mandatory header-body validation never satisfies such a selector.
+
+In this release the selector is reachable through the REST channel
+(`PUT /api/mcp_servers/{id}/l7_policy`) only. The matching `MCPEgressPolicy` CRD
+field ships separately in the operator
+([operator#160](https://github.com/mcp-hangar/mcp-hangar-operator/issues/160)),
+so a GitOps deployment cannot express it yet.
+
 ## Upgrade to 2.12.0
 
 ### `truncation.cache_driver: redis` now fails closed (#1007)
