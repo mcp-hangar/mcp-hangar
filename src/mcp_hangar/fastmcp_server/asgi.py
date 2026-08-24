@@ -7,7 +7,7 @@ and optional authentication middleware.
 from typing import Any, TYPE_CHECKING
 
 
-from ..context import identity_context_var
+from ..context import bind_routing_headers, identity_context_var, release_routing_headers  # noqa: F401
 from ..domain.value_objects.identity import CallerIdentity, IdentityContext
 from ..domain.value_objects.security import PrincipalType
 from ..logging_config import get_logger

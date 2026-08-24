@@ -796,7 +796,12 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         from mcp_hangar._sdk_compat import CallToolResult
 
-        from .asgi import bind_caller_identity, release_caller_identity
+        from .asgi import (
+            bind_caller_identity,
+            bind_routing_headers,
+            release_caller_identity,
+            release_routing_headers,
+        )
 
         # `ctx` is the SDK's per-request context and carries the HTTP request,
         # so the authenticated principal is right here. It used to be dropped:
@@ -818,9 +823,14 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         async def _call_v2(ctx: Any, params: Any) -> Any:
             token = bind_caller_identity(ctx)
+            # The L7 egress evaluator selects on Mcp-Param-* (#1058), and the
+            # aggregate that runs it is several frames and one worker thread
+            # away; this is the last place the HTTP request is in hand.
+            headers_token = bind_routing_headers(ctx)
             try:
                 return await _call_v2_inner(params, ctx)
             finally:
+                release_routing_headers(headers_token)
                 release_caller_identity(token)
 
         async def _call_v2_inner(params: Any, ctx: Any) -> Any:
