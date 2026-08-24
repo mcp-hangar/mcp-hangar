@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import Any
 import uuid
@@ -40,6 +41,65 @@ tool_name_var: ContextVar[str | None] = ContextVar("tool_name", default=None)
 user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
 
 identity_context_var: ContextVar[IdentityContext | None] = ContextVar("identity_context", default=None)
+
+#: This request's SEP-2243 routing headers, lower-cased: the ``Mcp-Param-*``
+#: values an L7 egress policy may select on, plus the ``MCP-Protocol-Version``
+#: that says whether they were checked against the body at all (#1058).
+#:
+#: Deliberately not the whole header bag. A policy engine that could read
+#: ``Authorization`` would be a way to exfiltrate a credential by writing globs
+#: until one matched, so only the headers a policy is allowed to see are carried.
+routing_headers_var: ContextVar[Mapping[str, str] | None] = ContextVar("routing_headers", default=None)
+
+
+def select_routing_headers(headers: Mapping[str, str] | None) -> Mapping[str, str]:
+    """Narrow a request's headers to the ones an egress policy may select on."""
+    if not headers:
+        return {}
+    return {
+        key.lower(): value
+        for key, value in headers.items()
+        if key.lower().startswith("mcp-param-") or key.lower() == "mcp-protocol-version"
+    }
+
+
+def get_routing_headers() -> Mapping[str, str] | None:
+    """This request's selectable routing headers, or ``None`` when unbound."""
+    return routing_headers_var.get()
+
+
+def bind_routing_headers(request_context: Any) -> Any:
+    """Bind the selectable headers off a per-request context, or return ``None``.
+
+    Same bridge, and the same reason, as ``bind_caller_identity``: the SDK runs
+    each inbound message in a task decoupled from the ASGI wrapper, so a
+    contextvar set out there is not the one the handler reads. The L7 evaluator
+    runs further down still, on a batch worker thread that inherits this via
+    ``copy_context()``.
+
+    Duck-typed on purpose -- it accepts a ``ServerRequestContext`` or anything
+    exposing one as ``.request_context`` -- so the front door and the batch
+    surface share one definition instead of growing one each.
+
+    Returns a token to reset, or ``None``. Fully fault-barriered.
+    """
+    try:
+        inner = getattr(request_context, "request_context", None) or request_context
+        headers = getattr(getattr(inner, "request", None), "headers", None)
+        selected = select_routing_headers(headers)
+        return routing_headers_var.set(selected) if selected else None
+    except Exception:  # noqa: BLE001 -- header bags vary; a missed bind must never break a call
+        return None
+
+
+def release_routing_headers(token: Any) -> None:
+    """Reset what :func:`bind_routing_headers` bound, if anything."""
+    if token is None:
+        return
+    try:
+        routing_headers_var.reset(token)
+    except Exception:  # noqa: BLE001 -- best-effort cleanup
+        pass
 
 
 def generate_request_id() -> str:

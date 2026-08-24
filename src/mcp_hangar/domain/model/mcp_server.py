@@ -1260,7 +1260,9 @@ class McpServer(AggregateRoot):
         if self._l7_policy is not None:
             from ..policies.egress_l7 import PolicyMode, ToolAction, evaluate
 
-            decision = evaluate(tool_name, arguments, self._l7_policy)
+            from mcp_hangar.context import get_routing_headers
+
+            decision = evaluate(tool_name, arguments, self._l7_policy, get_routing_headers())
             would_block = decision.action in (ToolAction.DENY, ToolAction.REQUIRE_APPROVAL)
             if would_block:
                 if self._l7_policy.mode is PolicyMode.AUDIT:

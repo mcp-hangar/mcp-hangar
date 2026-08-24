@@ -23,6 +23,7 @@ this module is the engine and its contract.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
@@ -30,6 +31,7 @@ import json
 import re
 from typing import Any
 
+from ..._sdk_compat import is_modern_protocol_version
 from ...redactor import OutputRedactor
 
 
@@ -109,12 +111,79 @@ class ToolRules:
     require_approval: tuple[str, ...] = ()
 
 
+#: The SEP-2243 prefix every parameter header carries. Matched
+#: case-insensitively: HTTP header names are not case-sensitive, and the
+#: operator writes them in the CRD in whatever case reads best.
+MCP_PARAM_PREFIX = "mcp-param-"
+
+#: The header a request states its revision in. Read here rather than trusted
+#: from negotiation: `_meta` defaults to the supported (modern) version when
+#: absent, which would make a handshake-era request look modern to the gate.
+PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
+
+
+@dataclass(frozen=True)
+class HeaderMatch:
+    """Globs over one ``Mcp-Param-<Token>`` header's value."""
+
+    name: str
+    values: tuple[str, ...] = ()
+
+    def matches(self, headers: Mapping[str, str]) -> bool:
+        value = headers.get(self.name.lower())
+        return value is not None and any(fnmatchcase(value, g) for g in self.values)
+
+
+@dataclass(frozen=True)
+class HeaderRules:
+    """``Mcp-Param-*`` selectors, same precedence as the tool-name globs.
+
+    Region, tenant and priority -- the SEP's own examples -- are the dimensions
+    L7 egress wants, and they are on the wire without parsing the body. Reading
+    them here is what keeps this a header matcher rather than DPI.
+    """
+
+    allow: tuple[HeaderMatch, ...] = ()
+    deny: tuple[HeaderMatch, ...] = ()
+    require_approval: tuple[HeaderMatch, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.allow or self.deny or self.require_approval)
+
+
 @dataclass(frozen=True)
 class ArgumentRules:
     """Deterministic constraints on tool-call arguments."""
 
     secret_patterns: tuple[str, ...] = ()
     max_payload_bytes: int | None = None
+
+
+def _header_matches(headers_d: dict[str, Any], key: str) -> tuple[HeaderMatch, ...]:
+    """Parse one ``headers.<key>`` list from the wire form. Raises ValueError."""
+    raw = headers_d.get(key) or []
+    if not isinstance(raw, list):
+        raise ValueError(f"headers.{key} must be a list of objects")
+    out: list[HeaderMatch] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValueError(f"headers.{key} entries must be objects")
+        name = entry.get("name")
+        values = entry.get("values") or []
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"headers.{key}: 'name' must be a non-empty string")
+        # Only Mcp-Param-* is selectable. Any other header is one the policy
+        # author does not own -- Authorization above all -- and a selector on it
+        # would turn an egress policy into a way to read credentials out of a
+        # request by writing globs until one matches.
+        if not name.lower().startswith(MCP_PARAM_PREFIX):
+            raise ValueError(f"headers.{key}: {name!r} is not an Mcp-Param-* header")
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise ValueError(f"headers.{key}: 'values' must be a list of strings")
+        if not values:
+            raise ValueError(f"headers.{key}: {name!r} has no values to match")
+        out.append(HeaderMatch(name=name, values=tuple(values)))
+    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -126,6 +195,7 @@ class L7Policy:
     """
 
     tools: ToolRules = field(default_factory=ToolRules)
+    headers: HeaderRules = field(default_factory=HeaderRules)
     arguments: ArgumentRules = field(default_factory=ArgumentRules)
     default_action: ToolAction = ToolAction.DENY
     mode: PolicyMode = PolicyMode.ENFORCE
@@ -157,9 +227,10 @@ class L7Policy:
             raise ValueError(f"invalid defaultAction {data.get('defaultAction')!r} (want Allow|Deny)")
 
         tools_d = data.get("tools") or {}
+        headers_d = data.get("headers") or {}
         args_d = data.get("arguments") or {}
-        if not isinstance(tools_d, dict) or not isinstance(args_d, dict):
-            raise ValueError("L7 policy 'tools' and 'arguments' must be objects")
+        if not isinstance(tools_d, dict) or not isinstance(args_d, dict) or not isinstance(headers_d, dict):
+            raise ValueError("L7 policy 'tools', 'headers' and 'arguments' must be objects")
 
         def _globs(key: str) -> tuple[str, ...]:
             raw = tools_d.get(key) or []
@@ -196,6 +267,11 @@ class L7Policy:
 
         return cls(
             tools=ToolRules(allow=_globs("allow"), deny=_globs("deny"), require_approval=_globs("requireApproval")),
+            headers=HeaderRules(
+                allow=_header_matches(headers_d, "allow"),
+                deny=_header_matches(headers_d, "deny"),
+                require_approval=_header_matches(headers_d, "requireApproval"),
+            ),
             arguments=ArgumentRules(secret_patterns=tuple(secret_patterns), max_payload_bytes=max_bytes),
             default_action=ToolAction(default_raw),
             mode=mode,
@@ -214,6 +290,14 @@ class L7Policy:
                 "allow": list(self.tools.allow),
                 "deny": list(self.tools.deny),
                 "requireApproval": list(self.tools.require_approval),
+            },
+            "headers": {
+                key: [{"name": m.name, "values": list(m.values)} for m in matches]
+                for key, matches in (
+                    ("allow", self.headers.allow),
+                    ("deny", self.headers.deny),
+                    ("requireApproval", self.headers.require_approval),
+                )
             },
             "arguments": {
                 "secretPatterns": list(self.arguments.secret_patterns),
@@ -243,6 +327,41 @@ def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) 
     if any(fnmatchcase(tool_name, g) for g in rules.allow):
         return ToolAction.ALLOW, f"tool {tool_name!r} matched an allow rule"
     return default_action, f"tool {tool_name!r} matched no rule; applying default action"
+
+
+def evaluate_headers(
+    headers: Mapping[str, str] | None,
+    rules: HeaderRules,
+) -> tuple[ToolAction, str] | None:
+    """Resolve ``Mcp-Param-*`` selectors, or ``None`` when none applies.
+
+    Precedence is the tool-name ladder: deny, then require-approval, then
+    allow. ``None`` means no rule matched -- it is not an allow, so the caller
+    falls through to the tool verdict and, failing that, the policy default.
+
+    A request whose ``MCP-Protocol-Version`` predates mandatory header-body
+    validation never satisfies a selector. On such a revision nothing has
+    checked that the header agrees with the body, so a caller can route on one
+    value and execute another; SEP-2243 says an intermediary enforcing policy
+    on mirrored headers should verify the revision and refuse to trust it
+    otherwise. Refusing to *match* is the honest shape of that here: the
+    request is left to the tool rules and the default action, rather than being
+    handed an allow it did not earn or a deny some other caller's header wrote.
+    """
+    if not rules:
+        return None
+    if headers is None or not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER)):
+        return None
+
+    for matches, action, label in (
+        (rules.deny, ToolAction.DENY, "deny"),
+        (rules.require_approval, ToolAction.REQUIRE_APPROVAL, "require-approval"),
+        (rules.allow, ToolAction.ALLOW, "allow"),
+    ):
+        hit = next((m for m in matches if m.matches(headers)), None)
+        if hit is not None:
+            return action, f"header {hit.name!r} matched an {label} rule"
+    return None
 
 
 def _serialize_arguments(arguments: Any) -> str | None:
@@ -300,14 +419,33 @@ def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
     return violations
 
 
-def evaluate(tool_name: str, arguments: Any, policy: L7Policy) -> Decision:
+def evaluate(
+    tool_name: str,
+    arguments: Any,
+    policy: L7Policy,
+    headers: Mapping[str, str] | None = None,
+) -> Decision:
     """Evaluate a full tool call against a policy.
 
     A secret or oversized payload in the arguments DENIES the call even when the
     tool itself would be allowed or gated for approval -- deny always wins.
+
+    ``headers`` carries this request's ``Mcp-Param-*`` values plus its
+    ``MCP-Protocol-Version``, lower-cased. An ``Mcp-Param-*`` selector that
+    matches decides the call the way a tool-name rule does, and takes
+    precedence over the tool ladder: it is the more specific statement, and it
+    is the one an operator writes to say "this region, never". A request that
+    matches no selector -- including every handshake-era request, which cannot
+    be trusted to have had its headers checked against its body -- is resolved
+    by the tool rules alone.
     """
-    action, reason = evaluate_tool(tool_name, policy.tools, policy.default_action)
-    reasons = [reason]
+    header_verdict = evaluate_headers(headers, policy.headers)
+    if header_verdict is not None:
+        action, reason = header_verdict
+        reasons = [reason]
+    else:
+        action, reason = evaluate_tool(tool_name, policy.tools, policy.default_action)
+        reasons = [reason]
 
     if action is not ToolAction.DENY:
         violations = scan_arguments(arguments, policy.arguments)

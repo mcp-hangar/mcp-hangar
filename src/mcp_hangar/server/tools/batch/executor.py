@@ -32,7 +32,7 @@ from ....domain.events import (
     BatchInvocationRequested,
     ToolWithdrawnRejected,
 )
-from ....context import get_identity_context
+from ....context import bind_routing_headers, get_identity_context
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
@@ -315,11 +315,15 @@ class BatchExecutor:
         if policy is None:
             return None
 
+        from mcp_hangar.context import get_routing_headers
         from mcp_hangar.domain.policies.egress_l7 import PolicyMode, ToolAction, evaluate
 
         if policy.mode is not PolicyMode.ENFORCE:
             return None
-        decision = evaluate(call.tool, call.arguments or {}, policy)
+        # Same inputs as the aggregate's own evaluation (#1058): a header
+        # selector that routes a call to approval there must route it here, or
+        # the gate is skipped and the aggregate refuses instead of asking.
+        decision = evaluate(call.tool, call.arguments or {}, policy, get_routing_headers())
         if decision.action is ToolAction.REQUIRE_APPROVAL:
             return "; ".join(decision.reasons) or "matched a requireApproval rule"
         return None
@@ -635,6 +639,13 @@ class BatchExecutor:
         # when it is None (stdio / no request) the helper yields None and negotiation
         # falls back to the default supported version -- unchanged behavior.
         set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(request_ctx)))
+
+        # The same request's SEP-2243 routing headers, for an L7 policy that
+        # selects on Mcp-Param-* (#1058). Bound here rather than only on the
+        # front door so a selector is never silently inert on this surface --
+        # a policy that reports enforcing while a rule cannot fire is the
+        # failure this module already refuses for secret-pattern groups.
+        bind_routing_headers(request_ctx)
 
         start_time = time.perf_counter()
         cancel_event = threading.Event()
