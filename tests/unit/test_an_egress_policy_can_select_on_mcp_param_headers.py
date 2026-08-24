@@ -13,11 +13,18 @@ an allow it did not earn.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from mcp_hangar.context import routing_headers_var, select_routing_headers
+from mcp_hangar.context import (
+    bind_routing_headers,
+    get_routing_headers,
+    release_routing_headers,
+    routing_headers_var,
+    select_routing_headers,
+)
 from mcp_hangar.domain.exceptions import EgressPolicyApprovalRequiredError, EgressPolicyDeniedError
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import (
@@ -96,6 +103,22 @@ class TestTheWireShape:
         with pytest.raises(ValueError, match="entries must be objects"):
             L7Policy.from_dict({"headers": {"deny": ["Mcp-Param-Region"]}})
 
+    def test_a_headers_block_that_is_not_an_object_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="must be objects"):
+            L7Policy.from_dict({"headers": ["Mcp-Param-Region"]})
+
+    def test_a_rule_list_that_is_not_a_list_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="must be a list of objects"):
+            L7Policy.from_dict({"headers": {"deny": {"name": "Mcp-Param-Region"}}})
+
+    def test_a_nameless_selector_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="'name' must be a non-empty string"):
+            L7Policy.from_dict({"headers": {"deny": [{"values": ["eu-*"]}]}})
+
+    def test_a_selector_whose_values_are_not_strings_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="'values' must be a list of strings"):
+            L7Policy.from_dict({"headers": {"deny": [{"name": "Mcp-Param-Region", "values": [7]}]}})
+
 
 class TestPrecedence:
     def test_deny_beats_require_approval_beats_allow(self) -> None:
@@ -115,6 +138,11 @@ class TestPrecedence:
 
     def test_an_empty_rule_set_never_looks_at_the_headers(self) -> None:
         assert evaluate_headers(_headers("eu-west-1"), HeaderRules()) is None
+
+    def test_a_selector_on_a_header_the_request_does_not_carry_is_not_a_match(self) -> None:
+        rules = HeaderRules(deny=(HeaderMatch("Mcp-Param-Tier", ("free",)),))
+
+        assert evaluate_headers(_headers("eu-west-1"), rules) is None
 
 
 class TestTheVersionGate:
@@ -205,6 +233,26 @@ class TestWhatThePolicyIsAllowedToSee:
 
     def test_no_headers_selects_nothing(self) -> None:
         assert select_routing_headers(None) == {}
+
+    def test_binding_off_a_request_that_has_none_binds_nothing(self) -> None:
+        """stdio, and any path with no HTTP request, must not be a match."""
+        assert bind_routing_headers(None) is None
+        assert bind_routing_headers(SimpleNamespace(request=None)) is None
+        assert get_routing_headers() is None
+
+    def test_an_unreadable_header_bag_is_not_a_broken_call(self) -> None:
+        """The bridge is a fault barrier: a policy input it cannot read is absent,
+        never an exception on the invocation path."""
+
+        class _Hostile:
+            @property
+            def headers(self):  # noqa: ANN202 -- deliberately explosive
+                raise RuntimeError("header bag exploded")
+
+        assert bind_routing_headers(SimpleNamespace(request=_Hostile())) is None
+
+    def test_releasing_nothing_is_a_no_op(self) -> None:
+        release_routing_headers(None)  # must not raise
 
 
 def test_evaluate_reports_the_header_reason(bound_headers) -> None:
