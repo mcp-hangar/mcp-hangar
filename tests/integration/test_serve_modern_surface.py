@@ -24,6 +24,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from mcp_hangar.protocol import HANGAR_SERVER_NAME
+from mcp_hangar.tasks_wire import HEADER_MISMATCH
 
 # The SDK auto-enables DNS-rebinding protection for loopback binds, and its
 # allowed-host patterns carry a port -- so the probe must present a Host header
@@ -188,7 +189,7 @@ class TestModernInvokePathIsServed:
         )
 
         assert response.status_code == 400
-        assert response.json()["error"]["code"] == -32600
+        assert response.json()["error"]["code"] == HEADER_MISMATCH
 
 
 class TestOneServerIdentity:

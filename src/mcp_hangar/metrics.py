@@ -1022,6 +1022,18 @@ PROJECTED_TOOLS = Histogram(
     buckets=(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
 )
 
+# The SDK's Mcp-Param-* check is fail-open: a tools/list that cannot produce a
+# schema skips validation and the call still runs (#1053). Some of those
+# branches log; none of them were a metric. Reasons match the SDK skip arms
+# Hangar can see without wrapping the transport (pagination is absent here:
+# the front door returns one unpaged list).
+PARAM_HEADER_VALIDATION_SKIPPED_TOTAL = Counter(
+    name="mcp_hangar_param_header_validation_skipped",
+    description="Times Mcp-Param-* header/body validation did not run, by cause",
+    # listing_failed | tool_not_listed | invalid_annotation | legacy_protocol
+    labels=["reason"],
+)
+
 # -----------------------------------------------------------------------------
 # Approval Gate Metrics
 # -----------------------------------------------------------------------------
@@ -1219,6 +1231,15 @@ def _register_all_metrics():
             TASK_INPUT_REQUIRED_TOTAL,
             TASK_DIGEST_DRIFT_TOTAL,
             TASK_CONSENT_DECIDED_TOTAL,
+        ]
+    )
+
+    # Front-door projection / SEP-2243 header validation (#887, #904, #1053).
+    metrics.extend(
+        [
+            EMPTY_PROJECTION_TOTAL,
+            PROJECTED_TOOLS,
+            PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
         ]
     )
 

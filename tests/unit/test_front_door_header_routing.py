@@ -21,6 +21,7 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
+from mcp.shared.inbound import encode_header_value
 from mcp_hangar.domain.model.mcp_server_group import CanaryPolicy, McpServerGroup
 from mcp_hangar.domain.value_objects import McpServerState
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
@@ -32,6 +33,7 @@ from mcp_hangar.fastmcp_server.front_door_routing import (
     resolve_route,
     route_from_body,
 )
+from mcp_hangar.tasks_wire import HEADER_MISMATCH
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +141,13 @@ class TestPureResolution:
         raw = [(b"mcp-method", b"tools/call"), (b"mcp-name", b"search"), (b"authorization", b"Bearer x")]
         assert extract_route_headers(raw) == ("tools/call", "search")
 
+    def test_extract_decodes_a_base64_wrapped_name(self):
+        uri = "file:///Załączniki/raport.pdf"
+        wrapped = encode_header_value(uri)
+        assert wrapped != uri
+        raw = [(b"mcp-method", b"resources/read"), (b"mcp-name", wrapped.encode("ascii"))]
+        assert extract_route_headers(raw) == ("resources/read", uri)
+
     def test_extract_missing_headers_are_none(self):
         assert extract_route_headers([(b"content-type", b"application/json")]) == (None, None)
 
@@ -239,8 +248,54 @@ class TestMiddleware:
         assert app.called is False  # request never reached the MCP app
         assert send.status == 400
         payload = json.loads(send.body)
-        assert payload["error"]["code"] == -32600
+        assert payload["error"]["code"] == HEADER_MISMATCH
         assert payload["id"] == 1  # JSON-RPC id echoed from the body
+
+    async def test_base64_wrapped_name_matching_the_body_routes(self):
+        """Handshake-era: a conforming sentinel-wrapped Mcp-Name is not a mismatch.
+
+        The middleware is the only Hangar owner of this check -- the SDK ladder
+        does not run on 2025-06-18. Drive the ASGI wrap, not resolve_route.
+        """
+        uri = "file:///Załączniki/raport.pdf"
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}}).encode()
+        headers = {
+            "mcp-protocol-version": "2025-06-18",
+            "mcp-method": "resources/read",
+            "mcp-name": encode_header_value(uri),
+        }
+        app, send = await self._run(headers, body)
+        assert app.called is True
+        assert send.status is None
+        assert _route_of(app).name == uri
+
+    async def test_base64_wrapped_name_that_decodes_to_a_different_body_is_refused(self):
+        uri = "file:///Załączniki/raport.pdf"
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}}).encode()
+        headers = {
+            "mcp-protocol-version": "2025-06-18",
+            "mcp-method": "resources/read",
+            "mcp-name": encode_header_value("file:///other.pdf"),
+        }
+        app, send = await self._run(headers, body)
+        assert app.called is False
+        assert send.status == 400
+        assert json.loads(send.body)["error"]["code"] == HEADER_MISMATCH
+
+    async def test_whitespace_wrapped_name_matches_the_stripped_body(self):
+        """SEP-2243 also wraps leading/trailing whitespace; body names are stripped."""
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "  search  "}}
+        ).encode()
+        headers = {
+            "mcp-protocol-version": "2025-06-18",
+            "mcp-method": "tools/call",
+            "mcp-name": encode_header_value("  search  "),
+        }
+        app, send = await self._run(headers, body)
+        assert app.called is True
+        assert send.status is None
+        assert _route_of(app).name == "search"
 
     async def test_get_request_passes_through(self):
 

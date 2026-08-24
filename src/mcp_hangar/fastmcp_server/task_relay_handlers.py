@@ -78,6 +78,8 @@ from typing import Any
 # `mcp_types` still carries the SEP-1686 generation -- nested `CreateTaskResult`,
 # `ttl`, `pollInterval`, no `resultType` -- and serving those to a 2026-07-28
 # client is the defect this module was realigned to remove.
+from mcp.shared.inbound import decode_header_value
+
 from mcp_hangar._sdk_compat import (
     INVALID_PARAMS,
     METHOD_NOT_FOUND,
@@ -229,19 +231,21 @@ def _require_mcp_name_header(ctx: Any, task_id: str) -> None:
         return
 
     try:
-        header_value = headers.get(MCP_NAME_HEADER)
+        raw_header = headers.get(MCP_NAME_HEADER)
     except Exception:  # noqa: BLE001 -- an unreadable header bag is not the caller's fault
         return
 
-    if not header_value:
+    if not raw_header:
         raise make_mcp_error(
             HEADER_MISMATCH,
             f"{MCP_NAME_HEADER} header is required on tasks/* requests (SEP-2663)",
         )
-    if header_value != task_id:
-        # A header that disagrees with the body is worse than an absent one: any
-        # intermediary that routed on it sent this request somewhere the body did
-        # not ask for.
+    header_value = decode_header_value(raw_header)
+    if header_value is None or header_value != task_id:
+        # Malformed sentinel or a value that disagrees with the body: an
+        # intermediary that routed on the header sent this request somewhere
+        # the body did not ask for. Decode through the SDK codec so a
+        # conforming ``=?base64?…?=`` wrapper is not itself a mismatch.
         raise make_mcp_error(
             HEADER_MISMATCH,
             f"{MCP_NAME_HEADER} header does not match the request body's taskId",
