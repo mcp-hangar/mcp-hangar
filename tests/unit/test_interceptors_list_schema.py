@@ -3,7 +3,7 @@
 Validates our response against a JSON Schema derived from the SEP-1763
 Interceptor interface definition at:
 
-    modelcontextprotocol/experimental-ext-interceptors @ 8704137
+    modelcontextprotocol/experimental-ext-interceptors @ 2f66b9b
 
 Re-pinned 5bd7ab4 -> 99bc7c9 for issue #401 (6 commits ahead). The notable
 drift then was upstream #25 ("Align capability key to SEP-2133 extensions
@@ -40,6 +40,21 @@ moves to record what was reviewed, not because anything drifted:
 
 ``docs/sep.md`` -- the SEP surface this schema derives from -- is untouched
 across all three, so the schema stays byte-identical.
+
+Re-pinned 8704137 -> 2f66b9b for issue #1052, after reviewing the five
+intervening commits. **The schema below is unchanged, deliberately** -- the pin
+moves to record what was reviewed, not because anything drifted:
+
+* ``57d4fac`` and ``bd57572`` are C#-SDK and Go-SDK sources.
+* ``39a8f0e`` and ``522358b`` are README/docs links.
+* ``2f66b9b`` is a CI workflow hardening.
+
+``docs/sep.md`` changed for the first time since the ``eebd2ac`` review, and
+both edits are cosmetic: a broken ``experimental-ext-interceptros`` issues URL,
+and one doc comment on ``failOpen`` renamed from "Enforce mode" to "Active
+mode" so the prose matches the ``mode`` enum the Go SDK aligned to in
+``bd57572``. The ``Interceptor`` interface, and the ``mode?: "active" | "audit"``
+enum this schema already allows, are unchanged.
 
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
