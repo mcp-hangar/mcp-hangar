@@ -173,6 +173,13 @@ class ReloadConfigurationHandler(CommandHandler):
             get_tool_projection_registry().clear_config_pins()
             logger.debug("config_pins_cleared_for_reload")
 
+            # 4d. Clear the header_exposure overlay for the same reason:
+            # deleting the block from config must restore the tools it withheld.
+            from ...domain.policies.header_exposure import clear_header_exposure_policies
+
+            clear_header_exposure_policies()
+            logger.debug("header_exposure_cleared_for_reload")
+
             # 5. Load new configuration (adds new and updates existing)
             self._config_loader.apply_mcp_servers(new_mcp_servers_config)
 
