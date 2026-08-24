@@ -14,9 +14,11 @@ fail-closed policy primitives used to gate ``ui://`` resources:
 - :class:`UiResourcePolicy`: a per-tenant allowlist + CSP. **An empty allowlist
   denies every ``ui://`` resource** (fail-closed default).
 
-There is no ``ui://`` resource relay in Hangar today; these primitives back the
-dormant-but-ready guard (:mod:`mcp_hangar.domain.services.ui_resource_guard`)
-that activates when ``ui://`` resources begin flowing through the proxy.
+These primitives back the guard
+(:mod:`mcp_hangar.domain.services.ui_resource_guard`) the front door consults on
+every relayed resource. A tenant's policy is built from the ``ui_resources``
+block of the config file; a tenant without one keeps the empty allowlist, which
+denies every ``ui://`` resource.
 """
 
 from __future__ import annotations
