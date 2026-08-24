@@ -21,7 +21,7 @@ permissions:
 
 env:
   UPSTREAM: modelcontextprotocol/experimental-ext-interceptors
-  PINNED_SHA: 870413763543d38892288bd7d211f3ea38548d42
+  PINNED_SHA: 2f66b9b4af1106162afc393d16576a77e2866a05
 
 jobs:
   drift:
