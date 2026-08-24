@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.13.1...v2.14.0) (2026-08-24)
+
+Hangar's side of SEP-2243. A tool whose `x-mcp-header` annotations are invalid
+is no longer projected -- a conforming client drops it on arrival, so
+advertising it handed out a tool nobody could call -- and a new
+`header_exposure` block governs which parameters an upstream may oblige a client
+to send as an HTTP header, the enforcement point behind a SHOULD NOT the spec
+leaves unbacked. An egress policy can select on `Mcp-Param-*`, and a request on
+a revision that predates mandatory header-body validation never satisfies such a
+selector.
+
+Doing that work surfaced eight metrics that were defined, incremented on the
+live path, and **never registered**, so they were absent from every scrape --
+including the three approval-gate counters the observability guide documents
+queries against, dead since 2.10.0. They are on `/metrics` now, and a test walks
+the metrics module so the next one cannot be forgotten.
+
+### Added
+
+- **core:** an `MCPEgressPolicy` can now select on SEP-2243 `Mcp-Param-*` headers
+  (`headers.allow` / `deny` / `requireApproval`, same glob precedence as the
+  tool-name rules), so region, tenant and priority are enforceable without
+  parsing the body. A request whose `MCP-Protocol-Version` predates mandatory
+  header-body validation never satisfies such a selector: nothing has checked
+  that its headers agree with its body, so the tool rules and the policy default
+  decide instead. Only `Mcp-Param-*` names are selectable -- a selector on
+  `Authorization` is refused at parse. ([#1064](https://github.com/mcp-hangar/mcp-hangar/pull/1064))
+- **core:** a new per-server (or per-group) `header_exposure:` block governs which
+  parameters an upstream may oblige a client to send as an HTTP header. SEP-2243
+  lets a tool annotate an `inputSchema` property with `x-mcp-header`, and its only
+  defence against annotating a secret is a SHOULD NOT -- so an upstream that
+  annotates `api_key` puts the key in front of every intermediary on the path.
+  `deny_annotated` globs are matched against both the annotation token and the
+  property path; `on_violation` is `warn` (the default, which changes nobody's
+  surface), `withdraw`, or `refuse_boot`. An unknown `on_violation` is refused at
+  parse rather than resolving to the default. The schema is never edited, so
+  digests and pins do not move. ([#1065](https://github.com/mcp-hangar/mcp-hangar/pull/1065))
+- **core:** a tool whose `x-mcp-header` annotations are invalid is no longer
+  projected through the front door. SEP-2243 makes dropping it a client-side
+  MUST, so advertising it handed out a tool nobody could call. The definition is
+  never edited -- stripping the annotation would move the JCS digest and read as
+  upstream drift -- the tool is withheld instead, with a log line naming the
+  reason and `mcp_hangar_projection_withdrawals_total{reason="invalid_x_mcp_header"}`
+  counting it once per schema version. ([#1063](https://github.com/mcp-hangar/mcp-hangar/pull/1063))
+
+### Fixed
+
+- **core:** four metrics were defined, incremented on the live path, and absent
+  from every `/metrics` scrape because nothing added them to the registration
+  list: the three approval-gate counters (`mcp_hangar_approval_requests_total`,
+  `_deliveries_total`, `_decisions_total`, dead since 2.10.0 — the three PromQL
+  queries in the observability guide could never return a row) and
+  `mcp_hangar_egress_policy_violations_observed_total`, the Audit-mode signal
+  ADR-013 calls the safe adoption path for an egress policy. All four are
+  registered, and a test now walks the metrics module so the next one cannot be
+  forgotten. ([#1066](https://github.com/mcp-hangar/mcp-hangar/pull/1066))
+- **core:** a `tools/call` whose `Mcp-Param-*` headers were never checked left no
+  metric. Hangar now increments `mcp_hangar_param_header_validation_skipped_total`
+  when the nested listing fails, omits the tool, or advertises an invalid
+  `x-mcp-header`, and when a handshake-era call still carries `Mcp-Param-*`.
+  The fail-open boundary itself is unchanged. ([#1060](https://github.com/mcp-hangar/mcp-hangar/pull/1060))
+- **core:** a handshake-era `Mcp-Name` that used the SEP-2243 base64 sentinel was
+  refused as a header/body mismatch, and a modern `tools/call` with arguments
+  recounted `mcp_hangar_projected_tools` because the SDK's schema lookup re-ran
+  `tools/list`. Routing headers now go through `decode_header_value`, a mismatch
+  answers `-32020` (`HEADER_MISMATCH`) like `tasks/*`, and the identity-scoped
+  projection is memoised for the lifetime of one HTTP request so the metric
+  still measures listings a client actually received. ([#1060](https://github.com/mcp-hangar/mcp-hangar/pull/1060))
+
 ## [2.13.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.13.0...v2.13.1) (2026-08-24)
 
 ### Fixed
