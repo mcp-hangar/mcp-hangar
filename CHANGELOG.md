@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.13.0...v2.13.1) (2026-08-24)
+
+### Fixed
+
+- **core:** a `ui://` resource can now be allowlisted and consented to rather than
+  only denied. SEP-1865 mandates a human decision before such a resource reaches a
+  client webview, and the guard stated that mandate while both halves that satisfy
+  it were missing: nothing built a `UiResourcePolicy`, so no tenant had an
+  allowlist, and no consent gate was ever attached, so an allowlisted resource was
+  refused for want of anyone to ask. The policies come from a new `ui_resources`
+  config block, the gate is an adapter over the approval service wired at
+  bootstrap, and both halves still fail closed on their own -- an unconfigured
+  deployment denies every `ui://` resource exactly as before. Consent stays
+  mandatory: the file cannot turn it off (ADR-024) ([#1055](https://github.com/mcp-hangar/mcp-hangar/pull/1055))
+- **core:** the startup reachability check no longer demands an approval gate for a
+  policy no gate can serve. It read `approval_list` off every registered policy,
+  including the prompt and resource kinds added in 2.13.0, and refused the boot over
+  it -- so one configuration was fail-open at request time and fail-closed at boot
+  at the same time. `iter_registered_policies()` takes a `kind` filter and both the
+  gate and the delivery-channel checks ask for tools ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** `approval_list` under `access.prompt` / `access.resource` is refused at
+  load instead of accepted and ignored. It was documented as inherited from the
+  tools policy and announced that way in 2.13.0, but `requires_approval()` has one
+  consumer -- the tool call path -- so an approval-listed prompt or resource was
+  listed and served immediately: no hold, no human, no metric. A configuration that
+  asks for enforcement no path performs is now refused where it is written, the way
+  per-tenant pins without an identity are. Whether the hold belongs on
+  `resources/read` / `prompts/get` at all is a separate decision, so the refusal
+  says "not supported", not "invalid" ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** a call routed to a group is checked against the withdrawal gate and its
+  digest pin. Both looked the tool up under the group id while the projection
+  registry is keyed by the member that started, so the lookup returned `None` --
+  "unknown tool, do not block" -- and a pinned tool served through a group was never
+  validated against its pin, in either topology and with no listing filter behind
+  it. The group id is asked first, the selected member answers otherwise ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** the post-approval-hold re-check asks the resolver the same question the
+  pre-hold gate asked. It re-resolved the effective policy with neither the target
+  group nor the caller's tenant, although both were in scope: in `front_door` that
+  is the fail-closed missing-identity branch, so **every** human-approved call was
+  refused at dispatch with `Approval no longer valid at dispatch: tool is no longer
+  allowed by policy`, and in `egress` a deny added to a group's policy during the
+  hold -- the race this re-check exists to close -- was not seen ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** a `tool_projection:` block on a **group** is read instead of silently
+  dropped. Only the mcp_server branch parsed it, so a group could declare neither a
+  withdrawal, a digest pin nor a `digest_enforcement` mode -- the key loaded without
+  a warning and did nothing, which left the group with no id under which those
+  controls could be both declared and read ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** a prompt or resource withdrawn on a group MEMBER is now hidden for the
+  whole group. The prompts and resources surfaces ask about a group under its group
+  id, and the withdrawal overlay is keyed by the id it was declared under, so a
+  member's `withdrawn_prompts` / `withdrawn_resources` was invisible to them. The
+  union is fail-closed: members of one group are interchangeable, so an item
+  withdrawn on one of two identical backends is not a state an operator can have
+  meant ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+- **core:** a group's `access.prompt` / `access.resource` policy was registered and
+  never read, so a declared deny enforced nothing on the prompts and resources
+  surfaces (fail-open). `prompt_proxy._upstream_ids` collapses a group member to
+  its group id before any check runs, and `is_governed_allowed` only mapped the
+  other direction -- member id to group -- so it asked the resolver with
+  `group_id=None` and the group's policy was never merged. Both spellings now
+  resolve to the group scope, the way `tools:` on the same group always did ([#1046](https://github.com/mcp-hangar/mcp-hangar/pull/1046))
+
 ## [2.13.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.12.0...v2.13.0) (2026-08-20)
 
 ### Added
