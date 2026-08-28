@@ -35,16 +35,30 @@ because a container-mode provider needs it, and a subprocess or remote provider
 would not. If your socket's group is not gid 999, run
 `DOCKER_GID=$(stat -c %g /var/run/docker.sock) docker compose up -d`.
 
-Ask the gateway what it projects:
+Call the provider through the gateway:
 
 ```bash
 curl -s http://localhost:8080/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2026-07-28' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list",
-       "params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}'
+  -H 'Mcp-Method: tools/call' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+        "name":"hangar_call",
+        "arguments":{"calls":[{"mcp_server":"filesystem","tool":"list_directory",
+                               "arguments":{"path":"/data"}}]},
+        "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                 "io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
+
+Three things that are easy to get wrong and answer `400` rather than a wrong
+result: `_meta` needs **both** envelope keys, the `Mcp-Method` header must match
+the body's method (SEP-2243), and `Accept` must allow `text/event-stream`.
+
+`hangar_call` rather than the tool directly: in the default topology the
+gateway serves its own `hangar_*` API and routes to providers through it. The
+`front_door` topology projects each provider's tools under their own names
+instead.
 
 The first call is slow: it pulls the provider image and cold-starts it.
 
