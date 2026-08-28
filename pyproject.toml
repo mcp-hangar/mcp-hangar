@@ -82,6 +82,13 @@ dev = [
 # nothing, while the guide, the cookbook and the config reference all described
 # a working feature. `docker` is a base dependency, so its source always worked;
 # this is the same standing for kubernetes.
+# The fuzzing harnesses under `fuzz/`. Markered, not bare: atheris publishes
+# manylinux x86_64 wheels for CPython 3.12-3.14 ONLY, so an unconditional entry
+# would break `uv sync --all-extras` on this project's own 3.11 baseline and on
+# every macOS machine. The invariants the harnesses assert live in
+# `fuzz/invariants.py`, which imports nothing from atheris and is replayed by
+# the normal test suite everywhere.
+fuzz = ["atheris>=3.1.0; sys_platform == 'linux' and python_version >= '3.12' and platform_machine == 'x86_64'"]
 kubernetes = ["kubernetes>=29.0.0"]
 langfuse = ["langfuse>=2.0.0"]
 opentelemetry = [

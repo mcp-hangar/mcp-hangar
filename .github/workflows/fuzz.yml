@@ -1,0 +1,71 @@
+# A short fuzzing run, so the harnesses in fuzz/ are code that executes rather
+# than code that exists. They cannot run on this project's 3.11 baseline or on
+# macOS -- atheris ships manylinux x86_64 wheels for 3.12-3.14 only -- so this
+# is the only place they run at all until ClusterFuzzLite lands (#1104).
+#
+# Short by design: this is a smoke test of the harness, not a fuzzing campaign.
+# Finding new inputs needs a corpus that persists between runs, which is what
+# #1104 is for.
+name: fuzz
+
+on:
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "src/mcp_hangar/domain/policies/**"
+      - "src/mcp_hangar/domain/value_objects/tool_access_policy.py"
+      - ".github/workflows/fuzz.yml"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Iterations per target"
+        default: "20000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz the policy evaluator
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_policy_evaluate, fuzz_policy_parse, fuzz_access_precedence]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the package and the fuzz extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[fuzz]'
+
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          RUNS: ${{ inputs.runs || '20000' }}
+        run: |
+          corpus=fuzz/corpus/parse
+          [ -d "$corpus" ] && [ "${{ matrix.target }}" = "fuzz_policy_parse" ] || corpus=""
+          # -runs bounds the batch; -timeout turns a hang into a reported crash
+          # rather than a job that sits until the step timeout.
+          python "fuzz/${{ matrix.target }}.py" -runs="$RUNS" -timeout=25 $corpus
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: |
+            crash-*
+            timeout-*
+            oom-*
+          if-no-files-found: ignore
