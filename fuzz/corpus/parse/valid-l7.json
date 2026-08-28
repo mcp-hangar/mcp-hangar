@@ -1,0 +1,1 @@
+{"mode": "Enforce", "tools": {"allow": ["read_*"], "deny": ["drop_*"]}, "defaultAction": "Deny", "arguments": {"secretPatterns": ["jwt"], "maxPayloadBytes": 262144}}

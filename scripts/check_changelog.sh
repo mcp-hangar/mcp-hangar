@@ -39,15 +39,22 @@ if echo "$PR_LABELS" | grep -q "skip-changelog"; then
   exit 0
 fi
 
-# A dependency bump owes no fragment (changelog.d/README.md says so), but it
-# edits `pyproject.toml`, which is a triggering path -- so every Python
-# dependabot PR failed this gate and sat red until somebody hand-labelled it.
-# The rule was documented and simply not implemented. Read from the title
-# rather than the author, so a human doing the same bump is treated the same.
-# A bump worth an entry (a pin that changes what callers may install) can still
-# add a fragment; only the requirement is lifted, not the possibility.
-if echo "$PR_TITLE" | grep -qE '^(chore|ci|build)\(deps(-dev)?\)'; then
-  echo "Dependency bump. Changelog fragment not required."
+# changelog.d/README.md names the PR kinds that owe no fragment: `chore(deps)`,
+# `ci`, `style`, `test` and pure `docs`. The gate did not implement any of it,
+# and the paths that trigger it are broad enough to catch all of them -- a
+# dependency bump edits `pyproject.toml`, a test-only PR can add an extra, a CI
+# change can touch a workflow beside one. So every such PR failed a REQUIRED
+# check and waited for somebody to hand-apply `skip-changelog`.
+#
+# Read from the title rather than the author or the paths: a human doing a
+# dependency bump is treated like Dependabot, and the Conventional Commit type
+# is the author's own statement about what the PR is. `pr-title / validate`
+# already constrains that vocabulary.
+#
+# This lifts the requirement, not the possibility: a `test` PR that does
+# something a reader upgrading needs to know about can still add a fragment.
+if echo "$PR_TITLE" | grep -qE '^(chore|ci|build)\(deps(-dev)?\)|^(ci|test|style|docs)(\([a-z-]+\))?:'; then
+  echo "Trivial by Conventional Commit type ($PR_TITLE). Changelog fragment not required."
   exit 0
 fi
 

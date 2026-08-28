@@ -1,0 +1,1 @@
+{"hooks": [{"hook": "pre-tool-call", "action": "deny", "match": {"tool": "drop_*"}}]}

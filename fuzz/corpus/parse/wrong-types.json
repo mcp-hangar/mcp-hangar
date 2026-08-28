@@ -1,0 +1,1 @@
+{"tools": {"allow": [1, 2, {"a": "b"}]}, "arguments": {"maxPayloadBytes": "many"}}
