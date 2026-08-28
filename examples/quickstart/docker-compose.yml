@@ -59,16 +59,22 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # The provider: the official "everything" server, over streamable HTTP.
+  # The provider: the official "everything" server over streamable HTTP.
   #
-  # Its image defaults to stdio (`CMD ["node", "dist/index.js"]`), which a
-  # gateway in another container cannot attach to, so the transport is selected
-  # here. It is the only official server that speaks HTTP; the rest are
-  # stdio-only and need a bridge beside them.
+  # Run from the npm package on a stock node image, not from `mcp/everything`.
+  # That image exists, but it was last rebuilt in 2025 and its build of the
+  # server ignored the transport argument -- it came up on stdio and the
+  # gateway got `Connection refused`. The package is released continuously
+  # (`@modelcontextprotocol/server-everything`), and `npx` is how the docs
+  # already recommend running an official server.
+  #
+  # `everything` and not one of the others because it is the only official
+  # server that speaks HTTP; the rest are stdio-only, which a gateway in its
+  # own container cannot attach to without a bridge beside it.
   everything:
-    image: docker.io/mcp/everything:latest
+    image: node:lts-alpine
     container_name: mcp-everything
-    command: ["node", "dist/index.js", "streamableHttp"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything", "streamableHttp"]
     environment:
       - PORT=3001
     # Not published on the host: the gateway reaches it over the compose

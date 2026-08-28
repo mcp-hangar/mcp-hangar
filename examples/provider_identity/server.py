@@ -8,6 +8,10 @@ returns that identity in the result. A live test can therefore observe the
 member a ``hangar_call`` was routed to and assert group-invocation and canary
 routing behaviour end to end.
 
+No official server can replace this one (#1097): none of them echoes which
+backend instance served a call, which is the entire point -- group routing and
+canary assertions need to observe the member, not the answer.
+
 It speaks MCP over **stdio** by default (the transport hangar uses for
 ``mode: subprocess`` members); override with ``MCP_TRANSPORT=streamable-http``.
 """

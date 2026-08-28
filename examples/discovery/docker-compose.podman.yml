@@ -7,30 +7,35 @@
 #   # or
 #   podman compose -f docker-compose.podman.yml up -d
 
-version: '3.8'
-
 services:
-  # Simple test container with MCP labels
+  # Two containers carrying discovery labels. Both run the official
+  # "everything" server from modelcontextprotocol/servers, on stdio -- which is
+  # what its image does by default, and what `mode: container` attaches to.
+  #
+  # They used to run `python -m http.server` labelled `mode: http` with a port.
+  # A static file server is not an MCP server, so discovery found two providers
+  # and neither could answer anything. The labels were the point of the example
+  # and they were the only part that was true.
+  #
+  # `-i` equivalent: compose keeps stdin open with `stdin_open`, without which
+  # a stdio server reads EOF immediately and the container exits.
   test-provider:
-    image: docker.io/library/python:3.14-slim
-    command: ["python", "-m", "http.server", "8080"]
+    image: docker.io/mcp/everything:latest
+    stdin_open: true
     labels:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "test-provider"
-      mcp.hangar.mode: "http"
-      mcp.hangar.port: "8080"
+      mcp.hangar.mode: "container"
     networks:
       - mcp-net
 
-  # Another test container
   math-provider:
-    image: docker.io/library/python:3.14-slim
-    command: ["python", "-m", "http.server", "8080"]
+    image: docker.io/mcp/everything:latest
+    stdin_open: true
     labels:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "math-provider"
-      mcp.hangar.mode: "http"
-      mcp.hangar.port: "8080"
+      mcp.hangar.mode: "container"
       mcp.hangar.group: "math-tools"
     networks:
       - mcp-net
