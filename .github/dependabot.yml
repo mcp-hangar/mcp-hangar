@@ -28,7 +28,6 @@ updates:
   - package-ecosystem: "docker"
     directories:
       - "/"
-      - "/docker"
       - "/examples/discovery"
       - "/examples/provider_math"
       - "/examples/task_upstream"
