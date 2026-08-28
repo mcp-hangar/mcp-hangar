@@ -32,6 +32,7 @@ updates:
       - "/examples/discovery"
       - "/examples/provider_math"
       - "/examples/task_upstream"
+      - "/.clusterfuzzlite"
     schedule:
       interval: "weekly"
       day: "monday"
