@@ -16,6 +16,13 @@ Carries ``prompts/list`` and ``prompts/get`` through the gateway in
   via the thin ``relay_request`` transport (no cold start), mirroring
   :mod:`resource_link_read_through`. An unknown name answers a generic
   not-found without leaking whether it exists for someone else.
+* ``completion/complete`` for a ``ref/prompt`` resolves through the same map
+  and forwards to the same upstream (#1026). Registering it is what advertises
+  the ``completions`` capability at all -- nothing registered a handler before,
+  so the gateway answered method-not-found while an upstream (the reference
+  server among them) had argument completions to offer. ``ref/resource`` is not
+  served: a projected ``hangar://`` URI is a gateway name no upstream would
+  recognise, so it answers like an unknown reference.
 
 Governed since #1028: every prompt goes through ``is_governed_allowed`` with
 ``kind="prompt"`` -- the same resolver, withdrawal overlays and front-door
@@ -39,6 +46,47 @@ from typing import Any
 from mcp_hangar._sdk_compat import INVALID_PARAMS, lowlevel_server, make_mcp_error
 
 logger = logging.getLogger(__name__)
+
+#: JSON-RPC method-not-found, as an upstream reports "I do not do completions".
+METHOD_NOT_FOUND = -32601
+
+
+def _completion_target(tenant_id: str | None, ref: Any) -> str | None:
+    """The upstream that owns the prompt *ref* names, for this tenant.
+
+    ``None`` for anything this tenant cannot complete: an unknown or denied
+    prompt, and any reference that is not ``ref/prompt`` -- ``ref/resource``
+    completion is not served here, because a projected ``hangar://`` URI is a
+    gateway name the upstream would not recognise (#1027 territory, not this).
+
+    Resolved from the same map ``prompts/get`` uses, rebuilt per request, so a
+    prompt that has since been denied stops completing at the same moment it
+    stops being fetchable.
+    """
+    if getattr(ref, "type", None) != "ref/prompt":
+        return None
+    name = getattr(ref, "name", None)
+    if not isinstance(name, str):
+        return None
+    owner = _build_prompt_map(tenant_id).get(name)
+    return owner[0] if owner is not None else None
+
+
+def _completion_params(params: Any) -> dict[str, Any]:
+    """The ``completion/complete`` params to forward, rebuilt rather than copied.
+
+    The caller's ``_meta`` is deliberately not among them: it carries the
+    caller's own envelope (progress token, trace state), which the relay mints
+    for itself. The flat prompt name IS the upstream's own name (#1024), so the
+    reference passes through as it arrived.
+    """
+    forwarded = {
+        "ref": params.ref.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        "argument": params.argument.model_dump(by_alias=True, exclude_none=True, mode="json"),
+    }
+    if params.context is not None:
+        forwarded["context"] = params.context.model_dump(by_alias=True, exclude_none=True, mode="json")
+    return forwarded
 
 
 def _upstream_ids(tenant_id: str | None) -> list[str]:
@@ -140,6 +188,8 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
         return False
 
     from mcp_types import (
+        CompleteRequestParams,
+        CompleteResult,
         GetPromptRequestParams,
         GetPromptResult,
         ListPromptsResult,
@@ -196,7 +246,34 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
         finally:
             release_caller_identity(token)
 
+    async def _complete(ctx: Any, params: Any) -> Any:
+        """Complete a prompt argument against the upstream that owns the prompt (#1026)."""
+        token = bind_caller_identity(ctx)
+        try:
+            tenant_id = _tenant()
+            server_id = await asyncio.to_thread(_completion_target, tenant_id, params.ref)
+            if server_id is None:
+                # One answer for "no such prompt", "not yours" and "not a
+                # prompt reference": a client must not be able to tell them
+                # apart, or the error becomes an existence oracle.
+                raise make_mcp_error(INVALID_PARAMS, "Unknown completion reference")
+            response = await asyncio.to_thread(_relay, server_id, "completion/complete", _completion_params(params))
+            error = response.get("error")
+            if error is not None:
+                if error.get("code") == METHOD_NOT_FOUND:
+                    # The prompt exists; this upstream just has no completions
+                    # for it. An empty completion is the spec's answer to that.
+                    return CompleteResult.model_validate({"completion": {"values": []}})
+                raise make_mcp_error(error.get("code", INVALID_PARAMS), error.get("message", "completion error"))
+            return CompleteResult.model_validate(response.get("result") or {})
+        finally:
+            release_caller_identity(token)
+
     low.add_request_handler("prompts/list", PaginatedRequestParams, _list)
     low.add_request_handler("prompts/get", GetPromptRequestParams, _get)
+    # Registering this is what advertises `completions` at all -- the SDK
+    # derives the capability from the handler, and nothing registered one
+    # before, so the gateway answered method-not-found (#888, #1026).
+    low.add_request_handler("completion/complete", CompleteRequestParams, _complete)
     logger.info("prompt_proxy_registered (topology_mode=front_door)")
     return True
