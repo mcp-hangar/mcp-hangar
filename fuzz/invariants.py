@@ -97,8 +97,16 @@ def check_access_precedence(
     """
     from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
-    policy = ToolAccessPolicy(allow_list=allow, deny_list=deny, approval_list=approval)
-    other = ToolAccessPolicy(allow_list=other_allow, deny_list=other_deny)
+    try:
+        policy = ToolAccessPolicy(allow_list=allow, deny_list=deny, approval_list=approval)
+        other = ToolAccessPolicy(allow_list=other_allow, deny_list=other_deny)
+    except ValueError:
+        # `__post_init__` rejects an empty or non-string pattern. That is a
+        # declared outcome, the same standing `check_evaluate` gives a policy
+        # `from_dict` refuses -- there is no policy here to have precedence.
+        # The fuzzer found this on its second input, as a crash in this file
+        # rather than in the code under test.
+        return
 
     denied_by_either = _matches(policy, tool_name) or _matches(other, tool_name)
 

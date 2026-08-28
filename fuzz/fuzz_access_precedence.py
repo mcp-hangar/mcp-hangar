@@ -31,7 +31,10 @@ ALPHABET = "ab_*?[]-."
 
 
 def _word(fdp: atheris.FuzzedDataProvider, limit: int = 8) -> str:
-    length = fdp.ConsumeIntInRange(0, limit)
+    """At least one character: an empty pattern is rejected by the policy's own
+    validation, so generating one spends the budget on a declared error rather
+    than on the precedence question."""
+    length = fdp.ConsumeIntInRange(1, limit)
     return "".join(ALPHABET[fdp.ConsumeIntInRange(0, len(ALPHABET) - 1)] for _ in range(length))
 
 
