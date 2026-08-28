@@ -24,8 +24,8 @@ docker compose logs -f mcp-hangar
 
 Two containers: the gateway, and the official
 [everything server](https://github.com/modelcontextprotocol/servers/tree/main/src/everything)
-beside it as the image Docker publishes. Nothing to build, no account, no
-credentials.
+beside it, run from its npm package on a stock node image. Nothing to build, no
+account, no credentials.
 
 The gateway reaches it with `mode: remote` over the compose network. Two things
 that pushed the example to this shape, both worth knowing before you write your
@@ -36,9 +36,15 @@ own config:
   the published image has neither. Mounting the Docker socket does not help --
   the socket is not what it uses. Hangar says so plainly when you try.
 - **`everything` is the only official server that speaks HTTP**
-  (`node dist/index.js streamableHttp`, which is why the compose file overrides
-  its command). The rest are stdio-only, and a gateway in its own container
-  cannot attach to another container's stdio without a bridge beside it.
+  (`streamableHttp` is its transport argument). The rest are stdio-only, and a
+  gateway in its own container cannot attach to another container's stdio
+  without a bridge beside it.
+- **The package, not the published image.** `mcp/everything` exists, but it was
+  last rebuilt in 2025 and its build ignores the transport argument -- it comes
+  up on stdio and the gateway gets `Connection refused`. The npm package is
+  released continuously, which is why the docs recommend `npx -y
+  @modelcontextprotocol/server-*` for anything you do not have to run as an
+  image.
 
 Call the provider through the gateway:
 
