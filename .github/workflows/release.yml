@@ -213,20 +213,32 @@ jobs:
       # legible to OpenSSF Signed-Releases, which reads release ASSETS: the
       # releases here carried none, so the check reported "no releases found"
       # even though every tag has one.
-      - name: Collect the attestation bundle beside the artifacts
-        run: cp "${{ steps.attest.outputs.bundle-path }}" dist/mcp-hangar.intoto.jsonl
+      #
+      # NOT in `dist/`. `gh-action-pypi-publish` uploads every file in
+      # `packages-dir`, and PyPI rejects anything that is not a distribution --
+      # which is how 2.15.0 built, attested, passed `twine check` and then
+      # failed at the upload with the wheel never leaving the runner.
+      - name: Collect the attestation bundle
+        run: |
+          mkdir -p attestation
+          cp "${{ steps.attest.outputs.bundle-path }}" attestation/mcp-hangar.intoto.jsonl
 
       - name: Upload the artifacts for the release job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-artifacts
-          path: dist/
+          path: |
+            dist/
+            attestation/
           if-no-files-found: error
 
       - name: Verify package
         run: |
           pip install twine
-          twine check dist/*.whl dist/*.tar.gz
+          # `dist/*` again, not a whitelist: the directory holds only
+          # distributions now, and checking everything in it is what catches a
+          # stray file before PyPI does.
+          twine check dist/*
 
       # Prereleases (alpha/beta/rc) and stable releases both publish to prod PyPI.
       # pip ignores prereleases unless --pre or an explicit prerelease pin is used,
@@ -460,7 +472,7 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
-            dist/*.intoto.jsonl
+            attestation/*.intoto.jsonl
           # Explicit tag so a workflow_dispatch run (github.ref is a branch)
           # attaches the release to the version tag instead of failing.
           tag_name: "v${{ needs.validate.outputs.version }}"
