@@ -41,6 +41,7 @@ from ...fastmcp_server.modern_surface import register_modern_surface
 from ...fastmcp_server.prompt_proxy import maybe_register_prompt_proxy
 from ...fastmcp_server.resource_link_read_through import maybe_register_resource_read_through
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
+from ...fastmcp_server.subscription_relay import maybe_register_subscription_relay
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
@@ -230,6 +231,10 @@ def build_serving_mcp_server() -> FastMCP:
     # is what re-advertises the `prompts` capability exactly when the proxy is
     # active (#1024, #888 "derived, not inverted").
     maybe_register_prompt_proxy(mcp_server)
+    # Last of the three, because it advertises what they serve: the modern
+    # subscription flags all derive from `subscriptions/listen`, so the
+    # front-door relay installs it and every other mode withdraws it (#1027).
+    maybe_register_subscription_relay(mcp_server)
     return mcp_server
 
 

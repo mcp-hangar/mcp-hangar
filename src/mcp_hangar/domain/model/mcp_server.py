@@ -1045,11 +1045,15 @@ class McpServer(AggregateRoot):
     def _route_upstream_message(self, msg: dict[str, Any]) -> None:
         """Route a server-initiated message from the standing GET stream (#882).
 
-        Runs on the stream's reader thread. One notification type has an
-        obvious home today: ``tools/list_changed`` triggers rediscovery (a
-        stale catalogue used to persist until the next restart).
-        ``notifications/progress`` gains its home with the caller-token mapping
-        (#883). The upstream's own MCP-protocol log notifications are
+        Runs on the stream's reader thread. ``tools/list_changed`` triggers
+        rediscovery (a stale catalogue used to persist until the next
+        restart). ``notifications/progress`` gains its home with the
+        caller-token mapping (#883). The change-notification vocabulary --
+        ``resources/updated`` and the three ``*/list_changed`` -- is also
+        handed to the front door, which fans it out to the client streams that
+        subscribed for it (#1027); outside ``front_door`` mode nothing is
+        registered there and the forward is a no-op.
+        The upstream's own MCP-protocol log notifications are
         deliberately NOT routed: SEP-2577 deprecates the Logging surface and
         this codebase guards against depending on it
         (test_no_mcp_logging_dependency) -- they fall into the debug line
@@ -1066,9 +1070,22 @@ class McpServer(AggregateRoot):
                 method=method,
             )
             return
+        from ..services import subscription_relay
+
         if method == "notifications/tools/list_changed":
             logger.info("upstream_tools_list_changed", mcp_server_id=self.mcp_server_id)
             self._refresh_tools()
+            # The catalogue changed for this gateway AND for whoever is
+            # listening through the front door (#1027): rediscovery is our
+            # answer, the nudge is theirs.
+            subscription_relay.forward(self.mcp_server_id, method, {})
+        elif method in subscription_relay.RELAYED_METHODS:
+            if not subscription_relay.forward(self.mcp_server_id, method, msg.get("params") or {}):
+                logger.debug(
+                    "upstream_subscription_event_unclaimed",
+                    mcp_server_id=self.mcp_server_id,
+                    method=method,
+                )
         elif method == "notifications/progress":
             from ..services import progress_relay
 
