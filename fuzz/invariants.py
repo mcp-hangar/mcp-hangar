@@ -17,8 +17,23 @@ records it either way.
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 import time
 from typing import Any
+
+# Imported at module level, NOT lazily inside each check. The harnesses import
+# this module inside `atheris.instrument_imports()`, and instrumentation
+# applies to what is imported while that context is open -- so a lazy import
+# inside a function runs long after it has closed, and the code under test is
+# loaded uninstrumented.
+#
+# That was not a subtle degradation: 1.6 million inputs at a constant
+# `cov: 4 ft: 4`, a corpus that never grew past its one empty seed, and a
+# green job the whole time (#1112). A blind fuzzer still finds shallow bugs,
+# which is exactly why the green looked like evidence.
+from mcp_hangar.domain.policies.dsl import parse_policy
+from mcp_hangar.domain.policies.egress_l7 import Decision, L7Policy, evaluate
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 #: A single evaluation is a decision on one tool call; it is not allowed to
 #: take this long. The budget exists because `scan_arguments` runs
@@ -41,8 +56,6 @@ def check_evaluate(tool_name: str, arguments: Any, policy_data: dict[str, Any], 
     in a verdict the caller can act on, or it ends as an unattributed failure
     in every mode (which is what #1102 was).
     """
-    from mcp_hangar.domain.policies.egress_l7 import Decision, L7Policy, evaluate
-
     try:
         policy = L7Policy.from_dict(policy_data)
     except ValueError:
@@ -67,9 +80,6 @@ def check_policy_parse(data: Any) -> None:
     payloads, so "did not expect" means an operator can crash the gateway's
     configuration path with a typo.
     """
-    from mcp_hangar.domain.policies.dsl import parse_policy
-    from mcp_hangar.domain.policies.egress_l7 import L7Policy
-
     for parser in (L7Policy.from_dict, parse_policy):
         try:
             parser(data)
@@ -95,8 +105,6 @@ def check_access_precedence(
     the composite policy it returns -- three places that have to agree, which
     is the shape of a rule that eventually does not.
     """
-    from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
-
     try:
         policy = ToolAccessPolicy(allow_list=allow, deny_list=deny, approval_list=approval)
         other = ToolAccessPolicy(allow_list=other_allow, deny_list=other_deny)
@@ -123,6 +131,4 @@ def check_access_precedence(
 
 def _matches(policy: Any, tool_name: str) -> bool:
     """Whether *tool_name* matches this policy's deny list, by the policy's own matcher."""
-    from fnmatch import fnmatchcase
-
     return any(fnmatchcase(tool_name, pattern) for pattern in policy.deny_list or ())

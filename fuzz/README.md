@@ -65,6 +65,22 @@ harness has already produced were handled that way:
   scope came back allowed once a group scope repeated the allow list. A policy
   bypass, found by the precedence invariant before the fuzzer ever ran.
 
+## Why the invariants import at module level
+
+`invariants.py` imports the code under test at the top of the file, and that is
+load-bearing rather than style. The harnesses import it inside
+`atheris.instrument_imports()`, and instrumentation applies to whatever is
+imported while that context is open. A lazy import inside a check function runs
+long after it has closed, so the code being fuzzed gets loaded uninstrumented
+and libFuzzer has nothing to steer by.
+
+That was the state of this directory for its first day (#1112): 1.6 million
+inputs, `cov: 4 ft: 4` from the first execution to the last, a corpus that never
+grew past its one empty seed, and a green job throughout. `fuzz.yml` now fails
+if the log does not name `mcp_hangar` among the instrumented modules, because
+the failure is otherwise invisible -- a blind fuzzer still finds shallow bugs,
+so "it caught something" is not evidence that it can see.
+
 ## What the time budget is for
 
 `scan_arguments` runs agent-controlled payload through ten regex groups

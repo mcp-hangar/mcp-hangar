@@ -53,11 +53,27 @@ jobs:
         env:
           RUNS: ${{ inputs.runs || '20000' }}
         run: |
+          set -o pipefail
           corpus=fuzz/corpus/parse
           [ -d "$corpus" ] && [ "${{ matrix.target }}" = "fuzz_policy_parse" ] || corpus=""
           # -runs bounds the batch; -timeout turns a hang into a reported crash
           # rather than a job that sits until the step timeout.
-          python "fuzz/${{ matrix.target }}.py" -runs="$RUNS" -timeout=25 $corpus
+          python "fuzz/${{ matrix.target }}.py" -runs="$RUNS" -timeout=25 $corpus 2>&1 | tee fuzz.log
+
+      # A fuzzer with no coverage feedback still runs, still exits zero, and
+      # still finds the occasional shallow bug -- so a green job is not evidence
+      # that anything was actually being searched. It ran 1.6 million inputs at
+      # a constant `cov: 4` before anyone looked (#1112). atheris names what it
+      # instruments, so this asserts the code under test is in that list.
+      - name: Assert the code under test was instrumented
+        if: always()
+        run: |
+          if ! grep -q "Instrumenting mcp_hangar" fuzz.log; then
+            echo "::error::atheris did not instrument mcp_hangar -- this run searched blind. See #1112."
+            grep "Instrumenting" fuzz.log || echo "(nothing was instrumented at all)"
+            exit 1
+          fi
+          grep -c "Instrumenting mcp_hangar" fuzz.log | xargs echo "instrumented modules:"
 
       - name: Upload the failing input
         if: failure()
