@@ -137,10 +137,15 @@ jobs:
       # (#1096), so this one CALLS the provider: config -> Docker socket ->
       # container start -> tool invocation, end to end.
       #
-      # `tools/list` would not do. The default topology is the registry, whose
-      # tool list is the `hangar_*` meta-API -- present and complete whether or
-      # not a single provider works, which is the same blind spot in a new
-      # place.
+      # Three things this assertion got wrong before it worked, all in the
+      # direction of passing when it should fail:
+      #   * `tools/list` -- the default topology answers it with the `hangar_*`
+      #     meta-API, complete whether or not a provider works.
+      #   * `isError` -- a hangar_call whose batch fails returns
+      #     `isError: false` with `"success": false` in the payload, so the
+      #     outer flag says nothing about the call.
+      #   * the envelope -- four headers and two `_meta` keys must agree, and
+      #     each disagreement is a 400 rather than a wrong answer.
       - name: Assert the configured provider can actually be called
         if: matrix.example == 'quickstart'
         working-directory: examples/${{ matrix.example }}
@@ -149,13 +154,10 @@ jobs:
           python3 - <<'PY'
           import json, sys, time, urllib.error, urllib.request
 
-          # The 2026-07-28 envelope: both `_meta` keys are required, and
-          # `Mcp-Method` (SEP-2243) must agree with the body's method. Getting
-          # either wrong is a 400 rather than a wrong answer.
-          META = {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-          }
+          # `mcp.shared.inbound`: `_meta` must carry protocolVersion AND
+          # clientCapabilities; the MCP-Protocol-Version header must equal the
+          # envelope's version; Mcp-Method must equal the body's method; and
+          # for a name-bearing method Mcp-Name must equal `params.name`.
           BODY = json.dumps({
               "jsonrpc": "2.0", "id": 1, "method": "tools/call",
               "params": {
@@ -165,7 +167,10 @@ jobs:
                       "tool": "list_directory",
                       "arguments": {"path": "/data"},
                   }]},
-                  "_meta": META,
+                  "_meta": {
+                      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                      "io.modelcontextprotocol/clientCapabilities": {},
+                  },
               },
           }).encode()
           HEADERS = {
@@ -173,7 +178,18 @@ jobs:
               "Accept": "application/json, text/event-stream",
               "MCP-Protocol-Version": "2026-07-28",
               "Mcp-Method": "tools/call",
+              "Mcp-Name": "hangar_call",
           }
+
+          def batch_succeeded(result: dict) -> bool:
+              """The batch's own verdict, not the envelope's."""
+              payload = result.get("structuredContent")
+              if payload is None:
+                  blocks = result.get("content") or []
+                  if not blocks:
+                      return False
+                  payload = json.loads(blocks[0]["text"])
+              return bool(payload.get("success"))
 
           last = ""
           for _attempt in range(12):
@@ -182,19 +198,19 @@ jobs:
                       "http://localhost:8080/mcp", data=BODY, headers=HEADERS, method="POST"
                   )
                   with urllib.request.urlopen(request, timeout=60) as response:
-                      last = response.read().decode()
+                      raw = response.read().decode()
               except urllib.error.HTTPError as exc:
                   # The body carries the reason; the status alone does not.
                   last = f"HTTP {exc.code}: {exc.read().decode()[:400]}"
               except (urllib.error.URLError, OSError) as exc:
                   last = f"{type(exc).__name__}: {exc}"
               else:
-                  payload = last
+                  payload = raw
                   if "data:" in payload:
                       payload = [ln[5:].strip() for ln in payload.splitlines() if ln.startswith("data:")][-1]
                   answer = json.loads(payload)
                   result = answer.get("result") or {}
-                  if "error" not in answer and not result.get("isError"):
+                  if "error" not in answer and not result.get("isError") and batch_succeeded(result):
                       print("provider answered:", json.dumps(result)[:400])
                       sys.exit(0)
                   last = payload[:400]

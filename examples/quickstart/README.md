@@ -43,6 +43,7 @@ curl -s http://localhost:8080/mcp \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2026-07-28' \
   -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: hangar_call' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
         "name":"hangar_call",
         "arguments":{"calls":[{"mcp_server":"filesystem","tool":"list_directory",
@@ -51,9 +52,14 @@ curl -s http://localhost:8080/mcp \
                  "io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-Three things that are easy to get wrong and answer `400` rather than a wrong
-result: `_meta` needs **both** envelope keys, the `Mcp-Method` header must match
-the body's method (SEP-2243), and `Accept` must allow `text/event-stream`.
+Four things that are easy to get wrong and answer `400` rather than a wrong
+result: `_meta` needs **both** envelope keys, `MCP-Protocol-Version` must equal
+the one in `_meta`, `Mcp-Method` must equal the body's method, and `Mcp-Name`
+must equal `params.name` (SEP-2243). `Accept` must also allow
+`text/event-stream`.
+
+Read the answer's `success` field, not just the HTTP status: a batch whose
+calls failed still comes back `200` with `isError: false`.
 
 `hangar_call` rather than the tool directly: in the default topology the
 gateway serves its own `hangar_*` API and routes to providers through it. The
