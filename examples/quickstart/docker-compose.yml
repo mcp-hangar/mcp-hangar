@@ -37,6 +37,22 @@ services:
       - MCP_JSON_LOGS=true
     volumes:
       - ./config.yaml:/etc/mcp-hangar/config.yaml:ro
+      # Container-mode providers are started by the gateway through the Docker
+      # API, so it needs the socket. Read this before copying it anywhere real:
+      # access to the Docker socket is equivalent to root on the host. It is
+      # here because the provider in config.yaml runs as a container; a
+      # subprocess or remote provider needs none of this.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The sandbox the filesystem provider is given. Created by the compose
+      # run on the host; the provider mounts the same path.
+      - /srv/hangar-quickstart/data:/srv/hangar-quickstart/data:rw
+    # The image runs as the unprivileged `hangar` user, which is not in the
+    # host's docker group -- so the socket above is unreadable to it without
+    # this. The gid differs per host: 999 on the GitHub runners and most Debian
+    # hosts, 0 where the socket is root-owned. Override with
+    # `DOCKER_GID=$(stat -c %g /var/run/docker.sock)` if yours differs.
+    group_add:
+      - "${DOCKER_GID:-999}"
     healthcheck:
       # `python3`, not `curl`: the image is `python:3.14-slim` and ships neither
       # curl nor wget, so every `["CMD", "curl", ...]` healthcheck in this repo
