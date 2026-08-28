@@ -1,30 +1,35 @@
 # Example docker-compose.yml with MCP discovery labels
-# Run: docker-compose up -d
-
-version: '3.8'
+# Run: docker compose up -d
+#
+# The two providers are the official servers from
+# modelcontextprotocol/servers, published by Docker on Docker Hub. They speak
+# stdio, so they are declared `mode: container` -- the discovery source then
+# attaches to the container rather than polling an HTTP port.
+#
+# This file used to name `ghcr.io/modelcontextprotocol/server-fetch:latest` and
+# `-server-memory:latest`, which do not exist (that registry serves 403 for
+# them while a real package answers 200), and declared `mode: http` with a port
+# for servers that have never spoken HTTP. It could not have worked as written.
 
 services:
   # MCP provider with discovery labels
   fetch-service:
-    image: ghcr.io/modelcontextprotocol/server-fetch:latest
+    image: docker.io/mcp/fetch:latest
     labels:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "fetch-service"
-      mcp.hangar.mode: "http"
-      mcp.hangar.port: "3000"
-      mcp.hangar.group: "http-tools"
-      mcp.hangar.health-path: "/health"
+      mcp.hangar.mode: "container"
+      mcp.hangar.group: "web-tools"
     networks:
       - mcp-network
 
   # Another MCP provider
   memory-service:
-    image: ghcr.io/modelcontextprotocol/server-memory:latest
+    image: docker.io/mcp/memory:latest
     labels:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "memory-service"
-      mcp.hangar.mode: "http"
-      mcp.hangar.port: "3000"
+      mcp.hangar.mode: "container"
       mcp.hangar.group: "storage-tools"
     networks:
       - mcp-network

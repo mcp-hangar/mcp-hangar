@@ -40,7 +40,11 @@ DOCKERFILES = _dockerfiles()
 
 def test_there_are_dockerfiles_to_check() -> None:
     """Guards the glob: an empty list would make the assertions below vacuous."""
-    assert len(DOCKERFILES) >= 9
+    # Was 9 until the five unbuilt demo images under `docker/` were deleted
+    # (#1095). The floor is a guard against the glob silently matching nothing,
+    # not a target -- lower it when files legitimately go, never to make a red
+    # assertion green.
+    assert len(DOCKERFILES) >= 4
 
 
 @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: str(p.relative_to(ROOT)))
