@@ -73,18 +73,6 @@ jobs:
       - name: Build the image under test
         run: docker build -t "$HANGAR_IMAGE" .
 
-      - name: Prepare the host paths the example mounts
-        run: |
-          set -euo pipefail
-          # The quickstart's provider is given a sandbox directory; compose
-          # would otherwise create it root-owned and the provider could not
-          # write to it.
-          sudo mkdir -p /srv/hangar-quickstart/data
-          sudo chmod 777 /srv/hangar-quickstart/data
-          # The gateway runs unprivileged and reaches the Docker socket through
-          # a supplementary group, whose gid is the host's, not a constant.
-          echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" >> "$GITHUB_ENV"
-
       - name: Bring ${{ matrix.example }} up and wait for healthy
         working-directory: examples/${{ matrix.example }}
         run: |
@@ -93,7 +81,12 @@ jobs:
           # reach healthy. Only the gateway is started: the dashboards and
           # collectors beside it are not what this job is asserting, and pulling
           # them costs minutes.
-          docker compose up --detach --wait --wait-timeout 120 "${{ matrix.service }}"
+          # The quickstart's provider is a service of its own, and the gateway
+          # is useless without it; the other examples still start one service.
+          extra=""
+          [ "${{ matrix.example }}" = "quickstart" ] && extra="everything"
+          # shellcheck disable=SC2086
+          docker compose up --detach --wait --wait-timeout 180 "${{ matrix.service }}" $extra
 
       - name: Assert it is healthy, not merely up
         working-directory: examples/${{ matrix.example }}
@@ -163,9 +156,9 @@ jobs:
               "params": {
                   "name": "hangar_call",
                   "arguments": {"calls": [{
-                      "mcp_server": "filesystem",
-                      "tool": "list_directory",
-                      "arguments": {"path": "/data"},
+                      "mcp_server": "everything",
+                      "tool": "echo",
+                      "arguments": {"message": "quickstart"},
                   }]},
                   "_meta": {
                       "io.modelcontextprotocol/protocolVersion": "2026-07-28",

@@ -22,18 +22,23 @@ docker compose logs -f mcp-hangar
 
 ## What is in it
 
-One provider: the official
-[filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem),
-as the image Docker publishes for it. Nothing to build, no account, no
-credentials -- the sandbox it is given is `/srv/hangar-quickstart/data` on the
-host, created by the compose run.
+Two containers: the gateway, and the official
+[everything server](https://github.com/modelcontextprotocol/servers/tree/main/src/everything)
+beside it as the image Docker publishes. Nothing to build, no account, no
+credentials.
 
-The gateway starts it as a container on first use, which is why the compose
-file mounts the Docker socket and adds the gateway to the socket's group.
-**Access to the Docker socket is equivalent to root on the host**: it is here
-because a container-mode provider needs it, and a subprocess or remote provider
-would not. If your socket's group is not gid 999, run
-`DOCKER_GID=$(stat -c %g /var/run/docker.sock) docker compose up -d`.
+The gateway reaches it with `mode: remote` over the compose network. Two things
+that pushed the example to this shape, both worth knowing before you write your
+own config:
+
+- **`mode: container` does not work from inside the Hangar image.** Container
+  mode shells out to a `podman` or `docker` CLI on the host running Hangar, and
+  the published image has neither. Mounting the Docker socket does not help --
+  the socket is not what it uses. Hangar says so plainly when you try.
+- **`everything` is the only official server that speaks HTTP**
+  (`node dist/index.js streamableHttp`, which is why the compose file overrides
+  its command). The rest are stdio-only, and a gateway in its own container
+  cannot attach to another container's stdio without a bridge beside it.
 
 Call the provider through the gateway:
 
@@ -46,17 +51,16 @@ curl -s http://localhost:8080/mcp \
   -H 'Mcp-Name: hangar_call' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
         "name":"hangar_call",
-        "arguments":{"calls":[{"mcp_server":"filesystem","tool":"list_directory",
-                               "arguments":{"path":"/data"}}]},
+        "arguments":{"calls":[{"mcp_server":"everything","tool":"echo",
+                               "arguments":{"message":"hello"}}]},
         "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",
                  "io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-Four things that are easy to get wrong and answer `400` rather than a wrong
-result: `_meta` needs **both** envelope keys, `MCP-Protocol-Version` must equal
-the one in `_meta`, `Mcp-Method` must equal the body's method, and `Mcp-Name`
-must equal `params.name` (SEP-2243). `Accept` must also allow
-`text/event-stream`.
+Four things that answer `400` rather than a wrong result: `_meta` needs **both**
+envelope keys, `MCP-Protocol-Version` must equal the one in `_meta`,
+`Mcp-Method` must equal the body's method, and `Mcp-Name` must equal
+`params.name` (SEP-2243). `Accept` must also allow `text/event-stream`.
 
 Read the answer's `success` field, not just the HTTP status: a batch whose
 calls failed still comes back `200` with `isError: false`.
@@ -65,8 +69,6 @@ calls failed still comes back `200` with `isError: false`.
 gateway serves its own `hangar_*` API and routes to providers through it. The
 `front_door` topology projects each provider's tools under their own names
 instead.
-
-The first call is slow: it pulls the provider image and cold-starts it.
 
 ## Services
 
