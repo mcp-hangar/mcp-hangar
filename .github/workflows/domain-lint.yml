@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   domain:
-    uses: mcp-hangar/.github/.github/workflows/domain-lint.yml@main
+    uses: mcp-hangar/.github/.github/workflows/domain-lint.yml@3fa20458d5ce8f7faffd9d900f6599aaa8e06e2a # main
