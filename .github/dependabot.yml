@@ -21,6 +21,30 @@ updates:
           - "minor"
           - "patch"
 
+  # Every Dockerfile's base image is pinned by digest, which freezes it: a
+  # digest with no updater behind it is a base image quietly accumulating CVEs,
+  # which is a worse problem than the movable tag it replaced. `directories`
+  # (plural) covers every path holding a Dockerfile in one entry.
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/docker"
+      - "/examples/discovery"
+      - "/examples/provider_math"
+      - "/examples/task_upstream"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    groups:
+      docker-base-images:
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
