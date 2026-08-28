@@ -44,7 +44,7 @@ try:
 except ImportError:
     DOCKER_AVAILABLE = False
     DockerException = Exception
-    docker = None  # type: ignore[assignment]  # optional dependency: module unavailable
+    docker = None  # optional dependency: module unavailable
 
 
 # Well-known socket locations
@@ -161,10 +161,10 @@ class DockerDiscoverySource(DiscoverySource):
 
                 if socket:
                     logger.info("docker_connecting", socket=socket, attempt=attempt + 1)
-                    self._client = docker.DockerClient(base_url=f"unix://{socket}")  # type: ignore[attr-defined]  # docker SDK has no type stubs
+                    self._client = docker.DockerClient(base_url=f"unix://{socket}")
                 else:
                     logger.info("docker_connecting_from_env", attempt=attempt + 1)
-                    self._client = docker.from_env()  # type: ignore[attr-defined]  # docker SDK has no type stubs
+                    self._client = docker.from_env()
 
                 # Verify connection works
                 self._client.ping()
