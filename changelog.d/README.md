@@ -58,7 +58,11 @@ stating in two sentences; skip it otherwise.
 
 `chore(deps)`, `ci`, `style`, `test` and pure `docs` PRs need no fragment. The
 `changelog / check` gate only fires on changes under `src/`, `pyproject.toml`
-or `packages/`, and the `skip-changelog` label bypasses it.
+or `packages/`. Two things bypass it: the `skip-changelog` label, and a
+Conventional Commit title in a dependency scope (`chore(deps)`, `ci(deps)`,
+`build(deps-dev)`, ...) -- a Python bump edits `pyproject.toml`, so without
+that every dependabot PR failed a required check. A bump that IS worth an
+entry may still add a fragment; only the requirement is lifted.
 
 ## Commands
 

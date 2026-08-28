@@ -10,18 +10,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default, so no workflow-level write exists to be inherited by a
+# step that never needed one. The merge job grants itself what it needs below.
+# OpenSSF Scorecard zeroes Token-Permissions on any workflow-level write; a
+# job-level grant does not.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   automerge:
     runs-on: ubuntu-latest
     if: ${{ github.actor == 'dependabot[bot]' }}
+    # `gh pr merge --auto` writes the merge and the PR state; nothing else here
+    # writes anything.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Fetch Dependabot metadata
         id: meta
-        uses: dependabot/fetch-metadata@v3
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
