@@ -6,13 +6,21 @@ on:
       - main
   workflow_dispatch:
 
+# Read-only at workflow level; the single job grants itself the writes it
+# needs. OpenSSF Scorecard zeroes Token-Permissions on any workflow-level
+# write, and a job-level grant does not -- with one job the scope is identical
+# either way, so the read-only default costs nothing.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # release-please writes the release branch, the tag and the release, and
+    # opens/updates its release PR.
+    permissions:
+      contents: write
+      pull-requests: write
     # Surface the secret as an env var: the `secrets` context is not available
     # in a step-level `if:`, but `env` is, so this is how the app-token step
     # conditions on whether the credential is configured.
