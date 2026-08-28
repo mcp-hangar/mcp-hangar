@@ -202,14 +202,31 @@ jobs:
         run: python -m build
 
       - name: Generate build provenance attestation
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: 'dist/*'
 
+      # The attestation is only useful to somebody who can fetch it beside the
+      # artifact, so the bundle travels with the wheel onto the GitHub Release
+      # (`create-release` downloads this). It is also what makes the release
+      # legible to OpenSSF Signed-Releases, which reads release ASSETS: the
+      # releases here carried none, so the check reported "no releases found"
+      # even though every tag has one.
+      - name: Collect the attestation bundle beside the artifacts
+        run: cp "${{ steps.attest.outputs.bundle-path }}" dist/mcp-hangar.intoto.jsonl
+
+      - name: Upload the artifacts for the release job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-artifacts
+          path: dist/
+          if-no-files-found: error
+
       - name: Verify package
         run: |
           pip install twine
-          twine check dist/*
+          twine check dist/*.whl dist/*.tar.gz
 
       # Prereleases (alpha/beta/rc) and stable releases both publish to prod PyPI.
       # pip ignores prereleases unless --pre or an explicit prerelease pin is used,
@@ -427,10 +444,23 @@ jobs:
           echo "$FULL_CHANGELOG_LINE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Download the published artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-artifacts
+          path: dist
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           name: "v${{ needs.validate.outputs.version }}"
+          # The wheel, the sdist and the provenance bundle. Without assets a
+          # release is not verifiable by anyone downstream, and OpenSSF
+          # Signed-Releases cannot see it at all.
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.intoto.jsonl
           # Explicit tag so a workflow_dispatch run (github.ref is a branch)
           # attaches the release to the version tag instead of failing.
           tag_name: "v${{ needs.validate.outputs.version }}"
