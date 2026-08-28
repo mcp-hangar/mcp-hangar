@@ -20,6 +20,34 @@ docker compose ps
 docker compose logs -f mcp-hangar
 ```
 
+## What is in it
+
+One provider: the official
+[filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem),
+as the image Docker publishes for it. Nothing to build, no account, no
+credentials -- the sandbox it is given is `/srv/hangar-quickstart/data` on the
+host, created by the compose run.
+
+The gateway starts it as a container on first use, which is why the compose
+file mounts the Docker socket and adds the gateway to the socket's group.
+**Access to the Docker socket is equivalent to root on the host**: it is here
+because a container-mode provider needs it, and a subprocess or remote provider
+would not. If your socket's group is not gid 999, run
+`DOCKER_GID=$(stat -c %g /var/run/docker.sock) docker compose up -d`.
+
+Ask the gateway what it projects:
+
+```bash
+curl -s http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list",
+       "params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}'
+```
+
+The first call is slow: it pulls the provider image and cold-starts it.
+
 ## Services
 
 | Service | URL | Description |
