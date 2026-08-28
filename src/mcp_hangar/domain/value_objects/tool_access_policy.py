@@ -215,39 +215,25 @@ class ToolAccessPolicy:
                 )
             return result
 
-        # Case 3: Both have allow_lists -> intersection
-        if broader.allow_list and narrower.allow_list:
+        # Cases 3-5: either side constrains by allow_list. One branch, because
+        # the merged answer is a CONJUNCTION of the two policies' own answers --
+        # which is what the invariant in this docstring says merging means, and
+        # what the three branches that used to live here got wrong.
+        #
+        # Each of them rebuilt a piece of the deny > approval > allow > default
+        # ladder out of whichever lists its condition named, and silently
+        # dropped the rest: "both have allow_lists" consulted neither deny_list,
+        # so a tool denied by the broader scope came back allowed as soon as a
+        # narrower scope repeated the allow list (#1106). The mirrored branches
+        # dropped the other side's deny_list the same way.
+        #
+        # `is_tool_allowed` already implements that ladder, once. Calling it is
+        # both the fix and the reason the fix cannot rot: there is no second
+        # copy of the precedence rules left to disagree with it.
+        if broader.allow_list or narrower.allow_list:
             return _CompositePolicy(
-                check=lambda name: (
-                    _matches_any_pattern(name, broader.allow_list) and _matches_any_pattern(name, narrower.allow_list)
-                ),
-                description=f"allow_intersection({list(broader.allow_list)} & {list(narrower.allow_list)})",
-                approval_patterns=merged_approval,
-                merged_timeout=min(broader.approval_timeout_seconds, narrower.approval_timeout_seconds),
-                merged_channel=narrower.approval_channel if narrower.approval_list else broader.approval_channel,
-            )
-
-        # Case 4: Broader has allow_list, narrower has deny_list
-        if broader.allow_list and narrower.deny_list:
-            return _CompositePolicy(
-                check=lambda name: (
-                    _matches_any_pattern(name, broader.allow_list)
-                    and not _matches_any_pattern(name, narrower.deny_list)
-                ),
-                description=f"allow({list(broader.allow_list)}) - deny({list(narrower.deny_list)})",
-                approval_patterns=merged_approval,
-                merged_timeout=min(broader.approval_timeout_seconds, narrower.approval_timeout_seconds),
-                merged_channel=narrower.approval_channel if narrower.approval_list else broader.approval_channel,
-            )
-
-        # Case 5: Broader has deny_list, narrower has allow_list
-        if broader.deny_list and narrower.allow_list:
-            return _CompositePolicy(
-                check=lambda name: (
-                    not _matches_any_pattern(name, broader.deny_list)
-                    and _matches_any_pattern(name, narrower.allow_list)
-                ),
-                description=f"not_deny({list(broader.deny_list)}) & allow({list(narrower.allow_list)})",
+                check=lambda name: broader.is_tool_allowed(name) and narrower.is_tool_allowed(name),
+                description=f"both({broader!r} & {narrower!r})",
                 approval_patterns=merged_approval,
                 merged_timeout=min(broader.approval_timeout_seconds, narrower.approval_timeout_seconds),
                 merged_channel=narrower.approval_channel if narrower.approval_list else broader.approval_channel,
