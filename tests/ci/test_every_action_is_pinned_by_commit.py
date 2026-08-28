@@ -23,10 +23,13 @@ WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 
 USES = re.compile(r"uses:\s+(?P<action>[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)@(?P<ref>\S+)")
 
-#: Our own org's reusable workflows track `main` on purpose: they carry shared
-#: repository policy (PR title, body, branch name), and pinning them would mean
-#: every repository drifting to its own copy of the rules.
-OWN_REUSABLE = "mcp-hangar/.github"
+#: Our own org's reusable workflows were excluded here at first, on the theory
+#: that shared repository policy should arrive instantly and that Scorecard did
+#: not count them. Both halves were wrong: the live scan reports all four as
+#: "third-party GitHubAction not pinned by hash", and an org-wide change to the
+#: PR rules landing in this repository unreviewed is itself the supply-chain
+#: path the pinning is for. They are pinned like everything else; Dependabot
+#: updates a reusable-workflow ref the same way it updates an action.
 
 
 def test_there_are_workflows_to_check() -> None:
@@ -38,7 +41,7 @@ def test_actions_are_pinned_by_sha(workflow: pathlib.Path) -> None:
     unpinned = [
         f"{m.group('action')}@{m.group('ref')}"
         for m in USES.finditer(workflow.read_text())
-        if not m.group("action").startswith(OWN_REUSABLE) and not re.fullmatch(r"[0-9a-f]{40}", m.group("ref"))
+        if not re.fullmatch(r"[0-9a-f]{40}", m.group("ref"))
     ]
 
     assert not unpinned, f"{workflow.name} references {unpinned} by tag; pin to a commit SHA with a `# tag` comment"
