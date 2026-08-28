@@ -40,4 +40,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # Read as data, never interpolated into the shell: a PR title is
+          # attacker-controlled text.
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: bash scripts/check_changelog.sh
