@@ -23,4 +23,4 @@ permissions:
 
 jobs:
   branch-name:
-    uses: mcp-hangar/.github/.github/workflows/branch-name.yml@main
+    uses: mcp-hangar/.github/.github/workflows/branch-name.yml@3fa20458d5ce8f7faffd9d900f6599aaa8e06e2a # main
