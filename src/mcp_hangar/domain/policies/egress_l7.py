@@ -320,10 +320,6 @@ class Decision:
 
 
 def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) -> tuple[ToolAction, str]:
-    # SABOTAGE -- temporary, proves ClusterFuzzLite catches a planted crash.
-    # Reverted before this PR leaves draft (#1104 acceptance).
-    if tool_name.startswith("aa"):
-        raise RuntimeError("planted crash for the ClusterFuzzLite acceptance test")
     """Resolve a tool name to an action by glob precedence: deny, then
     require-approval, then allow; if nothing matches, the policy default.
     """
