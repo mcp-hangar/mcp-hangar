@@ -456,11 +456,17 @@ jobs:
           echo "$FULL_CHANGELOG_LINE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      # Into the workspace root, NOT into `dist/`. The artifact carries two
+      # directories (`dist/` and `attestation/`), because upload-artifact keys
+      # a multi-path upload on the least common ancestor -- so unpacking it
+      # under `dist/` produces `dist/dist/*.whl`, every glob below matches
+      # nothing, and `action-gh-release` publishes a release with no assets
+      # while reporting success. That is what 2.15.0 shipped.
       - name: Download the published artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-artifacts
-          path: dist
+          path: .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
