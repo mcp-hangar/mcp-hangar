@@ -13,6 +13,7 @@ set -euo pipefail
 : "${BASE_SHA:?BASE_SHA must be set}"
 : "${HEAD_SHA:?HEAD_SHA must be set}"
 : "${PR_LABELS:=}"
+: "${PR_TITLE:=}"
 
 TRIGGERING_PATTERN='^(src/|pyproject\.toml$|packages/(operator|helm-charts|ui)/)'
 FRAGMENT_PATTERN='^changelog\.d/[A-Za-z0-9._-]+\.(added|changed|deprecated|removed|fixed|security)\.md$'
@@ -35,6 +36,18 @@ fi
 
 if echo "$PR_LABELS" | grep -q "skip-changelog"; then
   echo "skip-changelog label present. Skipping check."
+  exit 0
+fi
+
+# A dependency bump owes no fragment (changelog.d/README.md says so), but it
+# edits `pyproject.toml`, which is a triggering path -- so every Python
+# dependabot PR failed this gate and sat red until somebody hand-labelled it.
+# The rule was documented and simply not implemented. Read from the title
+# rather than the author, so a human doing the same bump is treated the same.
+# A bump worth an entry (a pin that changes what callers may install) can still
+# add a fragment; only the requirement is lifted, not the possibility.
+if echo "$PR_TITLE" | grep -qE '^(chore|ci|build)\(deps(-dev)?\)'; then
+  echo "Dependency bump. Changelog fragment not required."
   exit 0
 fi
 
