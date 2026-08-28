@@ -51,6 +51,26 @@ def test_the_attestation_is_not_in_the_package_directory() -> None:
     assert publish["with"]["packages-dir"] == "dist/"
 
 
+def test_the_download_lands_where_the_release_globs_look() -> None:
+    """The two halves of the hand-off have to agree about the directory layout.
+
+    `upload-artifact` keys a multi-path upload on the least common ancestor, so
+    an artifact carrying `dist/` and `attestation/` unpacks to those names
+    wherever it is put. Unpacking it under `dist/` gives `dist/dist/*.whl`;
+    every glob then matches nothing and the release publishes with **no
+    assets**, successfully. 2.15.0 shipped exactly that.
+    """
+    download = next(step for step in _steps("create-release") if "download-artifact" in step.get("uses", ""))
+    release = next(step for step in _steps("create-release") if "action-gh-release" in step.get("uses", ""))
+
+    assert download["with"]["path"] == "."
+    # Every attached glob names a directory the artifact actually carries.
+    upload = next(step for step in _steps("publish-pypi") if "upload-artifact" in step.get("uses", ""))
+    carried = {line.strip().rstrip("/") for line in upload["with"]["path"].splitlines() if line.strip()}
+    for pattern in release["with"]["files"].split():
+        assert pattern.split("/")[0] in carried, f"{pattern} is not in the uploaded artifact"
+
+
 def test_the_release_attaches_the_artifacts_and_the_provenance() -> None:
     release_step = next(step for step in _steps("create-release") if "action-gh-release" in step.get("uses", ""))
     attached = release_step["with"]["files"]
