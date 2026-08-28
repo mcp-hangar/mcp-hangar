@@ -1,0 +1,54 @@
+# ClusterFuzzLite on the diff (#1104).
+#
+# The `fuzz` workflow beside this one is a smoke test: 20 000 iterations from
+# an empty corpus, so it re-searches the same shallow space on every run. This
+# one fuzzes what the pull request CHANGED, which is where a new defect is, and
+# reports a crash as a build failure with the input attached.
+#
+# Corpus persistence is NOT wired: CFL carries a corpus between runs through a
+# separate `storage-repo`, which does not exist yet. Without it each run still
+# starts cold, so this catches what a few minutes of fuzzing near the diff can
+# reach -- more than the smoke job, less than a campaign. Creating that repo is
+# the remaining half of this feature.
+name: cfl
+
+on:
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "src/mcp_hangar/domain/policies/**"
+      - "src/mcp_hangar/domain/value_objects/tool_access_policy.py"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/cfl-pr.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz the diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Build the fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+
+      - name: Fuzz what changed
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 180
+          mode: code-change
+          sanitizer: address
+          # A crash is the finding; libFuzzer's own output plus the artifact
+          # this uploads is what reproduces it.
+          output-sarif: false

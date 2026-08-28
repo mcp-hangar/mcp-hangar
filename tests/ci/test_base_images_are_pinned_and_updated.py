@@ -64,7 +64,13 @@ def test_dependabot_updates_every_directory_that_holds_a_dockerfile() -> None:
             continue
         covered.update(update.get("directories") or [update["directory"]])
 
-    needed = {"/" + str(path.parent.relative_to(ROOT)).removeprefix(".").lstrip("/") for path in DOCKERFILES}
-    needed = {directory.rstrip("/") or "/" for directory in needed}
+    # `relative_to` gives "." for a Dockerfile at the root and a bare path
+    # otherwise. Stripping a leading "." handled the first case and mangled the
+    # second: a dotted directory like `.clusterfuzzlite` came out as
+    # `/clusterfuzzlite`, which matches no dependabot entry and no directory.
+    needed = set()
+    for path in DOCKERFILES:
+        relative = path.parent.relative_to(ROOT)
+        needed.add("/" if relative == pathlib.Path(".") else f"/{relative}")
 
     assert needed <= covered, f"no docker dependabot entry for {sorted(needed - covered)}"
