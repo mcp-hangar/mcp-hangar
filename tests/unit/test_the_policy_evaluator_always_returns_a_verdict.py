@@ -18,6 +18,7 @@ serializer returns, so the guard sits behind the thing that breaks.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import Mock
 
@@ -47,6 +48,29 @@ def _nested(depth: int) -> dict[str, Any]:
     return root
 
 
+#: Past this, assume the encoder will not refuse and the test cannot run. Well
+#: above 3.14's 34 710, with room for a future interpreter that recurses deeper.
+_DEPTH_CEILING = 500_000
+
+
+def _too_deep_to_serialize() -> dict[str, Any]:
+    """The shallowest nesting this interpreter's JSON encoder refuses.
+
+    Doubling rather than a fixed constant: the threshold moves by CPython
+    version (see the module docstring), and a constant that stops reproducing
+    the bug is worse than no test, because it still passes.
+    """
+    depth = 512
+    while depth <= _DEPTH_CEILING:
+        candidate = _nested(depth)
+        try:
+            json.dumps(candidate)
+        except RecursionError:
+            return candidate
+        depth *= 2
+    pytest.skip(f"this interpreter serializes {_DEPTH_CEILING} levels without recursing too deep")
+
+
 class _Unstringable:
     """`json.dumps(default=str)` calls this, and it is somebody else's code."""
 
@@ -68,7 +92,7 @@ class _Proceeded(Exception):
 
 
 class TestEvaluateIsTotal:
-    @pytest.mark.parametrize("depth", [10, 1_000, 100_000])
+    @pytest.mark.parametrize("depth", [10, 1_000, 100_000])  # spans every version's threshold
     @pytest.mark.parametrize("mode", [PolicyMode.ENFORCE, PolicyMode.AUDIT])
     def test_a_verdict_comes_back_at_any_nesting(self, depth: int, mode: PolicyMode) -> None:
         decision = evaluate("some_tool", _nested(depth), _policy(mode))
@@ -76,7 +100,7 @@ class TestEvaluateIsTotal:
         assert isinstance(decision, Decision)
 
     def test_nesting_the_encoder_cannot_walk_is_denied_with_a_reason(self) -> None:
-        decision = evaluate("some_tool", _nested(1_000), _policy())
+        decision = evaluate("some_tool", _too_deep_to_serialize(), _policy())
 
         assert decision.action is ToolAction.DENY
         assert any("could not be serialized" in reason for reason in decision.reasons)
@@ -99,7 +123,7 @@ class TestTheCallerGetsTheVerdictItCanActOn:
         server = McpServer(mcp_server_id="s", mode="subprocess", command=["echo"], l7_policy=_policy())
 
         with pytest.raises(EgressPolicyDeniedError) as raised:
-            server.invoke_tool("some_tool", _nested(1_000))
+            server.invoke_tool("some_tool", _too_deep_to_serialize())
 
         assert "could not be serialized" in raised.value.reason
 
@@ -109,7 +133,7 @@ class TestTheCallerGetsTheVerdictItCanActOn:
         server.ensure_ready = Mock(side_effect=_Proceeded())  # type: ignore[method-assign]
 
         with pytest.raises(_Proceeded):
-            server.invoke_tool("some_tool", _nested(1_000))
+            server.invoke_tool("some_tool", _too_deep_to_serialize())
 
         observed = [e for e in server.collect_events() if isinstance(e, EgressPolicyViolationObserved)]
         assert len(observed) == 1

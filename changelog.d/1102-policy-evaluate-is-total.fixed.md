@@ -2,8 +2,10 @@
 trace instead of a verdict. `_serialize_arguments` caught `TypeError` and
 `ValueError` and promised `None` "so the caller can fail closed rather than
 crash", but JSON nesting the encoder cannot walk raises `RecursionError`, which
-is neither -- about 992 levels, roughly 7 KB of payload, well under any
-`maxPayloadBytes` an operator would set. `maxPayloadBytes` could not have
+is neither. The depth that triggers it is an interpreter detail rather than a
+constant: 992 levels on CPython 3.11 -- this project's baseline, so roughly
+7 KB of payload, far under any `maxPayloadBytes` an operator would set -- and
+9 997 on 3.12, 34 710 on 3.14. `maxPayloadBytes` could not have
 helped either way: the size check reads the string the serializer returns, so
 the guard sat behind the thing that broke. The exception propagated out of
 `evaluate()` and out of `McpServer._enforce_l7_policy`, which called it with no
