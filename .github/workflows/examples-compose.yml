@@ -134,9 +134,14 @@ jobs:
       # Health plus a loaded config still says nothing about whether the
       # provider in that config exists. The quickstart declared an image and a
       # module that had never existed and passed both of the checks above
-      # (#1096), so this one asks the gateway for a tool and fails on an empty
-      # projection.
-      - name: Assert the gateway projects a tool from the configured provider
+      # (#1096), so this one CALLS the provider: config -> Docker socket ->
+      # container start -> tool invocation, end to end.
+      #
+      # `tools/list` would not do. The default topology is the registry, whose
+      # tool list is the `hangar_*` meta-API -- present and complete whether or
+      # not a single provider works, which is the same blind spot in a new
+      # place.
+      - name: Assert the configured provider can actually be called
         if: matrix.example == 'quickstart'
         working-directory: examples/${{ matrix.example }}
         run: |
@@ -144,41 +149,60 @@ jobs:
           python3 - <<'PY'
           import json, sys, time, urllib.error, urllib.request
 
-          # A cold start pulls the provider image and starts it on first use,
-          # so the first call is slow rather than wrong.
+          # The 2026-07-28 envelope: both `_meta` keys are required, and
+          # `Mcp-Method` (SEP-2243) must agree with the body's method. Getting
+          # either wrong is a 400 rather than a wrong answer.
+          META = {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+          }
           BODY = json.dumps({
-              "jsonrpc": "2.0", "id": 1, "method": "tools/list",
-              "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+              "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {
+                  "name": "hangar_call",
+                  "arguments": {"calls": [{
+                      "mcp_server": "filesystem",
+                      "tool": "list_directory",
+                      "arguments": {"path": "/data"},
+                  }]},
+                  "_meta": META,
+              },
           }).encode()
           HEADERS = {
               "Content-Type": "application/json",
               "Accept": "application/json, text/event-stream",
               "MCP-Protocol-Version": "2026-07-28",
+              "Mcp-Method": "tools/call",
           }
 
           last = ""
-          for attempt in range(12):
+          for _attempt in range(12):
               try:
                   request = urllib.request.Request(
                       "http://localhost:8080/mcp", data=BODY, headers=HEADERS, method="POST"
                   )
-                  with urllib.request.urlopen(request, timeout=30) as response:
+                  with urllib.request.urlopen(request, timeout=60) as response:
                       last = response.read().decode()
-                  # The modern surface may answer as SSE; the JSON is the last
-                  # `data:` line either way.
+              except urllib.error.HTTPError as exc:
+                  # The body carries the reason; the status alone does not.
+                  last = f"HTTP {exc.code}: {exc.read().decode()[:400]}"
+              except (urllib.error.URLError, OSError) as exc:
+                  last = f"{type(exc).__name__}: {exc}"
+              else:
                   payload = last
                   if "data:" in payload:
                       payload = [ln[5:].strip() for ln in payload.splitlines() if ln.startswith("data:")][-1]
-                  tools = (json.loads(payload).get("result") or {}).get("tools") or []
-                  if tools:
-                      print("projected tools:", [t["name"] for t in tools])
+                  answer = json.loads(payload)
+                  result = answer.get("result") or {}
+                  if "error" not in answer and not result.get("isError"):
+                      print("provider answered:", json.dumps(result)[:400])
                       sys.exit(0)
-                  last = payload
-              except (urllib.error.URLError, OSError, ValueError, IndexError) as exc:
-                  last = f"{type(exc).__name__}: {exc}"
+                  last = payload[:400]
+              # A cold start pulls the provider image, so early attempts fail
+              # for a reason that goes away.
               time.sleep(10)
 
-          print(f"::error::the gateway projected no tools; last response: {last[:600]}")
+          print(f"::error::the configured provider never answered; last: {last[:600]}")
           sys.exit(1)
           PY
 

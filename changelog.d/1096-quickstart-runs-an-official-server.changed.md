@@ -13,6 +13,9 @@ compose file now mounts the Docker socket and adds the gateway to its group.
 because this example runs a container provider, and a subprocess or remote
 provider needs none of it.
 
-The `examples-compose` CI job now asks the gateway for `tools/list` and fails
-on an empty projection. Healthy-and-config-loaded was true of the broken
-version too.
+The `examples-compose` CI job now **calls** the provider through
+`hangar_call` and fails if it does not answer -- config, Docker socket,
+container start and tool invocation, end to end. Healthy-and-config-loaded was
+true of the broken version too, and so was `tools/list`: in the default
+topology that returns the gateway's own `hangar_*` API whether or not a single
+provider works.
