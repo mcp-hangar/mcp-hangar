@@ -6,6 +6,7 @@
 [![CI](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14273/badge)](https://www.bestpractices.dev/projects/14273)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mcp-hangar/mcp-hangar/badge)](https://scorecard.dev/viewer/?uri=github.com/mcp-hangar/mcp-hangar)
 
 ## Why
 
