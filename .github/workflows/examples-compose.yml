@@ -73,18 +73,6 @@ jobs:
       - name: Build the image under test
         run: docker build -t "$HANGAR_IMAGE" .
 
-      - name: Prepare the host paths the example mounts
-        run: |
-          set -euo pipefail
-          # The quickstart's provider is given a sandbox directory; compose
-          # would otherwise create it root-owned and the provider could not
-          # write to it.
-          sudo mkdir -p /srv/hangar-quickstart/data
-          sudo chmod 777 /srv/hangar-quickstart/data
-          # The gateway runs unprivileged and reaches the Docker socket through
-          # a supplementary group, whose gid is the host's, not a constant.
-          echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" >> "$GITHUB_ENV"
-
       - name: Bring ${{ matrix.example }} up and wait for healthy
         working-directory: examples/${{ matrix.example }}
         run: |
@@ -93,7 +81,12 @@ jobs:
           # reach healthy. Only the gateway is started: the dashboards and
           # collectors beside it are not what this job is asserting, and pulling
           # them costs minutes.
-          docker compose up --detach --wait --wait-timeout 120 "${{ matrix.service }}"
+          # The quickstart's provider is a service of its own, and the gateway
+          # is useless without it; the other examples still start one service.
+          extra=""
+          [ "${{ matrix.example }}" = "quickstart" ] && extra="everything"
+          # shellcheck disable=SC2086
+          docker compose up --detach --wait --wait-timeout 180 "${{ matrix.service }}" $extra
 
       - name: Assert it is healthy, not merely up
         working-directory: examples/${{ matrix.example }}
@@ -134,9 +127,19 @@ jobs:
       # Health plus a loaded config still says nothing about whether the
       # provider in that config exists. The quickstart declared an image and a
       # module that had never existed and passed both of the checks above
-      # (#1096), so this one asks the gateway for a tool and fails on an empty
-      # projection.
-      - name: Assert the gateway projects a tool from the configured provider
+      # (#1096), so this one CALLS the provider: config -> Docker socket ->
+      # container start -> tool invocation, end to end.
+      #
+      # Three things this assertion got wrong before it worked, all in the
+      # direction of passing when it should fail:
+      #   * `tools/list` -- the default topology answers it with the `hangar_*`
+      #     meta-API, complete whether or not a provider works.
+      #   * `isError` -- a hangar_call whose batch fails returns
+      #     `isError: false` with `"success": false` in the payload, so the
+      #     outer flag says nothing about the call.
+      #   * the envelope -- four headers and two `_meta` keys must agree, and
+      #     each disagreement is a 400 rather than a wrong answer.
+      - name: Assert the configured provider can actually be called
         if: matrix.example == 'quickstart'
         working-directory: examples/${{ matrix.example }}
         run: |
@@ -144,41 +147,71 @@ jobs:
           python3 - <<'PY'
           import json, sys, time, urllib.error, urllib.request
 
-          # A cold start pulls the provider image and starts it on first use,
-          # so the first call is slow rather than wrong.
+          # `mcp.shared.inbound`: `_meta` must carry protocolVersion AND
+          # clientCapabilities; the MCP-Protocol-Version header must equal the
+          # envelope's version; Mcp-Method must equal the body's method; and
+          # for a name-bearing method Mcp-Name must equal `params.name`.
           BODY = json.dumps({
-              "jsonrpc": "2.0", "id": 1, "method": "tools/list",
-              "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+              "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {
+                  "name": "hangar_call",
+                  "arguments": {"calls": [{
+                      "mcp_server": "everything",
+                      "tool": "echo",
+                      "arguments": {"message": "quickstart"},
+                  }]},
+                  "_meta": {
+                      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                      "io.modelcontextprotocol/clientCapabilities": {},
+                  },
+              },
           }).encode()
           HEADERS = {
               "Content-Type": "application/json",
               "Accept": "application/json, text/event-stream",
               "MCP-Protocol-Version": "2026-07-28",
+              "Mcp-Method": "tools/call",
+              "Mcp-Name": "hangar_call",
           }
 
+          def batch_succeeded(result: dict) -> bool:
+              """The batch's own verdict, not the envelope's."""
+              payload = result.get("structuredContent")
+              if payload is None:
+                  blocks = result.get("content") or []
+                  if not blocks:
+                      return False
+                  payload = json.loads(blocks[0]["text"])
+              return bool(payload.get("success"))
+
           last = ""
-          for attempt in range(12):
+          for _attempt in range(12):
               try:
                   request = urllib.request.Request(
                       "http://localhost:8080/mcp", data=BODY, headers=HEADERS, method="POST"
                   )
-                  with urllib.request.urlopen(request, timeout=30) as response:
-                      last = response.read().decode()
-                  # The modern surface may answer as SSE; the JSON is the last
-                  # `data:` line either way.
-                  payload = last
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      raw = response.read().decode()
+              except urllib.error.HTTPError as exc:
+                  # The body carries the reason; the status alone does not.
+                  last = f"HTTP {exc.code}: {exc.read().decode()[:400]}"
+              except (urllib.error.URLError, OSError) as exc:
+                  last = f"{type(exc).__name__}: {exc}"
+              else:
+                  payload = raw
                   if "data:" in payload:
                       payload = [ln[5:].strip() for ln in payload.splitlines() if ln.startswith("data:")][-1]
-                  tools = (json.loads(payload).get("result") or {}).get("tools") or []
-                  if tools:
-                      print("projected tools:", [t["name"] for t in tools])
+                  answer = json.loads(payload)
+                  result = answer.get("result") or {}
+                  if "error" not in answer and not result.get("isError") and batch_succeeded(result):
+                      print("provider answered:", json.dumps(result)[:400])
                       sys.exit(0)
-                  last = payload
-              except (urllib.error.URLError, OSError, ValueError, IndexError) as exc:
-                  last = f"{type(exc).__name__}: {exc}"
+                  last = payload[:400]
+              # A cold start pulls the provider image, so early attempts fail
+              # for a reason that goes away.
               time.sleep(10)
 
-          print(f"::error::the gateway projected no tools; last response: {last[:600]}")
+          print(f"::error::the configured provider never answered; last: {last[:600]}")
           sys.exit(1)
           PY
 

@@ -3,24 +3,25 @@ logging:
   json_format: true
 
 mcp_servers:
-  # The official filesystem server from modelcontextprotocol/servers, as the
-  # image Docker publishes for it. Nothing to build, no credentials, no
-  # account: `docker compose up` and it is there.
+  # The official "everything" server from modelcontextprotocol/servers, as the
+  # image Docker publishes for it, run beside the gateway by the compose file.
   #
-  # This example used to declare `image: my-org/openai-mcp:latest` running
-  # `python -m openai_mcp_server` -- an image and a module that do not exist.
-  # It is the example the README points at, and `examples/**` has no CI that
-  # would have noticed.
-  filesystem:
-    mode: container
-    image: docker.io/mcp/filesystem:latest
-    # The server sandboxes itself to the directories it is given. `/data` is
-    # the only writable path, and it is a volume rather than the container's
-    # root filesystem.
-    command: ["/data"]
-    volumes:
-      - "/srv/hangar-quickstart/data:/data:rw"
-    network: none
+  # `mode: remote` rather than `mode: container`: container mode shells out to
+  # a podman or docker CLI on the host running Hangar, and the published
+  # Hangar image has neither -- it says so when you try
+  # ("No container runtime (podman or docker) found on PATH"). Mounting the
+  # Docker socket does not help, because the socket is not what it uses.
+  #
+  # This is also why the server is `everything` and not `filesystem`: of the
+  # official servers, it is the one that speaks streamable HTTP
+  # (`node dist/index.js streamableHttp`). The rest are stdio-only, which a
+  # gateway in its own container cannot attach to without a bridge.
+  #
+  # The example used to declare `image: my-org/openai-mcp:latest` running
+  # `python -m openai_mcp_server` -- neither of which exists.
+  everything:
+    mode: remote
+    endpoint: http://everything:3001/mcp
     idle_ttl_s: 300
 
     # Capability declaration: what this provider needs, which the operator
@@ -29,22 +30,21 @@ mcp_servers:
     # a different one.
     capabilities:
       network:
-        # A filesystem server has nobody to talk to. `network: none` above is
-        # the runtime half of the same statement.
-        egress: []
-        dns_allowed: false
+        egress:
+          - host: everything
+            port: 3001
+            protocol: http
+        dns_allowed: true
       filesystem:
-        read_paths:
-          - /data
-        write_paths:
-          - /data
-        temp_allowed: true
+        read_paths: []
+        write_paths: []
+        temp_allowed: false
       environment:
         required: []
         optional:
           - LOG_LEVEL
       tools:
-        max_count: 20
+        max_count: 30
         schema_drift_alert: true
       resources:
         max_memory_mb: 256
