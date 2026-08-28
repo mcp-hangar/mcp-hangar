@@ -234,3 +234,111 @@ class TestProxyHandlers:
     def test_egress_mode_registers_nothing(self) -> None:
         low = _register(resolver_mode="egress")
         assert low.handlers == {}
+
+
+class TestPromptArgumentCompletions:
+    """`completion/complete` for a `ref/prompt` (#1026, part 3 of the #889 split)."""
+
+    def _params(self, ref_type: str = "ref/prompt", name: str = "greet"):
+        from mcp_types import CompleteRequestParams
+
+        return CompleteRequestParams.model_validate(
+            {"ref": {"type": ref_type, "name": name}, "argument": {"name": "who", "value": "b"}}
+        )
+
+    def test_the_owning_upstream_is_resolved_from_the_prompt_map(self) -> None:
+        with patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}) as build:
+            assert pp._completion_target("tenant:a", self._params().ref) == "server_a"
+
+        build.assert_called_once_with("tenant:a")
+
+    def test_a_prompt_this_tenant_cannot_see_has_no_target(self) -> None:
+        with patch.object(pp, "_build_prompt_map", return_value={}):
+            assert pp._completion_target("tenant:b", self._params().ref) is None
+
+    def test_a_resource_reference_is_not_served_here(self) -> None:
+        """A projected `hangar://` URI is a gateway name no upstream would know."""
+        from mcp_types import ResourceTemplateReference
+
+        with patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}):
+            ref = ResourceTemplateReference(uri="hangar://server_a/demo://blob/{id}")
+            assert pp._completion_target("tenant:a", ref) is None
+
+    def test_the_callers_meta_is_not_forwarded_upstream(self) -> None:
+        from mcp_types import CompleteRequestParams
+
+        params = CompleteRequestParams.model_validate(
+            {
+                "ref": {"type": "ref/prompt", "name": "greet"},
+                "argument": {"name": "who", "value": "b"},
+                "_meta": {"progressToken": "caller-token"},
+            }
+        )
+
+        assert pp._completion_params(params) == {
+            "ref": {"type": "ref/prompt", "name": "greet"},
+            "argument": {"name": "who", "value": "b"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_completions_relay_to_the_owning_upstream(self) -> None:
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with (
+                patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}),
+                patch.object(
+                    pp, "_relay", return_value={"result": {"completion": {"values": ["bob"], "total": 1}}}
+                ) as relay,
+            ):
+                result = await low.handlers["completion/complete"](None, self._params())
+        finally:
+            identity_context_var.reset(token)
+
+        assert relay.call_args[0][0] == "server_a"
+        assert relay.call_args[0][1] == "completion/complete"
+        assert result.completion.values == ["bob"]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_prompt_answers_the_same_as_one_that_is_not_yours(self) -> None:
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            from mcp_types import CompleteRequestParams
+
+            resource_ref = CompleteRequestParams.model_validate(
+                {
+                    "ref": {"type": "ref/resource", "uri": "hangar://server_a/demo://blob/{id}"},
+                    "argument": {"name": "id", "value": "1"},
+                }
+            )
+            with patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}):
+                with pytest.raises(Exception) as unknown:
+                    await low.handlers["completion/complete"](None, self._params(name="nope"))
+                with pytest.raises(Exception) as not_a_prompt:
+                    await low.handlers["completion/complete"](None, resource_ref)
+        finally:
+            identity_context_var.reset(token)
+
+        assert str(unknown.value) == str(not_a_prompt.value)
+
+    @pytest.mark.asyncio
+    async def test_an_upstream_without_completions_answers_an_empty_completion(self) -> None:
+        """The prompt exists; only its completions do not."""
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with (
+                patch.object(pp, "_build_prompt_map", return_value={"greet": ("server_a", _GREET)}),
+                patch.object(pp, "_relay", return_value={"error": {"code": -32601, "message": "Method not found"}}),
+            ):
+                result = await low.handlers["completion/complete"](None, self._params())
+        finally:
+            identity_context_var.reset(token)
+
+        assert result.completion.values == []
+
+    def test_nothing_is_registered_outside_front_door(self) -> None:
+        low = _register(resolver_mode="registry")
+
+        assert low.handlers == {}
