@@ -1,4 +1,17 @@
-"""Simple math provider for testing the MCP registry."""
+"""Simple math provider for testing the MCP registry.
+
+A live-suite stub, not a demo. `tests/live/conftest.py`, `test_t0_digest.py`
+and `test_t2_auth.py` launch this file as a subprocess, so it belongs with
+`tests/mock_provider.py` rather than with the examples that show a reader how
+to point Hangar at something real.
+
+Deliberately NOT replaced by an official server from
+`modelcontextprotocol/servers` (#1097): a test fixture wants to be small,
+offline, deterministic and controllable from the test. `server-everything`
+would add a network fetch and a surface nobody here controls, in exchange for
+realism the live suite does not need -- the same reasoning that keeps
+`mock_provider.py`.
+"""
 
 import os
 
