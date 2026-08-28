@@ -5,6 +5,146 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.14.1...v2.15.0) (2026-08-28)
+
+### Added
+
+- **core:** `front_door` serves `subscriptions/listen`, so a client can be told
+  when an upstream resource changes. A stream's honored `resourceSubscriptions`
+  are filtered to the projected `hangar://` URIs its tenant can read, the owning
+  upstream is subscribed once however many streams ask, and an upstream
+  `notifications/resources/updated` is delivered to exactly those streams under
+  the projected URI. The three `*/list_changed` nudges ride the same stream.
+
+  This also makes an existing advertisement true rather than aspirational: on the
+  2026-07-28 wire the SDK derives `resources.subscribe` **and** all three
+  `listChanged` flags from whether `subscriptions/listen` is served, and
+  `MCPServer` registers a handler for it unconditionally -- so every deployment
+  advertised subscriptions that nothing published. Outside `front_door` mode that
+  handler is now withdrawn and the flags read `false`.
+
+  Note for clients: the legacy `resources/subscribe` is not the surface here. At
+  2026-07-28 a server has no standing channel to push an update on, so a
+  subscription taken that way could never fire; `subscriptions/listen` is the
+  wire that carries it. An upstream still has to offer the server->client stream
+  for updates to arrive at all. ([#1075](https://github.com/mcp-hangar/mcp-hangar/pull/1075))
+- **core:** `front_door` answers `completion/complete` for a `ref/prompt`,
+  forwarding to the upstream that owns the prompt through the same flat-name map
+  `prompts/get` uses. The `completions` capability is advertised for the first
+  time as a result: nothing registered a handler before, so the gateway answered
+  method-not-found while upstreams (the official reference server among them) had
+  argument completions to offer.
+
+  An unknown prompt, one this tenant may not see, and a `ref/resource` reference
+  all answer the same generic error, so the reply cannot be used to test whether
+  a prompt exists for somebody else. `ref/resource` completion stays unserved: a
+  projected `hangar://` URI is a gateway name no upstream would recognise. ([#1076](https://github.com/mcp-hangar/mcp-hangar/pull/1076))
+
+### Changed
+
+- **core:** `examples/quickstart` runs a provider that exists. Its `config.yaml`
+  declared `image: my-org/openai-mcp:latest` running `python -m
+  openai_mcp_server` -- an image and a module that have never existed -- so the
+  example the README points at could not work, and `examples/**` had no CI that
+  would notice. It now runs the official **everything** server as a second compose service --
+  from its npm package on a stock node image -- reached with `mode: remote`, with
+  the capability block rewritten to describe that provider rather than the
+  fictional one.
+
+  Two constraints decided that shape, and both are worth knowing before writing
+  a config of your own. `mode: container` cannot work from inside the published
+  Hangar image: container mode shells out to a `podman` or `docker` CLI on the
+  host running Hangar, and the image has neither -- mounting the Docker socket
+  does not help, because the socket is not what it uses. And `everything` is the
+  only official server that speaks HTTP; the rest are stdio-only, which a gateway
+  in its own container cannot attach to without a bridge beside it.
+
+  The package rather than the `mcp/everything` image: that image was last rebuilt
+  in 2025 and its build ignores the transport argument, coming up on stdio. The
+  npm packages are released continuously, which is why the docs recommend
+  `npx -y @modelcontextprotocol/server-*` for anything that does not have to be
+  an image.
+
+  The `examples-compose` CI job now **calls** the provider through
+  `hangar_call` and fails if it does not answer -- config, Docker socket,
+  container start and tool invocation, end to end. Healthy-and-config-loaded was
+  true of the broken version too, and so was `tools/list`: in the default
+  topology that returns the gateway's own `hangar_*` API whether or not a single
+  provider works. ([#1120](https://github.com/mcp-hangar/mcp-hangar/pull/1120))
+
+### Removed
+
+- **core:** the five `docker/Dockerfile.*` demo images are gone, and
+  `scripts/containers.sh` now runs the official images from
+  `modelcontextprotocol/servers` (`mcp/filesystem`, `mcp/memory`, `mcp/fetch` on
+  Docker Hub) instead of `localhost/mcp-*:latest`.
+
+  Nothing in this repository built those images -- not the Makefile, not CI, not
+  a script -- and every `podman run` in the pool script redirected stderr to
+  `/dev/null`, so a missing image failed silently. The script had never worked on
+  a fresh checkout and said so to nobody. Two of the five repackaged an official
+  npm package; `fetch` repackaged a third-party fork rather than the official
+  `mcp-server-fetch`; `sqlite` repackaged a third-party npm whose upstream is
+  archived, and has no maintained official replacement, so it is dropped from the
+  pool rather than kept unmarked.
+
+  `examples/discovery/docker-compose.yml` is fixed in the same pass: it named
+  `ghcr.io/modelcontextprotocol/server-fetch:latest` and `-server-memory:latest`,
+  which do not exist, and declared `mode: http` with a port for servers that
+  speak stdio. It now uses the same official images with `mode: container`.
+
+  **If you built these images by hand**, `docs/guides/CONTAINERS.md` has the
+  replacement commands. For anything driven as a subprocess prefer
+  `npx -y @modelcontextprotocol/server-*` or `uvx mcp-server-*`: those packages
+  are current, while the published container images were last rebuilt in 2025. ([#1119](https://github.com/mcp-hangar/mcp-hangar/pull/1119))
+
+### Fixed
+
+- **core:** merging two tool-access scopes could widen access. A tool denied at
+  the broader scope came back **allowed** as soon as a narrower scope declared an
+  allow list -- for example a server-level `allow: ["*"], deny: ["drop_*"]`
+  merged with a group-level `allow: ["*"]` allowed `drop_db`.
+
+  `merge()` dispatched on which lists were populated, and each branch rebuilt a
+  piece of the deny > approval > allow > default ladder out of the lists its own
+  condition named, dropping the rest. The "both sides have an allow_list" branch
+  consulted neither `deny_list`; the two mirrored branches each dropped one side's
+  `deny_list`. This broke the invariant `merge` documents about itself --
+  `merged.filter_tools(tools) == narrower.filter_tools(broader.filter_tools(tools))`.
+
+  Merging now composes the two policies' own `is_tool_allowed` answers, so the
+  precedence ladder exists in one place and a merge can only ever remove tools.
+
+  **Check your effective policy after upgrading.** A merged policy that has been
+  silently wider than intended will narrow to what it always said it was, and a
+  tool that has been callable may stop being callable -- which is the correct
+  behaviour, and may still be a surprise. `hangar tools list` for the affected
+  identity shows the effective set. ([#1107](https://github.com/mcp-hangar/mcp-hangar/pull/1107))
+- **core:** a tool call whose arguments could not be serialized ended in a stack
+  trace instead of a verdict. `_serialize_arguments` caught `TypeError` and
+  `ValueError` and promised `None` "so the caller can fail closed rather than
+  crash", but JSON nesting the encoder cannot walk raises `RecursionError`, which
+  is neither. The depth that triggers it is an interpreter detail rather than a
+  constant: 992 levels on CPython 3.11 -- this project's baseline, so roughly
+  7 KB of payload, far under any `maxPayloadBytes` an operator would set -- and
+  9 997 on 3.12, 34 710 on 3.14. `maxPayloadBytes` could not have
+  helped either way: the size check reads the string the serializer returns, so
+  the guard sat behind the thing that broke. The exception propagated out of
+  `evaluate()` and out of `McpServer._enforce_l7_policy`, which called it with no
+  `try`.
+
+  In Enforce the call was refused, but by accident of ordering rather than by
+  decision: no `EgressPolicyDeniedError`, no observation, no audit entry -- the
+  call died unattributed. In **Audit** the exception aborted the call before
+  dispatch, so a policy switched on in the mode ADR-013 documents as the safe
+  adoption path was a hard block instead of an observation.
+
+  `evaluate()` is now total: argument inspection that fails for any reason
+  produces a DENY carrying a reason, which Enforce raises on and Audit records
+  and lets through. The failure is logged with the underlying error. The same fix
+  covers `default=str`, which invokes an arbitrary `__str__` and can raise
+  anything. ([#1105](https://github.com/mcp-hangar/mcp-hangar/pull/1105))
+
 ## [2.14.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.14.0...v2.14.1) (2026-08-24)
 
 ### Fixed
