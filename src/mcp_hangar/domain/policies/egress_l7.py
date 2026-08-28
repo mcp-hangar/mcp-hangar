@@ -28,11 +28,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
 import json
+import logging
 import re
 from typing import Any
 
 from ..._sdk_compat import is_modern_protocol_version
 from ...redactor import OutputRedactor
+
+logger = logging.getLogger(__name__)
 
 
 class ToolAction(StrEnum):
@@ -369,15 +372,35 @@ def _serialize_arguments(arguments: Any) -> str | None:
 
     A string is used as-is; anything else is JSON-serialized deterministically
     (sorted keys), with non-JSON values coerced via ``str``. Returns None if the
-    payload cannot be serialized at all (e.g. a circular reference) so the caller
-    can fail closed rather than crash -- tool arguments arrive as decoded JSON in
-    practice, so this only guards against pathological internal callers.
+    payload cannot be serialized at all, so the caller can fail closed rather
+    than crash.
+
+    Caught by class rather than by name, which the earlier
+    ``except (TypeError, ValueError)`` did not do. Two things it missed, both
+    reachable from a tool call:
+
+    * ``RecursionError`` from nesting the encoder cannot walk. About 992 levels
+      does it -- roughly 7 KB of JSON, so ``maxPayloadBytes`` is no defence:
+      the size check runs on the string this function returns, i.e. behind the
+      thing that breaks.
+    * anything ``default=str`` raises. That calls an arbitrary ``__str__``,
+      which is somebody else's code.
+
+    A serialization failure is not silent: the reason goes to the log, while the
+    caller's verdict stays the deliberately unspecific "could not be serialized"
+    -- what an operator needs in an audit record is that the call was refused
+    uninspected, and the encoder's own message belongs in the log beside it.
     """
     if isinstance(arguments, str):
         return arguments
     try:
         return json.dumps(arguments, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
-    except (TypeError, ValueError):
+    except Exception as exc:  # noqa: BLE001 -- a policy decision must not depend on the encoder
+        logger.warning(
+            "argument_serialization_failed error=%s: %s -- the call is refused uninspected",
+            type(exc).__name__,
+            exc,
+        )
         return None
 
 
@@ -448,7 +471,20 @@ def evaluate(
         reasons = [reason]
 
     if action is not ToolAction.DENY:
-        violations = scan_arguments(arguments, policy.arguments)
+        try:
+            violations = scan_arguments(arguments, policy.arguments)
+        except Exception as exc:  # noqa: BLE001 -- see below
+            # This function is total by contract. A tool call that cannot be
+            # inspected must end in a verdict the caller can act on, because
+            # an exception here is not fail-closed: it aborts the call before
+            # dispatch in EVERY mode, which silently turns Audit into a hard
+            # block (ADR-013 promises Audit observes and lets the call
+            # through), and in Enforce produces no `EgressPolicyDeniedError`,
+            # no `EgressPolicyViolationObserved` and no audit entry -- the call
+            # dies unattributed. Denying here keeps Enforce blocking with a
+            # reason, and lets Audit record and proceed.
+            logger.exception("argument_inspection_failed error=%s", type(exc).__name__)
+            violations = ["arguments could not be inspected for policy violations"]
         if violations:
             action = ToolAction.DENY
             reasons.extend(violations)
