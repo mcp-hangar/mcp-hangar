@@ -5,11 +5,11 @@
 # one fuzzes what the pull request CHANGED, which is where a new defect is, and
 # reports a crash as a build failure with the input attached.
 #
-# Corpus persistence is NOT wired: CFL carries a corpus between runs through a
-# separate `storage-repo`, which does not exist yet. Without it each run still
-# starts cold, so this catches what a few minutes of fuzzing near the diff can
-# reach -- more than the smoke job, less than a campaign. Creating that repo is
-# the remaining half of this feature.
+# The corpus comes from `cfl-batch.yml` beside this, which runs nightly and
+# uploads `cifuzz-corpus-<target>` artifacts that this job downloads. A
+# storage repo is NOT needed for that -- CFL's default filestore is GitHub
+# Actions artifacts, which the first run of this workflow demonstrated by
+# looking for exactly those names and not finding them.
 name: cfl
 
 on:
