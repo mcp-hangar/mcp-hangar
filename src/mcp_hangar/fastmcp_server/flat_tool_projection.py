@@ -69,7 +69,7 @@ from mcp_hangar._sdk_compat import (
 
 from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
-from ..context import get_identity_context
+from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
@@ -551,6 +551,22 @@ def _memoise_flat_map(mcp_ctx: Any, tenant_id: str | None, flat_map: dict[str, t
         setattr(state, _MEMO_ATTR, (tenant_id, flat_map))
 
 
+def _mark_param_validation_skipped(mcp_ctx: Any) -> None:
+    """Record on this POST that the SDK will dispatch without checking headers.
+
+    The listing this failed in is the SDK's pre-dispatch schema lookup: it
+    catches, skips validation and dispatches anyway (fail-open by design). An
+    L7 header selector must not then match a header nobody compared against the
+    body, so the skip has to reach the evaluator -- and the carrier is
+    ``request.state``, not a contextvar, because ``bind_routing_headers``
+    rebuilds its mapping from the raw request headers rather than merging into
+    it (ADR-025). Same per-POST channel as the projection memo above.
+    """
+    state = getattr(_http_request(mcp_ctx), "state", None)
+    if state is not None:
+        setattr(state, PARAM_VALIDATION_STATE_ATTR, True)
+
+
 async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListToolsResult:
     """Build this caller's projection, count it only if the client asked for it."""
     identity = get_identity_context()
@@ -560,9 +576,10 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
         flat_map = _build_flat_map(tenant_id)
         governed = _build_mcp_tool_list(flat_map)
         management = await load_management(mcp_ctx)
-    except Exception:  # noqa: BLE001 -- the SDK fail-opens on a failed listing; count, then re-raise
+    except Exception:  # noqa: BLE001 -- the SDK fail-opens on a failed listing; count, mark, then re-raise
         if _envelope(mcp_ctx).get("method") == "tools/call" and _call_carries_param_check(mcp_ctx):
             prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="listing_failed")
+            _mark_param_validation_skipped(mcp_ctx)
         raise
 
     # The SDK's pre-dispatch tools/list on a tools/call (#1049) is not a listing
