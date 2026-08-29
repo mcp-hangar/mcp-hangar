@@ -294,15 +294,18 @@ class EgressPolicyDeniedError(ToolError):
     ``details`` for the audit trail.
     """
 
-    def __init__(self, mcp_server_id: str, tool_name: str, reason: str):
+    def __init__(self, mcp_server_id: str, tool_name: str, reason: str, policy_id: str | None = None):
         super().__init__(
             message="Tool call denied by egress policy",
             mcp_server_id=mcp_server_id,
             operation="invoke",
-            details={"tool_name": tool_name, "reason": reason},
+            details={"tool_name": tool_name, "reason": reason, "policy_id": policy_id},
         )
         self.tool_name = tool_name
         self.reason = reason
+        #: Content hash of the policy that produced this verdict (#1129), so an
+        #: audit record says which policy denied and not only that one did.
+        self.policy_id = policy_id
 
 
 class EgressPolicyApprovalRequiredError(ToolError):
@@ -314,14 +317,16 @@ class EgressPolicyApprovalRequiredError(ToolError):
     fail-closed default.
     """
 
-    def __init__(self, mcp_server_id: str, tool_name: str):
+    def __init__(self, mcp_server_id: str, tool_name: str, policy_id: str | None = None):
         super().__init__(
             message="Tool call requires approval",
             mcp_server_id=mcp_server_id,
             operation="invoke",
-            details={"tool_name": tool_name, "reason": "require_approval"},
+            details={"tool_name": tool_name, "reason": "require_approval", "policy_id": policy_id},
         )
         self.tool_name = tool_name
+        #: Content hash of the policy that routed this call to approval (#1129).
+        self.policy_id = policy_id
 
 
 # --- Client/Communication Exceptions ---

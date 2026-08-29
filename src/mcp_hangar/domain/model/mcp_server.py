@@ -1291,6 +1291,10 @@ class McpServer(AggregateRoot):
                             reasons=list(decision.reasons),
                             correlation_id=correlation_id,
                             identity_context=identity_context_dict,
+                            # Which policy said so (#1129). Without it, telling
+                            # two records apart across a policy change means
+                            # joining by timestamp against EgressPolicySet.
+                            policy_id=decision.policy_id,
                         )
                     )
                     logger.warning(
@@ -1299,10 +1303,13 @@ class McpServer(AggregateRoot):
                         tool_name=tool_name,
                         would_be_action=decision.action.value,
                         reasons=list(decision.reasons),
+                        policy_id=decision.policy_id,
                     )
                     # Audit mode: fall through and proceed with the call.
                 elif decision.action is ToolAction.DENY:
-                    raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
+                    raise EgressPolicyDeniedError(
+                        self.mcp_server_id, tool_name, "; ".join(decision.reasons), policy_id=decision.policy_id
+                    )
                 elif l7_approval_id is not None:  # REQUIRE_APPROVAL, granted upstream
                     # The approval gate asked a human, got a yes, and
                     # revalidated it at dispatch (#921). The id carries no
@@ -1316,7 +1323,7 @@ class McpServer(AggregateRoot):
                         approval_id=l7_approval_id,
                     )
                 else:  # ToolAction.REQUIRE_APPROVAL, nobody asked or nobody answered
-                    raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
+                    raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name, policy_id=decision.policy_id)
 
     def invoke_tool(  # noqa: C901 -- baseline CC=18 after the L7 split (#921); split further before extending
         self,

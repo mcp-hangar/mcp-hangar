@@ -322,6 +322,7 @@ class SetL7PolicyHandler(CommandHandler):
                     require_approval_rules=len(policy.tools.require_approval),
                     secret_pattern_groups=list(policy.arguments.secret_patterns),
                     max_payload_bytes=policy.arguments.max_payload_bytes,
+                    policy_id=policy.policy_id,
                 )
             )
 
@@ -330,6 +331,7 @@ class SetL7PolicyHandler(CommandHandler):
             mcp_server_id=command.mcp_server_id,
             cleared=command.policy is None,
             source=command.source,
+            policy_id=None if command.policy is None else command.policy.policy_id,
         )
         return {"mcp_server_id": command.mcp_server_id, "l7_policy_set": command.policy is not None}
 

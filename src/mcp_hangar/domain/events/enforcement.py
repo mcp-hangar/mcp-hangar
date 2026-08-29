@@ -71,6 +71,10 @@ class EgressPolicyViolationObserved(DomainEvent):
         reasons: Human-readable reasons for the verdict (audit-friendly).
         correlation_id: Correlation id of the observed invocation, if any.
         identity_context: Caller identity context (tenant/subject), if any.
+        policy_id: Content hash of the policy that produced the verdict
+            (``L7Policy.policy_id``), so a record says *which* policy would have
+            blocked and not only that one would (#1129). ``None`` on a verdict
+            produced before this field existed.
         schema_version: Event schema version.
     """
 
@@ -80,6 +84,7 @@ class EgressPolicyViolationObserved(DomainEvent):
     reasons: list[str] = field(default_factory=list)
     correlation_id: str | None = None
     identity_context: dict[str, Any] | None = None
+    policy_id: str | None = None
     schema_version: int = 1
 
     def __post_init__(self):
@@ -117,6 +122,10 @@ class EgressPolicySet(DomainEvent):
         require_approval_rules: Number of globs gated on human approval.
         secret_pattern_groups: Secret-detection groups the policy activates.
         max_payload_bytes: Argument payload ceiling, if any.
+        policy_id: Content hash of the policy now in force
+            (``L7Policy.policy_id``). The same id the verdicts carry, so "which
+            policy decided this call" and "when did that policy change" join on
+            a value rather than on adjacent timestamps (#1129).
         schema_version: Event schema version.
     """
 
@@ -129,6 +138,7 @@ class EgressPolicySet(DomainEvent):
     require_approval_rules: int = 0
     secret_pattern_groups: list[str] = field(default_factory=list)
     max_payload_bytes: int | None = None
+    policy_id: str | None = None
     schema_version: int = 1
 
 

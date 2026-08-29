@@ -27,6 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
+import hashlib
 import json
 import logging
 import re
@@ -211,6 +212,35 @@ class L7Policy:
     default_action: ToolAction = ToolAction.DENY
     mode: PolicyMode = PolicyMode.ENFORCE
 
+    #: This policy's identity, for the verdicts it produces (#1129). A content
+    #: hash over the compiled wire form: ``sha256:`` plus the first 16 hex
+    #: digits.
+    #:
+    #: Derived rather than assigned because the two sources have nothing in
+    #: common to assign from. An operator-compiled policy has a Kubernetes
+    #: ``resourceVersion`` upstream; a policy from ``config.yaml`` or the REST
+    #: channel has no identity at all, and a verdict that names its policy on
+    #: one path and not the other is not a record an auditor can use. A hash of
+    #: what the policy actually says works for every source and is stable across
+    #: restarts and replicas, which a resourceVersion is not.
+    #:
+    #: It covers ``mode`` as well as the rules, so flipping Audit to Enforce
+    #: yields a different id. That is deliberate: the mode is part of what the
+    #: policy says, and two verdicts taken either side of that flip should not
+    #: claim to come from the same policy.
+    #:
+    #: Excluded from equality and ``repr``: it is a function of the other
+    #: fields, so comparing it would be comparing them twice, and it must not
+    #: disturb the ``from_dict(p.to_wire()) == p`` round-trip.
+    policy_id: str = field(init=False, compare=False, repr=False, default="")
+
+    def __post_init__(self) -> None:
+        # Computed once, here, rather than per call: `evaluate` runs on every
+        # tool invocation and this walks the whole rule set.
+        wire = json.dumps(self.to_wire(), sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(wire.encode("utf-8")).hexdigest()[:16]
+        object.__setattr__(self, "policy_id", f"sha256:{digest}")
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> L7Policy:
         """Parse the wire form the operator compiles from an MCPEgressPolicy.
@@ -321,10 +351,17 @@ class L7Policy:
 
 @dataclass(frozen=True)
 class Decision:
-    """The evaluated outcome, with human-readable reasons (audit-friendly)."""
+    """The evaluated outcome, with human-readable reasons (audit-friendly).
+
+    ``policy_id`` names the policy that produced it (#1129), so two records
+    taken from different days can be told apart when the policy changed in
+    between -- without joining by timestamp against the ``EgressPolicySet``
+    stream, which is a reconstruction rather than a record.
+    """
 
     action: ToolAction
     reasons: tuple[str, ...] = ()
+    policy_id: str | None = None
 
 
 def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) -> tuple[ToolAction, str]:
@@ -520,4 +557,4 @@ def evaluate(
             action = ToolAction.DENY
             reasons.extend(violations)
 
-    return Decision(action=action, reasons=tuple(reasons))
+    return Decision(action=action, reasons=tuple(reasons), policy_id=policy.policy_id)
