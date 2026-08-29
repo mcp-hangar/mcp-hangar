@@ -87,12 +87,18 @@ class RouteRule:
 def _rule(template: str, methods: str | None, permission: tuple[str, str] | None) -> RouteRule:
     """Compile a path template into a rule.
 
-    ``{name}`` matches a single path segment. ``**`` matches the rest of the
-    path (used for the ``/auth`` subtree, which is uniformly admin-only).
+    ``{name}`` matches a single path segment; ``{name:path}`` matches across
+    segments, the Starlette ``path`` converter (a resource uri carries slashes,
+    #1141). ``**`` matches the rest of the path (used for the ``/auth``
+    subtree, which is uniformly admin-only).
     """
     escaped = re.escape(template)
     escaped = escaped.replace(r"\{", "{").replace(r"\}", "}")
-    regex = re.sub(r"\{[a-zA-Z_][a-zA-Z_0-9]*\}", r"[^/]+", escaped)
+    regex = re.sub(
+        r"\{[a-zA-Z_][a-zA-Z_0-9]*(:path)?\}",
+        lambda m: ".+" if m.group(1) else "[^/]+",
+        escaped,
+    )
     regex = regex.replace(r"/\*\*", "(?:/.*)?")
     method_set = frozenset(m.strip().upper() for m in methods.split(",")) if methods else None
     return RouteRule(
@@ -155,8 +161,9 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     _rule("/config", "GET", ("config", "read")),
     # --- Tools -------------------------------------------------------------
     _rule("/tools", "GET", ("tool", "list")),
-    _rule("/admin/tools/{server}/{tool}/withdraw", "POST", ("mcp_servers", "lifecycle")),
-    _rule("/admin/tools/{server}/{tool}/restore", "POST", ("mcp_servers", "lifecycle")),
+    # `{tool:path}`: a resource is withdrawn by its upstream uri, slashes and all.
+    _rule("/admin/tools/{server}/{tool:path}/withdraw", "POST", ("mcp_servers", "lifecycle")),
+    _rule("/admin/tools/{server}/{tool:path}/restore", "POST", ("mcp_servers", "lifecycle")),
     # --- WebSocket ---------------------------------------------------------
     # /ws/events streams EVERY domain event -- auth, quota, tenancy, tool
     # arguments -- so it is an audit-grade read, not a dashboard read.
