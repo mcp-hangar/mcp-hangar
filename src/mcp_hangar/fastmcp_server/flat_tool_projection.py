@@ -73,6 +73,7 @@ from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
+from ..tasks_wire import HEADER_MISMATCH
 from .resource_link_read_through import project_result_uris
 
 logger = logging.getLogger(__name__)
@@ -567,6 +568,29 @@ def _mark_param_validation_skipped(mcp_ctx: Any) -> None:
         setattr(state, PARAM_VALIDATION_STATE_ATTR, True)
 
 
+def _param_validation_skipped(mcp_ctx: Any) -> bool:
+    """Whether this POST's ``Mcp-Param-*`` headers reached dispatch unchecked."""
+    return bool(getattr(getattr(_http_request(mcp_ctx), "state", None), PARAM_VALIDATION_STATE_ATTR, False))
+
+
+#: Whether a call whose ``Mcp-Param-*`` headers could not be validated is
+#: refused rather than served (``headers.param_validation.required``, ADR-025
+#: Decision 2). Off by default and read once at config load, like
+#: ``tool_access.mode``: the front door is built from the config file at boot.
+_param_validation_required = False
+
+
+def set_param_validation_required(required: bool) -> None:
+    """Apply ``headers.param_validation.required`` from the config file."""
+    global _param_validation_required
+    _param_validation_required = required
+
+
+def param_validation_required() -> bool:
+    """Whether an unvalidated ``Mcp-Param-*`` call is refused instead of served."""
+    return _param_validation_required
+
+
 async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListToolsResult:
     """Build this caller's projection, count it only if the client asked for it."""
     identity = get_identity_context()
@@ -786,6 +810,27 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
         _observe_legacy_param_skip(mcp_ctx)
+
+        # The opt-in half of ADR-025: refuse a call whose Mcp-Param-* headers
+        # nobody could check, rather than serving it unvalidated. The mark is
+        # only ever set when a check was owed (arguments or Mcp-Param-* headers
+        # present) and the pre-dispatch listing raised -- `tool_not_listed` is
+        # already a -32601 below, and a handshake-era request is an era rather
+        # than a failure. Default off: this converts an upstream availability
+        # problem into a client-visible refusal, which only an operator who
+        # cannot serve an unvalidated header should choose.
+        if _param_validation_required and _param_validation_skipped(mcp_ctx):
+            # HEADER_MISMATCH is a slight overstatement -- we do not know the
+            # header disagrees with the body, only that nobody could check --
+            # and it is still the right code: a third code for one class
+            # ("your headers are not trustworthy here") is worse for a client
+            # than one code with an accurate message. The wire shape differs
+            # from the SDK's own refusal, which is a pre-dispatch HTTP 400;
+            # this one is a JSON-RPC error out of the handler.
+            raise make_mcp_error(
+                HEADER_MISMATCH,
+                f"Tool '{name}': the request's Mcp-Param-* headers could not be validated against its body",
+            )
 
         # Re-build flat map for this request's tenant (handles TOCTOU at the
         # map level; enforcement below also re-checks independently). Reuse
