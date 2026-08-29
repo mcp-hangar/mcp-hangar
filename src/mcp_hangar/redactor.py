@@ -138,6 +138,17 @@ class OutputRedactor:
             pattern=re.compile(r"pypi-[a-zA-Z0-9_-]{100,}"),
             name="pypi_token",
         ),
+        RedactionPattern(
+            # A URL carrying credentials in its userinfo: `postgres://user:pw@host/db`,
+            # `https://x-access-token:ghp_...@github.com/...`, `amqp://`, `mongodb://`.
+            # Only the userinfo is replaced -- the scheme and host stay readable,
+            # because a reader of a redacted record still needs to know which
+            # host was being reached. Documented as covered by the approval
+            # sanitizer since it was written, and absent until now (#1130).
+            pattern=re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^\s/:@]+:[^\s/@]+@"),
+            name="url_credentials",
+            replacement=r"\1[REDACTED:url_credentials]@",
+        ),
     ]
 
     LONG_SECRET_PATTERN = re.compile(r"[a-zA-Z0-9_\-]{32,}")

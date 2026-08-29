@@ -57,6 +57,27 @@ SHARED_POLL_INTERVAL_S = 2.0
 _publish_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="approval-publish")
 
 
+#: Key-name substrings whose value is never shown, wherever the key appears.
+_SENSITIVE_KEY_PARTS = ("password", "token", "secret", "key", "auth", "credential")
+
+#: How deep the walk goes before it stops trying. One deeper than the log
+#: pipeline's cap, because the top-level mapping counts as a level here.
+_MAX_SCRUB_DEPTH = 6
+
+#: What replaces a value the walk will not descend into. A marker rather than
+#: the value, because this projection is persisted and served: dropping what it
+#: cannot inspect is the fail-closed direction, and the log pipeline's choice to
+#: pass it through does not transfer to a record under an ``approval:read``
+#: grant.
+_TOO_DEEP = "[REDACTED:depth-limit]"
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    """Whether a mapping key names something whose value must never be shown."""
+    lowered = str(key).lower()
+    return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+
+
 def _sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     """Redact secrets from arguments before they are persisted or delivered.
 
@@ -65,7 +86,7 @@ def _sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     1. by key name -- ``password``, ``token``, ``secret``, ``key``, ``auth``,
        ``credential`` as substrings;
     2. by value shape, using the shared builtin-pattern redactor (JWTs, Bearer
-       headers, ``ghp_``/``AKIA``/``xox``-style keys, connection strings).
+       headers, ``ghp_``/``AKIA``/``xox``-style keys, URLs carrying credentials).
 
     Pass 1 alone was the whole of this function, so a secret under a
     non-matching key -- ``{"body": "Authorization: Bearer eyJ..."}`` or
@@ -74,30 +95,31 @@ def _sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     the REST DTO. The value redactor already existed and is used by the log
     pipeline and the stderr capture; approvals just were not using it.
 
+    **Pass 1 runs at every level** (#1130). It used to run only over the
+    top-level mapping, so the inverse of the leak above was open: a plain
+    password one level down -- ``{"config": {"password": "hunter2"}}``, or the
+    same inside a list of records -- has no shape for pass 2 to recognise and
+    was stored and served verbatim. Nested arguments are ordinary MCP shapes,
+    not an exotic case.
+
     Nested dicts and lists are walked, since MCP tool arguments are arbitrary
-    JSON, with the same depth cap the log pipeline uses.
+    JSON. Past :data:`_MAX_SCRUB_DEPTH` the subtree is replaced rather than
+    passed through.
     """
-    sensitive_patterns = {"password", "token", "secret", "key", "auth", "credential"}
     redactor = get_default_redactor()
 
-    def scrub(value: Any, depth: int = 0) -> Any:
-        if depth > 5:
-            return value
+    def scrub(value: Any, depth: int) -> Any:
+        if depth > _MAX_SCRUB_DEPTH:
+            return _TOO_DEEP
         if isinstance(value, str):
             return redactor.redact(value)
         if isinstance(value, dict):
-            return {k: scrub(v, depth + 1) for k, v in value.items()}
+            return {k: ("[REDACTED]" if _is_sensitive_key(k) else scrub(v, depth + 1)) for k, v in value.items()}
         if isinstance(value, list):
             return [scrub(item, depth + 1) for item in value]
         return value
 
-    sanitized: dict[str, Any] = {}
-    for key, value in arguments.items():
-        if any(pattern in key.lower() for pattern in sensitive_patterns):
-            sanitized[key] = "[REDACTED]"
-        else:
-            sanitized[key] = scrub(value)
-    return sanitized
+    return {key: ("[REDACTED]" if _is_sensitive_key(key) else scrub(value, 1)) for key, value in arguments.items()}
 
 
 def _hash_arguments(arguments: dict[str, Any]) -> str:
