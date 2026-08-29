@@ -14,7 +14,8 @@
       "skip-changelog": true,
       "extra-files": [
         { "type": "json", "path": "server.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "server.json", "jsonpath": "$.packages[0].version" }
+        { "type": "json", "path": "server.json", "jsonpath": "$.packages[0].version" },
+        { "type": "toml", "path": "uv.lock",     "jsonpath": "$.package[?(@.name.value=='mcp-hangar')].version" }
       ],
       "pull-request-title-pattern": "chore(release): release ${version}",
       "changelog-sections": [
