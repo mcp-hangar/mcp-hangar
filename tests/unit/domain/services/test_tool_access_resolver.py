@@ -444,3 +444,46 @@ class TestUnloadingAServerRetiresEveryKind:
         resolver.remove_mcp_server_policy("srv")
 
         assert not resolver.is_allowed("other", "secret_x", kind="prompt")
+
+
+class TestRemovingAGroupOrMemberRetiresEveryKind:
+    """`remove_group_policy` / `remove_member_policy` mirror the server remover.
+
+    Both used to pop the default kind only, so a prompt or resource policy
+    outlived the removal for an id that is free to be used again (#1138).
+    Nothing in production calls either yet; the first caller must not inherit
+    the defect.
+    """
+
+    def test_group_remover_drops_every_kind(self, resolver):
+        for kind in ("tool", "prompt", "resource"):
+            resolver.set_group_policy("grp", ToolAccessPolicy(deny_list=("secret_*",)), kind=kind)
+
+        resolver.remove_group_policy("grp")
+
+        assert not [s for s, _ in resolver.iter_registered_policies(kind=None) if s.startswith("group:grp")]
+
+    def test_member_remover_drops_every_kind(self, resolver):
+        for kind in ("tool", "prompt", "resource"):
+            resolver.set_member_policy("grp", "m1", ToolAccessPolicy(deny_list=("secret_*",)), "srv", kind=kind)
+        # Warm the prompt cache entry so a stale hit would be visible.
+        assert not resolver.is_allowed("srv", "secret_x", group_id="grp", member_id="m1", kind="prompt")
+
+        resolver.remove_member_policy("grp", "m1")
+
+        assert not [s for s, _ in resolver.iter_registered_policies(kind=None) if s.startswith("group:grp")]
+        assert resolver.is_allowed("srv", "secret_x", group_id="grp", member_id="m1", kind="prompt")
+
+    def test_another_group_and_member_are_untouched(self, resolver):
+        resolver.set_group_policy("other", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")
+        resolver.set_member_policy("grp", "m2", ToolAccessPolicy(deny_list=("secret_*",)), "srv", kind="prompt")
+        resolver.set_group_policy("grp", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")
+        resolver.set_member_policy("grp", "m1", ToolAccessPolicy(deny_list=("secret_*",)), "srv", kind="prompt")
+
+        resolver.remove_group_policy("grp")
+        resolver.remove_member_policy("grp", "m1")
+
+        assert sorted(s for s, _ in resolver.iter_registered_policies(kind=None)) == [
+            "group:grp:member:m2[prompt]",
+            "group:other[prompt]",
+        ]
