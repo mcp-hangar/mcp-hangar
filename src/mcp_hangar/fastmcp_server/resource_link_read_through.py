@@ -74,12 +74,20 @@ RESOURCE_NOT_FOUND = -32002
 #: is what keeps RFC 6570 template variables intact).
 PROJECTED_PREFIX = "hangar://"
 
-#: Bound on remembered links; oldest handed-out reference is evicted first.
+#: Bound on remembered links PER TENANT; a tenant's oldest handed-out
+#: reference is evicted first, and only by that tenant's own traffic (#1139).
 #: ponytail: per-replica in-memory map, move to a shared store if links must
 #: survive a restart or be readable cross-replica.
-_MAX_LINKS = 4096
+_MAX_LINKS_PER_TENANT = 4096
 
-_links: OrderedDict[tuple[str | None, str], tuple[str, dict[str, Any]]] = OrderedDict()
+#: Bound on the number of tenant maps, least recently used evicted first, so
+#: an identity-churning caller cannot trade one exhaustion for another by
+#: minting tenants. 1024 is a ceiling against churn, not a memory budget: it is
+#: far above the tenants one replica serves, and the worst case it admits
+#: (1024 x 4096 small dicts) is bounded rather than small.
+_MAX_TENANTS = 1024
+
+_links: OrderedDict[str | None, OrderedDict[str, tuple[str, dict[str, Any]]]] = OrderedDict()
 _lock = threading.Lock()
 
 
@@ -150,17 +158,28 @@ def _walk(tenant_id: str | None, mcp_server_id: str, node: Any) -> None:
 
 
 def _remember(tenant_id: str | None, mcp_server_id: str, block: dict[str, Any]) -> None:
-    key = (tenant_id, block["uri"])
+    uri = block["uri"]
     with _lock:
-        _links[key] = (mcp_server_id, block)
-        _links.move_to_end(key)
-        while len(_links) > _MAX_LINKS:
-            _links.popitem(last=False)
+        links = _links.get(tenant_id)
+        if links is None:
+            links = _links[tenant_id] = OrderedDict()
+            while len(_links) > _MAX_TENANTS:
+                _links.popitem(last=False)
+        else:
+            _links.move_to_end(tenant_id)
+        links[uri] = (mcp_server_id, block)
+        links.move_to_end(uri)
+        while len(links) > _MAX_LINKS_PER_TENANT:
+            links.popitem(last=False)
 
 
 def _lookup(tenant_id: str | None, uri: str) -> tuple[str, dict[str, Any]] | None:
     with _lock:
-        return _links.get((tenant_id, uri))
+        links = _links.get(tenant_id)
+        if links is None:
+            return None
+        _links.move_to_end(tenant_id)  # a read is a use for the tenant-map LRU
+        return links.get(uri)
 
 
 def _links_for(tenant_id: str | None) -> list[dict[str, Any]]:
@@ -171,7 +190,8 @@ def _links_for(tenant_id: str | None) -> list[dict[str, Any]]:
     ``resources/read`` now refuses -- the drift this seam exists to prevent.
     """
     with _lock:
-        remembered = [(server, block) for (tenant, _uri), (server, block) in _links.items() if tenant == tenant_id]
+        links = _links.get(tenant_id)
+        remembered = list(links.values()) if links else []
 
     visible: list[dict[str, Any]] = []
     for server, block in remembered:
