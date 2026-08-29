@@ -877,6 +877,55 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     logger.debug("tool_access_topology_mode_set", mode=mode)
 
 
+def _init_param_validation_from_config(full_config: dict[str, Any]) -> None:
+    """Apply ``headers.param_validation.required`` (ADR-025 Decision 2).
+
+    ::
+
+        headers:
+          param_validation:
+            required: true
+
+    Off by default. On, a ``tools/call`` whose ``Mcp-Param-*`` headers could not
+    be validated against its body -- the SDK's pre-dispatch schema listing
+    failed, so it skipped the check and would dispatch anyway -- is refused with
+    ``HEADER_MISMATCH`` instead of served.
+
+    Global to the front door rather than per-server: the condition it reacts to
+    is a property of the request, not of the upstream the call would reach, so
+    it does not belong beside the per-server ``header_exposure:`` block even
+    though the two govern the same SEP.
+
+    An unrecognised value is a hard error for the same reason ``tool_access.mode``
+    is: quietly resolving ``required: "yes"`` to off hands an operator the
+    permissive behaviour while their config file says otherwise.
+
+    Args:
+        full_config: Full configuration dictionary.
+
+    Raises:
+        ConfigurationError: If ``required`` is present but not a boolean.
+    """
+    from ..fastmcp_server.flat_tool_projection import set_param_validation_required
+
+    headers_config = full_config.get("headers")
+    block = headers_config.get("param_validation") if isinstance(headers_config, dict) else None
+    raw = block.get("required") if isinstance(block, dict) else None
+
+    if raw is None:
+        set_param_validation_required(False)
+        return
+    if not isinstance(raw, bool):
+        raise ConfigurationError(
+            f"Invalid headers.param_validation.required {raw!r}. It must be a boolean; "
+            "omit the key entirely to keep serving calls whose Mcp-Param-* headers could not be validated."
+        )
+
+    set_param_validation_required(raw)
+    if raw:
+        logger.info("param_validation_required_enabled")
+
+
 def _init_ui_resources_from_config(full_config: dict[str, Any]) -> None:
     """Build the process ``ui://`` guard from the config file (#1048).
 
@@ -1058,6 +1107,7 @@ def load_configuration(config_path: str | None = None, *, load_servers: bool = T
         full_config = load_config_from_file(config_path)
         _init_concurrency_from_config(full_config)
         _init_topology_mode_from_config(full_config)
+        _init_param_validation_from_config(full_config)
         _init_interceptors_from_config(full_config)
         _init_ui_resources_from_config(full_config)
         if load_servers:

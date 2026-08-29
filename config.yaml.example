@@ -274,3 +274,24 @@ logging:
   level: INFO  # DEBUG, INFO, WARNING, ERROR
   json_format: false  # Set to true for production (structured JSON logs)
   # file: /var/log/mcp-hangar/server.log  # Optional file logging
+
+# ---------------------------------------------------------------------------
+# Header parameter validation (SEP-2243) — OFF by default
+# ---------------------------------------------------------------------------
+# A conforming client sends an argument annotated `x-mcp-header` as an HTTP
+# `Mcp-Param-*` header instead of in the body, and the SDK checks pre-dispatch
+# that the header agrees with the body. That check is fail-open: when the
+# called tool's schema cannot be resolved (the pre-dispatch listing failed),
+# validation is skipped and the call is dispatched anyway.
+#
+# An MCPEgressPolicy header selector never matches such a request — that is the
+# default and needs no setting here (ADR-025). This turns the remaining half on:
+# refuse the call outright rather than serve it with headers nobody checked.
+#
+# The trade is deliberate: it converts an upstream listing failure into a
+# client-visible refusal (JSON-RPC error -32020) for every call carrying header
+# parameters. Turn it on where an unvalidated header is not servable.
+#
+# headers:
+#   param_validation:
+#     required: true
