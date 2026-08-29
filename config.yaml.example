@@ -295,3 +295,21 @@ logging:
 # headers:
 #   param_validation:
 #     required: true
+
+# ---------------------------------------------------------------------------
+# Handed-out resource_link memory — 4096 per tenant by default
+# ---------------------------------------------------------------------------
+# In front_door mode every `resource_link` a tool result hands out is
+# remembered per tenant so `resources/read` keeps resolving it even after the
+# upstream stops listing it, and `resources/list` keeps showing it. The map is
+# in-memory and per replica; this bounds how many links ONE tenant may hold
+# before its own oldest is forgotten. Another tenant's traffic never evicts it.
+#
+# Raise it when tenants legitimately hand out more references than the default
+# and `mcp_hangar_resource_links_evicted_total{reason="tenant_cap"}` is
+# climbing: each increment is a link a client was handed that the gateway no
+# longer resolves. Memory grows linearly with the cap times the tenants a
+# replica serves. Must be a positive integer; anything else refuses to start.
+#
+# resource_links:
+#   max_per_tenant: 4096
