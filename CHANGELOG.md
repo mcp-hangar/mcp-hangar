@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.15.0...v2.16.0) (2026-08-29)
+
+### Added
+
+- **core:** an egress verdict now names the policy that produced it.
+  `L7Policy.policy_id` is a content hash of the compiled rules (`sha256:` plus 16
+  hex digits), carried by the `Decision`, by `EgressPolicyViolationObserved`, by
+  the deny and approval-required refusals, and by `EgressPolicySet` -- so "which
+  policy decided this call" and "when did that policy change" join on a value
+  rather than on adjacent timestamps. `GET /api/mcp_servers/{id}/l7_policy`
+  returns it as `policyId`, so an id in an audit record can be resolved back to
+  the rules. A hash rather than an assigned name because the sources have nothing
+  in common to assign from: an operator-compiled policy has a Kubernetes
+  `resourceVersion` upstream, one from `config.yaml` or the REST channel has no
+  identity at all, and the hash is also stable across restarts and replicas. It
+  covers `mode`, so an Audit-to-Enforce flip is a different id ([#1135](https://github.com/mcp-hangar/mcp-hangar/pull/1135))
+- **core:** an Enforce-mode egress refusal now leaves a record. Audit mode -- the
+  mode that by definition changes nothing -- emitted a domain event, a warning and
+  a metric; Enforce mode, refusing the call for real, emitted a `logger.debug`
+  line in the batch fault barrier carrying the generic caller-facing message, with
+  the reasons the policy computed dropped on the way out. An operator could not
+  answer "which calls did this policy refuse yesterday" from anything Hangar
+  wrote, and `mcp_hangar_tool_call_errors_total` cannot cover it: it is fed from
+  `ToolInvocationFailed`, whose three emitters are all past the gate. A refusal
+  now publishes `EgressPolicyEnforced` -- the same fields as the observed event
+  plus the applied action, so one exporter reads both -- increments
+  `mcp_hangar_egress_policy_enforced_total{action,rule_kind}`, and logs at warning
+  with its reasons and the policy that produced them. A `requireApproval` verdict
+  nobody answered is recorded as the refusal it is. The fault barrier now
+  distinguishes a deliberate refusal from an upstream failure: the refusal is a
+  warning naming the reason, everything else keeps the debug level so a batch of
+  failing calls is not a log flood ([#1136](https://github.com/mcp-hangar/mcp-hangar/pull/1136))
+- **core:** `headers.param_validation.required: true` refuses a `tools/call`
+  whose `Mcp-Param-*` headers could not be validated against its body, instead of
+  serving it. The SDK's pre-dispatch check is fail-open -- a failed schema listing
+  means no check and the call is dispatched anyway -- and an operator for whom an
+  unvalidated header is not servable can now say so. Off by default: it converts
+  an upstream listing failure into a client-visible refusal (`HEADER_MISMATCH`,
+  -32020) for every call carrying header parameters, which is a trade only some
+  deployments want. Refusing to *match* a header selector on such a request is
+  the separate, unconditional default (ADR-025) ([#1132](https://github.com/mcp-hangar/mcp-hangar/pull/1132))
+
+### Removed
+
+- **core:** `PolicyEvaluationResult.policy_id` and the `policy_id` argument of its
+  `allow()` / `deny()` constructors are gone. The field was documented as "the
+  policy that made the decision (for audit)" and was never set by anything and
+  never read by anything -- the only enforcer implementation in the codebase is
+  the null one, which allows everything and names no policy. A documented-but-
+  always-empty audit field is worse than an absent one, because a reader
+  reasonably assumes it works. Policy identity on the path that does produce
+  verdicts is `L7Policy.policy_id` ([#1135](https://github.com/mcp-hangar/mcp-hangar/pull/1135))
+
+### Security
+
+- **core:** the shared redactor now recognises credentials in a URL's userinfo
+  (`postgres://user:pw@host/db`, `https://x-access-token:ghp_...@github.com/...`),
+  replacing them while leaving the scheme and host readable. The approval
+  sanitizer documented connection strings as covered from the day it was written
+  and no pattern matched them, so its own cited example was written verbatim into
+  the approval record. Applies everywhere the redactor runs, including the log
+  pipeline and stderr capture ([#1134](https://github.com/mcp-hangar/mcp-hangar/pull/1134))
+- **core:** approval-argument redaction was root-only, so a secret one level down
+  was persisted and served verbatim. `_sanitize_arguments` redacts by key name and
+  by value shape; the key-name pass ran over the top-level mapping only, while the
+  walk that goes deeper applied the value redactor alone -- and a plain password
+  has no shape for it to recognise. `{"config": {"password": "..."}}`, and the
+  same inside a list of records, reached the SQLite approval record and the REST
+  DTO served to every `approval:read` holder. The key-name check now applies at
+  every level, a sensitive key hides its whole subtree, and past the depth cap the
+  subtree is replaced rather than passed through -- this projection is stored and
+  served, so what the walk cannot inspect is dropped. `arguments_hash` is still
+  computed over the raw arguments; the dispatch-time substitution check depends on
+  that and is unchanged ([#1134](https://github.com/mcp-hangar/mcp-hangar/pull/1134))
+- **core:** an `MCPEgressPolicy` header selector could match an `Mcp-Param-*`
+  header nothing had validated against the request body. The SDK's pre-dispatch
+  check is fail-open by design -- a `tools/list` that raises means no schema, no
+  check, and the call is dispatched anyway -- and `evaluate_headers` admitted a
+  request on its protocol version alone, which says only whether the check was
+  *owed*. Since 2.14.0 Hangar routes on those headers itself, so SEP-2243's own
+  failure mode (route on one value, execute another) sat inside the policy engine.
+  A request whose validation was skipped now satisfies no `allow`, `deny` or
+  `requireApproval` selector: it falls through to the tool rules and the policy
+  default, and the audit reason says the rules were not consulted rather than that
+  none matched. Nothing changes for a policy that writes no header selectors
+  (ADR-025) ([#1131](https://github.com/mcp-hangar/mcp-hangar/pull/1131))
+
 ## [2.15.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.14.1...v2.15.0) (2026-08-28)
 
 ### Added
