@@ -79,12 +79,22 @@ class TestRecording:
         assert rt._links == {}
 
     def test_the_map_is_bounded(self, monkeypatch) -> None:
-        monkeypatch.setattr(rt, "_MAX_LINKS", 2)
+        monkeypatch.setattr(rt, "_MAX_LINKS_PER_TENANT", 2)
         for i in range(3):
             rt.project_result_uris("t", "s", {"content": [{"type": "resource_link", "uri": f"demo://r/{i}"}]})
 
         assert rt._lookup("t", "hangar://s/demo://r/0") is None, "oldest reference evicted first"
         assert rt._lookup("t", "hangar://s/demo://r/2") is not None
+
+    def test_the_tenant_map_count_is_bounded(self, monkeypatch) -> None:
+        """#1139: minting tenants must not trade one exhaustion for another."""
+        monkeypatch.setattr(rt, "_MAX_TENANTS", 2)
+        for tenant in ("t0", "t1", "t2"):
+            rt.project_result_uris(tenant, "s", {"content": [{"type": "resource_link", "uri": "demo://r"}]})
+
+        assert list(rt._links) == ["t1", "t2"], "least recently used tenant map evicted first"
+        assert rt._lookup("t0", "hangar://s/demo://r") is None
+        assert rt._lookup("t2", "hangar://s/demo://r") is not None
 
     def test_payloads_without_links_are_ignored(self) -> None:
         rt.project_result_uris("t", "s", None)
@@ -221,6 +231,37 @@ class TestReadThrough:
             identity_context_var.reset(token)
 
         assert [str(r.uri) for r in result.resources] == [_PROJECTED]
+
+    @pytest.mark.asyncio
+    async def test_another_tenants_traffic_does_not_evict_a_link(self) -> None:
+        """#1139: a tenant's links are bounded by its own behaviour, not B's.
+
+        Driven through the real read and list handlers with the catalogue and
+        the projected-upstream route both empty, so the remembered map is the
+        only thing that can carry the answer -- the case the map exists for.
+        """
+        rt.project_result_uris("tenant:a", "server_a", {"content": [_link()]})
+        for i in range(rt._MAX_LINKS_PER_TENANT * 2):
+            rt.project_result_uris(
+                "tenant:b", "server_a", {"content": [{"type": "resource_link", "uri": f"demo://{i}"}]}
+            )
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with (
+                patch("mcp_hangar.fastmcp_server.prompt_proxy._upstream_ids", return_value=[]),
+                patch.object(rt, "_build_catalog", return_value=[]),
+                patch.object(
+                    rt, "_relay_read", return_value={"result": {"contents": [{"uri": "demo://blob/1", "text": "p"}]}}
+                ),
+            ):
+                listed = await low.handlers["resources/list"](None, SimpleNamespace())
+                read = await low.handlers["resources/read"](None, SimpleNamespace(uri=_PROJECTED))
+        finally:
+            identity_context_var.reset(token)
+
+        assert [str(r.uri) for r in listed.resources] == [_PROJECTED], "still listed"
+        assert str(read.contents[0].uri) == _PROJECTED, "still resolvable"
 
     def test_egress_mode_registers_nothing(self) -> None:
         low = _register(resolver_mode="egress")
