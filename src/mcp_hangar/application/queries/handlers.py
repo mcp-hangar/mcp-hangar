@@ -167,10 +167,19 @@ class GetL7PolicyHandler(BaseQueryHandler):
     """Handler for GetL7PolicyQuery."""
 
     def handle(self, query: GetL7PolicyQuery) -> dict | None:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
-        """Return the attached policy in wire form, or None when unset."""
+        """Return the attached policy in wire form, or None when unset.
+
+        Carries ``policyId`` beside the rules (#1129): it is what the verdicts
+        and the ``EgressPolicySet`` event now name, so an operator holding an
+        audit record can ask a gateway whether *this* is the policy that
+        produced it. Derived from the rules, so ``from_dict`` ignores it on the
+        way back in and a GET-edit-POST round trip is unaffected.
+        """
         mcp_server = self._get_mcp_server(query.mcp_server_id)
         policy = mcp_server.l7_policy
-        return policy.to_wire() if policy is not None else None
+        if policy is None:
+            return None
+        return {**policy.to_wire(), "policyId": policy.policy_id}
 
 
 class GetMcpServerToolsHandler(BaseQueryHandler):

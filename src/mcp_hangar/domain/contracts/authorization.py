@@ -352,25 +352,37 @@ class IToolAccessPolicyStore(Protocol):
 class PolicyEvaluationResult:
     """Result of a tool access policy evaluation.
 
+    Carried a ``policy_id`` field documented as "the policy that made the
+    decision (for audit)" from the day it was written. Nothing ever set it and
+    nothing ever read it: the only implementation of the enforcer protocol in
+    this codebase is :class:`NullToolAccessPolicyEnforcer`, which allows
+    everything and names no policy. A documented-but-always-empty audit field is
+    worse than an absent one, because a reader reasonably assumes it works, so
+    it is gone (#1129) rather than left as evidence for a capability that does
+    not exist.
+
+    Policy identity on the path that does produce verdicts lives on
+    ``L7Policy.policy_id``: a content hash of the compiled rules, carried by
+    ``Decision``, the ``EgressPolicy*`` events and the refusals. Bring the field
+    back here when an enforcer exists that can fill it.
+
     Attributes:
         allowed: Whether the tool invocation is permitted.
         reason: Human-readable explanation of the decision.
-        policy_id: Identifier of the policy that made the decision (for audit).
     """
 
     allowed: bool
     reason: str = ""
-    policy_id: str | None = None
 
     @classmethod
-    def allow(cls, reason: str = "", policy_id: str | None = None) -> "PolicyEvaluationResult":
+    def allow(cls, reason: str = "") -> "PolicyEvaluationResult":
         """Create an allow result."""
-        return cls(allowed=True, reason=reason, policy_id=policy_id)
+        return cls(allowed=True, reason=reason)
 
     @classmethod
-    def deny(cls, reason: str = "", policy_id: str | None = None) -> "PolicyEvaluationResult":
+    def deny(cls, reason: str = "") -> "PolicyEvaluationResult":
         """Create a deny result."""
-        return cls(allowed=False, reason=reason, policy_id=policy_id)
+        return cls(allowed=False, reason=reason)
 
 
 @runtime_checkable
