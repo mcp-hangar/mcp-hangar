@@ -48,7 +48,7 @@ async def withdraw_tool(request: Request) -> HangarJSONResponse:
     get_tool_projection_registry().withdraw(server, tool, tenant_id=tenant_id)
 
     ctx = get_context()
-    ctx.event_bus.publish(ToolWithdrawn(tenant_id=tenant_id, mcp_server=server, tool=tool))
+    ctx.event_bus.publish(ToolWithdrawn(tenant_id=tenant_id, mcp_server=server, tool=tool, kind="tool"))
 
     return HangarJSONResponse({"withdrawn": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id})
 
@@ -84,7 +84,7 @@ async def restore_tool(request: Request) -> HangarJSONResponse:
     get_tool_projection_registry().restore(server, tool, tenant_id=tenant_id)
 
     ctx = get_context()
-    ctx.event_bus.publish(ToolRestored(tenant_id=tenant_id, mcp_server=server, tool=tool))
+    ctx.event_bus.publish(ToolRestored(tenant_id=tenant_id, mcp_server=server, tool=tool, kind="tool"))
 
     return HangarJSONResponse({"restored": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id})
 

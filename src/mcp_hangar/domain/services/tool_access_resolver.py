@@ -309,26 +309,36 @@ class ToolAccessResolver:
         self.remove_mcp_server_policy(provider_id)
 
     def remove_group_policy(self, group_id: str) -> None:
-        """Remove the tool access policy for a group.
+        """Remove EVERY access policy for a group -- tool, prompt and resource.
+
+        Same argument as :meth:`remove_mcp_server_policy`: removing a single
+        kind would leave the other two behind for an id that is free to be
+        used again (#1138).
 
         Args:
             group_id: Group identifier.
         """
         with self._lock:
-            self._group_policies.pop((group_id, DEFAULT_KIND), None)
+            for key in [k for k in self._group_policies if k[0] == group_id]:
+                self._group_policies.pop(key, None)
             self._invalidate_group_cache(group_id)
 
     def remove_member_policy(self, group_id: str, member_id: str) -> None:
-        """Remove the tool access policy for a group member.
+        """Remove EVERY access policy for a group member -- tool, prompt and resource.
+
+        Same argument as :meth:`remove_mcp_server_policy`: removing a single
+        kind would leave the other two behind for an id that is free to be
+        used again (#1138).
 
         Args:
             group_id: Group identifier.
             member_id: Member identifier.
         """
         with self._lock:
-            self._member_policies.pop((group_id, member_id, DEFAULT_KIND), None)
+            for key in [k for k in self._member_policies if k[:2] == (group_id, member_id)]:
+                self._member_policies.pop(key, None)
+                self._policy_cache.pop((key[2], f"group:{group_id}:member:{member_id}"), None)
             self._member_mcp_server_mapping.pop((group_id, member_id), None)
-            self._policy_cache.pop((DEFAULT_KIND, f"group:{group_id}:member:{member_id}"), None)
 
     def resolve_effective_policy(
         self,
