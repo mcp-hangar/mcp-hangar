@@ -43,13 +43,39 @@ user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
 identity_context_var: ContextVar[IdentityContext | None] = ContextVar("identity_context", default=None)
 
 #: This request's SEP-2243 routing headers, lower-cased: the ``Mcp-Param-*``
-#: values an L7 egress policy may select on, plus the ``MCP-Protocol-Version``
-#: that says whether they were checked against the body at all (#1058).
+#: values an L7 egress policy may select on, the ``MCP-Protocol-Version`` that
+#: says whether they were *owed* a check against the body, and -- under
+#: :data:`PARAM_VALIDATION_KEY` -- whether that check actually ran (#1058,
+#: ADR-025).
+#:
+#: The version was only ever a proxy for the second question, and the two part
+#: company on a failed pre-dispatch listing: the SDK skips validation, dispatch
+#: continues, and a modern request reaches a selector carrying a header nothing
+#: compared against the body.
 #:
 #: Deliberately not the whole header bag. A policy engine that could read
 #: ``Authorization`` would be a way to exfiltrate a credential by writing globs
 #: until one matched, so only the headers a policy is allowed to see are carried.
 routing_headers_var: ContextVar[Mapping[str, str] | None] = ContextVar("routing_headers", default=None)
+
+#: Where the listing path records that ``Mcp-Param-*`` validation was skipped
+#: for this POST. The carrier is ``request.state`` and not a contextvar because
+#: :func:`bind_routing_headers` rebuilds the mapping from the raw request
+#: headers rather than merging into it, so a contextvar set out in the nested
+#: listing is overwritten by the later bind (ADR-025). It is the same per-POST
+#: channel the projection memo already uses (#1049).
+PARAM_VALIDATION_STATE_ATTR = "hangar_param_validation_skipped"
+
+#: The entry :func:`bind_routing_headers` adds to the mapping to carry the skip
+#: status to the evaluator. Not an HTTP header: an ``MCPEgressPolicy`` selector
+#: can only name an ``Mcp-Param-*`` header (``egress_l7._header_matches``
+#: refuses anything else), so no operator rule can match or forge this key, and
+#: a client sending it by that name is filtered out below.
+PARAM_VALIDATION_KEY = "hangar-param-validation"
+
+#: Values of :data:`PARAM_VALIDATION_KEY`.
+PARAM_VALIDATION_RAN = "ran"
+PARAM_VALIDATION_SKIPPED = "skipped"
 
 
 def select_routing_headers(headers: Mapping[str, str] | None) -> Mapping[str, str]:
@@ -81,13 +107,23 @@ def bind_routing_headers(request_context: Any) -> Any:
     exposing one as ``.request_context`` -- so the front door and the batch
     surface share one definition instead of growing one each.
 
+    The mapping also carries whether this request's ``Mcp-Param-*`` headers were
+    validated against the body, read off ``request.state`` where the listing
+    path left it (ADR-025). Absent state means the ladder ran, which is what a
+    request that reaches a handler at all has done unless something recorded
+    otherwise.
+
     Returns a token to reset, or ``None``. Fully fault-barriered.
     """
     try:
         inner = getattr(request_context, "request_context", None) or request_context
-        headers = getattr(getattr(inner, "request", None), "headers", None)
-        selected = select_routing_headers(headers)
-        return routing_headers_var.set(selected) if selected else None
+        request = getattr(inner, "request", None)
+        selected = dict(select_routing_headers(getattr(request, "headers", None)))
+        if not selected:
+            return None
+        skipped = bool(getattr(getattr(request, "state", None), PARAM_VALIDATION_STATE_ATTR, False))
+        selected[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_SKIPPED if skipped else PARAM_VALIDATION_RAN
+        return routing_headers_var.set(selected)
     except Exception:  # noqa: BLE001 -- header bags vary; a missed bind must never break a call
         return None
 

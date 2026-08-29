@@ -45,6 +45,26 @@ Track the upstream MCP status the interceptor/governance extension depends on.
 
 **Our approach:** the task wire is **vendored** in `src/mcp_hangar/tasks_wire.py` rather than taken from the SDK types, per [ADR-015](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-015-vendored-task-wire.md). Relay-with-governance is [ADR-014](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-014-tasks-relay-with-governance.md), superseding the relay-only stance of ADR-008. The `relay_tasks_enabled` config switch remains the kill-switch on the serving surface.
 
+## `Mcp-Param-*` Header Validation (SEP-2243)
+
+**Upstream ref:** SEP-2243 (header parameters and header-body agreement), implemented in the SDK transport at `mcp/server/_streamable_http_modern.py`.
+
+**Why it is pinned:** the SDK enforces header-body agreement pre-dispatch and **fails open by design** — when it cannot resolve the called tool's schema, validation is skipped and the call proceeds. Hangar mirrors that precondition in two places rather than wrapping the transport: `_call_carries_param_check` (`flat_tool_projection.py`) decides when a skip was owed and therefore worth counting, and the skip status then gates the L7 header selector ([ADR-025](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-025-header-selectors-must-not-match-unvalidated-headers.md)). That is a copy of another project's control flow: true for `mcp==2.0.0`, unverified for anything else. An SDK bump that moves the ladder does not break the build — it makes the metric, and the gate, quietly wrong.
+
+**Our action:** an `mcp` upgrade re-diffs `_tool_input_schema` and `_mcp_param_rejection` against the mirrored branches, **in the same change as the bump**, per the [ADR-012](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-012-interceptor-sep-pin-tracking-policy.md) pin policy. The re-diff covers every skip condition below, including the ones Hangar cannot reach today — a mirror of four conditions out of seven passes its own re-diff green while the SDK changes one of the three nobody mirrors, which is the failure the pin exists to prevent.
+
+| Skip condition | Where | Metric reason | Reachable through Hangar |
+|---|---|---|---|
+| Listing raised | `_tool_input_schema` | `listing_failed` | Yes — the live gap ADR-025 closes |
+| Listing exhausted without the tool | `_tool_input_schema` | `tool_not_listed` | Yes; dispatch answers `-32601`, so not an execution gap |
+| Tool's annotations invalid | `validate_mcp_param_headers` (`shared/inbound.py`) | `invalid_annotation` | Effectively no — `#1063` withholds such a tool from the projection, and no `hangar_*` schema declares `x-mcp-header` |
+| Legacy revision (ladder not entered) | — | `legacy_protocol` | Yes; the selector refuses to match on it |
+| Cursor cycle | `_tool_input_schema` | **none** | No — the front door returns one unpaged list |
+| Pagination past the page cap | `_tool_input_schema` | **none** | No — same reason |
+| Envelope fails `tools/list` validation | `_tool_input_schema` | **none** | Out of scope: a client fault dispatch rejects on its own |
+
+**Before paginating the front-door projection:** the last two rows stop being unreachable the moment the projection emits a `nextCursor`. Their reason labels must be added *in the change that paginates*, or it opens a skip that nothing counts and the selector gate cannot see.
+
 ## Upstream Release Position
 
 **The dated release is cut.** Hangar speaks `2026-07-28` as its protocol revision: `src/mcp_hangar/protocol.py` → `SUPPORTED_PROTOCOL_VERSION = "2026-07-28"`, with legacy `2025-11-25` upstreams handled by downgrade in the `initialize` response and by the `_meta`-envelope compat path in `http_client.py`.
@@ -64,6 +84,7 @@ ADR-005 framed interceptors as a core SEP. It is **Superseded by ADR-010** (the 
 | Interceptors spec | `experimental-ext-interceptors` (was SEP-1763, closed completed 2026-04-22) | Experimental extension repo; not core spec | Pin `2f66b9b` in `interceptor-pin-drift.yml`; deliberate-cadence bumps per ADR-012 |
 | Digest pinning | [SEP-1766](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1766) | Closed completed 2026-06-24; not merged into upstream spec | Keep `TaskDigestGuard` as own Validator |
 | Extensions framework | SEP-2133 | Merged into upstream spec `main` by 2026-07-08 audit | Adopt reverse-DNS IDs; enforce default-off |
+| `Mcp-Param-*` validation | SEP-2243 | Merged; SDK ladder is fail-open by design | Mirrored preconditions pinned at `mcp==2.0.0`; re-diff both functions on an SDK bump (ADR-012, ADR-025) |
 | Tasks | SEP-2663 | Merged; SDK `mcp_types.Task*` is a frozen SEP-1686 fossil | Vendored wire (`tasks_wire.py`, ADR-015); relay-with-governance (ADR-014) |
 | Protocol revision | `2026-07-28` | Dated revision cut and adopted | `SUPPORTED_PROTOCOL_VERSION`; downgrade path for `2025-11-25` upstreams |
 | `logging/setLevel` | SEP-2575 / SEP-2577 | Deliberately unimplemented | None — conformance flags it by design; do not implement |

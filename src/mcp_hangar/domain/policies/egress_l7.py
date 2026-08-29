@@ -33,6 +33,7 @@ import re
 from typing import Any
 
 from ..._sdk_compat import is_modern_protocol_version
+from ...context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_SKIPPED
 from ...redactor import OutputRedactor
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,13 @@ MCP_PARAM_PREFIX = "mcp-param-"
 #: from negotiation: `_meta` defaults to the supported (modern) version when
 #: absent, which would make a handshake-era request look modern to the gate.
 PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
+
+#: The verdict reason recorded when a policy carries header selectors and none
+#: of them could be consulted, because this request's ``Mcp-Param-*`` headers
+#: were never validated against its body (ADR-025).
+HEADER_RULES_NOT_CONSULTED = (
+    "header rules not consulted: this request's Mcp-Param-* headers could not be validated against its body"
+)
 
 
 @dataclass(frozen=True)
@@ -342,18 +350,33 @@ def evaluate_headers(
     allow. ``None`` means no rule matched -- it is not an allow, so the caller
     falls through to the tool verdict and, failing that, the policy default.
 
-    A request whose ``MCP-Protocol-Version`` predates mandatory header-body
-    validation never satisfies a selector. On such a revision nothing has
-    checked that the header agrees with the body, so a caller can route on one
-    value and execute another; SEP-2243 says an intermediary enforcing policy
-    on mirrored headers should verify the revision and refuse to trust it
-    otherwise. Refusing to *match* is the honest shape of that here: the
-    request is left to the tool rules and the default action, rather than being
-    handed an allow it did not earn or a deny some other caller's header wrote.
+    A request whose ``Mcp-Param-*`` headers nobody checked against the body
+    never satisfies a selector. Nothing then stops a caller routing on one value
+    and executing another; SEP-2243 says an intermediary enforcing policy on
+    mirrored headers must not treat them as trusted unless it knows they were
+    checked. Refusing to *match* is the honest shape of that here: the request
+    is left to the tool rules and the default action, rather than being handed
+    an allow it did not earn or a deny some other caller's header wrote
+    (ADR-025).
+
+    Two facts disqualify a request, and they are not the same fact:
+
+    * :data:`PARAM_VALIDATION_KEY` says validation was skipped. The SDK's
+      pre-dispatch ladder is fail-open by design -- a ``tools/list`` that raises
+      means no schema, no check, and dispatch continues anyway -- so this is
+      reachable on a perfectly modern request.
+    * the ``MCP-Protocol-Version`` predates mandatory header-body validation, so
+      the ladder was never entered at all. This is the same disqualification
+      arriving before there was anything to record, which is why it stays a
+      check of its own rather than being folded into the key above: a caller
+      that reaches the evaluator without an HTTP request in hand (the batch
+      surface, stdio) carries no skip status either way.
     """
     if not rules:
         return None
-    if headers is None or not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER)):
+    if headers is None or headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
+        return None
+    if not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER)):
         return None
 
     for matches, action, label in (
@@ -453,14 +476,20 @@ def evaluate(
     A secret or oversized payload in the arguments DENIES the call even when the
     tool itself would be allowed or gated for approval -- deny always wins.
 
-    ``headers`` carries this request's ``Mcp-Param-*`` values plus its
-    ``MCP-Protocol-Version``, lower-cased. An ``Mcp-Param-*`` selector that
-    matches decides the call the way a tool-name rule does, and takes
-    precedence over the tool ladder: it is the more specific statement, and it
-    is the one an operator writes to say "this region, never". A request that
-    matches no selector -- including every handshake-era request, which cannot
-    be trusted to have had its headers checked against its body -- is resolved
-    by the tool rules alone.
+    ``headers`` carries this request's ``Mcp-Param-*`` values, its
+    ``MCP-Protocol-Version`` and whether those values were validated against the
+    body, lower-cased. An ``Mcp-Param-*`` selector that matches decides the call
+    the way a tool-name rule does, and takes precedence over the tool ladder: it
+    is the more specific statement, and it is the one an operator writes to say
+    "this region, never". A request that matches no selector -- including every
+    request whose headers nobody checked against its body -- is resolved by the
+    tool rules alone.
+
+    When selectors exist but could not be consulted, the reason says so. "No
+    rule matched" and "the rules were not consulted because nothing validated
+    the headers" are different verdicts, and an operator reading an audit record
+    of a policy that silently stopped selecting has nothing else to go on
+    (ADR-025).
     """
     header_verdict = evaluate_headers(headers, policy.headers)
     if header_verdict is not None:
@@ -469,6 +498,8 @@ def evaluate(
     else:
         action, reason = evaluate_tool(tool_name, policy.tools, policy.default_action)
         reasons = [reason]
+        if policy.headers and headers is not None and headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
+            reasons.append(HEADER_RULES_NOT_CONSULTED)
 
     if action is not ToolAction.DENY:
         try:
