@@ -101,6 +101,16 @@ class TestRoutePermissionTable:
         walk(app.routes, "")
         assert unmapped == [], f"routes with no permission mapping: {unmapped}"
 
+    def test_a_resource_uri_rides_the_withdraw_route(self):
+        """The name segment is a `path` converter: an upstream uri carries slashes (#1141).
+
+        The mounted-routes walk above resolves the literal template, which a
+        single-segment rule would also accept -- so this pins the runtime path.
+        """
+        for verb in ("withdraw", "restore"):
+            rule = resolve_rule("POST", f"/admin/tools/srv/file:///data/x.txt/{verb}")
+            assert rule is not None and rule.permission == ("mcp_servers", "lifecycle")
+
     def test_unmapped_path_resolves_to_none(self):
         """The default really is deny, not a catch-all rule."""
         assert resolve_rule("GET", "/not/a/real/route") is None
