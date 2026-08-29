@@ -78,13 +78,16 @@ class ToolWithdrawn(DomainEvent):
         tenant_id: Tenant for whom the tool is withdrawn, or ``None`` for ALL tenants.
         mcp_server: MCP server identifier owning the tool.
         tool: Name of the withdrawn tool.
+        kind: ``tool``, ``prompt`` or ``resource`` -- which overlay the
+            withdrawal was written to.
         schema_version: Event schema version.
     """
 
     tenant_id: str | None
     mcp_server: str
     tool: str
-    schema_version: int = 1
+    kind: str = "tool"
+    schema_version: int = 2
 
 
 @dataclass
@@ -99,13 +102,16 @@ class ToolRestored(DomainEvent):
             entire runtime entry was removed.
         mcp_server: MCP server identifier owning the tool.
         tool: Name of the restored tool.
+        kind: ``tool``, ``prompt`` or ``resource`` -- which overlay the
+            withdrawal was written to.
         schema_version: Event schema version.
     """
 
     tenant_id: str | None
     mcp_server: str
     tool: str
-    schema_version: int = 1
+    kind: str = "tool"
+    schema_version: int = 2
 
 
 @dataclass
