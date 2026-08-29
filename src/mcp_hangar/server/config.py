@@ -926,6 +926,44 @@ def _init_param_validation_from_config(full_config: dict[str, Any]) -> None:
         logger.info("param_validation_required_enabled")
 
 
+def _init_resource_links_from_config(full_config: dict[str, Any]) -> None:
+    """Apply ``resource_links.max_per_tenant`` (#1146).
+
+    ::
+
+        resource_links:
+          max_per_tenant: 4096
+
+    The number of handed-out ``resource_link`` references the front door
+    remembers for one tenant before that tenant's oldest is forgotten (#1139).
+    Absent means today's default, so nobody's behaviour changes on upgrade.
+
+    An invalid value is a hard error for the reason ``tool_access.mode`` and
+    ``headers.param_validation.required`` are: a limit that quietly falls back
+    to the default reads as applied. ``True`` is an ``int`` to ``isinstance``
+    and is refused explicitly -- ``max_per_tenant: yes`` is not a cap of 1.
+
+    Raises:
+        ConfigurationError: If ``max_per_tenant`` is present but not a positive integer.
+    """
+    from ..fastmcp_server.resource_link_read_through import DEFAULT_MAX_LINKS_PER_TENANT, set_max_links_per_tenant
+
+    section = full_config.get("resource_links")
+    raw = section.get("max_per_tenant") if isinstance(section, dict) else None
+
+    if raw is None:
+        set_max_links_per_tenant(DEFAULT_MAX_LINKS_PER_TENANT)
+        return
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise ConfigurationError(
+            f"Invalid resource_links.max_per_tenant {raw!r}. It must be a positive integer; "
+            f"omit the key entirely to keep the default of {DEFAULT_MAX_LINKS_PER_TENANT}."
+        )
+
+    set_max_links_per_tenant(raw)
+    logger.info("resource_links_max_per_tenant_set", max_per_tenant=raw)
+
+
 def _init_ui_resources_from_config(full_config: dict[str, Any]) -> None:
     """Build the process ``ui://`` guard from the config file (#1048).
 
@@ -1108,6 +1146,7 @@ def load_configuration(config_path: str | None = None, *, load_servers: bool = T
         _init_concurrency_from_config(full_config)
         _init_topology_mode_from_config(full_config)
         _init_param_validation_from_config(full_config)
+        _init_resource_links_from_config(full_config)
         _init_interceptors_from_config(full_config)
         _init_ui_resources_from_config(full_config)
         if load_servers:

@@ -22,8 +22,11 @@ import pytest
 
 from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
+from mcp_hangar.server.config import _init_resource_links_from_config
+from mcp_hangar.server.config_schema import validate_config
 
 
 def _identity(tenant_id: str | None) -> IdentityContext:
@@ -315,3 +318,58 @@ class TestReadThrough:
     def test_egress_mode_registers_nothing(self) -> None:
         low = _register(resolver_mode="egress")
         assert low.handlers == {}
+
+
+class TestTheConfigSurface:
+    """#1146: `resource_links.max_per_tenant` is the operator's lever on the cap."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_cap(self, monkeypatch) -> None:
+        # Same-value setattr: teardown restores whatever the module held before.
+        monkeypatch.setattr(rt, "_MAX_LINKS_PER_TENANT", rt._MAX_LINKS_PER_TENANT)
+
+    @pytest.mark.asyncio
+    async def test_setting_the_key_changes_the_effective_cap(self) -> None:
+        """Verified at the surface: with the cap at 2, a tenant's third link
+        pushes its first out of both `resources/list` and `resources/read`."""
+        _init_resource_links_from_config({"resource_links": {"max_per_tenant": 2}})
+        first = _link()
+        rt.project_result_uris("tenant:a", "server_a", {"content": [first]})
+        for i in range(2):
+            rt.project_result_uris(
+                "tenant:a", "server_a", {"content": [{"type": "resource_link", "uri": f"demo://{i}"}]}
+            )
+        low = _register()
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with (
+                patch("mcp_hangar.fastmcp_server.prompt_proxy._upstream_ids", return_value=[]),
+                patch.object(rt, "_build_catalog", return_value=[]),
+            ):
+                listed = await low.handlers["resources/list"](None, SimpleNamespace())
+                with pytest.raises(Exception, match="Unknown resource"):
+                    await low.handlers["resources/read"](None, SimpleNamespace(uri=_PROJECTED))
+        finally:
+            identity_context_var.reset(token)
+
+        assert [str(r.uri) for r in listed.resources] == ["hangar://server_a/demo://0", "hangar://server_a/demo://1"]
+
+    def test_omitting_the_key_keeps_the_default(self) -> None:
+        _init_resource_links_from_config({"resource_links": {"max_per_tenant": 2}})
+        _init_resource_links_from_config({})
+
+        assert rt._MAX_LINKS_PER_TENANT == 4096
+        assert rt.DEFAULT_MAX_LINKS_PER_TENANT == 4096
+
+    @pytest.mark.parametrize("raw", ["4096", 0, -1, True, 2.5])
+    def test_an_invalid_value_refuses_to_start(self, raw) -> None:
+        """A limit that quietly falls back reads as applied. `True` is the trap:
+        it IS an int to `isinstance`, and `yes` in YAML is `True`."""
+        with pytest.raises(ConfigurationError, match="resource_links.max_per_tenant"):
+            _init_resource_links_from_config({"resource_links": {"max_per_tenant": raw}})
+
+    def test_the_section_is_known_to_the_schema(self) -> None:
+        """A key nothing reads is the failure `validate_config` exists to catch."""
+        assert validate_config({"resource_links": {"max_per_tenant": 2}}) == []
+        assert validate_config({"resource_links": {"max_per_tenantt": 2}}) != []
+        assert validate_config({"resource_linkss": {"max_per_tenant": 2}}) != []

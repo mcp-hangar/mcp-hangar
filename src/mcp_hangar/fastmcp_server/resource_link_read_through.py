@@ -77,9 +77,12 @@ PROJECTED_PREFIX = "hangar://"
 
 #: Bound on remembered links PER TENANT; a tenant's oldest handed-out
 #: reference is evicted first, and only by that tenant's own traffic (#1139).
+#: Configurable as ``resource_links.max_per_tenant`` (#1146); this is the
+#: value an absent key keeps.
 #: ponytail: per-replica in-memory map, move to a shared store if links must
 #: survive a restart or be readable cross-replica.
-_MAX_LINKS_PER_TENANT = 4096
+DEFAULT_MAX_LINKS_PER_TENANT = 4096
+_MAX_LINKS_PER_TENANT = DEFAULT_MAX_LINKS_PER_TENANT
 
 #: Bound on the number of tenant maps, least recently used evicted first, so
 #: an identity-churning caller cannot trade one exhaustion for another by
@@ -90,6 +93,16 @@ _MAX_TENANTS = 1024
 
 _links: OrderedDict[str | None, OrderedDict[str, tuple[str, dict[str, Any]]]] = OrderedDict()
 _lock = threading.Lock()
+
+
+def set_max_links_per_tenant(cap: int) -> None:
+    """Apply ``resource_links.max_per_tenant`` from the config file (#1146).
+
+    Takes effect on the next ``_remember``; a map already above the new cap
+    is trimmed by that write, not here.
+    """
+    global _MAX_LINKS_PER_TENANT
+    _MAX_LINKS_PER_TENANT = cap
 
 
 #: Default guard: empty allowlist and no consent gate, so every ``ui://``

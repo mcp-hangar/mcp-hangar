@@ -132,6 +132,8 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # and the only thing that tells them apart is which one you nested it in.
     "rate_limit": frozenset({"burst", "rps"}),
     "relay_tasks_enabled": None,  # a bool, not a section
+    # `max_per_tenant` (#1146), read by `config._init_resource_links_from_config`.
+    "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
     "startup_checks": frozenset({"enforce"}),
     "tool_access": frozenset({"mode", "rules"}),
