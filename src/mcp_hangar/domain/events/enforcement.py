@@ -95,6 +95,57 @@ class EgressPolicyViolationObserved(DomainEvent):
 
 
 @dataclass
+class EgressPolicyEnforced(DomainEvent):
+    """Published when an Enforce-mode MCPEgressPolicy actually refused a call.
+
+    The sibling of :class:`EgressPolicyViolationObserved`, and it exists because
+    the enforcing verdict used to be the least auditable one in the product
+    (#1128). Audit mode -- which by definition changes nothing -- recorded an
+    event, a warning and a metric; Enforce mode, refusing the call for real,
+    recorded a ``logger.debug`` line carrying the generic caller-facing message,
+    with the reason the policy computed dropped on the way out. An operator
+    could not answer "which calls did this policy refuse yesterday" from
+    anything Hangar wrote.
+
+    The fields deliberately mirror the observed event, plus ``action``, so an
+    exporter written for one works for the other and the two can be read as one
+    series: what a policy *would* block in Audit and what it *did* block in
+    Enforce are the same question asked either side of a switch.
+
+    One difference from the observed event: no ``__post_init__`` coercing a
+    ``None`` ``reasons`` to ``[]``. That one exists because it replaced a
+    hand-written constructor that did ``x or []``; this event never had one, and
+    its only producer passes a list.
+
+    Attributes:
+        mcp_server_id: McpServer whose tool call the policy refused.
+        tool_name: The MCP tool that was invoked.
+        action: The verdict applied: "deny" or "require_approval". The second is
+            a refusal too: it is raised when the approval gate is not
+            configured, refused, or timed out -- the fail-closed default.
+        reasons: Human-readable reasons for the verdict (audit-friendly).
+        correlation_id: Correlation id of the refused invocation, if any.
+        identity_context: Caller identity context (tenant/subject), if any.
+        policy_id: Content hash of the policy that produced the verdict (#1129).
+        rule_kind: Which part of the policy decided -- "header", "tool" or
+            "arguments". Carried as a field rather than left to be parsed out of
+            ``reasons``, because it is what the counter labels and prose is not
+            an interface.
+        schema_version: Event schema version.
+    """
+
+    mcp_server_id: str
+    tool_name: str = ""
+    action: str = ""
+    reasons: list[str] = field(default_factory=list)
+    correlation_id: str | None = None
+    identity_context: dict[str, Any] | None = None
+    policy_id: str | None = None
+    rule_kind: str = ""
+    schema_version: int = 1
+
+
+@dataclass
 class EgressPolicySet(DomainEvent):
     """Published when an L7 egress policy is attached to or replaced on a server.
 

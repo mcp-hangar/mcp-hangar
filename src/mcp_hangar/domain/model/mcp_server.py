@@ -18,6 +18,7 @@ from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverit
 from ..events import (
     CapabilityViolationDetected,
     DomainEvent,
+    EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -1307,6 +1308,7 @@ class McpServer(AggregateRoot):
                     )
                     # Audit mode: fall through and proceed with the call.
                 elif decision.action is ToolAction.DENY:
+                    self._record_egress_enforcement(decision, tool_name, correlation_id, identity_context_dict, "deny")
                     raise EgressPolicyDeniedError(
                         self.mcp_server_id, tool_name, "; ".join(decision.reasons), policy_id=decision.policy_id
                     )
@@ -1323,7 +1325,53 @@ class McpServer(AggregateRoot):
                         approval_id=l7_approval_id,
                     )
                 else:  # ToolAction.REQUIRE_APPROVAL, nobody asked or nobody answered
+                    self._record_egress_enforcement(
+                        decision, tool_name, correlation_id, identity_context_dict, "require_approval"
+                    )
                     raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name, policy_id=decision.policy_id)
+
+    def _record_egress_enforcement(
+        self,
+        decision: Any,
+        tool_name: str,
+        correlation_id: str | None,
+        identity_context_dict: dict[str, Any] | None,
+        action: str,
+    ) -> None:
+        """Leave a record of a refusal the policy actually applied (#1128).
+
+        Audit mode -- the mode that changes nothing -- recorded an event, a
+        warning and a metric. Enforce mode, refusing the call for real, recorded
+        a `logger.debug` line in the batch fault barrier carrying the generic
+        caller-facing message, with the reasons the policy computed dropped on
+        the way out. The enforcing verdict was the least auditable one in the
+        product, and it is the one an auditor asks about.
+
+        The event is recorded before the raise, and the invoke handler publishes
+        collected events in a `finally`, so the refusal survives the exception
+        that carries it to the caller.
+        """
+        self._record_event(
+            EgressPolicyEnforced(
+                mcp_server_id=self.mcp_server_id,
+                tool_name=tool_name,
+                action=action,
+                reasons=list(decision.reasons),
+                correlation_id=correlation_id,
+                identity_context=identity_context_dict,
+                policy_id=decision.policy_id,
+                rule_kind=decision.rule_kind,
+            )
+        )
+        logger.warning(
+            "egress_policy_enforced",
+            mcp_server_id=self.mcp_server_id,
+            tool_name=tool_name,
+            action=action,
+            reasons=list(decision.reasons),
+            rule_kind=decision.rule_kind,
+            policy_id=decision.policy_id,
+        )
 
     def invoke_tool(  # noqa: C901 -- baseline CC=18 after the L7 split (#921); split further before extending
         self,

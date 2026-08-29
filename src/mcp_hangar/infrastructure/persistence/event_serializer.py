@@ -108,6 +108,7 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "CapabilityViolationDetected": 2,
     "EgressBlocked": 1,
     "EgressPolicyCleared": 1,
+    "EgressPolicyEnforced": 1,
     "EgressPolicySet": 1,
     "EgressPolicyViolationObserved": 1,
     "McpServerCapabilityQuarantined": 1,

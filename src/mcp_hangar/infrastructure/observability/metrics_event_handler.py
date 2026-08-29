@@ -15,6 +15,7 @@ from mcp_hangar.domain.events import (
     DigestMismatchInTask,
     DomainEvent,
     EgressBlocked,
+    EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -105,6 +106,7 @@ class MetricsEventHandler:
         CapabilityViolationDetected: "_handle_capability_violation",
         EgressBlocked: "_handle_egress_blocked",
         EgressPolicyViolationObserved: "_handle_egress_policy_violation_observed",
+        EgressPolicyEnforced: "_handle_egress_policy_enforced",
         TaskCreated: "_handle_task_created",
         TaskCompleted: "_handle_task_completed",
         TaskFailed: "_handle_task_failed",
@@ -265,6 +267,14 @@ class MetricsEventHandler:
         prometheus_metrics.record_egress_policy_violation_observed(
             mcp_server=event.mcp_server_id,
             would_be_action=event.would_be_action,
+        )
+
+    def _handle_egress_policy_enforced(self, event: EgressPolicyEnforced) -> None:
+        """Handle an Enforce-mode L7 egress-policy refusal (the call was blocked)."""
+        prometheus_metrics.record_egress_policy_enforced(
+            mcp_server=event.mcp_server_id,
+            action=event.action,
+            rule_kind=event.rule_kind or "tool",
         )
 
     def _handle_task_created(self, event: TaskCreated) -> None:

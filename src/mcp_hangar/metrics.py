@@ -911,6 +911,18 @@ EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL = Counter(
     labels=["mcp_server", "would_be_action"],  # would_be_action: deny | require_approval
 )
 
+# The enforcing half of the pair above (#1128). Audit mode -- which changes
+# nothing -- was counted; Enforce mode, refusing the call for real, was not, so
+# "which calls did this policy refuse" had no answer in any metric.
+# `mcp_hangar_tool_call_errors_total` cannot cover it: it is fed from
+# `ToolInvocationFailed`, whose three emitters are all past the gate.
+EGRESS_POLICY_ENFORCED_TOTAL = Counter(
+    name="mcp_hangar_egress_policy_enforced",
+    description="Total tool calls refused by an Enforce-mode L7 egress policy",
+    # action: deny | require_approval -- rule_kind: header | tool | arguments
+    labels=["mcp_server", "action", "rule_kind"],
+)
+
 BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
     name="mcp_hangar_behavioral_deviations",
     description="Total number of behavioral deviations detected",
@@ -1271,6 +1283,7 @@ def _register_all_metrics():
             APPROVAL_DELIVERIES_TOTAL,
             APPROVAL_DECISIONS_TOTAL,
             EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL,
+            EGRESS_POLICY_ENFORCED_TOTAL,
         ]
     )
 
@@ -1505,6 +1518,18 @@ def record_egress_policy_violation_observed(mcp_server: str, would_be_action: st
             (``deny`` or ``require_approval``).
     """
     EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL.inc(mcp_server=mcp_server, would_be_action=would_be_action)
+
+
+def record_egress_policy_enforced(mcp_server: str, action: str, rule_kind: str) -> None:
+    """Record an Enforce-mode L7 egress-policy refusal (the call was blocked).
+
+    Args:
+        mcp_server: McpServer ID whose tool call the policy refused.
+        action: Verdict applied -- ``deny`` or ``require_approval``.
+        rule_kind: Which part of the policy decided -- ``header``, ``tool`` or
+            ``arguments``.
+    """
+    EGRESS_POLICY_ENFORCED_TOTAL.inc(mcp_server=mcp_server, action=action, rule_kind=rule_kind)
 
 
 def record_otlp_export_failure() -> None:
