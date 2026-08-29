@@ -362,6 +362,11 @@ class Decision:
     action: ToolAction
     reasons: tuple[str, ...] = ()
     policy_id: str | None = None
+    #: Which part of the policy decided: ``header``, ``tool`` or ``arguments``.
+    #: An argument violation overrides whatever the ladders said, because deny
+    #: always wins, so this names the rule the verdict actually rests on rather
+    #: than the first one consulted (#1128).
+    rule_kind: str = "tool"
 
 
 def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) -> tuple[ToolAction, str]:
@@ -529,10 +534,12 @@ def evaluate(
     (ADR-025).
     """
     header_verdict = evaluate_headers(headers, policy.headers)
+    rule_kind = "header"
     if header_verdict is not None:
         action, reason = header_verdict
         reasons = [reason]
     else:
+        rule_kind = "tool"
         action, reason = evaluate_tool(tool_name, policy.tools, policy.default_action)
         reasons = [reason]
         if policy.headers and headers is not None and headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
@@ -556,5 +563,6 @@ def evaluate(
         if violations:
             action = ToolAction.DENY
             reasons.extend(violations)
+            rule_kind = "arguments"
 
-    return Decision(action=action, reasons=tuple(reasons), policy_id=policy.policy_id)
+    return Decision(action=action, reasons=tuple(reasons), policy_id=policy.policy_id, rule_kind=rule_kind)

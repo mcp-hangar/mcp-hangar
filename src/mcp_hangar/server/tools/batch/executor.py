@@ -239,6 +239,37 @@ class _CallPipeline:
         )
 
 
+def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float) -> None:
+    """Log a failed call, loudly when the failure was a deliberate refusal.
+
+    A policy refusal and an upstream blowing up are not the same class of event
+    and were logged the same way: `logger.debug`, which a default deployment
+    does not emit, carrying `str(e)` -- the generic caller-facing message, with
+    the reason the policy computed left behind in `.details` where only the REST
+    middleware ever looked (#1128).
+
+    The refusal is an enforcement decision this gateway made on purpose, so it
+    is a warning and it says why. Everything else keeps the debug level: an
+    upstream failure is already reported to the caller in the CallResult, and
+    raising it here would make a batch of failing calls a log flood.
+    """
+    details = getattr(error, "details", None)
+    reason = details.get("reason") if isinstance(details, dict) else None
+    refused = error_type in ("EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError")
+    log = logger.warning if refused else logger.debug
+    log(
+        "batch_call_refused" if refused else "batch_call_failed",
+        call_id=call.call_id,
+        mcp_server=call.mcp_server,
+        tool=call.tool,
+        error=str(error),
+        error_type=error_type,
+        reason=reason,
+        policy_id=getattr(error, "policy_id", None),
+        elapsed_ms=round(elapsed_ms, 2),
+    )
+
+
 class BatchExecutor:
     """Executes batch invocations with parallel processing.
 
@@ -1525,16 +1556,7 @@ class BatchExecutor:
                 error_type = type(retry_result.final_error).__name__ if retry_result.final_error else "UnknownError"
                 error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
-                logger.debug(
-                    "batch_call_failed",
-                    call_id=call.call_id,
-                    mcp_server=call.mcp_server,
-                    tool=call.tool,
-                    error=error_msg,
-                    error_type=error_type,
-                    elapsed_ms=round(elapsed_ms, 2),
-                    retry_attempts=retry_result.attempt_count,
-                )
+                _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms)
 
                 return CallResult(
                     index=call.index,
@@ -1557,15 +1579,7 @@ class BatchExecutor:
                 elapsed_ms = (time.perf_counter() - call_start) * 1000
                 error_type = type(e).__name__
 
-                logger.debug(
-                    "batch_call_failed",
-                    call_id=call.call_id,
-                    mcp_server=call.mcp_server,
-                    tool=call.tool,
-                    error=str(e),
-                    error_type=error_type,
-                    elapsed_ms=round(elapsed_ms, 2),
-                )
+                _log_call_failure(call, e, error_type, elapsed_ms)
 
                 return CallResult(
                     index=call.index,
