@@ -61,6 +61,7 @@ from typing import Any
 
 from mcp_hangar._sdk_compat import lowlevel_server, make_mcp_error
 
+from .. import metrics as prometheus_metrics
 from ..domain.services.ui_resource_guard import UiResourceGuard, get_ui_resource_guard
 
 logger = logging.getLogger(__name__)
@@ -164,13 +165,17 @@ def _remember(tenant_id: str | None, mcp_server_id: str, block: dict[str, Any]) 
         if links is None:
             links = _links[tenant_id] = OrderedDict()
             while len(_links) > _MAX_TENANTS:
-                _links.popitem(last=False)
+                _, dropped = _links.popitem(last=False)
+                prometheus_metrics.record_resource_links_evicted("tenant_map_cap", len(dropped))
         else:
             _links.move_to_end(tenant_id)
         links[uri] = (mcp_server_id, block)
         links.move_to_end(uri)
+        evicted = 0
         while len(links) > _MAX_LINKS_PER_TENANT:
             links.popitem(last=False)
+            evicted += 1
+        prometheus_metrics.record_resource_links_evicted("tenant_cap", evicted)
 
 
 def _lookup(tenant_id: str | None, uri: str) -> tuple[str, dict[str, Any]] | None:

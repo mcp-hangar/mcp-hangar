@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
@@ -101,6 +102,54 @@ class TestRecording:
         rt.project_result_uris("t", "s", "text")
         rt.project_result_uris("t", "s", {"content": "not-a-list"})
         assert rt._links == {}
+
+
+def _evicted(reason: str) -> float:
+    """Read the counter the way a scrape would; other tests may have advanced it."""
+    return next(
+        (
+            sample.value
+            for sample in prometheus_metrics.RESOURCE_LINKS_EVICTED_TOTAL.collect()
+            if sample.labels.get("reason") == reason
+        ),
+        0.0,
+    )
+
+
+def _hand_out(tenant: str, n: int) -> None:
+    for i in range(n):
+        rt.project_result_uris(tenant, "s", {"content": [{"type": "resource_link", "uri": f"demo://r/{i}"}]})
+
+
+class TestEvictionsAreCounted:
+    """#1145: an eviction with no record is the shape #1128 argued against."""
+
+    def test_the_counter_is_scraped(self) -> None:
+        prometheus_metrics.record_resource_links_evicted("tenant_cap", 1)
+        assert "mcp_hangar_resource_links_evicted_total" in prometheus_metrics.get_metrics()
+
+    def test_only_a_reason_label_never_a_tenant(self) -> None:
+        assert prometheus_metrics.RESOURCE_LINKS_EVICTED_TOTAL.label_names == ["reason"]
+
+    def test_a_write_below_the_cap_counts_nothing(self, monkeypatch) -> None:
+        monkeypatch.setattr(rt, "_MAX_LINKS_PER_TENANT", 2)
+        before = _evicted("tenant_cap")
+        _hand_out("t", 2)
+        assert _evicted("tenant_cap") == before
+
+    def test_the_per_tenant_cap_counts_each_evicted_link(self, monkeypatch) -> None:
+        monkeypatch.setattr(rt, "_MAX_LINKS_PER_TENANT", 2)
+        before = _evicted("tenant_cap")
+        _hand_out("t", 5)
+        assert _evicted("tenant_cap") == before + 3
+
+    def test_the_tenant_map_cap_counts_the_dropped_tenants_links(self, monkeypatch) -> None:
+        monkeypatch.setattr(rt, "_MAX_TENANTS", 1)
+        _hand_out("t0", 3)
+        before_map, before_cap = _evicted("tenant_map_cap"), _evicted("tenant_cap")
+        _hand_out("t1", 1)
+        assert _evicted("tenant_map_cap") == before_map + 3, "what went away is every link t0 held"
+        assert _evicted("tenant_cap") == before_cap
 
 
 class TestUriProjection:

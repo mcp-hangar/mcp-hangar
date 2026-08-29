@@ -1056,6 +1056,19 @@ PROJECTION_WITHDRAWALS_TOTAL = Counter(
     labels=["reason"],
 )
 
+# A handed-out resource_link the front door forgot: the per-tenant map hit its
+# cap, or the tenant-map LRU dropped a whole tenant (#1139). Either way the
+# victim's `resources/list` just gets shorter, with nothing in the log -- the
+# shape #1128 argued against on the egress path. Unlabelled by tenant for the
+# same reason as EMPTY_PROJECTION_TOTAL (#895): unbounded cardinality.
+RESOURCE_LINKS_EVICTED_TOTAL = Counter(
+    name="mcp_hangar_resource_links_evicted",
+    description="Handed-out resource_links forgotten by the front door, by cause",
+    # tenant_cap (oldest link at the per-tenant cap) | tenant_map_cap (every
+    # link of a tenant dropped by the tenant-map LRU)
+    labels=["reason"],
+)
+
 # -----------------------------------------------------------------------------
 # Approval Gate Metrics
 # -----------------------------------------------------------------------------
@@ -1263,13 +1276,14 @@ def _register_all_metrics():
         ]
     )
 
-    # Front-door projection / SEP-2243 header validation (#887, #904, #1053).
+    # Front-door projection / SEP-2243 header validation / link map (#887, #904, #1053, #1139).
     metrics.extend(
         [
             EMPTY_PROJECTION_TOTAL,
             PROJECTED_TOOLS,
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
             PROJECTION_WITHDRAWALS_TOTAL,
+            RESOURCE_LINKS_EVICTED_TOTAL,
         ]
     )
 
@@ -1530,6 +1544,19 @@ def record_egress_policy_enforced(mcp_server: str, action: str, rule_kind: str) 
             ``arguments``.
     """
     EGRESS_POLICY_ENFORCED_TOTAL.inc(mcp_server=mcp_server, action=action, rule_kind=rule_kind)
+
+
+def record_resource_links_evicted(reason: str, count: int) -> None:
+    """Record handed-out resource_links the front door forgot (#1139).
+
+    Args:
+        reason: ``tenant_cap`` (a tenant's oldest link at its own cap) or
+            ``tenant_map_cap`` (a whole tenant dropped by the tenant-map LRU).
+        count: Links that went away -- for ``tenant_map_cap`` that is every
+            link the evicted tenant held, not one.
+    """
+    if count > 0:
+        RESOURCE_LINKS_EVICTED_TOTAL.inc(count, reason=reason)
 
 
 def record_otlp_export_failure() -> None:
