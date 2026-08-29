@@ -58,6 +58,70 @@ class TestValueLevelRedaction:
         assert out == {"count": 3, "ratio": 1.5, "flag": False, "nothing": None}
 
 
+class TestKeyNameRedactionIsNotRootOnly:
+    """The inverse of the leak the value pass was added for (#1130).
+
+    A plain password has no shape, so pass 2 cannot see it. Pass 1 could, and
+    ran only over the top-level mapping -- so the same key name one level down
+    was persisted and served verbatim.
+    """
+
+    def test_a_password_one_level_down_is_redacted(self):
+        out = _sanitize_arguments({"config": {"password": "hunter2"}})
+        assert out == {"config": {"password": "[REDACTED]"}}
+
+    def test_a_password_inside_a_list_of_records_is_redacted(self):
+        out = _sanitize_arguments({"items": [{"password": "hunter2"}, {"user": "alice"}]})
+        assert out == {"items": [{"password": "[REDACTED]"}, {"user": "alice"}]}
+
+    def test_a_deeply_nested_sensitive_key_is_redacted(self):
+        out = _sanitize_arguments({"a": {"b": {"c": {"api_key": "whatever-this-is"}}}})
+        assert "whatever-this-is" not in str(out)
+
+    def test_the_key_name_wins_over_descending_into_the_value(self):
+        """A sensitive key hides its whole subtree, not just its strings."""
+        out = _sanitize_arguments({"credentials": {"user": "alice", "pw": "hunter2"}})
+        assert out == {"credentials": "[REDACTED]"}
+
+
+class TestTheDepthCap:
+    def test_past_the_cap_the_subtree_is_replaced_not_passed_through(self):
+        """Fail-closed: this projection is persisted and served, so what the walk
+        cannot inspect is dropped rather than shown."""
+        deep = {"a": {"b": {"c": {"d": {"e": {"f": {"g": GITHUB_PAT_A}}}}}}}
+
+        out = _sanitize_arguments(deep)
+
+        assert GITHUB_PAT_A not in str(out)
+
+    def test_within_the_cap_ordinary_nesting_survives(self):
+        args = {"a": {"b": {"c": {"limit": 50}}}}
+
+        assert _sanitize_arguments(args) == args
+
+
+class TestCredentialsInAUrl:
+    """The docstring named connection strings as covered; no pattern matched
+    them until #1130. The example it cites is the test."""
+
+    def test_a_dsn_loses_its_credentials(self):
+        out = _sanitize_arguments({"dsn": "postgres://user:pw@host/db"})
+
+        assert "user:pw" not in out["dsn"]
+
+    def test_the_host_stays_readable(self):
+        """An approver still has to know which host was being reached."""
+        out = _sanitize_arguments({"dsn": "postgres://user:pw@host/db"})
+
+        assert out["dsn"].startswith("postgres://")
+        assert out["dsn"].endswith("@host/db")
+
+    def test_a_url_without_credentials_is_untouched(self):
+        args = {"url": "https://example.com/report.csv"}
+
+        assert _sanitize_arguments(args) == args
+
+
 class TestIntegrityHashIsOverRawArguments:
     def test_changed_arguments_change_the_hash(self):
         assert _hash_arguments({"path": "/a"}) != _hash_arguments({"path": "/b"})
