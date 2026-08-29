@@ -281,13 +281,17 @@ class ToolAccessResolver:
                 self._policy_cache.pop(key, None)
 
     def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
-        """Remove EVERY access policy for a mcp_server -- tool, prompt and resource.
+        """Remove EVERY access policy for a mcp_server -- tool, prompt and resource,
+        the server's own AND its per-tenant (``tool_access.member.<tenant>``) ones.
 
         The one caller is the hot-unload path, and unloading a server retires
         the whole server, not one kind of policy about it. Removing a single
         kind would leave the other two behind for an id that is free to be
         loaded again, so a later server inheriting that id would be governed by
-        its predecessor's rules (#1028).
+        its predecessor's rules (#1028). The same argument holds one axis over:
+        a per-tenant policy left behind is materialised fresh on the next
+        resolve, because the cache that might have masked it is correctly
+        cleared below (#1138).
 
         Args:
             mcp_server_id: McpServer identifier.
@@ -295,6 +299,9 @@ class ToolAccessResolver:
         with self._lock:
             for key in [k for k in self._mcp_server_policies if k[0] == mcp_server_id]:
                 self._mcp_server_policies.pop(key, None)
+            for member_key in [k for k in self._standalone_member_policies if k[0] == mcp_server_id]:
+                self._standalone_member_policies.pop(member_key, None)
+            # Already drops every `mcp_server:<id>:member:` entry too.
             self._invalidate_mcp_server_cache(mcp_server_id)
 
     def remove_provider_policy(self, provider_id: str) -> None:
