@@ -1,1 +1,0 @@
-**core:** hot-unloading an mcp_server left its per-tenant policies (`tool_access.member.<tenant>`) registered under the freed id, so a server later loaded under that id inherited its predecessor's deny and allow lists for every kind. `remove_mcp_server_policy` now retires them with the server's own policies (#1138)

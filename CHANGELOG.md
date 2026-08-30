@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.16.0...v2.17.0) (2026-08-29)
+
+### Added
+
+- **core:** `resource_links.max_per_tenant` bounds how many handed-out
+  `resource_link` references the front door remembers for one tenant before
+  that tenant's oldest is forgotten. Absent, it stays at the previous constant of
+  4096, so nothing changes on upgrade. Raise it when
+  `mcp_hangar_resource_links_evicted_total{reason="tenant_cap"}` climbs for
+  tenants that legitimately hand out more. A value that is not a positive
+  integer refuses to start rather than falling back, and the section is known to
+  `validate_config`, so a typo is reported (and refused under
+  `HANGAR_CONFIG_STRICT=1`) ([#1155](https://github.com/mcp-hangar/mcp-hangar/pull/1155))
+- **core:** `mcp_hangar_resource_links_evicted_total` counts handed-out
+  `resource_link`s the front door forgot, by `reason`: `tenant_cap` (a tenant's
+  oldest link at its own 4096-link cap) or `tenant_map_cap` (every link of a
+  tenant dropped by the tenant-map LRU). Until now an eviction left no record and
+  the victim's `resources/list` simply got shorter. Not labelled by tenant, for
+  the same cardinality reason as `mcp_hangar_empty_projection_total` ([#1153](https://github.com/mcp-hangar/mcp-hangar/pull/1153))
+
+### Changed
+
+- **core:** `ToolWithdrawn` and `ToolRestored` carry `kind` (`tool`, `prompt` or
+  `resource`) at schema version 2, so a consumer rebuilding the withdrawal overlay
+  from the event log can tell which surface was withdrawn. The admin endpoints
+  still write `tool`; rows stored by an older gateway have no `kind` and replay
+  as `tool`, which is all they could have been ([#1148](https://github.com/mcp-hangar/mcp-hangar/pull/1148))
+
+### Fixed
+
+- **core:** the handed-out `resource_link` map is now bounded per tenant, not
+  per process. One `OrderedDict` capped at 4096 links evicted oldest-first
+  across all tenants, so a tenant handing out 4096 links flushed every other
+  tenant's remembered links: they vanished from `resources/list` and, for an
+  upstream the tenant no longer projects, stopped resolving on `resources/read`.
+  Each tenant now has its own map with the same 4096-link cap, evicted only by
+  that tenant's own traffic, and the number of tenant maps is itself capped
+  (1024, least recently used evicted first) so minting identities cannot trade
+  one exhaustion for another. Restart and cross-replica survival are unchanged:
+  the map is still per-replica and in-memory ([#1149](https://github.com/mcp-hangar/mcp-hangar/pull/1149))
+- **core:** `remove_group_policy` and `remove_member_policy` removed only the
+  tool-kind policy, so a prompt or resource policy registered on a group or a
+  group member outlived its removal (and, for a member, so did its cached
+  resolution). Both now retire every kind, the way `remove_mcp_server_policy`
+  already did since #1034. No production path calls either yet ([#1147](https://github.com/mcp-hangar/mcp-hangar/pull/1147))
+- **core:** hot-unloading an mcp_server left its per-tenant policies (`tool_access.member.<tenant>`) registered under the freed id, so a server later loaded under that id inherited its predecessor's deny and allow lists for every kind. `remove_mcp_server_policy` now retires them with the server's own policies (#1138) ([#1150](https://github.com/mcp-hangar/mcp-hangar/pull/1150))
+- **core:** `POST /api/admin/tools/{server}/{name}/withdraw` and `/restore` accept
+  `kind` (`tool`, `prompt` or `resource`) in the JSON body, so a prompt or a
+  resource can be withdrawn at runtime instead of only from `withdrawn_prompts:` /
+  `withdrawn_resources:` and a reload. Before, the endpoint reported success for a
+  prompt name, left the prompt served, and withdrew a same-named tool for that
+  tenant. An unrecognised `kind` is a 400 and writes nothing; no `kind` still
+  means a tool. A resource is named by its upstream uri (`demo://doc/1`), and the
+  name segment now accepts slashes so such a uri reaches the endpoint. The
+  response JSON gains a `kind` field and the emitted event carries it ([#1152](https://github.com/mcp-hangar/mcp-hangar/pull/1152))
+
 ## [2.16.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.15.0...v2.16.0) (2026-08-29)
 
 ### Added
