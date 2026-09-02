@@ -448,6 +448,13 @@ def bootstrap(
     # seconds after every restart is a gateway that lost its fleet.
     restore_persisted_fleet(runtime)
 
+    # And the withdrawals decided before this replica existed. After the tailer
+    # for the same head-then-snapshot reason, and after the fleet so the servers
+    # a withdrawal names are already here (#1165).
+    from .withdrawals import restore_runtime_withdrawals
+
+    restore_runtime_withdrawals(runtime)
+
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
     # Initialize saga with persistence
