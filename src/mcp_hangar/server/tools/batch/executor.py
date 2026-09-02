@@ -13,7 +13,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 import asyncio
 import atexit
 import contextvars
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import threading
 import time
@@ -51,7 +51,7 @@ from ....metrics import (
     TOOL_ACCESS_DENIED_TOTAL,
 )
 from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
-from ....retry import retry_sync, RetryPolicy, RetryResult
+from ....retry import configured_retry_policy, retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
@@ -251,6 +251,38 @@ class _CallPipeline:
             error_type=error_type,
             elapsed_ms=self.elapsed_ms(),
         )
+
+
+def _retry_policy_for(call: Any) -> RetryPolicy | None:
+    """The policy this call retries under, or ``None`` for a single attempt.
+
+    The `retry:` section had a loader, a log line confirming what it loaded, and
+    no consumer: the executor built `RetryPolicy(max_attempts=call.max_retries)`
+    from the `hangar_batch` argument alone, so `backoff`, `initial_delay`,
+    `max_delay`, `retry_on` and `jitter*` were always the class defaults and
+    `per_mcp_server` applied to nothing (#1162).
+
+    Two rules decide the result:
+
+    * **Config is the ceiling.** An explicit `max_attempts` from the caller can
+      lower the attempt count and never raise it. The operator configures how
+      hard this gateway is willing to lean on an upstream; a caller asking for
+      more attempts than that is asking to be someone else's load problem.
+    * **No config means no change.** `RetryPolicy()` is three attempts, so
+      treating "nothing configured" as a default policy would turn every batch
+      call in every deployment into three -- which is why the store answers
+      `None` rather than a policy nobody asked for.
+    """
+    configured = configured_retry_policy(call.mcp_server)
+    caller_attempts = getattr(call, "max_retries", 1) or 1
+
+    if configured is None:
+        return RetryPolicy(max_attempts=caller_attempts) if caller_attempts > 1 else None
+
+    attempts = min(configured.max_attempts, caller_attempts) if caller_attempts > 1 else configured.max_attempts
+    if attempts <= 1:
+        return None
+    return replace(configured, max_attempts=attempts)
 
 
 def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float) -> None:
@@ -1554,14 +1586,15 @@ class BatchExecutor:
                 cmd_span.set_attribute("command.result", "success")
                 return cast(dict[str, Any], result)
 
-        # Execute with retry if max_retries > 1
+        # Execute with retry, under whichever policy applies (#1162).
         retry_result: RetryResult | None = None
-        if call.max_retries > 1:
+        policy = _retry_policy_for(call)
+        if policy is not None:
             with tracer.start_as_current_span("invoke_with_retry") as retry_span:
-                retry_span.set_attribute("retry.max_attempts", call.max_retries)
+                retry_span.set_attribute("retry.max_attempts", policy.max_attempts)
+                retry_span.set_attribute("retry.backoff", str(policy.backoff))
                 retry_span.set_attribute("mcp.server.id", call.mcp_server)
                 retry_span.set_attribute("gen_ai.tool.name", call.tool)
-                policy = RetryPolicy(max_attempts=call.max_retries)
                 retry_result = retry_sync(
                     operation=do_invoke,
                     policy=policy,

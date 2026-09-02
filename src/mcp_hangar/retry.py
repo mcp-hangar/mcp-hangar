@@ -31,12 +31,40 @@ import inspect
 import time
 from typing import Any, TypeVar
 
+from .domain.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    EgressPolicyApprovalRequiredError,
+    EgressPolicyDeniedError,
+    RateLimitExceeded,
+    ToolAccessDeniedError,
+    ValidationError,
+)
 from .errors import is_retryable
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+#: Errors that are a decision, not a failure. Retrying one asks the same
+#: question again and gets the same answer -- or worse: re-driving an approval
+#: gate holds a human decision open once per attempt, and re-driving a rate
+#: limit is what the limit exists to stop. Checked before the policy, so no
+#: `retry_on` can opt back in.
+#:
+#: `ValidationError` is in the list for a second reason: its message frequently
+#: contains "malformed", which `is_retryable` matches as a transient shape, so
+#: an invalid payload was retried to exhaustion on the stock configuration.
+_NEVER_RETRY: tuple[type[Exception], ...] = (
+    ToolAccessDeniedError,
+    EgressPolicyDeniedError,
+    EgressPolicyApprovalRequiredError,
+    AuthorizationError,
+    AuthenticationError,
+    RateLimitExceeded,
+    ValidationError,
+)
 
 
 class BackoffStrategy(StrEnum):
@@ -211,6 +239,13 @@ def calculate_backoff(
 def should_retry(error: Exception, policy: RetryPolicy) -> bool:
     """Determine if an error should trigger a retry.
 
+    A refusal is never retried, whatever the policy says. Both arms below are
+    substring matches -- on the type name AND on the message -- so a
+    `retry_on` of `["Error"]` matches every refusal type there is, and even the
+    stock list retries a denial whose message happens to contain "timeout" or
+    "connection". Re-asking an approval gate, or re-driving a denied egress
+    decision, is not a transient-failure recovery: the answer was the point.
+
     Args:
         error: The exception that occurred
         policy: The retry policy
@@ -218,6 +253,9 @@ def should_retry(error: Exception, policy: RetryPolicy) -> bool:
     Returns:
         True if the error matches retry criteria
     """
+    if isinstance(error, _NEVER_RETRY):
+        return False
+
     # Check if it's a known retryable HangarError
     if is_retryable(error):
         return True
@@ -479,14 +517,22 @@ class RetryConfigStore:
 
     _default_policy: RetryPolicy
     _mcp_server_policies: dict[str, RetryPolicy]
+    _default_is_configured: bool
 
     def __init__(self):
         self._default_policy = RetryPolicy()
         self._mcp_server_policies = {}
+        # Whether anyone actually asked for a default. `RetryPolicy()` is three
+        # attempts, so a store that cannot tell "the operator wrote
+        # `default_policy`" from "nobody said anything" would turn every batch
+        # call in every deployment into three -- a retry storm shipped as a
+        # bug fix. See `configured_policy_for`.
+        self._default_is_configured = False
 
     def set_default(self, policy: RetryPolicy) -> None:
         """Set the default retry policy."""
         self._default_policy = policy
+        self._default_is_configured = True
 
     def set_mcp_server_policy(self, mcp_server_id: str, policy: RetryPolicy) -> None:
         """Set retry policy for a specific mcp_server."""
@@ -499,6 +545,19 @@ class RetryConfigStore:
         otherwise returns default policy.
         """
         return self._mcp_server_policies.get(mcp_server_id, self._default_policy)
+
+    def configured_policy_for(self, mcp_server_id: str) -> RetryPolicy | None:
+        """The policy an operator wrote for this server, or ``None``.
+
+        The difference from :meth:`get_policy` is the whole point: that one
+        always answers, falling back to a `RetryPolicy()` nobody asked for.
+        A caller deciding whether retries happen at all needs to know that
+        nothing was configured, so it can leave behaviour as it was.
+        """
+        configured = self._mcp_server_policies.get(mcp_server_id)
+        if configured is not None:
+            return configured
+        return self._default_policy if self._default_is_configured else None
 
     def load_from_config(self, config: dict[str, Any]) -> None:
         """Load retry configuration from config dictionary.
@@ -521,6 +580,7 @@ class RetryConfigStore:
         default_config = retry_config.get("default_policy", {})
         if default_config:
             self._default_policy = RetryPolicy.from_dict(default_config)
+            self._default_is_configured = True
             logger.info(
                 "retry_default_policy_loaded",
                 max_attempts=self._default_policy.max_attempts,
@@ -553,6 +613,24 @@ def get_retry_store() -> RetryConfigStore:
 def get_retry_policy(mcp_server_id: str) -> RetryPolicy:
     """Get retry policy for a mcp_server."""
     return _retry_store.get_policy(mcp_server_id)
+
+
+def configured_retry_policy(mcp_server_id: str) -> RetryPolicy | None:
+    """The configured retry policy for a server, or ``None`` if none was set."""
+    return _retry_store.configured_policy_for(mcp_server_id)
+
+
+def reset_retry_store() -> None:
+    """Forget every loaded policy (config reload, and tests).
+
+    In place rather than rebinding the global: `bootstrap.retry_config` holds
+    the store it fetched, and so does anything else that took a reference, so a
+    fresh object would leave them reading the old one -- the shape that makes a
+    reload look applied and change nothing.
+    """
+    _retry_store._mcp_server_policies.clear()
+    _retry_store._default_policy = RetryPolicy()
+    _retry_store._default_is_configured = False
 
 
 # =============================================================================
