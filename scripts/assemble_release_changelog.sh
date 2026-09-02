@@ -104,8 +104,36 @@ if git diff --quiet HEAD -- CHANGELOG.md changelog.d UPGRADE.md; then
 fi
 
 git add -A CHANGELOG.md changelog.d UPGRADE.md
-git -c user.name="github-actions[bot]" \
-    -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+
+# Commit as the identity that PUSHES this, not as a different bot.
+#
+# The organisation requires approval to run workflows for "first-time
+# contributors" -- anyone who has never had a commit or pull request merged
+# into this repository -- and it checks the ACTOR of the pull request event,
+# not only the author. Signing this commit as `github-actions[bot]` made that
+# the actor, and `github-actions[bot]` never has anything merged here: the
+# assembly commit lives on the release branch and the squash into main is
+# attributed to the pull request's author, the release app. So every release
+# PR's checks sat in `action_required` waiting for a human, while the merge was
+# refused with "13 of 13 required status checks are expected" (#1184).
+#
+# The release app is not a first-time contributor -- it authors and merges a
+# release PR every time -- so committing as the app is what makes the runs
+# start on their own. It is also just true: the app's token is what pushes the
+# commit two lines below.
+COMMIT_NAME="${RELEASE_BOT_NAME:-mcp-hangar-release-bot[bot]}"
+COMMIT_EMAIL="${RELEASE_BOT_EMAIL:-283430731+mcp-hangar-release-bot[bot]@users.noreply.github.com}"
+
+# ... unless there is no app token, in which case `github-actions[bot]` is who
+# actually pushed and claiming otherwise would be a lie in the history. That
+# path is the one the recovery below exists for.
+if [ "$PUSH_TOKEN" = "$GH_TOKEN" ]; then
+  COMMIT_NAME="github-actions[bot]"
+  COMMIT_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+fi
+
+git -c user.name="$COMMIT_NAME" \
+    -c user.email="$COMMIT_EMAIL" \
     commit -m "chore(release): assemble changelog and upgrade notes for ${version}"
 
 # Push with an explicit credential rather than the one checkout persisted. A
@@ -115,25 +143,60 @@ git -c user.name="github-actions[bot]" \
 # nothing is wrong. The app token does trigger them.
 git push "https://x-access-token:${PUSH_TOKEN}@github.com/${REPO}.git" "HEAD:${branch}"
 
-# Fix the fallback rather than describe it.
+# Recover on what is observable, not on a theory about why.
 #
-# The condition used to be `PUSH_TOKEN = GH_TOKEN && RELEASE_BOT_APP_ID unset`,
-# on the assumption that the fallback only happens where no app is configured.
-# It also happens where the app IS configured and the token step yields nothing
-# -- an expired installation, a permissions change, a transient failure -- and
-# that is the case that reached #1173: the app id was set, so the warning was
-# skipped, and the release PR sat with 13 required checks in "expected" that no
-# push would ever satisfy. `--admin` does not clear a ruleset requirement, so
-# the release was stuck behind an error message pointing at branch protection.
+# The first version of this guessed at the cause: it compared PUSH_TOKEN to
+# GH_TOKEN, on the reasoning that a push made with the built-in GITHUB_TOKEN
+# does not trigger workflows. That reasoning is sound and the condition was
+# still wrong -- on the run it was written for, the app token WAS available, so
+# the comparison was false and the recovery never ran. The release PR sat with
+# 13 required checks "expected" anyway (#1173).
 #
-# Comparing the tokens is the honest test: it is true whenever this commit was
-# pushed with a credential that does not trigger workflows, whatever the reason.
-# Close/reopen fires `pull_request: reopened` on the head we just pushed, which
-# runs the checks without rewriting history -- the manual recovery, done here so
-# nobody has to work out that it is needed.
-if [ "$PUSH_TOKEN" = "$GH_TOKEN" ]; then
-  echo "::warning::Pushed with the built-in GITHUB_TOKEN, which does not trigger the release PR's checks. Re-firing them; the app token was unavailable, which is worth investigating (RELEASE_BOT_APP_ID=${RELEASE_BOT_APP_ID:+set}${RELEASE_BOT_APP_ID:-unset})."
+# What actually happened, from the API rather than from inference: the runs
+# existed, they belonged to `github-actions[bot]`, and they produced nothing --
+# ten runs with zero jobs and `conclusion: failure` on one head, ten runs in
+# `action_required` on the next. Re-firing the same workflows as a human actor
+# produced checks immediately, both times. So the condition worth testing is
+# not which credential pushed, but whether the head ended up with any check
+# runs at all -- which is the thing that blocks the merge, and the thing that
+# is true whatever the underlying reason turns out to be (#1184).
+#
+# The grace period is for the ordinary case: a head that has just been pushed
+# has no checks for a few seconds either way.
+sleep "${CHECK_GRACE_S:-45}"
+
+head_sha=$(git rev-parse HEAD)
+
+# CHECK RUNS, not workflow runs. The two differ exactly where it matters: on
+# the head this was written for, ten workflow runs existed and contributed no
+# checks at all -- zero jobs and `conclusion: failure` -- and on the next head
+# ten sat in `action_required`. Both look identical to the merge gate, which
+# reads check runs and reports "13 of 13 required status checks are expected".
+checks_on_head() {
+  gh api "repos/${REPO}/commits/${1}/check-runs" --jq '.total_count' 2>/dev/null || echo "unknown"
+}
+
+checks=$(checks_on_head "$head_sha")
+
+if [ "$checks" = "0" ]; then
+  echo "::warning::No check runs on ${head_sha}, so the release PR's required checks stay \"expected\" and the merge is refused. Re-firing them."
   bash "${refire}" "$branch"
+  sleep "${CHECK_GRACE_S:-45}"
+  checks=$(checks_on_head "$head_sha")
+fi
+
+# Said plainly, because the recovery has a ceiling: it reopens the PR with this
+# job's credential, and a run whose actor is `github-actions[bot]` is what was
+# producing no checks in the first place. When that is what happens, the
+# release needs a human -- and a human who is told exactly what to run gets it
+# done in a minute rather than an hour (#1184).
+if [ "$checks" = "0" ]; then
+  echo "::error::The release PR still has no check runs, so it cannot be merged. Approve its pending runs, or reopen it, with an account that can:"
+  echo "::error::  gh run list -R ${REPO} --branch ${branch} --json databaseId,name,conclusion --jq '.[]|select(.conclusion==\"action_required\")|.databaseId' | xargs -I{} gh api -X POST repos/${REPO}/actions/runs/{}/approve"
+elif [ "$checks" = "unknown" ]; then
+  echo "::warning::Could not read the check runs for ${head_sha}; if the release PR shows no checks, close and reopen it."
+else
+  echo "${checks} check run(s) on ${head_sha}."
 fi
 
 echo "Assembled changelog for ${version} onto ${branch}."
