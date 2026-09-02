@@ -394,7 +394,12 @@ class HttpClient:
         # `retries` and `verify` arguments must still reach the transport
         # unchanged -- see the long comment above on why TLS settings live here.
         transport = _SsrfGuardedTransport(
-            retries=config.max_retries,
+            # Zero, because `_post_with_retry` owns retrying now (#1163).
+            # httpcore's loop retries connect failures only, on a hardcoded
+            # backoff the operator cannot configure and a metric the application
+            # cannot emit from; leaving it at `max_retries` as well would
+            # multiply the two loops together.
+            retries=0,
             verify=verify,
             enforce_ssrf=config.enforce_ssrf,
             provenance=config.provenance,
@@ -422,6 +427,67 @@ class HttpClient:
         headers.update(self._http_config.extra_headers)
 
         return headers
+
+    def _post_with_retry(
+        self,
+        url: str,
+        request_body: dict[str, Any],
+        headers: dict[str, str] | None,
+        timeout: float | None,
+        mcp_server_label: str,
+    ) -> httpx.Response:
+        """POST, retrying the transient failures the config says to retry.
+
+        `max_retries`, `retry_backoff_factor` and `retry_status_codes` were
+        declared, validated, parsed from `http:`, passed through the launcher
+        and documented -- and the only retry that ran was httpcore's, which
+        retries `ConnectError`/`ConnectTimeout` alone, with its own hardcoded
+        backoff. A 502/503/504 from an upstream mid-rollout came straight back
+        to the caller on the first attempt, `retry_backoff_factor` and
+        `retry_status_codes` had no reader at all, and
+        `mcp_hangar_http_retries_total` -- registered, on a shipped Grafana
+        panel, in the docs -- could not be incremented from inside a retry loop
+        the application cannot see (#1163).
+
+        The transport is now built with `retries=0` so connect retries happen
+        here too, once, under the configured backoff rather than two loops deep.
+
+        Args:
+            url: The upstream endpoint.
+            request_body: JSON-RPC request payload.
+            headers: Per-request headers, or None.
+            timeout: Per-request timeout.
+            mcp_server_label: Metric label for this upstream.
+
+        Returns:
+            The last response received -- a retried status is returned as-is
+            once the attempts are spent, so the caller's existing error
+            handling is unchanged.
+        """
+        attempts = max(1, self._http_config.max_retries)
+        retry_statuses = set(self._http_config.retry_status_codes)
+        backoff = self._http_config.retry_backoff_factor
+
+        for attempt in range(attempts):
+            reason: str
+            try:
+                response = self._client.post(url, json=request_body, headers=headers, timeout=timeout)
+                if response.status_code not in retry_statuses or attempt == attempts - 1:
+                    return response
+                reason = str(response.status_code)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                if attempt == attempts - 1:
+                    raise
+                reason = "connection_error"
+                logger.debug("http_client_connect_failed", mcp_server=mcp_server_label, error=str(exc))
+
+            prometheus_metrics.HTTP_RETRIES_TOTAL.inc(mcp_server=mcp_server_label, retry_reason=reason)
+            # Exponential on the factor, the shape `retry_backoff_factor`
+            # names; a factor of 0 disables waiting without disabling retries.
+            time.sleep(backoff * (2**attempt))
+
+        # Unreachable: the loop returns or raises on its last attempt.
+        raise ClientError("retry_loop_exhausted")
 
     def call(
         self,
@@ -502,11 +568,12 @@ class HttpClient:
                     extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
-                response = self._client.post(
+                response = self._post_with_retry(
                     url,
-                    json=request_body,
-                    headers=extra_headers if extra_headers else None,
-                    timeout=timeout,
+                    request_body,
+                    extra_headers if extra_headers else None,
+                    timeout,
+                    mcp_server_label,
                 )
 
             duration_s = time.time() - start_time

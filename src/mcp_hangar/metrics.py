@@ -707,12 +707,6 @@ DISCOVERY_DEREGISTRATIONS_TOTAL = Counter(
     labels=["source_type", "reason"],  # reason: ttl_expired, source_removed, manual
 )
 
-DISCOVERY_CONFLICTS_TOTAL = Counter(
-    name="mcp_hangar_discovery_conflicts",
-    description="Total discovery conflicts",
-    labels=["conflict_type"],  # conflict_type: static_wins, source_priority
-)
-
 DISCOVERY_QUARANTINE_TOTAL = Counter(
     name="mcp_hangar_discovery_quarantine",
     description="Total mcp_servers quarantined",
@@ -1196,7 +1190,6 @@ def _register_all_metrics():
         DISCOVERY_CYCLE_DURATION_SECONDS,
         DISCOVERY_REGISTRATIONS_TOTAL,
         DISCOVERY_DEREGISTRATIONS_TOTAL,
-        DISCOVERY_CONFLICTS_TOTAL,
         DISCOVERY_QUARANTINE_TOTAL,
         DISCOVERY_ERRORS_TOTAL,
         DISCOVERY_LAST_CYCLE_TIMESTAMP,
