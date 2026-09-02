@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from ..domain.security.argument_redaction import redact_arguments
 from .context import get_context
 
 if TYPE_CHECKING:
@@ -126,7 +127,19 @@ def serialize_full_config(
         stored = getattr(ctx, "full_config", {}) or {}
         for key in _PASSTHROUGH_KEYS:
             if key in stored and key not in config:
-                config[key] = stored[key]
+                # Redacted, because `ctx.full_config` is the INTERPOLATED
+                # document: `${OIDC_CLIENT_SECRET}` in the file is the secret
+                # itself by the time it is stored, and this export is served
+                # under `config:read` (`POST /config/export`, `GET
+                # /config/diff`), where the only sanitizer in the module runs on
+                # `GET /config` alone and only over top-level key names (#1169).
+                #
+                # The section's CONTENTS, not the section: the name `auth`
+                # matches the sensitive-key list itself, so redacting the pair
+                # would replace the whole block with a marker and lose
+                # `enabled`, `driver` and every other harmless setting.
+                section = stored[key]
+                config[key] = redact_arguments(section) if isinstance(section, dict) else section
     except Exception:  # noqa: BLE001 -- fault-barrier: missing context must not break serialization
         pass
 

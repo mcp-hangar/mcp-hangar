@@ -17,7 +17,7 @@ the interaction: it fails if anyone "simplifies" the hash back onto the
 sanitized projection.
 """
 
-from mcp_hangar.approvals.service import _hash_arguments, _sanitize_arguments
+from mcp_hangar.domain.security.argument_redaction import hash_arguments, redact_arguments
 
 
 GITHUB_PAT_A = "ghp_" + "A" * 36
@@ -28,33 +28,33 @@ JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJ
 class TestValueLevelRedaction:
     def test_secret_under_an_innocuous_key_is_redacted(self):
         """The whole point: key-name matching never saw this one."""
-        out = _sanitize_arguments({"body": f"Authorization: Bearer {JWT}"})
+        out = redact_arguments({"body": f"Authorization: Bearer {JWT}"})
         assert JWT not in out["body"]
 
     def test_github_token_in_a_free_text_field(self):
-        out = _sanitize_arguments({"message": f"deploy with {GITHUB_PAT_A} please"})
+        out = redact_arguments({"message": f"deploy with {GITHUB_PAT_A} please"})
         assert GITHUB_PAT_A not in out["message"]
 
     def test_nested_dict_is_walked(self):
-        out = _sanitize_arguments({"payload": {"inner": {"note": GITHUB_PAT_A}}})
+        out = redact_arguments({"payload": {"inner": {"note": GITHUB_PAT_A}}})
         assert GITHUB_PAT_A not in str(out)
 
     def test_list_values_are_walked(self):
-        out = _sanitize_arguments({"items": ["safe", GITHUB_PAT_A]})
+        out = redact_arguments({"items": ["safe", GITHUB_PAT_A]})
         assert GITHUB_PAT_A not in str(out)
 
     def test_key_name_redaction_still_applies(self):
-        out = _sanitize_arguments({"api_key": "whatever-this-is", "password": "hunter2"})
+        out = redact_arguments({"api_key": "whatever-this-is", "password": "hunter2"})
         assert out["api_key"] == "[REDACTED]"
         assert out["password"] == "[REDACTED]"
 
     def test_ordinary_values_survive_untouched(self):
         """Redaction must not mangle the arguments an approver needs to read."""
         args = {"path": "/tmp/report.csv", "limit": 50, "dry_run": True, "tags": ["a", "b"]}
-        assert _sanitize_arguments(args) == args
+        assert redact_arguments(args) == args
 
     def test_non_string_scalars_are_preserved(self):
-        out = _sanitize_arguments({"count": 3, "ratio": 1.5, "flag": False, "nothing": None})
+        out = redact_arguments({"count": 3, "ratio": 1.5, "flag": False, "nothing": None})
         assert out == {"count": 3, "ratio": 1.5, "flag": False, "nothing": None}
 
 
@@ -67,20 +67,20 @@ class TestKeyNameRedactionIsNotRootOnly:
     """
 
     def test_a_password_one_level_down_is_redacted(self):
-        out = _sanitize_arguments({"config": {"password": "hunter2"}})
+        out = redact_arguments({"config": {"password": "hunter2"}})
         assert out == {"config": {"password": "[REDACTED]"}}
 
     def test_a_password_inside_a_list_of_records_is_redacted(self):
-        out = _sanitize_arguments({"items": [{"password": "hunter2"}, {"user": "alice"}]})
+        out = redact_arguments({"items": [{"password": "hunter2"}, {"user": "alice"}]})
         assert out == {"items": [{"password": "[REDACTED]"}, {"user": "alice"}]}
 
     def test_a_deeply_nested_sensitive_key_is_redacted(self):
-        out = _sanitize_arguments({"a": {"b": {"c": {"api_key": "whatever-this-is"}}}})
+        out = redact_arguments({"a": {"b": {"c": {"api_key": "whatever-this-is"}}}})
         assert "whatever-this-is" not in str(out)
 
     def test_the_key_name_wins_over_descending_into_the_value(self):
         """A sensitive key hides its whole subtree, not just its strings."""
-        out = _sanitize_arguments({"credentials": {"user": "alice", "pw": "hunter2"}})
+        out = redact_arguments({"credentials": {"user": "alice", "pw": "hunter2"}})
         assert out == {"credentials": "[REDACTED]"}
 
 
@@ -90,14 +90,14 @@ class TestTheDepthCap:
         cannot inspect is dropped rather than shown."""
         deep = {"a": {"b": {"c": {"d": {"e": {"f": {"g": GITHUB_PAT_A}}}}}}}
 
-        out = _sanitize_arguments(deep)
+        out = redact_arguments(deep)
 
         assert GITHUB_PAT_A not in str(out)
 
     def test_within_the_cap_ordinary_nesting_survives(self):
         args = {"a": {"b": {"c": {"limit": 50}}}}
 
-        assert _sanitize_arguments(args) == args
+        assert redact_arguments(args) == args
 
 
 class TestCredentialsInAUrl:
@@ -105,13 +105,13 @@ class TestCredentialsInAUrl:
     them until #1130. The example it cites is the test."""
 
     def test_a_dsn_loses_its_credentials(self):
-        out = _sanitize_arguments({"dsn": "postgres://user:pw@host/db"})
+        out = redact_arguments({"dsn": "postgres://user:pw@host/db"})
 
         assert "user:pw" not in out["dsn"]
 
     def test_the_host_stays_readable(self):
         """An approver still has to know which host was being reached."""
-        out = _sanitize_arguments({"dsn": "postgres://user:pw@host/db"})
+        out = redact_arguments({"dsn": "postgres://user:pw@host/db"})
 
         assert out["dsn"].startswith("postgres://")
         assert out["dsn"].endswith("@host/db")
@@ -119,15 +119,15 @@ class TestCredentialsInAUrl:
     def test_a_url_without_credentials_is_untouched(self):
         args = {"url": "https://example.com/report.csv"}
 
-        assert _sanitize_arguments(args) == args
+        assert redact_arguments(args) == args
 
 
 class TestIntegrityHashIsOverRawArguments:
     def test_changed_arguments_change_the_hash(self):
-        assert _hash_arguments({"path": "/a"}) != _hash_arguments({"path": "/b"})
+        assert hash_arguments({"path": "/a"}) != hash_arguments({"path": "/b"})
 
     def test_identical_arguments_hash_identically(self):
-        assert _hash_arguments({"a": 1, "b": 2}) == _hash_arguments({"b": 2, "a": 1})
+        assert hash_arguments({"a": 1, "b": 2}) == hash_arguments({"b": 2, "a": 1})
 
     def test_two_different_secrets_do_not_collide(self):
         """The regression this guards.
@@ -136,5 +136,5 @@ class TestIntegrityHashIsOverRawArguments:
         sanitized copy, these would be indistinguishable and a token swap
         between approval and dispatch would pass revalidation silently.
         """
-        assert _sanitize_arguments({"note": GITHUB_PAT_A}) == _sanitize_arguments({"note": GITHUB_PAT_B})
-        assert _hash_arguments({"note": GITHUB_PAT_A}) != _hash_arguments({"note": GITHUB_PAT_B})
+        assert redact_arguments({"note": GITHUB_PAT_A}) == redact_arguments({"note": GITHUB_PAT_B})
+        assert hash_arguments({"note": GITHUB_PAT_A}) != hash_arguments({"note": GITHUB_PAT_B})

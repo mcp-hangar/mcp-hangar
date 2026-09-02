@@ -12,7 +12,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
-from mcp_hangar.approvals.service import ApprovalGateService, _hash_arguments, _sanitize_arguments
+from mcp_hangar.approvals.service import ApprovalGateService
+from mcp_hangar.domain.security.argument_redaction import hash_arguments, redact_arguments
 
 from .test_approval_gate_service import FakeRepository
 
@@ -31,14 +32,14 @@ def _approved(arguments, *, expires_in=300, state=ApprovalState.APPROVED):
     # shown to approval:read holders), the HASH is over the raw arguments (it
     # answers whether the dispatched payload is the approved one). Building the
     # fixture any other way tests a scheme production does not use.
-    sanitized = _sanitize_arguments(arguments)
+    sanitized = redact_arguments(arguments)
     now = datetime.now(UTC)
     return ApprovalRequest(
         approval_id="ap-1",
         provider_id="srv",
         tool_name="transfer",
         arguments=sanitized,
-        arguments_hash=_hash_arguments(arguments),
+        arguments_hash=hash_arguments(arguments),
         requested_at=now,
         expires_at=now + timedelta(seconds=expires_in),
         state=state,
