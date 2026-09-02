@@ -53,6 +53,11 @@ cp scripts/build_changelog.py "$assembler"
 promoter="${RUNNER_TEMP:-/tmp}/promote_upgrade_notes.py"
 cp scripts/promote_upgrade_notes.py "$promoter"
 
+# And the recovery, for the same reason: it runs after the checkout, and the
+# release branch predates it.
+refire="${RUNNER_TEMP:-/tmp}/refire_release_pr_checks.sh"
+cp scripts/refire_release_pr_checks.sh "$refire"
+
 git fetch --force origin "${branch}:refs/remotes/origin/${branch}"
 
 # Refuse to write onto a release branch that does not contain the commit this
@@ -110,8 +115,25 @@ git -c user.name="github-actions[bot]" \
 # nothing is wrong. The app token does trigger them.
 git push "https://x-access-token:${PUSH_TOKEN}@github.com/${REPO}.git" "HEAD:${branch}"
 
-if [ "$PUSH_TOKEN" = "$GH_TOKEN" ] && [ -z "${RELEASE_BOT_APP_ID:-}" ]; then
-  echo "::warning::Pushed with the built-in GITHUB_TOKEN, which does not re-trigger the release PR's required checks. Close/reopen the PR or push an empty commit to unblock the merge."
+# Fix the fallback rather than describe it.
+#
+# The condition used to be `PUSH_TOKEN = GH_TOKEN && RELEASE_BOT_APP_ID unset`,
+# on the assumption that the fallback only happens where no app is configured.
+# It also happens where the app IS configured and the token step yields nothing
+# -- an expired installation, a permissions change, a transient failure -- and
+# that is the case that reached #1173: the app id was set, so the warning was
+# skipped, and the release PR sat with 13 required checks in "expected" that no
+# push would ever satisfy. `--admin` does not clear a ruleset requirement, so
+# the release was stuck behind an error message pointing at branch protection.
+#
+# Comparing the tokens is the honest test: it is true whenever this commit was
+# pushed with a credential that does not trigger workflows, whatever the reason.
+# Close/reopen fires `pull_request: reopened` on the head we just pushed, which
+# runs the checks without rewriting history -- the manual recovery, done here so
+# nobody has to work out that it is needed.
+if [ "$PUSH_TOKEN" = "$GH_TOKEN" ]; then
+  echo "::warning::Pushed with the built-in GITHUB_TOKEN, which does not trigger the release PR's checks. Re-firing them; the app token was unavailable, which is worth investigating (RELEASE_BOT_APP_ID=${RELEASE_BOT_APP_ID:+set}${RELEASE_BOT_APP_ID:-unset})."
+  bash "${refire}" "$branch"
 fi
 
 echo "Assembled changelog for ${version} onto ${branch}."
