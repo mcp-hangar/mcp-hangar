@@ -5,6 +5,113 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.17.0...v2.17.1) (2026-09-02)
+
+### Changed
+
+- **core:** `mcp_hangar_build` and `mcp_hangar_process_start_time_seconds` are
+  now set at startup instead of being exposed as a TYPE header with no sample,
+  and `mcp_hangar_discovery_conflicts` -- which nothing incremented, no dashboard
+  drew and no document mentioned -- is removed. A test now asserts that every
+  registered metric has something that writes to it, next to the one that asserts
+  every metric is registered ([#1179](https://github.com/mcp-hangar/mcp-hangar/pull/1179))
+
+### Fixed
+
+- **ci:** a release PR could be left unmergeable by its own workflow. When the
+  changelog assembly fell back to `GITHUB_TOKEN` -- a push with which does not
+  trigger workflows -- the commit it pushed became the PR head with no runs at
+  all, so all 13 required checks stayed "expected" and the merge was refused even
+  with `--admin`, a ruleset requirement being nothing a bypass clears. The
+  existing warning was guarded on the release app being *unconfigured*, so the
+  case that actually happened (app configured, token step yielded nothing) said
+  nothing at all. The fallback is now detected by comparing the tokens, the
+  assembly re-fires the checks itself, and a missing app token is reported where
+  it is caused ([#1181](https://github.com/mcp-hangar/mcp-hangar/pull/1181))
+- **core:** `HANGAR_CONFIG_STRICT=1` refused to start a gateway whose config
+  declared `ui_resources:`. The block has been read since 2.13.1 and is
+  documented as the way to enable `ui://` resources, but it was missing from the
+  config schema's section table, so `validate_config` reported it as a key
+  nothing reads -- fatal under the strict posture the docs recommend for CI and
+  staging, and a misleading "the setting simply does not apply" warning
+  everywhere else. A test now asserts that every top-level section the loader
+  reads is a section the schema knows ([#1176](https://github.com/mcp-hangar/mcp-hangar/pull/1176))
+- **core:** the first call to a pinned tool through a group after a gateway boot
+  was refused with `ToolDigestMismatchError` ("schema could not be verified").
+  The pin gate defers when the selected member is still cold, and the deferred
+  re-check after the cold start resolved the GROUP id alone -- the projection is
+  keyed by the member that started -- so it found nothing and fell through to the
+  fail-closed branch. It now goes through the pipeline's own two-name lookup, the
+  one `_gate_digest_pin` has used since #1040 ([#1175](https://github.com/mcp-hangar/mcp-hangar/pull/1175))
+- **core:** `max_retries`, `retry_backoff_factor` and `retry_status_codes` on an
+  HTTP upstream now do what they say. The only retry that ran was httpcore's,
+  which retries connect failures alone on its own hardcoded backoff, so a
+  502/503/504 from an upstream mid-rollout came back to the caller on the first
+  attempt and the other two settings had no reader at all. The client retries the
+  configured statuses and connect failures itself, under the configured backoff,
+  and emits `mcp_hangar_http_retries_total` -- registered, on a shipped Grafana
+  panel and in the docs, and never incremented until now ([#1179](https://github.com/mcp-hangar/mcp-hangar/pull/1179))
+- **core:** the `retry:` config section did nothing. It was parsed, merged and
+  logged at startup, and then no code read the store back: the batch executor
+  built its policy from the `hangar_batch` `max_attempts` argument alone, so
+  `backoff`, `initial_delay`, `max_delay`, `retry_on` and `jitter` were always
+  the class defaults and `per_mcp_server` applied to nothing. The executor now
+  retries under the configured policy, with the caller's `max_attempts` able to
+  lower the attempt count but not raise it; a deployment that configures nothing
+  is unchanged, at one attempt ([#1178](https://github.com/mcp-hangar/mcp-hangar/pull/1178))
+
+### Security
+
+- **core:** `POST /config/export` and `GET /config/diff` returned a subprocess
+  server's `env` verbatim and the `auth`, `discovery` and other pass-through
+  sections with `${VAR}` references already resolved, so a principal holding
+  `config:read` could read the gateway's credentials out of the exported YAML.
+  `to_config_dict` redacted the remote `auth` block only -- and its docstring
+  claimed more than it did -- while `_sanitize` covers `GET /config` alone and
+  only matches top-level key names. Both surfaces are redacted now, contents
+  first so a section named `auth` keeps its harmless settings ([#1177](https://github.com/mcp-hangar/mcp-hangar/pull/1177))
+- **core:** a tool call's arguments reached the event store and the `/ws/events`
+  stream verbatim, so a secret passed to a tool sat in SQLite or Postgres for the
+  retention of the event log and was served to every `audit:read` holder -- while
+  the approval record built from the same dict has been two-pass redacted since
+  #1130 and the log pipeline prints `[REDACTED]`. `ToolInvocationRequested` now
+  redacts its arguments as it is constructed, so no exit and no future
+  construction site can keep them, and carries `arguments_hash` over the RAW
+  payload so the audit trail can still tell two calls apart. The redaction moved
+  out of `approvals` into `domain/security/argument_redaction.py`; approvals is
+  unchanged in behaviour ([#1177](https://github.com/mcp-hangar/mcp-hangar/pull/1177))
+- **core:** a runtime withdrawal made through `POST
+  /admin/tools/{server}/{name}/withdraw` lived in the RAM of the replica that
+  served the request. On a fleet of N the other N-1 kept listing and serving the
+  withdrawn tool, prompt or resource -- reachable by retrying until the load
+  balancer picked another pod -- and a rolling restart lifted the withdrawal
+  altogether, while the response said `{"withdrawn": true}` and the REST
+  reference said it persists. `ToolWithdrawn` and `ToolRestored` are now recorded
+  in a per-server withdrawal stream, applied on every replica by a new
+  `WithdrawalProjection` off the event tail, and folded back into the overlay at
+  startup, so a replica that joins later comes up with the fleet's withdrawals
+  rather than without them ([#1172](https://github.com/mcp-hangar/mcp-hangar/pull/1172))
+- **core:** a group member's own tool/prompt/resource policy never reached the
+  verdict. `groups.<g>.members.<m>.tools` and the REST `member/<g>:<m>` scope
+  register under the member SERVER id, but every production caller -- the batch
+  gate, the post-approval revalidation and the front door -- identified the scope
+  with the caller's TENANT, so the lookup missed and the effective policy was
+  `_global -> group` alone: a documented member `deny_list` failed open, in both
+  topologies, on listing and on call. The resolver now takes the selected member
+  and the tenant as separate arguments and merges `_global -> mcp_server -> group
+  -> member server -> tenant`, which also brings in `mcp_servers.<m>.tools` and
+  `mcp_servers.<m>.tool_access.member.<tenant>` for a server reached through a
+  group ([#1170](https://github.com/mcp-hangar/mcp-hangar/pull/1170))
+- **core:** a refusal is no longer retryable. `should_retry` matched `retry_on`
+  as a substring of both the exception type name and its message, with no
+  exclusion for deliberate decisions -- so `retry_on: ["Error"]` covered every
+  denial there is, and even the stock list retried a denial whose message
+  contained "timeout" or "connection". The batch executor could therefore re-ask
+  an approval gate, or re-drive a denied egress decision, once per attempt.
+  Access denials, egress denials, approval-required holds, authn/authz failures,
+  rate limits and validation errors are now excluded before any policy is
+  consulted ([#1178](https://github.com/mcp-hangar/mcp-hangar/pull/1178))
+
 ## [2.17.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.16.0...v2.17.0) (2026-08-29)
 
 ### Added
