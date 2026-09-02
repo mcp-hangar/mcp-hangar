@@ -12,6 +12,12 @@ name segment is a ``path`` converter, anchored by the trailing verb.
 
 Auth: requires the admin role (``mcp_servers`` resource, ``lifecycle`` action)
 via the existing ``_check_permission`` pattern from ``mcp_servers.py``.
+
+Scope: a withdrawal made here is recorded, reaches the rest of the fleet through
+``WithdrawalProjection`` and is folded back in at startup by
+``bootstrap.withdrawals`` (#1165). It survives a config reload, a peer's
+ignorance and a restart -- which is what the ``{"withdrawn": true}`` in the
+response has always implied and, until then, did not deliver.
 """
 
 import json
@@ -78,6 +84,11 @@ async def withdraw_tool(request: Request) -> HangarJSONResponse:
         return parsed
     tenant_id, kind = parsed
 
+    # Applied here as well as by the projection the publish below delivers to.
+    # Both, deliberately: the projection is what carries this to peers and back
+    # across a restart, but it is registered by bootstrap, and an endpoint whose
+    # enforcement depends on a subscription being wired is one wiring bug away
+    # from doing nothing at all. Applying twice is applying once.
     get_tool_projection_registry().withdraw(server, tool, tenant_id=tenant_id, kind=kind)
 
     ctx = get_context()

@@ -40,6 +40,16 @@ MCP_SERVER_GROUP: Final = "mcp_server_group"
 #: about the session, not about the pod that happened to take the request.
 SESSION: Final = "session"
 
+#: Stream for the runtime withdrawal overlay of one server.
+#:
+#: Deliberately not the server's own stream, which also holds every invocation:
+#: a replica rebuilding the overlay at startup reads this stream whole, and
+#: reading a busy server's whole history to find a handful of withdrawals is the
+#: kind of boot cost that only shows up in production. The subject is also its
+#: own: a withdrawal is an operator's decision ABOUT a server's tools, with its
+#: own withdraw/restore lifecycle, and it outlives any single tool catalogue.
+TOOL_WITHDRAWAL: Final = "tool_withdrawal"
+
 SEPARATOR: Final = ":"
 
 
@@ -74,6 +84,14 @@ def stream_id_for_event(event: object) -> str | None:
         history for them to be part of, and inventing a bucket to hold them
         would make the store harder to read, not more complete.
     """
+    # First, because a withdrawal names a server too and would otherwise land in
+    # its history. The event opts in by exposing `withdrawal_of`; nothing is
+    # sniffed here, so an event acquiring an `mcp_server` field later does not
+    # silently change stream.
+    withdrawal_of = getattr(event, "withdrawal_of", None)
+    if isinstance(withdrawal_of, str) and withdrawal_of:
+        return stream_id_for(TOOL_WITHDRAWAL, withdrawal_of)
+
     mcp_server_id = getattr(event, "mcp_server_id", None)
     if isinstance(mcp_server_id, str) and mcp_server_id:
         return stream_id_for(MCP_SERVER, mcp_server_id)

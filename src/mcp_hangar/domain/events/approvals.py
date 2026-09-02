@@ -71,8 +71,13 @@ class ToolApprovalExpired(DomainEvent):
 class ToolWithdrawn(DomainEvent):
     """Published when an operator withdraws a tool at runtime via the admin API.
 
-    This is a runtime (process-local) withdrawal that survives config reloads.
-    Fleet-wide propagation requires shared state (out of scope — issue #235).
+    A runtime withdrawal, which survives config reloads. It reaches the rest of
+    the fleet, and outlives a restart, because this event is its record: it is
+    appended to the server's withdrawal stream, applied on peers by
+    ``WithdrawalProjection`` off the tail, and folded back into the registry at
+    startup (#1165). Before that it lived in the RAM of whichever replica took
+    the POST -- so N-1 replicas kept serving the withdrawn tool, and a rolling
+    restart lifted the withdrawal entirely.
 
     Attributes:
         tenant_id: Tenant for whom the tool is withdrawn, or ``None`` for ALL tenants.
@@ -88,6 +93,15 @@ class ToolWithdrawn(DomainEvent):
     tool: str
     kind: str = "tool"
     schema_version: int = 2
+
+    @property
+    def withdrawal_of(self) -> str:
+        """The server whose withdrawal stream this event belongs to.
+
+        A property, not a field: it names the stream without adding anything to
+        the wire, so a v2 row written before this existed replays unchanged.
+        """
+        return self.mcp_server
 
 
 @dataclass
@@ -113,15 +127,21 @@ class ToolRestored(DomainEvent):
     kind: str = "tool"
     schema_version: int = 2
 
+    @property
+    def withdrawal_of(self) -> str:
+        """The server whose withdrawal stream this event belongs to."""
+        return self.mcp_server
+
 
 @dataclass
 class ToolWithdrawnRejected(DomainEvent):
     """Published when a tool call is rejected because the tool is withdrawn for the caller.
 
-    Enforcement guarantee: **per-process-after-reload** — the registry is
-    config-reload-driven (#230); withdrawal takes effect on the replica that
-    reloaded. Fleet-wide synchronous withdrawal requires shared state (out of
-    scope). Rejection is **envelope-level** (``CallResult(success=False)``);
+    Enforcement guarantee: **fleet-wide, within one tail interval** — the
+    decision is recorded and applied on every replica by ``WithdrawalProjection``
+    (#1165), and rebuilt at startup, so a caller cannot reach a withdrawn tool
+    by retrying until another replica answers. Rejection is **envelope-level**
+    (``CallResult(success=False)``);
     protocol-clean JSON-RPC ``-32601`` on a single ``tools/call`` is #232-gated.
 
     Attributes:
