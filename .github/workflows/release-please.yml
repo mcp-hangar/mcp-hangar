@@ -88,6 +88,18 @@ jobs:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
 
+      # Say it here, where the cause is, as well as in the assembly step, where
+      # the consequence is. An app that is configured and yields no token is a
+      # credential problem -- expired installation, changed permissions -- and
+      # everything downstream silently degrades to `GITHUB_TOKEN`: a release PR
+      # whose required checks never start, and commits attributed to
+      # github-actions[bot] rather than the release bot (#1180).
+      - name: Say so when the release app produced no token
+        if: ${{ env.RELEASE_BOT_APP_ID != '' && steps.guard.outputs.skip != 'true' && steps.app-token.outputs.token == '' }}
+        run: |
+          echo "::warning::RELEASE_BOT_APP_ID is configured but the app token step produced nothing;"\
+               "falling back to GITHUB_TOKEN. Check the app installation and its permissions."
+
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release-please
         if: ${{ steps.guard.outputs.skip != 'true' }}
