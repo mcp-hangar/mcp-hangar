@@ -21,7 +21,7 @@ always had, applied per kind rather than reinvented for the new ones.
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ...logging_config import should_log_now
 from ..model.tool_catalog import ToolSchema
@@ -58,6 +58,18 @@ _DENY_ALL_POLICY: ToolAccessPolicy = ToolAccessPolicy(deny_list=("*",))
 def _scope_label(scope: str, kind: str) -> str:
     """Describe a registered scope, naming the kind only when it is not tool."""
     return scope if kind == DEFAULT_KIND else f"{scope}[{kind}]"
+
+
+def _scope_covers(scope_key: str, prefix: str) -> bool:
+    """Is *scope_key* the scope named by *prefix*, or a narrower one under it?
+
+    Cache scope keys gained a trailing ``:tenant:{tenant_id}`` segment when the
+    group branch started resolving the member server and the tenant separately
+    (#1164), so an invalidation that matched a scope key exactly now has to
+    match its narrower forms too. Segment-anchored: ``group:g:member:m`` never
+    matches ``group:g:member:m2``.
+    """
+    return scope_key == prefix or scope_key.startswith(f"{prefix}:")
 
 
 class ToolAccessResolver:
@@ -192,8 +204,8 @@ class ToolAccessResolver:
             if resolved_mcp_server_id:
                 self._member_mcp_server_mapping[(group_id, member_id)] = resolved_mcp_server_id
 
-            # Invalidate cache for this member
-            self._policy_cache.pop((kind, f"group:{group_id}:member:{member_id}"), None)
+            # Invalidate cache for this member, every tenant it was resolved for.
+            self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=kind)
 
     def set_standalone_member_policy(
         self,
@@ -217,8 +229,12 @@ class ToolAccessResolver:
                 self._standalone_member_policies.pop(key, None)
             else:
                 self._standalone_member_policies[key] = policy
-            # Invalidate cache for this (server, member) pair
-            self._policy_cache.pop((kind, f"mcp_server:{mcp_server_id}:member:{member_id}"), None)
+            # Invalidate cache for this (server, member) pair. Also every group
+            # scope: the group branch merges this tenant policy too (#1164), so
+            # a group-scoped entry resolved for this tenant is now stale.
+            self._pop_cache_scope(f"mcp_server:{mcp_server_id}:member:{member_id}", kind=kind)
+            for stale in [k for k in self._policy_cache if k[1].endswith(f":tenant:{member_id}")]:
+                self._policy_cache.pop(stale, None)
 
     def iter_registered_policies(self, *, kind: PolicyKind | None = None) -> list[tuple[str, ToolAccessPolicy]]:
         """Return every registered policy as ``(scope_description, policy)``.
@@ -337,7 +353,7 @@ class ToolAccessResolver:
         with self._lock:
             for key in [k for k in self._member_policies if k[:2] == (group_id, member_id)]:
                 self._member_policies.pop(key, None)
-                self._policy_cache.pop((key[2], f"group:{group_id}:member:{member_id}"), None)
+                self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=cast(PolicyKind, key[2]))
             self._member_mcp_server_mapping.pop((group_id, member_id), None)
 
     def resolve_effective_policy(
@@ -346,6 +362,7 @@ class ToolAccessResolver:
         group_id: str | None = None,
         member_id: str | None = None,
         *,
+        member_server_id: str | None = None,
         kind: PolicyKind = DEFAULT_KIND,
     ) -> ToolAccessPolicy:
         """Get the effective access policy for a specific context.
@@ -356,7 +373,17 @@ class ToolAccessResolver:
         Args:
             mcp_server_id: McpServer identifier.
             group_id: Optional group identifier (for group member context).
-            member_id: Optional member identifier (for group member context).
+            member_id: The CALLER's tenant. On the standalone branch it selects
+                the per-tenant policy; in front_door mode its absence is the
+                fail-closed missing-identity branch.
+            member_server_id: The group member the call was routed to, when the
+                caller knows it. Group member policies are registered under the
+                member SERVER id (`groups.<g>.members.<m>.tools`, and the REST
+                `member/<group>:<member>` scope), so without this the group
+                branch looked them up under the tenant and never found them --
+                a documented deny list that failed open (#1164). Defaults to
+                *member_id* so a caller using the resolver's own vocabulary
+                (member id in `member_id`) resolves exactly as before.
             kind: What is being governed -- tools, prompts or resources. Each
                 kind resolves against the policies registered for that kind
                 alone, so a tool deny never silently governs a prompt.
@@ -364,9 +391,14 @@ class ToolAccessResolver:
         Returns:
             The effective ToolAccessPolicy for this context.
         """
-        # Build cache key
-        if group_id and member_id:
-            scope_key = f"group:{group_id}:member:{member_id}"
+        # Build cache key. The group scope names both halves: two tenants
+        # routed to the same member can resolve differently (the member's own
+        # per-tenant policy), and so can one tenant routed to two members.
+        if group_id and (member_id or member_server_id):
+            member_scope = member_server_id or member_id
+            scope_key = f"group:{group_id}:member:{member_scope}"
+            if member_id:
+                scope_key = f"{scope_key}:tenant:{member_id}"
         elif member_id and not group_id:
             scope_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
         else:
@@ -379,7 +411,7 @@ class ToolAccessResolver:
                 return self._policy_cache[cache_key]
 
             # Compute effective policy
-            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id, kind)
+            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id, kind, member_server_id)
 
             # Cache it
             self._policy_cache[cache_key] = effective
@@ -391,13 +423,14 @@ class ToolAccessResolver:
         group_id: str | None,
         member_id: str | None,
         kind: PolicyKind = DEFAULT_KIND,
+        member_server_id: str | None = None,
     ) -> ToolAccessPolicy:
         """Compute effective policy by merging all applicable levels.
 
         Must be called with lock held.
 
         Resolution order (highest priority last, i.e. narrower wins):
-          _global -> mcp_server -> group -> member
+          _global -> mcp_server -> group -> member server -> tenant
 
         The _global policy (keyed as "_global") is set by the agent when a
         cloud policy uses mcp_server_id="*".  It acts as a floor: if no
@@ -452,23 +485,43 @@ class ToolAccessResolver:
         # Get group policy
         group_policy = self._group_policies.get((group_id, kind), ToolAccessPolicy())
 
-        # Get member policy (only when a concrete member_id is present;
-        # a group context without a member resolves to server+group only).
+        # Get member policy. Keyed by the member SERVER id, which is what
+        # `groups.<g>.members.<m>.tools` and the REST `member/<g>:<m>` scope
+        # register -- never the tenant (#1164). `member_server_id` is what the
+        # dispatching caller resolved; `member_id` is the fallback for a caller
+        # speaking the resolver's own vocabulary (the tests, and any caller for
+        # which tenant and member id coincide).
+        member_scope_id = member_server_id or member_id
         member_policy = ToolAccessPolicy()
         mapped_mcp_server_id: str | None = None
-        if member_id is not None:
-            member_policy = self._member_policies.get((group_id, member_id, kind), ToolAccessPolicy())
-            mapped_mcp_server_id = self._member_mcp_server_mapping.get((group_id, member_id))
+        if member_scope_id is not None:
+            member_policy = self._member_policies.get((group_id, member_scope_id, kind), ToolAccessPolicy())
+            mapped_mcp_server_id = self._member_mcp_server_mapping.get((group_id, member_scope_id))
         if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
             mapped_mcp_server_policy = self._mcp_server_policies.get((mapped_mcp_server_id, kind), ToolAccessPolicy())
             # Merge mapped mcp_server policy with base mcp_server policy
             mcp_server_policy = ToolAccessPolicy.merge(mcp_server_policy, mapped_mcp_server_policy)
 
-        # Three-level merge: mcp_server -> group -> member
+        # The caller's own per-tenant policy, narrower than everything above it.
+        # Both spellings are consulted, the same way #1036 consults both for the
+        # group scope: `tool_access.member.<tenant>` can be declared on the group
+        # and on the member server, and a call routed through a group must honour
+        # whichever the operator wrote.
+        tenant_policy = ToolAccessPolicy()
+        if member_id is not None:
+            for scope in (mcp_server_id, mapped_mcp_server_id or member_scope_id):
+                if scope is None:
+                    continue
+                tenant_policy = ToolAccessPolicy.merge(
+                    tenant_policy,
+                    self._standalone_member_policies.get((scope, member_id, kind), ToolAccessPolicy()),
+                )
+
+        # Four-level merge: mcp_server -> group -> member server -> tenant
         step1 = ToolAccessPolicy.merge(mcp_server_policy, group_policy)
         step2 = ToolAccessPolicy.merge(step1, member_policy)
 
-        return step2
+        return ToolAccessPolicy.merge(step2, tenant_policy)
 
     def is_allowed(
         self,
@@ -478,6 +531,7 @@ class ToolAccessResolver:
         kind: PolicyKind = DEFAULT_KIND,
         group_id: str | None = None,
         member_id: str | None = None,
+        member_server_id: str | None = None,
     ) -> bool:
         """Quick check if a named tool / prompt / resource is allowed in context.
 
@@ -492,12 +546,15 @@ class ToolAccessResolver:
                 URI, not the ``hangar://`` projection of it.
             kind: What *name* is.
             group_id: Optional group identifier.
-            member_id: Optional member identifier.
+            member_id: The caller's tenant (see :meth:`resolve_effective_policy`).
+            member_server_id: The group member this call routes to, when known.
 
         Returns:
             True if allowed (including approval-gated), False otherwise.
         """
-        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id, kind=kind)
+        policy = self.resolve_effective_policy(
+            mcp_server_id, group_id, member_id, member_server_id=member_server_id, kind=kind
+        )
         return policy.is_tool_allowed(name)
 
     def is_tool_allowed(
@@ -506,6 +563,8 @@ class ToolAccessResolver:
         tool_name: str,
         group_id: str | None = None,
         member_id: str | None = None,
+        *,
+        member_server_id: str | None = None,
     ) -> bool:
         """Quick check if a specific tool is allowed in context.
 
@@ -513,12 +572,15 @@ class ToolAccessResolver:
             mcp_server_id: McpServer identifier.
             tool_name: Name of the tool to check.
             group_id: Optional group identifier.
-            member_id: Optional member identifier.
+            member_id: The caller's tenant (see :meth:`resolve_effective_policy`).
+            member_server_id: The group member this call routes to, when known.
 
         Returns:
             True if the tool is allowed, False otherwise.
         """
-        return self.is_allowed(mcp_server_id, tool_name, group_id=group_id, member_id=member_id)
+        return self.is_allowed(
+            mcp_server_id, tool_name, group_id=group_id, member_id=member_id, member_server_id=member_server_id
+        )
 
     def filter_tools(
         self,
@@ -587,6 +649,11 @@ class ToolAccessResolver:
                 self._invalidate_mcp_server_cache(mcp_server_id)
                 logger.debug("tool_access_cache_invalidated", extra={"mcp_server_id": mcp_server_id})
 
+    def _pop_cache_scope(self, prefix: str, *, kind: PolicyKind | None = None) -> None:
+        """Drop every cache entry at *prefix* or narrower. Lock must be held."""
+        for key in [k for k in self._policy_cache if (kind is None or k[0] == kind) and _scope_covers(k[1], prefix)]:
+            self._policy_cache.pop(key, None)
+
     def _invalidate_mcp_server_cache(self, mcp_server_id: str) -> None:
         """Invalidate cache entries related to a mcp_server.
 
@@ -605,7 +672,7 @@ class ToolAccessResolver:
             if mapped == mcp_server_id
         }
 
-        for key in [k for k in self._policy_cache if k[1] in stale]:
+        for key in [k for k in self._policy_cache if any(_scope_covers(k[1], s) for s in stale)]:
             self._policy_cache.pop(key, None)
 
     def _invalidate_group_cache(self, group_id: str) -> None:
