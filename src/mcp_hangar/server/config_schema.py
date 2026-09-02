@@ -138,6 +138,11 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "startup_checks": frozenset({"enforce"}),
     "tool_access": frozenset({"mode", "rules"}),
     "truncation": None,  # TruncationConfig.from_dict owns these
+    # `tenants` (ADR-024, #1048), read by `config._init_ui_resources_from_config`.
+    # Shipped in 2.13.1 without an entry here, so `HANGAR_CONFIG_STRICT=1` --
+    # the posture the docs recommend for CI and staging -- refused to start a
+    # gateway whose config declared the block the docs told it to write (#1167).
+    "ui_resources": frozenset({"tenants"}),
 }
 
 
