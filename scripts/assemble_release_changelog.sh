@@ -104,8 +104,36 @@ if git diff --quiet HEAD -- CHANGELOG.md changelog.d UPGRADE.md; then
 fi
 
 git add -A CHANGELOG.md changelog.d UPGRADE.md
-git -c user.name="github-actions[bot]" \
-    -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+
+# Commit as the identity that PUSHES this, not as a different bot.
+#
+# The organisation requires approval to run workflows for "first-time
+# contributors" -- anyone who has never had a commit or pull request merged
+# into this repository -- and it checks the ACTOR of the pull request event,
+# not only the author. Signing this commit as `github-actions[bot]` made that
+# the actor, and `github-actions[bot]` never has anything merged here: the
+# assembly commit lives on the release branch and the squash into main is
+# attributed to the pull request's author, the release app. So every release
+# PR's checks sat in `action_required` waiting for a human, while the merge was
+# refused with "13 of 13 required status checks are expected" (#1184).
+#
+# The release app is not a first-time contributor -- it authors and merges a
+# release PR every time -- so committing as the app is what makes the runs
+# start on their own. It is also just true: the app's token is what pushes the
+# commit two lines below.
+COMMIT_NAME="${RELEASE_BOT_NAME:-mcp-hangar-release-bot[bot]}"
+COMMIT_EMAIL="${RELEASE_BOT_EMAIL:-283430731+mcp-hangar-release-bot[bot]@users.noreply.github.com}"
+
+# ... unless there is no app token, in which case `github-actions[bot]` is who
+# actually pushed and claiming otherwise would be a lie in the history. That
+# path is the one the recovery below exists for.
+if [ "$PUSH_TOKEN" = "$GH_TOKEN" ]; then
+  COMMIT_NAME="github-actions[bot]"
+  COMMIT_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+fi
+
+git -c user.name="$COMMIT_NAME" \
+    -c user.email="$COMMIT_EMAIL" \
     commit -m "chore(release): assemble changelog and upgrade notes for ${version}"
 
 # Push with an explicit credential rather than the one checkout persisted. A

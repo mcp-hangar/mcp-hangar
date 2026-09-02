@@ -119,3 +119,24 @@ def test_it_says_what_a_human_must_run_when_recovery_is_not_enough() -> None:
 
     assert "::error::" in assembler
     assert "/approve" in assembler, "name the API call, so nobody has to look it up under pressure"
+
+
+def test_the_assembly_commit_is_authored_by_the_pushing_identity() -> None:
+    """The actor decides whether a run needs approval, and the actor is this name.
+
+    The organisation requires approval for "first-time contributors" -- anyone
+    with nothing merged into this repository -- and checks the actor of the
+    pull request event, not only its author. Committing as
+    `github-actions[bot]`, which never has anything merged here (the squash
+    into main is attributed to the PR's author, the release app), put every
+    release PR's checks in `action_required` (#1184).
+    """
+    assembler = (_SCRIPT.parent / "assemble_release_changelog.sh").read_text(encoding="utf-8")
+
+    body = assembler[assembler.index("git add -A CHANGELOG.md") :]
+    committer = body[: body.index("commit -m")]
+
+    assert "mcp-hangar-release-bot[bot]" in committer, "commit as the app whose token pushes"
+    # The fallback identity stays reachable: with no app token, github-actions[bot]
+    # really is who pushed, and the history should not claim otherwise.
+    assert '"$PUSH_TOKEN" = "$GH_TOKEN"' in committer
