@@ -220,6 +220,20 @@ class _CallPipeline:
             self._projection = resolved
         return self._projection
 
+    def reresolve_projection(self) -> Any:
+        """Look the projection up again, after a cold start populated it.
+
+        The deferred pin gate needs the answer to a question that had none when
+        the cached one was taken. It goes through the property rather than
+        calling the registry itself, because a second copy of the two-name
+        lookup is a copy that can be missing the fallback -- which is what it
+        was: the deferred gate asked the group id alone, found nothing for a
+        member that had just started, and refused the first pinned call after
+        every gateway boot as unverifiable (#1166).
+        """
+        self._projection = _UNRESOLVED
+        return self.projection
+
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
 
@@ -1394,7 +1408,7 @@ class BatchExecutor:
         """
         if not p.digest_pin_deferred:
             return None
-        late_projection = p.proj_registry.resolve(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
+        late_projection = p.reresolve_projection()
         if late_projection is not None:
             return self._enforce_digest_pin(p, late_projection, p.pin)
         if p.proj_registry.digest_enforcement(p.call.mcp_server) != DigestEnforcement.BLOCK:
