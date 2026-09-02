@@ -551,7 +551,12 @@ class BatchExecutor:
             # `_global` policy into every scope it resolves, so a result that is
             # unrestricted means `_global` was empty too -- the fallback could
             # only ever re-answer the same question.
-            policy = resolver.resolve_effective_policy(call.mcp_server, group_id, caller_tenant_id)
+            policy = resolver.resolve_effective_policy(
+                call.mcp_server,
+                group_id,
+                caller_tenant_id,
+                member_server_id=target_server_id or None,
+            )
             if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
                 return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
         except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
@@ -1156,13 +1161,16 @@ class BatchExecutor:
             policy_span.set_attribute("policy.is_group", p.is_group)
             if p.is_group:
                 p.group_obj = GROUPS.get(p.call.mcp_server)
-                # For groups, we check against group policy. Member-specific
-                # policy will be checked when the member is selected.
+                # Group policy AND the policy of the member `_gate_resolve_target`
+                # just selected. The member half is keyed by the member SERVER id,
+                # so passing only the tenant resolved to group-level alone and a
+                # member deny_list never reached the verdict (#1164).
                 allowed = p.resolver.is_tool_allowed(
                     mcp_server_id=p.call.mcp_server,
                     tool_name=p.call.tool,
                     group_id=p.call.mcp_server,
                     member_id=p.caller_tenant_id,
+                    member_server_id=p.target_server_id or None,
                 )
             else:
                 # For standalone mcp_servers: server->member merge when tenant is known
