@@ -92,16 +92,30 @@ def test_a_failed_reopen_is_a_warning_not_a_failure(tmp_path: Path) -> None:
     assert "by hand" in result.stdout
 
 
-def test_the_assembler_recovers_whenever_it_falls_back(tmp_path: Path) -> None:
-    """The condition that let #1180 through: it also guarded on the app being unset.
+def test_the_assembler_recovers_on_missing_checks_not_on_a_token_guess() -> None:
+    """The condition #1181 shipped could not fire on the run it was written for.
 
-    An app that is configured and yields no token takes the same fallback, and
-    that is the case nobody was warned about.
+    It compared `PUSH_TOKEN` to `GH_TOKEN`, reasoning that a push made with the
+    built-in token does not trigger workflows. The app token was in fact
+    available on that run, so the comparison was false and the recovery never
+    ran -- while the PR still sat with no checks. What blocks the merge is the
+    absence of CHECK RUNS on the head, whatever produced it, so that is what
+    the script tests (#1184).
     """
     assembler = (_SCRIPT.parent / "assemble_release_changelog.sh").read_text(encoding="utf-8")
 
-    guard = assembler[assembler.index('if [ "$PUSH_TOKEN" = "$GH_TOKEN" ]') :]
-    condition = guard.splitlines()[0]
+    recovery = assembler[assembler.index("head_sha=$(git rev-parse HEAD)") :]
 
-    assert "RELEASE_BOT_APP_ID" not in condition, "the fallback is about the token, not about whether an app is set"
+    assert '"$PUSH_TOKEN" = "$GH_TOKEN"' not in recovery, "the token comparison was the wrong test"
+    assert "check-runs" in recovery, "the merge gate reads check runs; so must the recovery"
     assert "refire_release_pr_checks.sh" in assembler, "the assembler must ship the recovery to the runner"
+
+
+def test_it_says_what_a_human_must_run_when_recovery_is_not_enough() -> None:
+    """Reopening uses this job's credential, which is the identity that was
+    producing no checks. When the second attempt also comes back empty the run
+    has to hand the problem over, with the command rather than a description."""
+    assembler = (_SCRIPT.parent / "assemble_release_changelog.sh").read_text(encoding="utf-8")
+
+    assert "::error::" in assembler
+    assert "/approve" in assembler, "name the API call, so nobody has to look it up under pressure"
