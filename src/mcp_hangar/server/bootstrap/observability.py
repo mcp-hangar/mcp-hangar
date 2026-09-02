@@ -33,6 +33,7 @@ Or via config.yaml:
 
 from dataclasses import dataclass
 import os
+import platform
 from typing import Any
 
 from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
@@ -239,6 +240,18 @@ def init_metrics_publisher() -> None:
     """
     set_default_metrics_publisher(PrometheusMetricsPublisher())
     logger.debug("metrics_publisher_wired", adapter="PrometheusMetricsPublisher")
+
+    # Two metrics that were registered and never given a value, so `/metrics`
+    # carried their TYPE header and no sample, forever (#1163). Both are the
+    # standard shape every Prometheus deployment expects: `*_build` to join a
+    # version onto a series, and a process start time to compute uptime.
+    import time
+
+    from mcp_hangar import __version__
+    from ...metrics import BUILD_INFO, PROCESS_START_TIME
+
+    BUILD_INFO.info(version=__version__, python=platform.python_version())
+    PROCESS_START_TIME.set(time.time())
 
 
 def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, ObservabilityPort]:

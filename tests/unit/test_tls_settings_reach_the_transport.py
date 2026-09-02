@@ -99,11 +99,17 @@ class TestTheClientDoesNotAskTwice:
         assert "verify=" not in client_call
         assert "verify=verify" in source, "the transport must still receive it"
 
-    def test_the_retry_setting_is_still_there(self) -> None:
-        # The transport exists for retries; moving TLS onto it must not drop them.
+    def test_the_transport_no_longer_retries_on_its_own(self) -> None:
+        """Retrying moved up to `_post_with_retry`, and must not happen twice (#1163).
+
+        httpcore's loop retries connect failures only, on a backoff the operator
+        cannot configure, in a place the retry metric cannot be emitted from.
+        Leaving it at `max_retries` as well would multiply the two loops.
+        """
         client = HttpClient(endpoint=ENDPOINT, http_config=HttpClientConfig(max_retries=7))
 
-        assert _transport(client)._pool._retries == 7
+        assert _transport(client)._pool._retries == 0
+        assert client._http_config.max_retries == 7
 
 
 @pytest.mark.parametrize("verify_ssl", [True, False])

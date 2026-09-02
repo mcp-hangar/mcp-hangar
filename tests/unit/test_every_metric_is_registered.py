@@ -70,3 +70,51 @@ def test_an_incremented_approval_counter_is_scrapable() -> None:
     prometheus_metrics.APPROVAL_DECISIONS_TOTAL.inc(channel="slack", decision="granted")
 
     assert "mcp_hangar_approval_decisions_total" in prometheus_metrics.get_metrics()
+
+
+def _metrics_nothing_ever_writes_to() -> list[str]:
+    """Module-level metrics referenced nowhere but their own definition.
+
+    Registration was only half the question (#1059). A metric that is
+    registered and never incremented is exposed as a TYPE header with no
+    sample, which reads to an operator, a dashboard and a docs table exactly
+    like a metric that is working and quiet -- `mcp_hangar_http_retries_total`
+    shipped a Grafana panel that could never draw a line (#1163).
+
+    The scan skips the registration list, which references every metric by
+    construction, and treats a reference from anywhere else -- including the
+    `record_*` helpers in `metrics.py` itself -- as an emitter.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    names = set(_module_level_metrics()) | {
+        name for name, value in vars(prometheus_metrics).items() if isinstance(value, prometheus_metrics.Info)
+    }
+    src = Path(prometheus_metrics.__file__).parent
+    written_to: set[str] = set()
+
+    module = ast.parse(Path(prometheus_metrics.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(module):
+        if isinstance(node, ast.FunctionDef) and node.name == "_register_all_metrics":
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load) and inner.id in names:
+                written_to.add(inner.id)
+
+    for path in src.rglob("*.py"):
+        if path.name == "metrics.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        written_to |= {name for name in names if re.search(rf"\b{name}\b", text)}
+
+    return sorted(names - written_to)
+
+
+def test_every_registered_metric_has_something_that_writes_to_it() -> None:
+    assert _metrics_nothing_ever_writes_to() == [], (
+        "registered but never written to, so /metrics carries a TYPE header and no sample: "
+        + ", ".join(_metrics_nothing_ever_writes_to())
+        + " -- emit it, or delete it and whatever promises it"
+    )
