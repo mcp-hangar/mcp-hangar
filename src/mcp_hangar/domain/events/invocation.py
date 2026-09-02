@@ -22,6 +22,11 @@ class ToolInvocationRequested(DomainEvent):
     correlation_id: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
     identity_context: dict[str, Any] | None = None
+    #: SHA-256 of the RAW arguments, computed before they are redacted. The
+    #: identity of the payload, kept so the audit trail can still say "this call
+    #: and that approval carried the same arguments" without holding the values.
+    arguments_hash: str = ""
+    schema_version: int = 2
 
     def __post_init__(self):
         # The hand-written constructor this replaces did `arguments or {}`, so an
@@ -30,6 +35,25 @@ class ToolInvocationRequested(DomainEvent):
         # indexes it without a None check.
         if self.arguments is None:
             self.arguments = {}
+
+        # Redacted HERE rather than at the call site, because the call site was
+        # not the problem: this event is persisted to SQLite/Postgres and streamed
+        # to every `audit:read` holder over `/ws/events`, and it carried the
+        # caller's arguments verbatim -- the same dict the approval record beside
+        # it has been two-pass redacted since #1130, and the log pipeline prints
+        # as `[REDACTED]` (#1168). Doing it in `__post_init__` means no
+        # construction site can forget, including ones written later.
+        #
+        # The hash is taken first and only when absent: `from_dict` rebuilds a
+        # stored event by passing every field, and recomputing over the redacted
+        # copy would replace the payload's identity with the identity of its
+        # redaction -- where two different secrets hash alike.
+        from ..security.argument_redaction import hash_arguments, redact_arguments
+
+        if not self.arguments_hash and self.arguments:
+            self.arguments_hash = hash_arguments(self.arguments)
+        if self.arguments:
+            self.arguments = redact_arguments(self.arguments)
 
 
 @accepts_legacy_provider_id
