@@ -229,13 +229,21 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
     # projection is keyed) and the GROUP id itself (what `_upstream_ids` hands the
     # prompts and resources surfaces, having already collapsed the member). Without
     # the second half a group `access:` policy is registered and never read (#1036).
-    owner_group = _member_to_group().get(mcp_server) or (mcp_server if mcp_server in _groups() else None)
+    owner_group = _member_to_group().get(mcp_server)
+    # When *mcp_server* is a member id we know which member answers; when it is
+    # the group id (`_upstream_ids` has already collapsed the member for the
+    # prompts and resources surfaces) we do not, and the group-level policy is
+    # the whole answer -- a member policy cannot be applied to a member that has
+    # not been chosen yet.
+    member_server_id = mcp_server if owner_group else None
+    owner_group = owner_group or (mcp_server if mcp_server in _groups() else None)
     return get_tool_access_resolver().is_allowed(
         owner_group or mcp_server,
         name,
         kind=kind,
         group_id=owner_group,
         member_id=tenant_id,
+        member_server_id=member_server_id,
     )
 
 
