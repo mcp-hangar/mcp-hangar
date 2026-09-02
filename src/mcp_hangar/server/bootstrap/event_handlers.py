@@ -31,6 +31,8 @@ from ...domain.events import (
     McpServerStateChanged,
     ToolInvocationCompleted,
     ToolInvocationFailed,
+    ToolRestored,
+    ToolWithdrawn,
 )
 from ...domain.contracts.event_bus import HandlerKind
 from ...logging_config import get_logger
@@ -172,6 +174,17 @@ def init_event_handlers(runtime: "Runtime") -> None:
     suspension_projection = SessionSuspensionProjection(_session_registry())
     runtime.event_bus.subscribe(SessionSuspended, suspension_projection.handle, kind=HandlerKind.PROJECTION)
     runtime.event_bus.subscribe(SessionUnsuspended, suspension_projection.handle, kind=HandlerKind.PROJECTION)
+
+    # A withdrawal has to reach every replica for the same reason a suspension
+    # does: withdrawn here and served by the other two is a control a caller
+    # walks past by retrying (#1165). The startup half of it -- rebuilding the
+    # overlay a restart would otherwise drop -- is `restore_runtime_withdrawals`.
+    from ...application.event_handlers.withdrawal_projection import WithdrawalProjection
+    from ...application.read_models.tool_projection import get_tool_projection_registry
+
+    withdrawal_projection = WithdrawalProjection(get_tool_projection_registry())
+    runtime.event_bus.subscribe(ToolWithdrawn, withdrawal_projection.handle, kind=HandlerKind.PROJECTION)
+    runtime.event_bus.subscribe(ToolRestored, withdrawal_projection.handle, kind=HandlerKind.PROJECTION)
 
     # Cost attribution -- computes cost per tool invocation
     cost_handler = CostAttributionEventHandler(

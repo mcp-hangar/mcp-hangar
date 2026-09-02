@@ -220,6 +220,20 @@ class _CallPipeline:
             self._projection = resolved
         return self._projection
 
+    def reresolve_projection(self) -> Any:
+        """Look the projection up again, after a cold start populated it.
+
+        The deferred pin gate needs the answer to a question that had none when
+        the cached one was taken. It goes through the property rather than
+        calling the registry itself, because a second copy of the two-name
+        lookup is a copy that can be missing the fallback -- which is what it
+        was: the deferred gate asked the group id alone, found nothing for a
+        member that had just started, and refused the first pinned call after
+        every gateway boot as unverifiable (#1166).
+        """
+        self._projection = _UNRESOLVED
+        return self.projection
+
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
 
@@ -551,7 +565,12 @@ class BatchExecutor:
             # `_global` policy into every scope it resolves, so a result that is
             # unrestricted means `_global` was empty too -- the fallback could
             # only ever re-answer the same question.
-            policy = resolver.resolve_effective_policy(call.mcp_server, group_id, caller_tenant_id)
+            policy = resolver.resolve_effective_policy(
+                call.mcp_server,
+                group_id,
+                caller_tenant_id,
+                member_server_id=target_server_id or None,
+            )
             if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
                 return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
         except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
@@ -1156,13 +1175,16 @@ class BatchExecutor:
             policy_span.set_attribute("policy.is_group", p.is_group)
             if p.is_group:
                 p.group_obj = GROUPS.get(p.call.mcp_server)
-                # For groups, we check against group policy. Member-specific
-                # policy will be checked when the member is selected.
+                # Group policy AND the policy of the member `_gate_resolve_target`
+                # just selected. The member half is keyed by the member SERVER id,
+                # so passing only the tenant resolved to group-level alone and a
+                # member deny_list never reached the verdict (#1164).
                 allowed = p.resolver.is_tool_allowed(
                     mcp_server_id=p.call.mcp_server,
                     tool_name=p.call.tool,
                     group_id=p.call.mcp_server,
                     member_id=p.caller_tenant_id,
+                    member_server_id=p.target_server_id or None,
                 )
             else:
                 # For standalone mcp_servers: server->member merge when tenant is known
@@ -1386,7 +1408,7 @@ class BatchExecutor:
         """
         if not p.digest_pin_deferred:
             return None
-        late_projection = p.proj_registry.resolve(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
+        late_projection = p.reresolve_projection()
         if late_projection is not None:
             return self._enforce_digest_pin(p, late_projection, p.pin)
         if p.proj_registry.digest_enforcement(p.call.mcp_server) != DigestEnforcement.BLOCK:
