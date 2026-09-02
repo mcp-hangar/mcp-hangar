@@ -40,19 +40,21 @@ jobs:
           # Upgrade the ambient build tooling too: the runner ships an older
           # setuptools/wheel that pip-audit flags (e.g. PYSEC-2026-3447), even
           # though the project builds with hatchling and does not depend on it.
+          # `safety` is deliberately not installed here. pip-audit audits the
+          # ENVIRONMENT, so anything installed beside the project is audited as
+          # if the project depended on it: safety pulls in nltk, and
+          # PYSEC-2026-3740 (nltk, no fixed version) failed this job on every
+          # PR while nltk appears in neither pyproject.toml nor uv.lock. The
+          # safety step itself was `continue-on-error` and needs an API key it
+          # does not have, so it could never fail the build or report anything
+          # pip-audit does not.
           python -m pip install --upgrade pip setuptools wheel
-          pip install pip-audit safety
+          pip install pip-audit
 
       - name: Run pip-audit
         run: |
           pip install -e .
           pip-audit --skip-editable --desc on
-
-      - name: Run safety check
-        run: |
-          pip freeze > requirements-lock.txt
-          safety check -r requirements-lock.txt --full-report
-        continue-on-error: true  # Safety requires API key for full functionality
 
   codeql:
     name: CodeQL Analysis
