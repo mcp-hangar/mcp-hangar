@@ -88,7 +88,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     # Circuit Breaker
     "CircuitBreakerStateChanged": 1,
     # Tool Invocation
-    "ToolInvocationRequested": 1,
+    # v2 = `arguments_hash`, and `arguments` redacted at construction (#1168)
+    "ToolInvocationRequested": 2,
     "ToolInvocationCompleted": 1,
     "ToolInvocationFailed": 1,
     # Health Check

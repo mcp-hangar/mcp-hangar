@@ -42,6 +42,7 @@ from ..exceptions import (
     ToolInvocationError,
     ToolNotFoundError,
 )
+from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.provenance import Provenance
@@ -1895,9 +1896,19 @@ class McpServer(AggregateRoot):
 
         Returns the minimal representation for round-trip:
         load_config(to_config_dict()) produces an equivalent McpServer.
-        Note: auth secrets are redacted (bearer_token, api_key, basic_password
-        replaced with [REDACTED]) since output is used in API responses and logs.
-        This means the output is NOT suitable for lossless round-trip of secrets.
+
+        Secrets are redacted, because this output is served: `GET /config`,
+        `POST /config/export` and `GET /config/diff` all reach it under
+        `config:read`, and it is logged. So the output is NOT suitable for a
+        lossless round-trip of secrets, and that is deliberate.
+
+        Two things are redacted, not one. The remote `auth` block was, and the
+        docstring said so; `env` was not, which is where a SUBPROCESS server's
+        credentials live and where the documentation tells an operator to put
+        them (`GITHUB_TOKEN: ${GITHUB_TOKEN}`, resolved by the time it reaches
+        this aggregate). A principal with a custom `config:read` role -- the
+        GitOps drift bot, the config reviewer -- got the resolved value in
+        YAML (#1169).
 
         Returns:
             Dictionary of mcp_server configuration fields, omitting optional
@@ -1915,7 +1926,7 @@ class McpServer(AggregateRoot):
         if self._endpoint:
             spec["endpoint"] = self._endpoint
         if self._env:
-            spec["env"] = dict(self._env)
+            spec["env"] = redact_arguments(dict(self._env))
         if self._description:
             spec["description"] = self._description
         if self._volumes:
