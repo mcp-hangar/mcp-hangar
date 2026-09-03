@@ -148,23 +148,35 @@ def get_request_id() -> str | None:
     return request_id_var.get()
 
 
+#: Identity for a caller that arrives on a transport with no request to bind
+#: one (ADR-026). Process-wide on purpose: a stdio server serves exactly one
+#: session over one pair of pipes, so there is no second caller to distinguish.
+#: `auth.stdio_principal` owns the writing; this module owns the reading,
+#: because the shared kernel must not import the auth layer to answer it.
+_fallback_identity: IdentityContext | None = None
+
+
+def set_fallback_identity(identity: IdentityContext | None) -> None:
+    """Set (or with None, clear) the identity used when nothing binds one."""
+    global _fallback_identity
+    _fallback_identity = identity
+
+
 def get_identity_context() -> IdentityContext | None:
     """Get the current identity context.
 
-    Falls back to the stdio principal declared in configuration (ADR-026) when
-    nothing bound the contextvar. That is every request on a stdio server: the
-    binding paths are ASGI middleware and `bind_caller_identity`, and neither
-    runs on a transport that has no request. The fallback lives here rather than
-    at each reader so one process-wide declaration reaches the flat projection,
-    the batch executor and the pin scope alike -- and so it cannot silently
-    apply to an HTTP request, which always binds the var first.
+    Falls back to the process-wide identity set by `set_fallback_identity`,
+    which is how a stdio session gets the caller its configuration declares
+    (ADR-026): the binding paths are ASGI middleware and `bind_caller_identity`,
+    and neither runs on a transport that has no request. The fallback lives here
+    rather than at each reader so one declaration reaches the flat projection,
+    the batch executor and the pin scope alike -- and it can never displace a
+    bound context, so an HTTP request is unaffected.
     """
     bound = identity_context_var.get()
     if bound is not None:
         return bound
-    from mcp_hangar.auth.stdio_principal import get_stdio_identity
-
-    return get_stdio_identity()
+    return _fallback_identity
 
 
 def bind_request_context(

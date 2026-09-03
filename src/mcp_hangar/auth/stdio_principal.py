@@ -19,6 +19,7 @@ authorization path from its roles.
 
 from __future__ import annotations
 
+from mcp_hangar.context import set_fallback_identity
 from mcp_hangar.domain.value_objects import Principal
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 
@@ -43,6 +44,7 @@ def set_stdio_principal(principal: Principal) -> None:
             tenant_id=principal.tenant_id,
         )
     )
+    set_fallback_identity(_identity)
 
 
 def clear_stdio_principal() -> None:
@@ -50,13 +52,9 @@ def clear_stdio_principal() -> None:
     global _principal, _identity
     _principal = None
     _identity = None
+    set_fallback_identity(None)
 
 
 def get_stdio_principal() -> Principal | None:
     """The declared principal, or None when no block was configured."""
     return _principal
-
-
-def get_stdio_identity() -> IdentityContext | None:
-    """The declared principal as an identity context, or None."""
-    return _identity
