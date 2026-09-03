@@ -1,6 +1,7 @@
 """Simple mock MCP provider for testing."""
 
 import json
+import os
 import sys
 
 
@@ -34,7 +35,11 @@ def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extendin
                         "tools": [
                             {
                                 "name": "add",
-                                "description": "Add two numbers",
+                                # Env-driven so a test can change what this
+                                # server serves between two runs -- which is
+                                # what schema drift is (tests/integration
+                                # test_pin_writes_and_detects_drift.py).
+                                "description": os.environ.get("MOCK_ADD_DESCRIPTION", "Add two numbers"),
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
