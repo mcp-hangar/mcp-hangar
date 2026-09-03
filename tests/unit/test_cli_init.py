@@ -1,46 +1,19 @@
 """Tests for CLI init command.
 
-Tests cover Claude Desktop detection, config file generation,
-and provider selection logic.
+Covers config file generation and provider selection. Client detection and
+writing moved to `mcp_clients` in #1192 -- one writer for Claude Code, Cursor
+and Claude Desktop -- and is covered by
+`tests/unit/cli/test_clients_are_pointed_at_hangar.py`.
 """
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mcp_hangar.server.cli.services import (
-    ClaudeDesktopManager,
     ConfigFileManager,
     get_provider,
     get_providers_by_category,
 )
-
-
-class TestClaudeDesktopManager:
-    """Tests for Claude Desktop detection."""
-
-    def test_platform_paths_by_platform(self):
-        """Correct paths defined for each platform."""
-        assert "Darwin" in ClaudeDesktopManager.PLATFORM_PATHS  # macOS
-        assert "Linux" in ClaudeDesktopManager.PLATFORM_PATHS
-        assert "Windows" in ClaudeDesktopManager.PLATFORM_PATHS
-
-    def test_macos_path_is_application_support(self):
-        """macOS path should be in Application Support."""
-        mac_path = ClaudeDesktopManager.PLATFORM_PATHS["Darwin"]
-        assert "Application Support" in str(mac_path)
-        assert "Claude" in str(mac_path)
-
-    def test_linux_path_is_config(self):
-        """Linux path should be in .config."""
-        linux_path = ClaudeDesktopManager.PLATFORM_PATHS["Linux"]
-        assert ".config" in str(linux_path)
-        assert "claude" in str(linux_path).lower()
-
-    def test_backup_returns_none_for_missing_file(self):
-        """Backup should return None if file doesn't exist."""
-        manager = ClaudeDesktopManager(Path("/nonexistent/file.json"))
-        result = manager.backup()
-        assert result is None
 
 
 class TestProviderCategories:
@@ -112,16 +85,23 @@ class TestConfigFileManager:
         assert "env:" in config_str
         assert "GITHUB_TOKEN" in config_str
 
-    def test_generate_initial_config_includes_health_check(self):
-        """Config should include health check settings."""
+    def test_generate_initial_config_omits_the_health_check_block(self):
+        """The generated config must not carry a key nothing reads.
+
+        It used to write `health_check: {enabled: true, interval_s: 30}`, and
+        nothing has ever read it -- the worker takes its interval from
+        `HEALTH_CHECK_INTERVAL_SECONDS` in `bootstrap/workers.py`, and
+        `health_check` is not among the sections `config_schema` knows. Every
+        config `init` produced therefore logged `unknown_config_key`, and any
+        operator who changed `interval_s` changed nothing (#1192).
+        """
         manager = ConfigFileManager()
         provider = get_provider("fetch")
         assert provider is not None
 
         config_str = manager.generate_initial_config(mcp_servers=[provider], configs={})
 
-        assert "health_check:" in config_str
-        assert "enabled: true" in config_str
+        assert "health_check:" not in config_str
 
     def test_generate_initial_config_includes_logging(self):
         """Config should include logging settings."""

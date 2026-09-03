@@ -23,8 +23,8 @@ def plain(output: str) -> str:
     """Strip ANSI styling before asserting on CLI output.
 
     Rich colourizes when it believes it has a terminal, which splits the strings
-    these tests look for: ``"Step 0"`` arrives as
-    ``"\x1b[1mStep \x1b[0m\x1b[1;36m0\x1b[0m"``. CI has no colour, so these
+    these tests look for: ``"Step 1"`` arrives as
+    ``"\x1b[1mStep \x1b[0m\x1b[1;36m1\x1b[0m"``. CI has no colour, so these
     assertions passed there and failed on developer machines -- a property of the
     harness reported as a defect in the code. Setting NO_COLOR/TERM on the runner
     does not help: the module builds its ``Console()`` at import time.
@@ -44,7 +44,7 @@ class TestInitDependencyDetection:
     """Tests for init command dependency detection."""
 
     def test_init_shows_available_runtimes(self, runner, tmp_path):
-        """Should show detected runtimes in Step 0.
+        """Should show detected runtimes in the first step.
 
         Detection is pinned rather than read off the host, and the wizard is run
         with ``--skip-test``. Both are load-bearing, and the second one is why
@@ -52,16 +52,16 @@ class TestInitDependencyDetection:
 
         Pinning `shutil.which` alone did not remove the host from the equation --
         it forced the *runtimes available* branch, which is precisely the branch
-        that shells out. `init` Step 5 starts every configured server for real
-        ("Starting each mcp_server to verify configuration"), so a mocked-present
+        that shells out. `init`'s smoke-test step starts every configured server
+        for real ("Starting each server to verify configuration"), so a mocked-present
         `npx` means a genuine `npx -y @modelcontextprotocol/...`, fetching
-        packages from the network on a CI runner. The per-server 10s budget does
+        packages from the network on a CI runner. The per-server budget does
         not bound that: a release run left an orphaned `npm exec` process alive
         after the job was cancelled.
 
         It has hung three times on that path -- 3.12 at 300s (green on re-run),
         3.14 during the 1.6.3 release at 1080s, and 3.12 again on #657. Nothing
-        here asserts on Step 5, so the wizard has no business reaching it.
+        here asserts on that step, so the wizard has no business reaching it.
 
         Worth knowing: `pytest-timeout` fired on the 3.12 runs and did **not** on
         3.14, where the job ran to four times the limit. Tracked in #652; the
@@ -81,7 +81,7 @@ class TestInitDependencyDetection:
                 catch_exceptions=False,
             )
 
-        assert "Step 0" in plain(result.output)
+        assert "Step 1" in plain(result.output)
         assert "Detecting available runtimes" in plain(result.output)
 
     def test_init_exits_when_no_runtimes(self, runner, tmp_path):
