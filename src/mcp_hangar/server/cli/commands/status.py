@@ -1,6 +1,6 @@
-"""Status command - McpServer health dashboard.
+"""Status command - MCP server health dashboard.
 
-Shows the health and status of all configured mcp_servers with:
+Shows the health and status of all configured MCP servers with:
 - Color-coded state indicators
 - Tool counts and metadata
 - Memory usage and uptime
@@ -77,7 +77,7 @@ def _get_status_from_config(config_path: Path | None) -> dict:
         config_path: Path to config file, or None to search default locations
 
     Returns:
-        Status dictionary with mcp_servers in COLD state
+        Status dictionary with MCP servers in COLD state
     """
     import yaml
 
@@ -175,7 +175,7 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
 
     # Add columns
     table.add_column("", width=3)  # Status icon
-    table.add_column("McpServer", style="bold")
+    table.add_column("MCP server", style="bold")
     table.add_column("State", justify="center")
     table.add_column("Health", justify="right")
     table.add_column("Tools", justify="right")
@@ -235,7 +235,7 @@ def _create_summary_panel(status: dict) -> Panel:
 
     if total == 0:
         return Panel(
-            "[dim]No mcp_servers configured[/dim]",
+            "[dim]No MCP servers configured[/dim]",
             title="Summary",
             border_style="dim",
         )
@@ -250,7 +250,7 @@ def _create_summary_panel(status: dict) -> Panel:
     else:
         parts.append("[yellow]Server not running[/yellow]")
 
-    parts.append(f"McpServers: {total}")
+    parts.append(f"MCP servers: {total}")
 
     if ready:
         parts.append(f"[green]Ready: {ready}[/green]")
@@ -266,7 +266,7 @@ def _create_summary_panel(status: dict) -> Panel:
 
 
 def _get_mcp_server_details(name: str, status: dict) -> dict | None:
-    """Get detailed information for a single mcp_server."""
+    """Get detailed information for a single MCP server."""
     for mcp_server in status.get("mcp_servers", []):
         if mcp_server.get("name") == name:
             return cast(dict, mcp_server)
@@ -274,11 +274,11 @@ def _get_mcp_server_details(name: str, status: dict) -> dict | None:
 
 
 def _display_mcp_server_details(name: str, status: dict):
-    """Display detailed information for a single mcp_server."""
+    """Display detailed information for a single MCP server."""
     mcp_server = _get_mcp_server_details(name, status)
 
     if not mcp_server:
-        console.print(f"[red]McpServer '{name}' not found[/red]")
+        console.print(f"[red]MCP server '{name}' not found[/red]")
         return
 
     state = mcp_server.get("state", "COLD")
@@ -335,7 +335,10 @@ def status_command(
     mcp_server: Annotated[
         str | None,
         typer.Argument(
-            help="Show detailed status for a specific mcp_server",
+            # The parameter name is the identifier; the metavar is what a user
+            # reads in `Usage:` (#1195).
+            metavar="[SERVER]",
+            help="Show detailed status for a specific MCP server",
         ),
     ] = None,
     watch: Annotated[
@@ -363,15 +366,15 @@ def status_command(
         ),
     ] = False,
 ):
-    """Show status of all mcp_servers.
+    """Show status of all MCP servers.
 
-    Displays a table with mcp_server states, health percentages, and tool counts.
+    Displays a table with MCP server states, health percentages, and tool counts.
     Use --watch for real-time updates.
 
     Examples:
         mcp-hangar status
         mcp-hangar status --watch
-        mcp-hangar status my-mcp_server
+        mcp-hangar status my-MCP server
         mcp-hangar status --details
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()

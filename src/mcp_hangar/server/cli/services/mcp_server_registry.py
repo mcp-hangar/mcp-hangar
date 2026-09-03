@@ -1,6 +1,6 @@
-"""McpServer registry - unified mcp_server definitions for CLI commands.
+"""MCP server registry - unified MCP server definitions for CLI commands.
 
-Consolidates mcp_server metadata previously duplicated across init.py and add.py.
+Consolidates MCP server metadata previously duplicated across init.py and add.py.
 """
 
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from .dependency_detector import DependencyStatus, detect_dependencies, is_mcp_s
 
 @dataclass(frozen=True)
 class McpServerDefinition:
-    """Definition of an MCP mcp_server."""
+    """Definition of an MCP server."""
 
     name: str
     description: str
@@ -25,9 +25,9 @@ class McpServerDefinition:
     official: bool = True
 
     def is_available(self, deps: DependencyStatus | None = None) -> bool:
-        """Check if this mcp_server can be installed with current dependencies.
+        """Check if this MCP server can be installed with current dependencies.
 
-        A mcp_server is available if:
+        An MCP server is available if:
         - Primary install_type runtime is available, OR
         - uvx_package exists and uvx is available
         """
@@ -45,7 +45,7 @@ class McpServerDefinition:
         return False
 
     def get_unavailable_reason(self, deps: DependencyStatus | None = None) -> str | None:
-        """Get reason why mcp_server is unavailable, or None if available."""
+        """Get reason why MCP server is unavailable, or None if available."""
         if self.is_available(deps):
             return None
 
@@ -234,17 +234,17 @@ _PROVIDERS_BY_NAME: dict[str, McpServerDefinition] = {p.name: p for p in _PROVID
 
 
 def get_all_mcp_servers() -> list[McpServerDefinition]:
-    """Get all known mcp_servers."""
+    """Get all known MCP servers."""
     return list(_PROVIDERS)
 
 
 def get_mcp_server(name: str) -> McpServerDefinition | None:
-    """Get a mcp_server by name."""
+    """Get an MCP server by name."""
     return _PROVIDERS_BY_NAME.get(name)
 
 
 def get_mcp_servers_by_category() -> dict[str, list[McpServerDefinition]]:
-    """Get mcp_servers grouped by category."""
+    """Get MCP servers grouped by category."""
     result: dict[str, list[McpServerDefinition]] = {}
     for mcp_server in _PROVIDERS:
         if mcp_server.category not in result:
@@ -254,26 +254,26 @@ def get_mcp_servers_by_category() -> dict[str, list[McpServerDefinition]]:
 
 
 def search_mcp_servers(query: str) -> list[McpServerDefinition]:
-    """Search mcp_servers by name or description.
+    """Search MCP servers by name or description.
 
     Args:
         query: Search query string
 
     Returns:
-        List of matching mcp_servers
+        List of matching MCP servers
     """
     query_lower = query.lower()
     return [p for p in _PROVIDERS if query_lower in p.name.lower() or query_lower in p.description.lower()]
 
 
 def get_available_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
-    """Get mcp_servers that can be installed with current dependencies.
+    """Get MCP servers that can be installed with current dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of available mcp_servers
+        List of available MCP servers
     """
     if deps is None:
         deps = detect_dependencies()
@@ -281,13 +281,13 @@ def get_available_mcp_servers(deps: DependencyStatus | None = None) -> list[McpS
 
 
 def get_unavailable_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
-    """Get mcp_servers that cannot be installed due to missing dependencies.
+    """Get MCP servers that cannot be installed due to missing dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of unavailable mcp_servers
+        List of unavailable MCP servers
     """
     if deps is None:
         deps = detect_dependencies()
@@ -297,7 +297,7 @@ def get_unavailable_mcp_servers(deps: DependencyStatus | None = None) -> list[Mc
 def get_mcp_servers_by_category_filtered(
     deps: DependencyStatus | None = None,
 ) -> tuple[dict[str, list[McpServerDefinition]], dict[str, list[McpServerDefinition]]]:
-    """Get mcp_servers grouped by category, split into available and unavailable.
+    """Get MCP servers grouped by category, split into available and unavailable.
 
     Args:
         deps: Optional pre-detected dependencies
@@ -329,7 +329,7 @@ def filter_bundle_by_availability(
     bundle_name: str,
     deps: DependencyStatus | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Filter a bundle to only include available mcp_servers.
+    """Filter a bundle to only include available MCP servers.
 
     Args:
         bundle_name: Name of the bundle

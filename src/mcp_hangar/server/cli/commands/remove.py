@@ -1,7 +1,7 @@
-"""Remove command - Remove mcp_servers from configuration.
+"""Remove command - Remove MCP servers from configuration.
 
-Removes a mcp_server from the MCP Hangar configuration file and optionally
-stops the running mcp_server instance.
+Removes an MCP server from the MCP Hangar configuration file and optionally
+stops the running MCP server instance.
 """
 
 import json
@@ -19,13 +19,13 @@ console = Console()
 
 
 def _get_configured_mcp_servers(config_path: Path) -> list[str]:
-    """Get list of mcp_servers from config file.
+    """Get list of MCP servers from config file.
 
     Args:
         config_path: Path to config file
 
     Returns:
-        List of mcp_server names
+        List of MCP server names
     """
     import yaml
 
@@ -41,14 +41,14 @@ def _get_configured_mcp_servers(config_path: Path) -> list[str]:
 
 
 def _remove_from_config(config_path: Path, mcp_server_name: str) -> bool:
-    """Remove a mcp_server from the configuration file.
+    """Remove an MCP server from the configuration file.
 
     Args:
         config_path: Path to config file
-        mcp_server_name: Name of mcp_server to remove
+        mcp_server_name: Name of MCP server to remove
 
     Returns:
-        True if mcp_server was removed, False if not found
+        True if MCP server was removed, False if not found
     """
     import yaml
 
@@ -70,13 +70,13 @@ def _remove_from_config(config_path: Path, mcp_server_name: str) -> bool:
 
 
 def _try_stop_mcp_server(mcp_server_name: str) -> bool:
-    """Try to stop a running mcp_server instance.
+    """Try to stop a running MCP server instance.
 
     Args:
-        mcp_server_name: Name of mcp_server to stop
+        mcp_server_name: Name of MCP server to stop
 
     Returns:
-        True if mcp_server was stopped, False otherwise
+        True if MCP server was stopped, False otherwise
     """
     import httpx
 
@@ -84,7 +84,7 @@ def _try_stop_mcp_server(mcp_server_name: str) -> bool:
         for port in [8000, 8080]:
             try:
                 response = httpx.post(
-                    f"http://localhost:{port}/mcp_servers/{mcp_server_name}/stop",
+                    f"http://localhost:{port}/MCP servers/{mcp_server_name}/stop",
                     timeout=5.0,
                 )
                 if response.status_code == 200:
@@ -102,7 +102,7 @@ def remove_command(
     name: Annotated[
         str,
         typer.Argument(
-            help="McpServer name to remove",
+            help="MCP server name to remove",
         ),
     ],
     yes: Annotated[
@@ -117,13 +117,13 @@ def remove_command(
         bool,
         typer.Option(
             "--keep-running",
-            help="Don't stop the running mcp_server instance",
+            help="Don't stop the running MCP server instance",
         ),
     ] = False,
 ):
-    """Remove a mcp_server from MCP Hangar configuration.
+    """Remove an MCP server from MCP Hangar configuration.
 
-    Removes the mcp_server from the config file and optionally stops
+    Removes the MCP server from the config file and optionally stops
     any running instance.
 
     Examples:
@@ -145,7 +145,7 @@ def remove_command(
     # Confirm removal
     if not yes:
         confirm = questionary.confirm(
-            f"Remove mcp_server '{name}' from configuration?",
+            f"Remove MCP server '{name}' from configuration?",
             default=False,
         ).ask()
         if not confirm:
@@ -160,7 +160,7 @@ def remove_command(
     if _remove_from_config(config_path, name):
         console.print(f"[green]Removed {name} from {config_path}[/green]")
     else:
-        console.print(f"[yellow]McpServer {name} not found in configuration[/yellow]")
+        console.print(f"[yellow]MCP server {name} not found in configuration[/yellow]")
 
     # JSON output
     if global_opts.json_output:

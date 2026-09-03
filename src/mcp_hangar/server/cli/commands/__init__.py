@@ -2,9 +2,9 @@
 
 Each module implements a subcommand:
 - init: Interactive setup wizard
-- status: McpServer health dashboard
-- add: Add mcp_servers from registry
-- remove: Remove mcp_servers
+- status: MCP server health dashboard
+- add: Add MCP servers from registry
+- remove: Remove MCP servers
 - serve: Start the MCP server
 - completion: Shell completion scripts
 - auth: Authentication administration (bootstrap-admin)

@@ -30,7 +30,7 @@ _mcp_hangar_completion() {
 
     local commands="init status add remove serve completion"
     local global_opts="--config --verbose --quiet --json --version --help"
-    local init_opts="--non-interactive --bundle --mcp_servers --config-path"
+    local init_opts="--non-interactive --bundle --MCP servers --config-path"
     init_opts="$init_opts --claude-config --skip-claude --reset --help"
     local add_opts="--search --yes --no-reload --help"
     local add_mcp_servers="filesystem fetch memory github git sqlite postgres"
@@ -198,9 +198,9 @@ complete -c mcp-hangar -s h -l help -d "Show help"
 
 # Commands
 complete -c mcp-hangar -n "__fish_use_subcommand" -a "init" -d "Initialize MCP Hangar"
-complete -c mcp-hangar -n "__fish_use_subcommand" -a "status" -d "Show mcp_server status"
-complete -c mcp-hangar -n "__fish_use_subcommand" -a "add" -d "Add a mcp_server"
-complete -c mcp-hangar -n "__fish_use_subcommand" -a "remove" -d "Remove a mcp_server"
+complete -c mcp-hangar -n "__fish_use_subcommand" -a "status" -d "Show MCP server status"
+complete -c mcp-hangar -n "__fish_use_subcommand" -a "add" -d "Add an MCP server"
+complete -c mcp-hangar -n "__fish_use_subcommand" -a "remove" -d "Remove an MCP server"
 complete -c mcp-hangar -n "__fish_use_subcommand" -a "serve" -d "Start the server"
 complete -c mcp-hangar -n "__fish_use_subcommand" -a "completion" -d "Generate completions"
 
@@ -208,9 +208,9 @@ complete -c mcp-hangar -n "__fish_use_subcommand" -a "completion" -d "Generate c
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -s y -l non-interactive \\
     -d "Run without prompts"
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -s b -l bundle \\
-    -d "McpServer bundle" -r -a "starter developer data"
-complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l mcp_servers \\
-    -d "Comma-separated mcp_servers" -r
+    -d "MCP server bundle" -r -a "starter developer data"
+complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l MCP servers \\
+    -d "Comma-separated MCP servers" -r
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l config-path \\
     -d "Custom config path" -r -F
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l claude-config \\
@@ -235,7 +235,7 @@ complete -c mcp-hangar -n "__fish_seen_subcommand_from add" \\
 # remove options
 complete -c mcp-hangar -n "__fish_seen_subcommand_from remove" -s y -l yes -d "Skip confirmation"
 complete -c mcp-hangar -n "__fish_seen_subcommand_from remove" -l keep-running \\
-    -d "Keep mcp_server running"
+    -d "Keep MCP server running"
 
 # serve options
 complete -c mcp-hangar -n "__fish_seen_subcommand_from serve" -l http -d "HTTP mode"
