@@ -67,7 +67,7 @@ def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
     """Collect configuration for an MCP server.
 
     Args:
-        MCP server: MCP server definition
+        mcp_server: MCP server definition
 
     Returns:
         Configuration dictionary or None if skipped
