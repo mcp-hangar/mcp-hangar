@@ -5,6 +5,177 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.17.1...v2.18.0) (2026-09-03)
+
+This release makes a first run produce a verdict on a laptop. `mcp-hangar init` writes a
+configuration that enforces something -- the upstreams' own tool names through
+`front_door`, a declared caller over stdio, and a digest pin for every tool your servers
+serve -- and `mcp-hangar pin` computes, writes and checks those pins, which until now
+existed only as a thing the gate compared against and no command produced.
+
+**Two behaviours change only if you opt in.** A stdio session gets an identity when you
+declare one under `auth.stdio.principal`, and `init` writes the new shape when you run it.
+An existing configuration with neither is served exactly as it was in 2.17.1.
+
+**One changes for everyone**, and it is cosmetic: the CLI stopped printing the internal
+spelling `mcp_server` at people. Help text now says "MCP server"; `init --mcp_servers` is
+`init --servers`, with the old spelling still accepted.
+
+To adopt the new enforcement on a configuration you already have, run
+`mcp-hangar pin --write` and add the `tool_access` and `auth.stdio.principal` blocks --
+see [Upgrading](https://github.com/mcp-hangar/mcp-hangar/blob/main/UPGRADE.md).
+
+### Added
+
+- **core:** `examples/rugpull/` is the upstream the quickstart uses to show a rug pull -- one
+  tool whose description comes from `RUG_DESC`, so the same server is honest on one run and
+  poisoned on the next while nothing else about it changes. A poisoned description is the
+  version of tool poisoning that alters no parameter, and Hangar's digest covers
+  `description` as well as the schemas, so `pin --check` catches it and the gate refuses the
+  call.
+
+  The release smoke gate (`scripts/smoke_published_artifact.py`) now walks that same
+  sequence against the published artifact: pin, call and get an answer, restart with the
+  description changed, call again and get `Tool 'echo' schema does not match its pinned
+  digest`, then `pin --check` exiting 1 with the drift named. A deny is the claim that rots
+  silently -- a broken example still starts, lists and answers, it just stops refusing --
+  so the gate asserts the refusal rather than the happy path. ([#1201](https://github.com/mcp-hangar/mcp-hangar/pull/1201))
+- **core:** `mcp-hangar init` now writes a configuration that enforces something. The
+  generated file gains `tool_access.mode: front_door` (your client sees the upstreams' own
+  tool names, not Hangar's meta-API), an `auth.stdio.principal` block so that projection is
+  reachable over stdio at all, and a digest pin for every tool the smoke test saw --
+  captured during that run, while the servers are already up. `--skip-test` therefore also
+  means no pins: an unverified pin would refuse every call to a tool nobody digested. The
+  summary panel now says which of those happened instead of defaulting to "All passed".
+
+  `init` also writes the clients people actually use: Claude Code (`~/.claude.json`,
+  `./.mcp.json`), Cursor (`~/.cursor/mcp.json`, `./.cursor/mcp.json`) and Claude Desktop,
+  detected automatically or named with `--client` (`--skip-claude` still works as
+  `--skip-clients`). The Hangar entry is now **merged** into a client's `mcpServers` rather
+  than replacing it -- the previous writer discarded every other server in that file.
+
+  **core:** the default `starter` bundle could not start. `init` preferred a PyPI
+  distribution derived from each npm package name, and seven of the ten names that produced
+  were wrong: `mcp-server-filesystem`, `mcp-server-github`, `mcp-server-slack` and
+  `mcp-server-google-maps` do not exist, `mcp-server-memory` ships no executable, and
+  `mcp-server-postgres` and `mcp-server-brave-search` belong to other people -- uvx would
+  have fetched and run a stranger's code under an official-looking name. Only `fetch` and
+  `git` are published by Anthropic from `modelcontextprotocol/servers`; the rest now use
+  their real npm packages. Existing configurations are untouched; a config already pointing
+  at one of those names keeps doing so until you regenerate it.
+
+  **core:** the generated config no longer writes a `health_check:` block. Nothing has ever
+  read it -- the worker takes its interval from a constant -- so every generated config
+  logged `unknown_config_key`, and an operator who tuned `interval_s` tuned nothing. ([#1201](https://github.com/mcp-hangar/mcp-hangar/pull/1201))
+- **core:** `mcp-hangar pin` computes the tool digests Hangar enforces, so digest pinning can
+  be adopted without deriving a SHA-256 by hand:
+
+  ```bash
+  mcp-hangar pin                 # print {tool: sha256} per server
+  mcp-hangar pin --write         # merge them into tool_projection.pins
+  mcp-hangar pin --check         # exit 1 when the file and the servers disagree
+  ```
+
+  Digests come from `compute_tool_digest`, the same function the projection registry uses to
+  build what the gate compares against, so a written pin matches by construction. `--check`
+  is the pre-commit/CI form: it prints the pinned and the served digest per drifted tool and
+  exits non-zero (`--json` for scripts). Exit codes: 0 agreement, 1 drift, 2 the question
+  could not be answered -- missing config, unknown `--server`, or a server that never
+  started.
+
+  `--write` rewrites the configuration file through PyYAML, which round-trips values but not
+  comments or key order, and keeps the previous file beside it as `<config>.bak`. Pins cover
+  the tool description as well as its schema, so a poisoned description with unchanged
+  parameters is drift.
+
+  The smoke test's timeout budget moved with this: it was 10s for the whole fleet and halved
+  again per server, which is less than a cold `uvx` download takes, so `init` reported
+  `reader_died` for servers that were merely slow to arrive. It is now 60s overall with a
+  30s floor per server. ([#1197](https://github.com/mcp-hangar/mcp-hangar/pull/1197))
+- **core:** a stdio session can now be given an identity, so `tool_access.mode: front_door`
+  is reachable without a cluster. Declare the caller the spawning process implies:
+
+  ```yaml
+  auth:
+    stdio:
+      principal:
+        id: local-user
+        tenant_id: local
+        roles: [viewer]      # default; read-only
+  ```
+
+  With the block present and the transport stdio, `tools/list` serves the upstream's own
+  flat tool names instead of the fail-closed empty list, per-tenant digest pins addressed to
+  that tenant are matchable (and no longer refused at boot), and the `hangar_*` management
+  surface follows the declared roles -- `viewer` shows the fleet reads and nothing that can
+  change state. No credential is checked, because a stdio server is not listening on
+  anything: the OS user who launched the process is the trust boundary (ADR-026).
+
+  Absent the block, nothing changes: the caller is anonymous and the front door stays empty.
+  HTTP ignores the block entirely and keeps using its credential channel. ([#1196](https://github.com/mcp-hangar/mcp-hangar/pull/1196))
+- **core:** the 2.18.0 exit gate now runs on every pull request, not only at release. A new
+  integration test drives `mcp-hangar serve` over stdio with the SDK's own `ClientSession`
+  and asserts the three claims the release is built on: with `auth.stdio.principal`,
+  `front_door` serves the upstream's flat tool names and one of them can be called; without
+  it, the same configuration serves zero tools (the fail-closed behaviour from #902, which
+  ADR-026 must not loosen); and a tool whose digest does not match its pin is refused.
+
+  Every one of those already had an in-process test, and none of them would have caught what
+  this covers -- identity binding depends on which task reads the contextvar, projection
+  depends on a real `initialize` handshake, and the refusal depends on the flat dispatcher
+  reaching the executor rather than `hangar_call`. ([#1203](https://github.com/mcp-hangar/mcp-hangar/pull/1203))
+
+### Changed
+
+- **core:** the CLI stopped saying `mcp_server` at people. `mcp-hangar --help` described "a
+  Production-grade MCP mcp_server platform"; `status` offered to "Show status of all
+  mcp_servers"; `add` would "Add a mcp_server". That spelling is an internal identifier left
+  over from the `provider` rename, and it appeared in the root description, in nine command
+  help texts and in `status`'s `Usage:` line. All of it now reads "MCP server(s)", and the
+  root line says what Hangar is: *the policy enforcement plane for your MCP servers*.
+
+  `init --mcp_servers` is now `init --servers`, with the old spelling kept as an alias --
+  renaming a flag people have in scripts is a breaking change; renaming the one they read is
+  not. `mcp_servers` stays where it is a name rather than prose: the configuration section
+  and every identifier in the code.
+
+  A test walks the real Typer app and reads what each command renders, so a help string that
+  reintroduces the identifier fails the build rather than shipping.
+
+  **core:** the sdist no longer carries `.grimp_cache`, `.import_linter_cache`,
+  `.clusterfuzzlite` or `coverage.json` -- artefacts of having built the project, not inputs
+  for building it (2.6 MB to 2.3 MB). `scripts/` and `examples/` stay: the test suite imports
+  `scripts.dump_api_routes`, and the quickstart points at `examples/rugpull/`. ([#1201](https://github.com/mcp-hangar/mcp-hangar/pull/1201))
+- **core:** the README's Quickstart now shows what Hangar is for. It used to point at a
+  config, start a server, and stop -- which describes a proxy. It walks the same loop the
+  docs do: `init` (client found, tools pinned), the rug pull, the refusal
+  (`Tool 'echo' schema does not match its pinned digest`), and `pin --check` for CI. The
+  hand-written config example gained the two blocks that make it govern -- `tool_access` and
+  `auth.stdio.principal` -- because an example that omits them teaches a configuration that
+  enforces nothing.
+
+  **core:** the package description is now "Policy enforcement plane for MCP: every tool call
+  ends in a verdict. Self-hosted, MIT." It read "Production-grade infrastructure for Model
+  Context Protocol", which was retired from the site, the README and the registry entry
+  while `pyproject` kept feeding it to PyPI -- and from there to anything that reads PyPI
+  metadata. The keywords move with it: `security`, `policy-enforcement` and `tool-poisoning`
+  instead of `infrastructure`. ([#1202](https://github.com/mcp-hangar/mcp-hangar/pull/1202))
+
+### Fixed
+
+- **core:** two identifiers came back. The CLI vocabulary rename rewrote `mcp_server`
+  wherever the package renders it, and reached inside a code span: `McpServer` (the class)
+  and `mcp_servers` (the configuration section) became `MCP server` and `MCP servers` in
+  `build_mcp_server`'s docstring, so a reader following either one finds nothing -- a class
+  that does not exist, and a section nobody can write. A gate now refuses a code span in the
+  CLI package that holds a phrase with a space in it, which is what an identifier never is. ([#1206](https://github.com/mcp-hangar/mcp-hangar/pull/1206))
+- **core:** two docstrings documented an argument no function has. The CLI vocabulary rename
+  rewrote `mcp_server` to "MCP server" in every string the package renders, and an `Args:`
+  entry is not prose -- it is the parameter's name -- so `add._collect_config` and
+  `ConfigFileManager.add_mcp_server` ended up describing `MCP server:`. Nothing failed,
+  because nothing parses those at runtime, which is why a gate now checks that every
+  documented argument is a parameter of the function it documents. ([#1205](https://github.com/mcp-hangar/mcp-hangar/pull/1205))
+
 ## [2.17.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.17.0...v2.17.1) (2026-09-02)
 
 ### Changed
