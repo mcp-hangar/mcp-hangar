@@ -77,7 +77,7 @@ class SmokeTestResult:
 
 
 def build_mcp_server(mcp_server_id: str, mcp_server_config: dict[str, Any]) -> McpServer:
-    """Build an unstarted `MCP server` from one entry of the `MCP servers` map.
+    """Build an unstarted `McpServer` from one entry of the `mcp_servers` map.
 
     Shared with `mcp-hangar pin`, which starts a server for exactly the same
     reason this does -- to find out what it actually serves. Two copies of this
