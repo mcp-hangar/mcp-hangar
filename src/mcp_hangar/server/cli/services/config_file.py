@@ -69,7 +69,7 @@ class ConfigFileManager:
         """Add an MCP server to the configuration.
 
         Args:
-            MCP server: MCP server definition.
+            mcp_server: MCP server definition.
             config_value: Configuration value (path or secret).
             use_env: Environment variable to use instead of value.
         """
