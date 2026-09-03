@@ -25,7 +25,15 @@ Provider = McpServer
 ProviderState = McpServerState
 
 # Constants
-DEFAULT_TIMEOUT_SECONDS = 10
+#
+# The old budget was 10 seconds for the whole fleet, split again per server, so
+# a single server got 5. A first `uvx` run downloads the package before it says
+# anything, which takes longer than that on a cold machine -- the smoke test
+# then reported `reader_died` for a server that was working, and `mcp-hangar
+# pin` would have written no pin for it. The per-server floor is what fixes
+# that; the total is a budget for a fleet of them.
+DEFAULT_TIMEOUT_SECONDS = 60
+MIN_PER_SERVER_TIMEOUT_SECONDS = 30
 MAX_PARALLEL_STARTS = 3
 
 
@@ -64,6 +72,33 @@ class SmokeTestResult:
         return sum(1 for r in self.results if not r.success)
 
 
+def build_mcp_server(mcp_server_id: str, mcp_server_config: dict[str, Any]) -> McpServer:
+    """Build an unstarted `McpServer` from one entry of the `mcp_servers` map.
+
+    Shared with `mcp-hangar pin`, which starts a server for exactly the same
+    reason this does -- to find out what it actually serves. Two copies of this
+    constructor would drift on the next field added to a server spec, and the
+    pinned digests would then be taken from a server configured slightly
+    differently than the one `serve` runs.
+    """
+    return McpServer(
+        mcp_server_id=mcp_server_id,
+        mode=mcp_server_config.get("mode", "subprocess"),
+        command=mcp_server_config.get("command"),
+        image=mcp_server_config.get("image"),
+        endpoint=mcp_server_config.get("endpoint"),
+        env=mcp_server_config.get("env"),
+        idle_ttl_s=mcp_server_config.get("idle_ttl_s", 300),
+        health_check_interval_s=mcp_server_config.get("health_check_interval_s", 60),
+        volumes=mcp_server_config.get("volumes"),
+        resources=mcp_server_config.get("resources"),
+        network=mcp_server_config.get("network", "none"),
+        auth=mcp_server_config.get("auth"),
+        tls=mcp_server_config.get("tls"),
+        http=mcp_server_config.get("http"),
+    )
+
+
 def _test_single_mcp_server(
     mcp_server_id: str,
     mcp_server_config: dict[str, Any],
@@ -82,23 +117,7 @@ def _test_single_mcp_server(
     start_time = time.perf_counter()
 
     try:
-        # Create mcp_server from config
-        mcp_server = McpServer(
-            mcp_server_id=mcp_server_id,
-            mode=mcp_server_config.get("mode", "subprocess"),
-            command=mcp_server_config.get("command"),
-            image=mcp_server_config.get("image"),
-            endpoint=mcp_server_config.get("endpoint"),
-            env=mcp_server_config.get("env"),
-            idle_ttl_s=mcp_server_config.get("idle_ttl_s", 300),
-            health_check_interval_s=mcp_server_config.get("health_check_interval_s", 60),
-            volumes=mcp_server_config.get("volumes"),
-            resources=mcp_server_config.get("resources"),
-            network=mcp_server_config.get("network", "none"),
-            auth=mcp_server_config.get("auth"),
-            tls=mcp_server_config.get("tls"),
-            http=mcp_server_config.get("http"),
-        )
+        mcp_server = build_mcp_server(mcp_server_id, mcp_server_config)
 
         # Start mcp_server with timeout
         deadline = time.time() + timeout_s
@@ -221,7 +240,7 @@ def run_smoke_test(
         return SmokeTestResult(results=[], total_duration_ms=0)
 
     results: list[McpServerTestResult] = []
-    per_mcp_server_timeout = min(timeout_s / len(mcp_servers_config), timeout_s / 2)
+    per_mcp_server_timeout = max(timeout_s / len(mcp_servers_config), MIN_PER_SERVER_TIMEOUT_SECONDS)
 
     # Run tests with progress indicator
     with Progress(
