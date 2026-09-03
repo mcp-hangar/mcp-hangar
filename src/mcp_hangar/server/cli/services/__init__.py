@@ -1,6 +1,5 @@
 """CLI services - extracted functionality from commands."""
 
-from .claude_desktop import ClaudeDesktopManager
 from .config_file import ConfigFileManager
 from .dependency_detector import (
     DependencyStatus,
@@ -42,7 +41,6 @@ __all__ = [
     # Config file management
     "ConfigFileManager",
     # Claude Desktop management
-    "ClaudeDesktopManager",
     # Smoke test
     "run_smoke_test",
     "run_smoke_test_simple",

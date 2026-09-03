@@ -4,7 +4,7 @@ Starts each mcp_server, waits for READY state, reports status, then stops.
 Used by `mcp-hangar init` to verify configuration before user closes terminal.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import time
 from typing import Any
@@ -47,6 +47,10 @@ class McpServerTestResult:
     duration_ms: float
     error: str | None = None
     suggestion: str | None = None
+    #: `{tool: sha256}` for a server that answered. The smoke test has the server
+    #: started and ready anyway, and this is the moment `init` can write pins
+    #: without starting everything a second time.
+    digests: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -128,6 +132,13 @@ def _test_single_mcp_server(
             if mcp_server.state == McpServerState.READY:
                 duration_ms = (time.perf_counter() - start_time) * 1000
 
+                # Read the tools before stopping: this is the only moment in
+                # `init` where every server is up, and a pin taken later would
+                # mean starting the fleet twice.
+                from .pinning import digest_tools
+
+                digests = digest_tools(mcp_server)
+
                 # Stop mcp_server after successful test
                 try:
                     mcp_server.stop()
@@ -139,6 +150,7 @@ def _test_single_mcp_server(
                     success=True,
                     state="ready",
                     duration_ms=duration_ms,
+                    digests=digests,
                 )
             time.sleep(0.1)
 

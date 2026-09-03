@@ -86,15 +86,39 @@ class McpServerDefinition:
         return self.package
 
 
-# All known mcp_servers with their configurations
-# uvx_package maps to PyPI packages that provide equivalent functionality
+# All known mcp_servers with their configurations.
+#
+# `uvx_package` is the PyPI distribution to run instead of the npm one, and it
+# is set ONLY where that distribution is the official server published by
+# Anthropic from `modelcontextprotocol/servers`. It used to be filled in by
+# pattern -- `@modelcontextprotocol/server-X` -> `mcp-server-X` -- for every
+# entry, and seven of the ten names that produced were wrong (#1192):
+#
+#   mcp-server-filesystem   does not exist on PyPI
+#   mcp-server-memory       exists, provides no executable
+#   mcp-server-github       does not exist
+#   mcp-server-slack        does not exist
+#   mcp-server-google-maps  does not exist
+#   mcp-server-postgres     someone else's package ("Add your description here")
+#   mcp-server-brave-search an Amazon placeholder ("This package is reserved")
+#
+# The first five made `init` write a configuration that could not start -- two
+# of the three servers in the default `starter` bundle. The last two are worse
+# than broken: uvx would have fetched and run a stranger's code under a name
+# that looks official. Check before adding one back:
+#
+#   curl -s https://pypi.org/pypi/<name>/json | jq '.info.author, .info.project_urls'
+#
+# `mcp-server-sqlite` is dropped for the same reason: it resolves, but with no
+# author and no repository link, so nothing ties it to the archived official
+# server it shares a name with.
 _PROVIDERS: list[McpServerDefinition] = [
     # Starter (recommended for everyone)
     McpServerDefinition(
         name="filesystem",
         description="Read and write local files",
         package="@modelcontextprotocol/server-filesystem",
-        uvx_package="mcp-server-filesystem",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Starter",
         requires_config=True,
         config_prompt="Directory to allow access to",
@@ -111,7 +135,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="memory",
         description="Persistent key-value storage for context",
         package="@modelcontextprotocol/server-memory",
-        uvx_package="mcp-server-memory",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Starter",
     ),
     # Developer Tools
@@ -119,7 +143,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="github",
         description="GitHub repos, issues, PRs",
         package="@modelcontextprotocol/server-github",
-        uvx_package="mcp-server-github",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Developer Tools",
         requires_config=True,
         config_prompt="GitHub personal access token",
@@ -138,7 +162,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="sqlite",
         description="Query SQLite databases",
         package="@modelcontextprotocol/server-sqlite",
-        uvx_package="mcp-server-sqlite",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Data & Databases",
         requires_config=True,
         config_prompt="Path to SQLite database file",
@@ -148,7 +172,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="postgres",
         description="Query PostgreSQL databases",
         package="@modelcontextprotocol/server-postgres",
-        uvx_package="mcp-server-postgres",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Data & Databases",
         requires_config=True,
         config_prompt="PostgreSQL connection string",
@@ -160,7 +184,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="slack",
         description="Slack workspace integration",
         package="@modelcontextprotocol/server-slack",
-        uvx_package="mcp-server-slack",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Slack bot token",
@@ -178,7 +202,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="brave-search",
         description="Brave Search API",
         package="@modelcontextprotocol/server-brave-search",
-        uvx_package="mcp-server-brave-search",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Brave Search API key",
@@ -189,7 +213,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="google-maps",
         description="Google Maps API",
         package="@modelcontextprotocol/server-google-maps",
-        uvx_package="mcp-server-google-maps",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Google Maps API key",

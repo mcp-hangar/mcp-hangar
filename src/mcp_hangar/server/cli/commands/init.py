@@ -1,14 +1,18 @@
 """Init command - Interactive setup wizard for MCP Hangar.
 
 This command provides the "5-minute experience" for new users:
-0. Detect available runtimes (npx, uvx, docker)
-1. Detect Claude Desktop installation
-2. Present mcp_server selection with bundles (filtered by available deps)
-3. Collect required configuration
-4. Generate MCP Hangar config file
-5. Smoke test mcp_servers
-6. Update Claude Desktop config
-7. Show completion summary with next steps
+1. Detect available runtimes (npx, uvx, docker)
+2. Detect the MCP clients on this machine (Claude Code, Cursor, Claude Desktop)
+3. Present MCP server selection with bundles (filtered by available deps)
+4. Collect required configuration
+5. Generate the MCP Hangar config file
+6. Smoke test every server -- and take a digest pin for each tool while it is up
+7. Point the selected clients at Hangar, and show what was written
+
+The configuration this writes governs. It used to configure a fleet and enforce
+nothing -- no `tool_access`, no pins, no identity -- so a first run ended every
+call in `allow` while the project's own pitch is that a call ends in a verdict
+(#1192).
 """
 
 import os
@@ -25,7 +29,6 @@ import typer
 from ..errors import CLIError, PermissionError
 from ..main import GlobalOptions
 from ..services import (
-    ClaudeDesktopManager,
     ConfigFileManager,
     DependencyStatus,
     detect_dependencies,
@@ -37,6 +40,7 @@ from ..services import (
     McpServerDefinition,
     run_smoke_test,
 )
+from ..services.mcp_clients import McpClient, client_by_key, detect_clients, write_hangar_entry
 
 
 # Existing config handling options
@@ -234,54 +238,121 @@ def _prompt_existing_config_action(
 def _show_completion_summary(
     mcp_servers: list[str],
     hangar_config_path: Path,
-    claude_config_path: Path | None,
+    client_paths: list[Path],
     backup_path: Path | None,
-    smoke_test_passed: bool = True,
+    smoke_test_status: str,
+    pinned_tools: int,
 ):
-    """Display completion summary with next steps."""
+    """Display completion summary with next steps.
+
+    `smoke_test_status` is a state, not a flag. It used to default to `True`,
+    so `--skip-test` -- which runs no test at all -- printed "All passed"
+    (#1192). A panel that reports a pass nobody measured is worse than one that
+    says nothing.
+    """
     console.print()
+    passed = smoke_test_status == "passed"
+    skipped = smoke_test_status == "skipped"
 
     table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
     table.add_column("Item", style="bold")
     table.add_column("Value")
 
-    table.add_row("McpServers configured", str(len(mcp_servers)))
+    table.add_row("MCP servers configured", str(len(mcp_servers)))
     table.add_row("MCP Hangar config", str(hangar_config_path))
-    if claude_config_path:
-        table.add_row("Claude Desktop config", str(claude_config_path))
+    for path in client_paths:
+        table.add_row("Client config", str(path))
     if backup_path:
         table.add_row("Backup created", str(backup_path))
 
     if mcp_servers:
-        if smoke_test_passed:
-            table.add_row("McpServer tests", "[green]All passed[/green]")
-        else:
-            table.add_row("McpServer tests", "[yellow]Some failed[/yellow]")
+        table.add_row(
+            "MCP server tests",
+            {
+                "passed": "[green]All passed[/green]",
+                "failed": "[yellow]Some failed[/yellow]",
+                "skipped": "[dim]Not run (--skip-test)[/dim]",
+            }[smoke_test_status],
+        )
+        table.add_row(
+            "Digest pins",
+            f"[green]{pinned_tools} tool(s) pinned[/green]"
+            if pinned_tools
+            else "[dim]None -- pins are taken during the test[/dim]",
+        )
 
     title = (
         "[bold green]Setup Complete[/bold green]"
-        if smoke_test_passed
+        if passed
         else "[bold yellow]Setup Complete (with warnings)[/bold yellow]"
     )
-    border = "green" if smoke_test_passed else "yellow"
+    border = "green" if passed else "yellow"
 
     console.print(Panel(table, title=title, border_style=border))
 
     if mcp_servers:
-        console.print("\n[bold]Enabled mcp_servers:[/bold]")
+        console.print("\n[bold]Enabled MCP servers:[/bold]")
         for name in mcp_servers:
             console.print(f"  [green]+[/green] {name}")
 
     console.print("\n[bold]Next steps:[/bold]")
-    if not smoke_test_passed:
-        console.print("  1. [bold]Review errors above[/bold] and fix mcp_server configuration")
+    if smoke_test_status == "failed":
+        console.print("  1. [bold]Review errors above[/bold] and fix the server configuration")
         console.print("  2. Run [bold]mcp-hangar serve[/bold] to test manually")
-        console.print("  3. [bold]Restart Claude Desktop[/bold] when ready")
+        console.print("  3. [bold]Restart your MCP client[/bold] when ready")
+    elif skipped:
+        console.print("  1. Run [bold]mcp-hangar pin --write[/bold] to pin what your servers serve")
+        console.print("  2. [bold]Restart your MCP client[/bold] to activate the new configuration")
+        console.print("  3. Run [bold]mcp-hangar status[/bold] to verify the servers are healthy")
     else:
-        console.print("  1. [bold]Restart Claude Desktop[/bold] to activate the new configuration")
-        console.print("  2. Run [bold]mcp-hangar status[/bold] to verify mcp_servers are healthy")
-        console.print("  3. Run [bold]mcp-hangar add <mcp_server>[/bold] to add more mcp_servers later")
-    console.print("\n[dim]Need help? Visit https://docs.mcp-hangar.io[/dim]")
+        console.print("  1. [bold]Restart your MCP client[/bold] to activate the new configuration")
+        console.print("  2. Run [bold]mcp-hangar pin --check[/bold] any time to see whether a tool changed")
+        console.print("  3. Run [bold]mcp-hangar add <server>[/bold] to add more servers later")
+    console.print("\n[dim]Need help? Visit https://mcp-hangar.io/docs[/dim]")
+
+
+def _resolve_clients(
+    client_keys: list[str] | None,
+    claude_config_path: Path | None,
+    skip_clients: bool,
+    non_interactive: bool,
+) -> list[McpClient]:
+    """Which client config files this run should write.
+
+    Named clients win; otherwise what exists on the machine is used, and an
+    interactive run with more than one is asked rather than guessed at.
+    """
+    if skip_clients:
+        return []
+
+    if claude_config_path is not None:
+        return [McpClient("custom", "Custom client config", claude_config_path)]
+
+    if client_keys:
+        if "all" in client_keys:
+            return detect_clients() or []
+        chosen = []
+        for key in client_keys:
+            client = client_by_key(key)
+            if client is None:
+                raise CLIError(
+                    f"Unknown client '{key}'. Known: claude-code, claude-code-project, "
+                    "cursor, cursor-project, claude-desktop, all."
+                )
+            chosen.append(client)
+        return chosen
+
+    detected = detect_clients()
+    if len(detected) <= 1 or non_interactive:
+        return detected
+
+    picked = questionary.checkbox(
+        "Which clients should point at Hangar?",
+        choices=[questionary.Choice(f"{c.label} -- {c.path}", value=c.key, checked=True) for c in detected],
+    ).ask()
+    if picked is None:
+        raise typer.Abort()
+    return [c for c in detected if c.key in picked]
 
 
 @app.callback(invoke_without_command=True)
@@ -305,15 +376,26 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     ] = None,
     claude_config_path: Annotated[
         Path | None,
-        typer.Option("--claude-config", help="Custom path to Claude Desktop config"),
+        typer.Option("--claude-config", help="Custom path to a client config file to write"),
     ] = None,
-    skip_claude: Annotated[
+    client_keys: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--client",
+            help="Client to point at Hangar: claude-code, claude-code-project, cursor, "
+            "cursor-project, claude-desktop, or all. Repeatable; default is what is detected.",
+        ),
+    ] = None,
+    skip_clients: Annotated[
         bool,
-        typer.Option("--skip-claude", help="Skip Claude Desktop config modification"),
+        typer.Option("--skip-clients", "--skip-claude", help="Do not modify any MCP client config"),
     ] = False,
     skip_test: Annotated[
         bool,
-        typer.Option("--skip-test", help="Skip smoke test after configuration"),
+        typer.Option(
+            "--skip-test",
+            help="Skip the smoke test. No digest pins are taken either -- they come from that run.",
+        ),
     ] = False,
     reset: Annotated[
         bool,
@@ -341,12 +423,11 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     # Initialize managers
     effective_config_path = config_path or global_opts.config or ConfigFileManager.DEFAULT_CONFIG_PATH
     config_mgr = ConfigFileManager(effective_config_path)
-    claude_mgr = ClaudeDesktopManager(claude_config_path)
 
-    # Step 0: Detect available runtimes
+    # Step 1: Detect available runtimes
     deps = detect_dependencies()
 
-    console.print("\n[bold]Step 0:[/bold] Detecting available runtimes...")
+    console.print("\n[bold]Step 1:[/bold] Detecting available runtimes...")
     if non_interactive:
         if deps.available_runtimes:
             console.print(f"  [green]Available:[/green] {', '.join(deps.available_runtimes)}")
@@ -363,37 +444,30 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             Panel(
                 "[bold]Welcome to MCP Hangar![/bold]\n\n"
                 "This wizard will help you set up MCP Hangar in just a few minutes.\n"
-                "MCP Hangar manages your MCP mcp_servers so Claude Desktop only needs\n"
-                "to connect to a single process.",
+                "Your client connects to one process, and every tool call it makes\n"
+                "goes through a policy you can read in one file.",
                 title="MCP Hangar Setup",
                 border_style="blue",
             )
         )
 
-    # Step 1: Detect Claude Desktop
-    console.print("\n[bold]Step 1:[/bold] Detecting Claude Desktop...")
+    # Step 2: Detect the MCP clients on this machine
+    console.print("\n[bold]Step 2:[/bold] Detecting MCP clients...")
 
-    if claude_mgr.exists():
-        console.print(f"  [green]Found:[/green] {claude_mgr.config_path}")
-        servers = claude_mgr.get_mcp_servers()
-        if servers:
-            console.print(f"  [dim]Existing MCP servers: {len(servers)}[/dim]")
-    elif not skip_claude:
-        if non_interactive:
-            console.print("  [yellow]Claude Desktop not found - skipping integration[/yellow]")
-            skip_claude = True
-        else:
-            console.print("  [yellow]Claude Desktop not found[/yellow]")
-            proceed = questionary.confirm(
-                "Continue without Claude Desktop integration?",
-                default=True,
-            ).ask()
-            if not proceed:
-                raise typer.Abort()
-            skip_claude = True
+    clients = _resolve_clients(
+        client_keys=client_keys,
+        claude_config_path=claude_config_path,
+        skip_clients=skip_clients,
+        non_interactive=non_interactive,
+    )
+    if clients:
+        for client in clients:
+            console.print(f"  [green]Found:[/green] {client.label} -- {client.path}")
+    elif not skip_clients:
+        console.print("  [yellow]No MCP client config found - you can point one at Hangar yourself[/yellow]")
 
-    # Step 2: McpServer selection
-    console.print("\n[bold]Step 2:[/bold] Selecting mcp_servers...")
+    # Step 3: McpServer selection
+    console.print("\n[bold]Step 3:[/bold] Selecting MCP servers...")
 
     selected_mcp_servers: list[str] = []
     mcp_server_configs: dict[str, dict] = {}
@@ -455,10 +529,9 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             if not proceed:
                 raise typer.Abort()
 
-    # Step 3: Collect mcp_server configurations
+    # Step 4: Collect mcp_server configurations
+    console.print("\n[bold]Step 4:[/bold] Configuring MCP servers...")
     if selected_mcp_servers and not non_interactive:
-        console.print("\n[bold]Step 3:[/bold] Configuring mcp_servers...")
-
         for name in list(selected_mcp_servers):
             mcp_server = get_mcp_server(name)
             if mcp_server and mcp_server.requires_config:
@@ -468,8 +541,8 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
                 else:
                     mcp_server_configs[name] = config
 
-    # Step 4: Generate configuration files
-    console.print("\n[bold]Step 4:[/bold] Generating configuration...")
+    # Step 5: Generate configuration files
+    console.print("\n[bold]Step 5:[/bold] Generating configuration...")
 
     backup_path = None
     merged_mcp_servers = False
@@ -538,59 +611,81 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
         except OSError as e:
             raise PermissionError(str(config_mgr.config_path), "write") from e
 
-    # Step 5: Smoke test mcp_servers
-    smoke_test_passed = True
+    # Step 6: Smoke test the servers, and pin what they serve while they are up
+    smoke_test_status = "skipped"
+    pins: dict[str, dict[str, str]] = {}
     mcp_servers_to_test = final_mcp_servers if merged_mcp_servers else selected_mcp_servers
     if mcp_servers_to_test and not skip_test:
-        console.print("\n[bold]Step 5:[/bold] Testing mcp_servers...")
-        console.print("  [dim]Starting each mcp_server to verify configuration (max 10s)[/dim]\n")
+        console.print("\n[bold]Step 6:[/bold] Testing MCP servers...")
+        console.print("  [dim]Starting each server to verify configuration and pin its tools[/dim]\n")
 
         try:
             test_result = run_smoke_test(
                 config_path=config_mgr.config_path,
-                timeout_s=10.0,
                 console=console,
             )
+            pins = {r.mcp_server_id: r.digests for r in test_result.results if r.success and r.digests}
 
             if test_result.all_passed:
+                smoke_test_status = "passed"
                 console.print(
-                    f"\n  [green]All {test_result.passed_count} mcp_servers ready[/green] "
+                    f"\n  [green]All {test_result.passed_count} MCP servers ready[/green] "
                     f"({test_result.total_duration_ms:.0f}ms)"
                 )
             else:
-                smoke_test_passed = False
+                smoke_test_status = "failed"
                 console.print(
-                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} mcp_servers failed[/yellow]"
+                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} MCP servers failed[/yellow]"
                 )
                 console.print("  [dim]Configuration saved - fix issues and run 'mcp-hangar status'[/dim]")
 
         except Exception as e:  # noqa: BLE001 -- fault-barrier: smoke test failure must not crash init wizard
-            smoke_test_passed = False
+            smoke_test_status = "failed"
             console.print(f"  [yellow]Smoke test failed: {e}[/yellow]")
             console.print("  [dim]Configuration saved - verify manually with 'mcp-hangar serve'[/dim]")
 
-    # Step 6: Update Claude Desktop config
-    claude_backup_path = None
-    if not skip_claude and claude_mgr.exists():
-        console.print("\n[bold]Step 6:[/bold] Updating Claude Desktop...")
-
-        claude_backup_path = claude_mgr.backup()
-        if claude_backup_path:
-            console.print(f"  [dim]Backed up to: {claude_backup_path}[/dim]")
-
+    # The pins are only writable into a file this command owns. After a MERGE the
+    # file is the user's, with servers this run never started, and rewriting it
+    # from the wizard's inputs would drop them.
+    pinned_tools = 0
+    if pins and not merged_mcp_servers:
         try:
-            claude_mgr.update_for_hangar(config_mgr.config_path)
-            console.print(f"  [green]Updated:[/green] {claude_mgr.config_path}")
+            config_mgr.write_initial_config(mcp_server_defs, mcp_server_configs, deps, pins=pins)
+            pinned_tools = sum(len(tools) for tools in pins.values())
+            console.print(f"  [green]Pinned:[/green] {pinned_tools} tool(s) in {config_mgr.config_path}")
         except OSError as e:
-            raise PermissionError(str(claude_mgr.config_path), "write") from e
+            raise PermissionError(str(config_mgr.config_path), "write") from e
+    elif pins and merged_mcp_servers:
+        console.print("  [dim]Existing config merged - run 'mcp-hangar pin --write' to pin its tools[/dim]")
 
-    # Step 7: Completion summary
+    # Step 7: Point the selected clients at Hangar
+    client_backup_path = None
+    written_clients: list[McpClient] = []
+    if not skip_clients and clients:
+        console.print("\n[bold]Step 7:[/bold] Updating MCP clients...")
+
+        for client in clients:
+            try:
+                backup = write_hangar_entry(client, config_mgr.config_path)
+            except OSError as e:
+                raise PermissionError(str(client.path), "write") from e
+            except ValueError as e:
+                # An unparseable client file is not ours to rewrite.
+                console.print(f"  [yellow]Skipped {client.label}: {e}[/yellow]")
+                continue
+            written_clients.append(client)
+            client_backup_path = backup or client_backup_path
+            console.print(f"  [green]Updated:[/green] {client.path}")
+            if backup:
+                console.print(f"  [dim]Backed up to: {backup}[/dim]")
+
     _show_completion_summary(
         mcp_servers=selected_mcp_servers,
         hangar_config_path=config_mgr.config_path,
-        claude_config_path=claude_mgr.config_path if not skip_claude else None,
-        backup_path=claude_backup_path or backup_path,
-        smoke_test_passed=smoke_test_passed,
+        client_paths=[client.path for client in written_clients],
+        backup_path=client_backup_path or backup_path,
+        smoke_test_status=smoke_test_status,
+        pinned_tools=pinned_tools,
     )
 
 
