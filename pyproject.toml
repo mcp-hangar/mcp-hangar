@@ -1,14 +1,14 @@
 [project]
 name = "mcp-hangar"
 version = "2.17.1"
-description = "Production-grade infrastructure for Model Context Protocol"
+description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
     {name = "Marcin Pyrka", email = "marcin@mcp-hangar.io"}
 ]
-keywords = ["mcp", "model-context-protocol", "llm", "ai", "infrastructure"]
+keywords = ["mcp", "model-context-protocol", "llm", "ai", "security", "policy-enforcement", "tool-poisoning"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
