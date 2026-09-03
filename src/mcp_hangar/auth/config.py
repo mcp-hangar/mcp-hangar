@@ -8,6 +8,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from mcp_hangar.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ApiKeyAuthConfig:
@@ -262,6 +266,23 @@ class RateLimitConfig:
 
 
 @dataclass
+class StdioPrincipalConfig:
+    """The caller a stdio session is declared to be (ADR-026).
+
+    Attributes:
+        id: Principal id, e.g. "local-user".
+        tenant_id: Tenant the caller belongs to; scopes policy and pins.
+        roles: Role names resolved through the ordinary RBAC path. Defaults to
+            read-only ``viewer`` so a first run can ask the gateway what it
+            thinks is happening without being able to change anything.
+    """
+
+    id: str
+    tenant_id: str
+    roles: list[str] = field(default_factory=lambda: ["viewer"])
+
+
+@dataclass
 class AuthConfig:
     """Authentication and authorization configuration.
 
@@ -292,6 +313,10 @@ class AuthConfig:
     opa: OPAConfig = field(default_factory=OPAConfig)
 
     role_assignments: list[RoleAssignment] = field(default_factory=list)
+
+    #: Declared principal for a stdio session (ADR-026). Ignored over HTTP,
+    #: which has a credential channel of its own.
+    stdio: StdioPrincipalConfig | None = None
 
 
 def _parse_tenant_audiences(raw: Any) -> dict[str, str]:
@@ -440,7 +465,42 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         oidc=oidc_config,
         opa=opa_config,
         role_assignments=role_assignments,
+        stdio=_parse_stdio_principal(config_dict.get("stdio")),
     )
+
+
+def _parse_stdio_principal(raw: Any) -> StdioPrincipalConfig | None:
+    """Parse `auth.stdio.principal` (ADR-026), or None when it is absent.
+
+    Fail-closed on a malformed block: a principal missing an id or a tenant is
+    not a partially-declared caller, it is an undeclared one, and admitting it
+    with a default id would hand a config typo an identity nobody wrote down.
+    Dropping it restores exactly the pre-ADR-026 behaviour -- an anonymous
+    caller and an empty front door -- which is loud enough to notice.
+    """
+    if not isinstance(raw, dict):
+        return None
+    principal = raw.get("principal")
+    if not isinstance(principal, dict):
+        logger.warning("stdio_principal_block_ignored", reason="no_principal_mapping")
+        return None
+
+    principal_id = principal.get("id")
+    tenant_id = principal.get("tenant_id")
+    if not isinstance(principal_id, str) or not principal_id.strip():
+        logger.warning("stdio_principal_block_ignored", reason="missing_id")
+        return None
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        logger.warning("stdio_principal_block_ignored", reason="missing_tenant_id")
+        return None
+
+    raw_roles = principal.get("roles", ["viewer"])
+    if not isinstance(raw_roles, list):
+        logger.warning("stdio_principal_roles_ignored", reason="not_a_list")
+        raw_roles = []
+    roles = [r for r in raw_roles if isinstance(r, str) and r.strip()]
+
+    return StdioPrincipalConfig(id=principal_id, tenant_id=tenant_id, roles=roles)
 
 
 def get_default_auth_config() -> AuthConfig:

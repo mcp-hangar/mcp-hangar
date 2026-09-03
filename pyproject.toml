@@ -69,8 +69,8 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.4",
-    "import-linter==2.13",
+    "ruff==0.16.5",
+    "import-linter==2.14",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
     "jsonschema>=4.20.0",
