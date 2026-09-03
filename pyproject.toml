@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.17.1"
+version = "2.18.0"
 description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
