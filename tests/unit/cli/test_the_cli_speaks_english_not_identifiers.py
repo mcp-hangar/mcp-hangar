@@ -43,12 +43,22 @@ COMMANDS = [
 IDENTIFIER = re.compile(r"\bmcp_servers?\b|\bMcpServers?\b")
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def rendered(argv: list[str]) -> str:
+    """What `mcp-hangar <argv> --help` actually puts on a terminal, as plain text.
+
+    Two things have to come off before matching, and both have bitten this repo
+    already. Rich colourizes when it believes it has a terminal, so
+    `--servers,--mcp_servers` arrives shot through with escape sequences and a
+    plain `in` check misses it (the same trap `test_init_deps.plain` documents,
+    firing the other way round: colour on CI, none here). And Rich wraps at the
+    terminal width, so a phrase can be split across two lines.
+    """
     result = runner.invoke(app, [*argv, "--help"])
     assert result.exit_code == 0, result.output
-    # Rich wraps at the terminal width, so a phrase can be split across lines;
-    # collapse whitespace before matching.
-    return " ".join(result.output.split())
+    return " ".join(_ANSI.sub("", result.output).split())
 
 
 @pytest.mark.parametrize("argv", COMMANDS, ids=lambda argv: " ".join(argv) or "root")
@@ -72,7 +82,7 @@ def test_the_root_help_says_what_hangar_is():
 def test_the_old_flag_spelling_still_works():
     # Renaming a flag people have in scripts is a breaking change; renaming the
     # one they read is not. So the new name leads and the old one still parses.
-    result = runner.invoke(app, ["init", "--help"])
+    text = rendered(["init"])
 
-    assert "--servers" in " ".join(result.output.split())
-    assert "--mcp_servers" in " ".join(result.output.split())
+    assert "--servers" in text
+    assert "--mcp_servers" in text
