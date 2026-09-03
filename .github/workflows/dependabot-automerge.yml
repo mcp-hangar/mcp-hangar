@@ -53,7 +53,12 @@ jobs:
             exit 0
           fi
 
-          if [ "$ECOSYSTEM" = "github-actions" ]; then
+          # fetch-metadata reports the ecosystem with Dependabot's internal
+          # spelling (`github_actions`), not the hyphenated one from
+          # dependabot.yml. Comparing against the hyphen alone matched nothing,
+          # so every Actions patch fell through to the no-rule-matched branch
+          # and waited for a human. Normalize instead of picking one spelling.
+          if [ "${ECOSYSTEM//_/-}" = "github-actions" ]; then
             echo "GitHub Actions patch. Enabling auto-merge."
             gh pr merge --auto --squash "$PR_URL"
             exit 0
