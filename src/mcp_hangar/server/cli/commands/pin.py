@@ -82,11 +82,11 @@ def pin_command(
     try:
         observations = observe_digests(path, mcp_server_ids=list(mcp_server or []))
     except KeyError as exc:
-        console.print(f"[red]No such mcp_server in {path}:[/red] {exc.args[0]}")
+        console.print(f"[red]No such MCP server in {path}:[/red] {exc.args[0]}")
         raise typer.Exit(2) from exc
 
     if not observations:
-        console.print(f"[yellow]{path} configures no mcp_servers, so there is nothing to pin.[/yellow]")
+        console.print(f"[yellow]{path} configures no MCP servers, so there is nothing to pin.[/yellow]")
         raise typer.Exit(2)
 
     failed = [observation for observation in observations if not observation.ok]

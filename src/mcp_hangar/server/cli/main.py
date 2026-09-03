@@ -21,7 +21,7 @@ error_console = Console(stderr=True)
 # Create the main app
 app = typer.Typer(
     name="mcp-hangar",
-    help="MCP Hangar - Production-grade MCP mcp_server platform",
+    help="MCP Hangar - the policy enforcement plane for your MCP servers",
     no_args_is_help=False,  # Allow running without args (defaults to serve)
     add_completion=True,
     rich_markup_mode="rich",
@@ -90,9 +90,13 @@ def main_callback(
         ),
     ] = False,
 ):
-    """MCP Hangar - Production-grade MCP mcp_server platform.
+    """MCP Hangar - the policy enforcement plane for your MCP servers.
 
-    Run 'mcp-hangar init' for interactive setup, or 'mcp-hangar serve' to start the server.
+    Every tool call your client makes goes through one mediated path, where
+    policy, digest pins and audit apply.
+
+    Run 'mcp-hangar init' for interactive setup, or 'mcp-hangar serve' to start
+    the gateway.
     """
     # Handle version flag
     if version:

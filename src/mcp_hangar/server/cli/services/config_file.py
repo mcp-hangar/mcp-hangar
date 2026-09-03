@@ -66,10 +66,10 @@ class ConfigFileManager:
         config_value: str | None = None,
         use_env: str | None = None,
     ) -> None:
-        """Add a mcp_server to the configuration.
+        """Add an MCP server to the configuration.
 
         Args:
-            mcp_server: McpServer definition.
+            MCP server: MCP server definition.
             config_value: Configuration value (path or secret).
             use_env: Environment variable to use instead of value.
         """
@@ -93,13 +93,13 @@ class ConfigFileManager:
         self.add_mcp_server(provider, config_value, use_env)
 
     def remove_mcp_server(self, name: str) -> bool:
-        """Remove a mcp_server from the configuration.
+        """Remove an MCP server from the configuration.
 
         Args:
-            name: McpServer name.
+            name: MCP server name.
 
         Returns:
-            True if mcp_server was removed, False if not found.
+            True if MCP server was removed, False if not found.
         """
         config = self.load()
 
@@ -111,12 +111,12 @@ class ConfigFileManager:
         return True
 
     def has_mcp_server(self, name: str) -> bool:
-        """Check if a mcp_server exists in the configuration."""
+        """Check if an MCP server exists in the configuration."""
         config = self.load()
         return name in config.get("mcp_servers", {})
 
     def list_mcp_servers(self) -> list[str]:
-        """List all configured mcp_server names."""
+        """List all configured MCP server names."""
         config = self.load()
         return list(config.get("mcp_servers", {}).keys())
 
@@ -186,7 +186,7 @@ class ConfigFileManager:
         use_env: str | None,
         deps: DependencyStatus | None = None,
     ) -> dict:
-        """Build a mcp_server configuration entry.
+        """Build an MCP server configuration entry.
 
         Uses the preferred runtime (uvx > npx) based on available dependencies.
         """

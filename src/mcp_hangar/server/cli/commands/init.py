@@ -97,11 +97,11 @@ def _check_dependencies_or_exit(deps: DependencyStatus, non_interactive: bool) -
 
 
 def _prompt_mcp_server_selection(deps: DependencyStatus) -> list[str]:
-    """Interactive mcp_server selection with categories."""
+    """Interactive MCP server selection with categories."""
     available_cats, unavailable_cats = get_mcp_servers_by_category_filtered(deps)
     selected = []
 
-    console.print("\n[bold]Select mcp_servers to enable:[/bold]")
+    console.print("\n[bold]Select MCP servers to enable:[/bold]")
     console.print("[dim]Use arrow keys and space to select, Enter to confirm[/dim]\n")
 
     for category, mcp_servers in available_cats.items():
@@ -128,7 +128,7 @@ def _prompt_mcp_server_selection(deps: DependencyStatus) -> list[str]:
             selected.extend(category_selected)
 
     if unavailable_cats:
-        console.print("\n[dim]Unavailable mcp_servers (missing dependencies):[/dim]")
+        console.print("\n[dim]Unavailable MCP servers (missing dependencies):[/dim]")
         for category, mcp_servers in unavailable_cats.items():
             for p in mcp_servers:
                 reason = p.get_unavailable_reason(deps)
@@ -138,7 +138,7 @@ def _prompt_mcp_server_selection(deps: DependencyStatus) -> list[str]:
 
 
 def _collect_mcp_server_config(mcp_server: McpServerDefinition) -> dict | None:
-    """Collect configuration for a mcp_server that requires it."""
+    """Collect configuration for an MCP server that requires it."""
     if not mcp_server.requires_config:
         return {}
 
@@ -211,7 +211,7 @@ def _prompt_existing_config_action(
 
     choices = [
         questionary.Choice(
-            title="Merge - Add new mcp_servers, keep existing ones",
+            title="Merge - Add new MCP servers, keep existing ones",
             value=ExistingConfigAction.MERGE,
         ),
         questionary.Choice(
@@ -364,11 +364,18 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     ] = False,
     bundle: Annotated[
         str | None,
-        typer.Option("--bundle", "-b", help="McpServer bundle to install: starter, developer, data"),
+        typer.Option("--bundle", "-b", help="MCP server bundle to install: starter, developer, data"),
     ] = None,
     mcp_servers_opt: Annotated[
         str | None,
-        typer.Option("--mcp_servers", help="Comma-separated list of mcp_servers to install"),
+        typer.Option(
+            "--servers",
+            # The old spelling, kept because it is in scripts and in the docs
+            # people already have. It is the identifier leaking into the flag
+            # surface, which is the thing #1195 is about, so the new name leads.
+            "--mcp_servers",
+            help="Comma-separated list of MCP servers to install",
+        ),
     ] = None,
     config_path: Annotated[
         Path | None,
@@ -407,15 +414,15 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     This wizard will:
     - Detect available runtimes (npx, uvx, docker)
     - Detect your Claude Desktop installation
-    - Help you select which MCP mcp_servers to enable
+    - Help you select which MCP servers to enable
     - Create a configuration file
-    - Test mcp_servers to verify configuration
+    - Test MCP servers to verify configuration
     - Update Claude Desktop to use MCP Hangar
 
     Examples:
         mcp-hangar init
         mcp-hangar init --bundle starter
-        mcp-hangar init --mcp_servers filesystem,github,sqlite
+        mcp-hangar init --MCP servers filesystem,github,sqlite
         mcp-hangar init --non-interactive --bundle developer
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
@@ -480,7 +487,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
         for name in requested:
             mcp_server = get_mcp_server(name)
             if mcp_server is None:
-                console.print(f"  [yellow]Unknown mcp_server: {name}[/yellow]")
+                console.print(f"  [yellow]Unknown MCP server: {name}[/yellow]")
             elif not mcp_server.is_available(deps):
                 reason = mcp_server.get_unavailable_reason(deps)
                 console.print(f"  [yellow]Skipping {name} ({reason})[/yellow]")
@@ -523,7 +530,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
         selected_mcp_servers = _prompt_mcp_server_selection(deps)
 
     if not selected_mcp_servers:
-        console.print("  [yellow]No mcp_servers selected[/yellow]")
+        console.print("  [yellow]No MCP servers selected[/yellow]")
         if not non_interactive:
             proceed = questionary.confirm("Continue with empty configuration?", default=False).ask()
             if not proceed:
