@@ -307,9 +307,51 @@ def _register_configured_sources(registry: Any, full_config: dict[str, Any]) -> 
         )
 
 
+def _declare_stdio_principal(full_config: dict[str, Any], stdio: bool) -> None:
+    """Bind the configured stdio principal for this process (ADR-026).
+
+    The spawning process is the trust boundary on stdio -- there is no channel
+    to carry a credential and no credential that the OS user who launched this
+    could not read out of the same file. So the declaration is trusted, and what
+    the caller may do is still resolved from its roles.
+
+    A no-op over HTTP, which has its own credential channel, and a no-op when
+    the block is absent: the caller stays anonymous and the front door stays
+    empty, exactly as before.
+    """
+    from mcp_hangar.auth.stdio_principal import clear_stdio_principal, set_stdio_principal
+    from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
+
+    clear_stdio_principal()
+    if not stdio:
+        return
+
+    from mcp_hangar.auth.config import parse_auth_config
+
+    declared = parse_auth_config(full_config.get("auth")).stdio
+    if declared is None:
+        return
+
+    set_stdio_principal(
+        Principal(
+            id=PrincipalId(declared.id),
+            type=PrincipalType.USER,
+            tenant_id=declared.tenant_id,
+            metadata={"roles": list(declared.roles), "source": "auth.stdio.principal"},
+        )
+    )
+    logger.info(
+        "stdio_principal_declared",
+        principal_id=declared.id,
+        tenant_id=declared.tenant_id,
+        roles=declared.roles,
+    )
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
+    stdio: bool = False,
 ) -> ApplicationContext:
     """Bootstrap the application.
 
@@ -330,6 +372,8 @@ def bootstrap(
     Args:
         config_path: Optional path to config.yaml
         config_dict: Optional configuration dictionary (takes precedence over config_path)
+        stdio: Whether this process serves over stdio. Only then is
+            `auth.stdio.principal` read (ADR-026); over HTTP the block is ignored.
 
     Returns:
         Fully initialized ApplicationContext (components not started)
@@ -389,6 +433,11 @@ def bootstrap(
     # declares a child-process server is wrong whether or not its database is
     # reachable, and it should not be told about the database first.
     refuse_local_modes_in_a_declared_cluster(full_config)
+
+    # Before the pin refusal below, which asks whether any caller can carry the
+    # tenant those pins name: on stdio a declared principal carries one, and the
+    # refusal has to know that before it answers (ADR-026).
+    _declare_stdio_principal(full_config, stdio=stdio)
 
     # Same reason, same place: pins addressed to a tenant no caller can carry
     # are wrong before any of them is parsed, and the operator should hear it
