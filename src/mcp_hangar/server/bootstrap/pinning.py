@@ -112,6 +112,27 @@ def refuse_pins_that_no_caller_can_match(config: dict[str, Any] | None = None) -
     config = config or {}
     if _auth_is_enabled(config):
         return
-    offenders = _per_tenant_pins(config)
+    declared = _declared_stdio_tenant()
+    offenders = [entry for entry in _per_tenant_pins(config) if entry[1] != declared]
     if offenders:
         raise PinnedToolsNeedAnIdentityError(offenders)
+
+
+def _declared_stdio_tenant() -> str | None:
+    """The tenant a declared stdio principal carries, or None (ADR-026).
+
+    The refusal above asks one question -- can any caller carry the tenant these
+    pins name? -- and answers it from `auth.enabled` alone, because that used to
+    be the only way a tenant reached a request. A stdio session whose principal
+    is declared carries one without authentication, so pins addressed to *that*
+    tenant are matchable and refusing them would refuse a configuration that
+    works. Pins for every other tenant are refused exactly as before.
+
+    Reads the principal set during bootstrap rather than the raw document, so
+    this stays false on an HTTP run, where the block is ignored and the pins
+    really are unmatchable.
+    """
+    from mcp_hangar.auth.stdio_principal import get_stdio_principal
+
+    principal = get_stdio_principal()
+    return principal.tenant_id if principal is not None else None
