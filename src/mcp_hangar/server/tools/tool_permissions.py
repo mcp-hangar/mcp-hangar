@@ -114,6 +114,45 @@ INVOKE_PATH_TOOLS: frozenset[str] = SELF_AUTHORIZING_TOOLS | frozenset(
 )
 
 
+def _stdio_management_tools() -> frozenset[str] | None:
+    """The management surface a declared stdio principal may see (ADR-026).
+
+    Returns None when no stdio principal was declared, which leaves every other
+    caller on the path below unchanged.
+
+    The permission check is `Role.has_permission` against the same
+    ``TOOL_PERMISSIONS`` entries the authorizer uses, so this narrows the
+    surface by the declared roles rather than inventing a second vocabulary.
+    It cannot widen anything: with auth off :func:`authorize_tool` already
+    permits every management tool, and today a stdio caller is shown none of
+    them, so a declaration can only take that list from empty to a subset.
+    Only built-in roles resolve -- a role defined in the role store belongs to a
+    deployment that has auth on, and that deployment is served by the path
+    below.
+    """
+    from ...auth.roles import BUILTIN_ROLES
+    from ...auth.stdio_principal import get_stdio_principal
+
+    principal = get_stdio_principal()
+    if principal is None:
+        return None
+
+    roles = [BUILTIN_ROLES[name] for name in _stdio_role_names(principal) if name in BUILTIN_ROLES]
+    permitted = {
+        tool_name
+        for tool_name, (resource_type, action) in TOOL_PERMISSIONS.items()
+        if tool_name not in INVOKE_PATH_TOOLS and any(role.has_permission(resource_type, action, "*") for role in roles)
+    }
+    return frozenset(permitted)
+
+
+def _stdio_role_names(principal: Any) -> list[str]:
+    """Role names carried on the declared stdio principal's metadata."""
+    metadata = getattr(principal, "metadata", None) or {}
+    names = metadata.get("roles", [])
+    return [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
+
+
 def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
     """Which management tools this caller may see, because it may call them (#904).
 
@@ -147,6 +186,14 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
         The names this caller may both see and call. Empty when auth is off or
         the caller is anonymous.
     """
+    # A stdio session has no request to carry a principal, so the declared one
+    # (ADR-026) answers instead -- and it answers first, because on stdio there
+    # is nothing else to ask. Its roles are resolved against the same permission
+    # table below, so what is listed is still exactly what may be called.
+    stdio_surface = _stdio_management_tools()
+    if stdio_surface is not None:
+        return stdio_surface
+
     try:
         from ..context import get_context
 

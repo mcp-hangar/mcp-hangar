@@ -111,6 +111,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
             "opa",
             "rate_limit",
             "role_assignments",
+            # The declared principal for a stdio session (ADR-026), read by
+            # `auth/config.parse_auth_config`. Ignored over HTTP.
+            "stdio",
             "storage",
         }
     ),

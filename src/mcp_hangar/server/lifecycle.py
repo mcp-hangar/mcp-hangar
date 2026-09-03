@@ -783,8 +783,9 @@ def run_server(cli_config: CLIConfig) -> None:
         log_file=cli_config.log_file,
     )
 
-    # Bootstrap application
-    context = bootstrap(cli_config.config_path)
+    # Bootstrap application. The transport is passed because `auth.stdio.principal`
+    # is read only when this process serves over stdio (ADR-026).
+    context = bootstrap(cli_config.config_path, stdio=not cli_config.http_mode)
 
     # Create lifecycle manager
     lifecycle = ServerLifecycle(context)

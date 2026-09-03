@@ -428,7 +428,9 @@ class TestRunServer:
         """run_server() should call bootstrap."""
         run_server(mock_cli_config)
 
-        mock_dependencies["bootstrap"].assert_called_once_with(None)
+        # The transport rides along: `auth.stdio.principal` is read only when
+        # this process serves over stdio (ADR-026).
+        mock_dependencies["bootstrap"].assert_called_once_with(None, stdio=True)
 
     def test_run_server_with_config_path(self, mock_dependencies):
         """run_server() should pass config path to bootstrap."""
@@ -444,7 +446,7 @@ class TestRunServer:
 
         run_server(config)
 
-        mock_dependencies["bootstrap"].assert_called_once_with("/path/to/config.yaml")
+        mock_dependencies["bootstrap"].assert_called_once_with("/path/to/config.yaml", stdio=True)
 
     def test_run_server_setup_signal_handlers(self, mock_cli_config, mock_dependencies):
         """run_server() should setup signal handlers."""

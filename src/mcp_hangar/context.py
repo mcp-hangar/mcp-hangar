@@ -149,8 +149,22 @@ def get_request_id() -> str | None:
 
 
 def get_identity_context() -> IdentityContext | None:
-    """Get the current identity context."""
-    return identity_context_var.get()
+    """Get the current identity context.
+
+    Falls back to the stdio principal declared in configuration (ADR-026) when
+    nothing bound the contextvar. That is every request on a stdio server: the
+    binding paths are ASGI middleware and `bind_caller_identity`, and neither
+    runs on a transport that has no request. The fallback lives here rather than
+    at each reader so one process-wide declaration reaches the flat projection,
+    the batch executor and the pin scope alike -- and so it cannot silently
+    apply to an HTTP request, which always binds the var first.
+    """
+    bound = identity_context_var.get()
+    if bound is not None:
+        return bound
+    from mcp_hangar.auth.stdio_principal import get_stdio_identity
+
+    return get_stdio_identity()
 
 
 def bind_request_context(
