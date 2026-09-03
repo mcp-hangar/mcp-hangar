@@ -73,19 +73,25 @@ class TestServeConfigOption:
         assert _config_path_from_run_server(mock_run) == "/tmp/local.yaml"
 
 
-class TestGeneratedClaudeDesktopEntryStarts:
-    """The generated Claude Desktop args must actually start the server."""
+class TestGeneratedClientEntryStarts:
+    """The args written into a client's config must actually start the server."""
 
-    def test_generated_args_start_the_server(self, runner):
-        """Feeding the generated args to the CLI resolves the config and starts."""
+    def test_generated_args_start_the_server(self, runner, tmp_path, monkeypatch):
+        """Feeding a written client entry to the CLI resolves the config and starts."""
+        import json
         from pathlib import Path
 
         from mcp_hangar.server.cli.main import app
-        from mcp_hangar.server.cli.services import ClaudeDesktopManager
+        from mcp_hangar.server.cli.services.mcp_clients import (
+            client_by_key,
+            HANGAR_ENTRY_NAME,
+            write_hangar_entry,
+        )
 
-        manager = ClaudeDesktopManager()
-        entry = manager._generate_hangar_entry(Path("/tmp/hangar.yaml"))
-        args = entry["mcp-hangar"]["args"]
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        client = client_by_key("cursor", cwd=tmp_path)
+        write_hangar_entry(client, Path("/tmp/hangar.yaml"))
+        args = json.loads(client.path.read_text())["mcpServers"][HANGAR_ENTRY_NAME]["args"]
 
         with patch("mcp_hangar.server.lifecycle.run_server") as mock_run:
             result = runner.invoke(app, args)

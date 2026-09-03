@@ -1,6 +1,6 @@
-"""Add command - Add mcp_servers from MCP Registry.
+"""Add command - Add MCP servers from MCP Registry.
 
-Searches the MCP Registry, installs the mcp_server, prompts for configuration,
+Searches the MCP Registry, installs the MCP server, prompts for configuration,
 and updates the MCP Hangar config file.
 """
 
@@ -26,10 +26,10 @@ def _display_search_results(results: list[McpServerDefinition]) -> str | None:
     """Display search results and let user select.
 
     Args:
-        results: List of mcp_server definitions
+        results: List of MCP server definitions
 
     Returns:
-        Selected mcp_server name or None
+        Selected MCP server name or None
     """
     if not results:
         return None
@@ -38,9 +38,9 @@ def _display_search_results(results: list[McpServerDefinition]) -> str | None:
         result = results[0]
         console.print(f"\n[bold]Found:[/bold] {result.name} - {result.description}")
         if result.official:
-            console.print("[dim]Official first-party mcp_server[/dim]")
+            console.print("[dim]Official first-party MCP server[/dim]")
 
-        confirm = questionary.confirm("Install this mcp_server?", default=True).ask()
+        confirm = questionary.confirm("Install this MCP server?", default=True).ask()
         return result.name if confirm else None
 
     # Multiple matches - show table
@@ -54,20 +54,20 @@ def _display_search_results(results: list[McpServerDefinition]) -> str | None:
         badge = "[green]official[/green]" if result.official else ""
         table.add_row(str(i), result.name, result.description, badge)
 
-    console.print("\n[bold]Multiple mcp_servers found:[/bold]")
+    console.print("\n[bold]Multiple MCP servers found:[/bold]")
     console.print(table)
 
     choices = [questionary.Choice(title=f"{r.name} - {r.description}", value=r.name) for r in results]
     choices.append(questionary.Choice(title="Cancel", value=None))
 
-    return cast(str | None, questionary.select("Select a mcp_server to install:", choices=choices).ask())
+    return cast(str | None, questionary.select("Select an MCP server to install:", choices=choices).ask())
 
 
 def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
-    """Collect configuration for a mcp_server.
+    """Collect configuration for an MCP server.
 
     Args:
-        mcp_server: McpServer definition
+        MCP server: MCP server definition
 
     Returns:
         Configuration dictionary or None if skipped
@@ -99,7 +99,7 @@ def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
         value = questionary.text(f"{mcp_server.config_prompt}:").ask()
 
     if not value:
-        console.print("[yellow]Skipping configuration - mcp_server may not work correctly[/yellow]")
+        console.print("[yellow]Skipping configuration - MCP server may not work correctly[/yellow]")
         return {}
 
     return {"value": value, "env_var": mcp_server.env_var, "config_type": mcp_server.config_type}
@@ -124,7 +124,7 @@ def _try_hot_reload() -> bool:
 
 def add_command(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="McpServer name or search query")],
+    name: Annotated[str, typer.Argument(help="MCP server name or search query")],
     search: Annotated[
         bool,
         typer.Option("--search", "-s", help="Search the registry instead of exact match"),
@@ -138,9 +138,9 @@ def add_command(
         typer.Option("--no-reload", help="Don't try to hot-reload the running server"),
     ] = False,
 ):
-    """Add a mcp_server from the MCP Registry.
+    """Add an MCP server from the MCP Registry.
 
-    Searches for the mcp_server, prompts for configuration, and adds it
+    Searches for the MCP server, prompts for configuration, and adds it
     to your MCP Hangar config file.
 
     Examples:
@@ -184,7 +184,7 @@ def add_command(
         raise McpServerNotFoundError(mcp_server_name)
 
     # Show mcp_server info
-    console.print(f"\n[bold]Adding mcp_server:[/bold] {mcp_server.name}")
+    console.print(f"\n[bold]Adding MCP server:[/bold] {mcp_server.name}")
     console.print(f"[dim]{mcp_server.description}[/dim]")
     console.print(f"[dim]Package: {mcp_server.package}[/dim]")
 
@@ -214,10 +214,10 @@ def add_command(
     # Try hot reload
     if not no_reload:
         if _try_hot_reload():
-            console.print("[green]Server reloaded - mcp_server is now available[/green]")
+            console.print("[green]Server reloaded - MCP server is now available[/green]")
         else:
             console.print("[dim]Server not running or reload not available[/dim]")
-            console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new mcp_server")
+            console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new MCP server")
 
     # JSON output
     if global_opts.json_output:

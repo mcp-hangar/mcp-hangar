@@ -1,7 +1,7 @@
 """Dependency detection for CLI commands.
 
 Detects available runtimes (npx, uvx, docker, podman) and filters
-mcp_servers based on what can actually be executed.
+MCP servers based on what can actually be executed.
 """
 
 from dataclasses import dataclass
@@ -100,14 +100,14 @@ def detect_dependencies() -> DependencyStatus:
 
 
 def is_mcp_server_available(install_type: str, deps: DependencyStatus | None = None) -> bool:
-    """Check if a mcp_server can be installed given available dependencies.
+    """Check if an MCP server can be installed given available dependencies.
 
     Args:
-        install_type: McpServer's install_type (npx, uvx, docker, binary)
+        install_type: MCP server's install_type (npx, uvx, docker, binary)
         deps: Optional pre-detected dependencies (uses cached if None)
 
     Returns:
-        True if mcp_server can be installed
+        True if MCP server can be installed
     """
     if deps is None:
         deps = detect_dependencies()

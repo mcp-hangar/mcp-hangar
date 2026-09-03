@@ -1,4 +1,18 @@
-"""Tests for uvx fallback in provider registry."""
+"""Tests for uvx fallback in the provider registry.
+
+The rule these pin changed in #1192. `uvx_package` used to be filled in for
+every npm server by transforming its name (`@modelcontextprotocol/server-X` ->
+`mcp-server-X`), and the tests here asserted that convention -- that every
+starter server had one and that the names matched the pattern. Seven of the ten
+names it produced were wrong: five distributions do not exist or ship no
+executable, and two belong to other people. So the tests asserted the shape of
+the bug.
+
+What is asserted now is the rule that replaced it: a server carries a
+`uvx_package` only where that PyPI distribution is the official server, which is
+a fact about the world rather than a pattern, so the registry records it per
+server and this file pins which ones were checked.
+"""
 
 import pytest
 
@@ -34,9 +48,9 @@ class TestProviderUvxFallback:
         assert provider.is_available(deps) is True
 
     def test_provider_available_with_uvx_only(self):
-        """Provider should be available when only uvx is available and has uvx_package."""
+        """A server with an official PyPI distribution runs on uvx alone."""
         deps = make_deps(npx=False, uvx=True)
-        provider = get_provider("filesystem")
+        provider = get_provider("fetch")
         assert provider.uvx_package is not None
         assert provider.is_available(deps) is True
 
@@ -47,35 +61,47 @@ class TestProviderUvxFallback:
         assert provider.is_available(deps) is False
 
     def test_provider_without_uvx_package_needs_npx(self):
-        """Provider without uvx_package should need npx."""
+        """A server with no official PyPI distribution needs npx."""
         deps = make_deps(npx=False, uvx=True)
         provider = get_provider("puppeteer")  # No Python equivalent
+        assert provider.uvx_package is None
+        assert provider.is_available(deps) is False
+
+    def test_filesystem_needs_npx_because_its_pypi_name_does_not_exist(self):
+        """`mcp-server-filesystem` is not on PyPI, so uvx alone cannot run it.
+
+        This is the case that used to produce a configuration `init` could not
+        start: uvx was preferred, the package did not resolve, and two of the
+        three servers in the default bundle died on first run.
+        """
+        deps = make_deps(npx=False, uvx=True)
+        provider = get_provider("filesystem")
         assert provider.uvx_package is None
         assert provider.is_available(deps) is False
 
     def test_preferred_runtime_is_uvx_when_both_available(self):
         """Should prefer uvx when both npx and uvx are available."""
         deps = make_deps(npx=True, uvx=True)
-        provider = get_provider("filesystem")
+        provider = get_provider("fetch")
         assert provider.get_preferred_runtime(deps) == "uvx"
 
     def test_preferred_runtime_is_npx_when_only_npx_available(self):
         """Should use npx when only npx is available."""
         deps = make_deps(npx=True, uvx=False)
-        provider = get_provider("filesystem")
+        provider = get_provider("fetch")
         assert provider.get_preferred_runtime(deps) == "npx"
 
     def test_preferred_runtime_is_uvx_when_only_uvx_available(self):
         """Should use uvx when only uvx is available."""
         deps = make_deps(npx=False, uvx=True)
-        provider = get_provider("filesystem")
+        provider = get_provider("fetch")
         assert provider.get_preferred_runtime(deps) == "uvx"
 
     def test_get_command_package_returns_uvx_package(self):
-        """Should return uvx package name when uvx is preferred."""
+        """Should return the uvx package name when uvx is preferred."""
         deps = make_deps(npx=False, uvx=True)
-        provider = get_provider("filesystem")
-        assert provider.get_command_package(deps) == "mcp-server-filesystem"
+        provider = get_provider("fetch")
+        assert provider.get_command_package(deps) == "mcp-server-fetch"
 
     def test_get_command_package_returns_npx_package(self):
         """Should return npx package name when npx is preferred."""
@@ -86,7 +112,7 @@ class TestProviderUvxFallback:
     def test_unavailable_reason_shows_both_options(self):
         """Should show both npx and uvx in unavailable reason."""
         deps = make_deps(npx=False, uvx=False)
-        provider = get_provider("filesystem")
+        provider = get_provider("fetch")
         reason = provider.get_unavailable_reason(deps)
         assert "npx" in reason
         assert "uvx" in reason
@@ -104,18 +130,24 @@ class TestProviderUvxFallback:
 class TestProviderDefinitionUvx:
     """Tests for ProviderDefinition with uvx support."""
 
-    def test_all_starter_providers_have_uvx_package(self):
-        """All starter providers should have uvx package for Python fallback."""
-        starter_providers = ["filesystem", "fetch", "memory"]
-        for name in starter_providers:
-            provider = get_provider(name)
-            assert provider.uvx_package is not None, f"{name} should have uvx_package"
+    def test_only_the_checked_distributions_carry_a_uvx_package(self):
+        """A uvx package is a claim that a distribution exists and is official.
+
+        The two here were verified against PyPI: both are published by
+        Anthropic, PBC from `modelcontextprotocol/servers`. Adding a third means
+        checking `.info.author` and `.info.project_urls` for that name first --
+        the registry comment says how -- and this list is what makes that a
+        deliberate act rather than a pattern match.
+        """
+        from mcp_hangar.server.cli.services.mcp_server_registry import _PROVIDERS
+
+        with_uvx = sorted(p.name for p in _PROVIDERS if p.uvx_package)
+
+        assert with_uvx == ["fetch", "git"]
 
     def test_uvx_package_names_follow_convention(self):
-        """uvx package names should follow mcp-server-* convention."""
-        for name in ["filesystem", "fetch", "memory", "github", "git"]:
+        """The names that remain still follow the mcp-server-* convention."""
+        for name in ["fetch", "git"]:
             provider = get_provider(name)
-            if provider.uvx_package:
-                assert provider.uvx_package.startswith("mcp-server-"), (
-                    f"{name} uvx_package should start with mcp-server-"
-                )
+            assert provider.uvx_package is not None
+            assert provider.uvx_package.startswith("mcp-server-")

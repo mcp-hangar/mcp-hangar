@@ -1,10 +1,10 @@
-"""Smoke test for validating mcp_server configuration.
+"""Smoke test for validating MCP server configuration.
 
-Starts each mcp_server, waits for READY state, reports status, then stops.
+Starts each MCP server, waits for READY state, reports status, then stops.
 Used by `mcp-hangar init` to verify configuration before user closes terminal.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import time
 from typing import Any
@@ -39,7 +39,7 @@ MAX_PARALLEL_STARTS = 3
 
 @dataclass
 class McpServerTestResult:
-    """Result of testing a single mcp_server."""
+    """Result of testing a single MCP server."""
 
     mcp_server_id: str
     success: bool
@@ -47,33 +47,37 @@ class McpServerTestResult:
     duration_ms: float
     error: str | None = None
     suggestion: str | None = None
+    #: `{tool: sha256}` for a server that answered. The smoke test has the server
+    #: started and ready anyway, and this is the moment `init` can write pins
+    #: without starting everything a second time.
+    digests: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class SmokeTestResult:
-    """Aggregate result of smoke testing all mcp_servers."""
+    """Aggregate result of smoke testing all MCP servers."""
 
     results: list[McpServerTestResult]
     total_duration_ms: float
 
     @property
     def all_passed(self) -> bool:
-        """Check if all mcp_servers passed."""
+        """Check if all MCP servers passed."""
         return all(r.success for r in self.results)
 
     @property
     def passed_count(self) -> int:
-        """Count of passed mcp_servers."""
+        """Count of passed MCP servers."""
         return sum(1 for r in self.results if r.success)
 
     @property
     def failed_count(self) -> int:
-        """Count of failed mcp_servers."""
+        """Count of failed MCP servers."""
         return sum(1 for r in self.results if not r.success)
 
 
 def build_mcp_server(mcp_server_id: str, mcp_server_config: dict[str, Any]) -> McpServer:
-    """Build an unstarted `McpServer` from one entry of the `mcp_servers` map.
+    """Build an unstarted `MCP server` from one entry of the `MCP servers` map.
 
     Shared with `mcp-hangar pin`, which starts a server for exactly the same
     reason this does -- to find out what it actually serves. Two copies of this
@@ -128,6 +132,13 @@ def _test_single_mcp_server(
             if mcp_server.state == McpServerState.READY:
                 duration_ms = (time.perf_counter() - start_time) * 1000
 
+                # Read the tools before stopping: this is the only moment in
+                # `init` where every server is up, and a pin taken later would
+                # mean starting the fleet twice.
+                from .pinning import digest_tools
+
+                digests = digest_tools(mcp_server)
+
                 # Stop mcp_server after successful test
                 try:
                     mcp_server.stop()
@@ -139,6 +150,7 @@ def _test_single_mcp_server(
                     success=True,
                     state="ready",
                     duration_ms=duration_ms,
+                    digests=digests,
                 )
             time.sleep(0.1)
 
@@ -154,8 +166,8 @@ def _test_single_mcp_server(
             success=False,
             state=str(mcp_server.state.value),
             duration_ms=duration_ms,
-            error=f"Timeout after {timeout_s}s - mcp_server did not reach READY state",
-            suggestion="Check mcp_server command/image and ensure it starts correctly",
+            error=f"Timeout after {timeout_s}s - MCP server did not reach READY state",
+            suggestion="Check MCP server command/image and ensure it starts correctly",
         )
 
     except McpServerStartError as e:
@@ -177,7 +189,7 @@ def _test_single_mcp_server(
             state="backoff",
             duration_ms=duration_ms,
             error=str(e),
-            suggestion="McpServer is in backoff state, try again later",
+            suggestion="MCP server is in backoff state, try again later",
         )
 
     except Exception as e:  # noqa: BLE001 -- fault-barrier: smoke test must return result, not crash CLI
@@ -217,15 +229,15 @@ def run_smoke_test(
     timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
     console: Console | None = None,
 ) -> SmokeTestResult:
-    """Run smoke test on all mcp_servers in configuration.
+    """Run smoke test on all MCP servers in configuration.
 
     Args:
         config_path: Path to configuration file.
-        timeout_s: Maximum time per mcp_server.
+        timeout_s: Maximum time per MCP server.
         console: Optional Rich console for output.
 
     Returns:
-        SmokeTestResult with all mcp_server results.
+        SmokeTestResult with all MCP server results.
     """
     if console is None:
         console = Console()
@@ -251,7 +263,7 @@ def run_smoke_test(
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("Testing mcp_servers...", total=len(mcp_servers_config))
+        task = progress.add_task("Testing MCP servers...", total=len(mcp_servers_config))
 
         # Test mcp_servers sequentially to avoid resource contention
         for mcp_server_id, mcp_server_config in mcp_servers_config.items():

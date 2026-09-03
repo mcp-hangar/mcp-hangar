@@ -1,6 +1,6 @@
-"""McpServer registry - unified mcp_server definitions for CLI commands.
+"""MCP server registry - unified MCP server definitions for CLI commands.
 
-Consolidates mcp_server metadata previously duplicated across init.py and add.py.
+Consolidates MCP server metadata previously duplicated across init.py and add.py.
 """
 
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from .dependency_detector import DependencyStatus, detect_dependencies, is_mcp_s
 
 @dataclass(frozen=True)
 class McpServerDefinition:
-    """Definition of an MCP mcp_server."""
+    """Definition of an MCP server."""
 
     name: str
     description: str
@@ -25,9 +25,9 @@ class McpServerDefinition:
     official: bool = True
 
     def is_available(self, deps: DependencyStatus | None = None) -> bool:
-        """Check if this mcp_server can be installed with current dependencies.
+        """Check if this MCP server can be installed with current dependencies.
 
-        A mcp_server is available if:
+        An MCP server is available if:
         - Primary install_type runtime is available, OR
         - uvx_package exists and uvx is available
         """
@@ -45,7 +45,7 @@ class McpServerDefinition:
         return False
 
     def get_unavailable_reason(self, deps: DependencyStatus | None = None) -> str | None:
-        """Get reason why mcp_server is unavailable, or None if available."""
+        """Get reason why MCP server is unavailable, or None if available."""
         if self.is_available(deps):
             return None
 
@@ -86,15 +86,39 @@ class McpServerDefinition:
         return self.package
 
 
-# All known mcp_servers with their configurations
-# uvx_package maps to PyPI packages that provide equivalent functionality
+# All known mcp_servers with their configurations.
+#
+# `uvx_package` is the PyPI distribution to run instead of the npm one, and it
+# is set ONLY where that distribution is the official server published by
+# Anthropic from `modelcontextprotocol/servers`. It used to be filled in by
+# pattern -- `@modelcontextprotocol/server-X` -> `mcp-server-X` -- for every
+# entry, and seven of the ten names that produced were wrong (#1192):
+#
+#   mcp-server-filesystem   does not exist on PyPI
+#   mcp-server-memory       exists, provides no executable
+#   mcp-server-github       does not exist
+#   mcp-server-slack        does not exist
+#   mcp-server-google-maps  does not exist
+#   mcp-server-postgres     someone else's package ("Add your description here")
+#   mcp-server-brave-search an Amazon placeholder ("This package is reserved")
+#
+# The first five made `init` write a configuration that could not start -- two
+# of the three servers in the default `starter` bundle. The last two are worse
+# than broken: uvx would have fetched and run a stranger's code under a name
+# that looks official. Check before adding one back:
+#
+#   curl -s https://pypi.org/pypi/<name>/json | jq '.info.author, .info.project_urls'
+#
+# `mcp-server-sqlite` is dropped for the same reason: it resolves, but with no
+# author and no repository link, so nothing ties it to the archived official
+# server it shares a name with.
 _PROVIDERS: list[McpServerDefinition] = [
     # Starter (recommended for everyone)
     McpServerDefinition(
         name="filesystem",
         description="Read and write local files",
         package="@modelcontextprotocol/server-filesystem",
-        uvx_package="mcp-server-filesystem",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Starter",
         requires_config=True,
         config_prompt="Directory to allow access to",
@@ -111,7 +135,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="memory",
         description="Persistent key-value storage for context",
         package="@modelcontextprotocol/server-memory",
-        uvx_package="mcp-server-memory",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Starter",
     ),
     # Developer Tools
@@ -119,7 +143,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="github",
         description="GitHub repos, issues, PRs",
         package="@modelcontextprotocol/server-github",
-        uvx_package="mcp-server-github",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Developer Tools",
         requires_config=True,
         config_prompt="GitHub personal access token",
@@ -138,7 +162,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="sqlite",
         description="Query SQLite databases",
         package="@modelcontextprotocol/server-sqlite",
-        uvx_package="mcp-server-sqlite",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Data & Databases",
         requires_config=True,
         config_prompt="Path to SQLite database file",
@@ -148,7 +172,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="postgres",
         description="Query PostgreSQL databases",
         package="@modelcontextprotocol/server-postgres",
-        uvx_package="mcp-server-postgres",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Data & Databases",
         requires_config=True,
         config_prompt="PostgreSQL connection string",
@@ -160,7 +184,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="slack",
         description="Slack workspace integration",
         package="@modelcontextprotocol/server-slack",
-        uvx_package="mcp-server-slack",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Slack bot token",
@@ -178,7 +202,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="brave-search",
         description="Brave Search API",
         package="@modelcontextprotocol/server-brave-search",
-        uvx_package="mcp-server-brave-search",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Brave Search API key",
@@ -189,7 +213,7 @@ _PROVIDERS: list[McpServerDefinition] = [
         name="google-maps",
         description="Google Maps API",
         package="@modelcontextprotocol/server-google-maps",
-        uvx_package="mcp-server-google-maps",
+        uvx_package=None,  # see the note above: not the official PyPI distribution
         category="Integrations",
         requires_config=True,
         config_prompt="Google Maps API key",
@@ -210,17 +234,17 @@ _PROVIDERS_BY_NAME: dict[str, McpServerDefinition] = {p.name: p for p in _PROVID
 
 
 def get_all_mcp_servers() -> list[McpServerDefinition]:
-    """Get all known mcp_servers."""
+    """Get all known MCP servers."""
     return list(_PROVIDERS)
 
 
 def get_mcp_server(name: str) -> McpServerDefinition | None:
-    """Get a mcp_server by name."""
+    """Get an MCP server by name."""
     return _PROVIDERS_BY_NAME.get(name)
 
 
 def get_mcp_servers_by_category() -> dict[str, list[McpServerDefinition]]:
-    """Get mcp_servers grouped by category."""
+    """Get MCP servers grouped by category."""
     result: dict[str, list[McpServerDefinition]] = {}
     for mcp_server in _PROVIDERS:
         if mcp_server.category not in result:
@@ -230,26 +254,26 @@ def get_mcp_servers_by_category() -> dict[str, list[McpServerDefinition]]:
 
 
 def search_mcp_servers(query: str) -> list[McpServerDefinition]:
-    """Search mcp_servers by name or description.
+    """Search MCP servers by name or description.
 
     Args:
         query: Search query string
 
     Returns:
-        List of matching mcp_servers
+        List of matching MCP servers
     """
     query_lower = query.lower()
     return [p for p in _PROVIDERS if query_lower in p.name.lower() or query_lower in p.description.lower()]
 
 
 def get_available_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
-    """Get mcp_servers that can be installed with current dependencies.
+    """Get MCP servers that can be installed with current dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of available mcp_servers
+        List of available MCP servers
     """
     if deps is None:
         deps = detect_dependencies()
@@ -257,13 +281,13 @@ def get_available_mcp_servers(deps: DependencyStatus | None = None) -> list[McpS
 
 
 def get_unavailable_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
-    """Get mcp_servers that cannot be installed due to missing dependencies.
+    """Get MCP servers that cannot be installed due to missing dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of unavailable mcp_servers
+        List of unavailable MCP servers
     """
     if deps is None:
         deps = detect_dependencies()
@@ -273,7 +297,7 @@ def get_unavailable_mcp_servers(deps: DependencyStatus | None = None) -> list[Mc
 def get_mcp_servers_by_category_filtered(
     deps: DependencyStatus | None = None,
 ) -> tuple[dict[str, list[McpServerDefinition]], dict[str, list[McpServerDefinition]]]:
-    """Get mcp_servers grouped by category, split into available and unavailable.
+    """Get MCP servers grouped by category, split into available and unavailable.
 
     Args:
         deps: Optional pre-detected dependencies
@@ -305,7 +329,7 @@ def filter_bundle_by_availability(
     bundle_name: str,
     deps: DependencyStatus | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Filter a bundle to only include available mcp_servers.
+    """Filter a bundle to only include available MCP servers.
 
     Args:
         bundle_name: Name of the bundle

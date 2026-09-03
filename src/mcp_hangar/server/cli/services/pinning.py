@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from ....domain.model.mcp_server import McpServer
 from ....domain.services.digest_computation import compute_tool_digest
 from ....domain.value_objects import McpServerState
 from ....logging_config import get_logger
@@ -50,6 +51,15 @@ class Drift:
     tool: str
     expected: str | None  # pin in the config; None when the tool has no pin
     observed: str | None  # digest now; None when the tool is no longer served
+
+
+def digest_tools(mcp_server: McpServer) -> dict[str, str]:
+    """Digest every tool a started server is serving, as `{tool: sha256}`.
+
+    One line, shared with the `init` smoke test, so a pin written during setup
+    and a pin written by `mcp-hangar pin` cannot come from two canonicalizations.
+    """
+    return {schema.name: compute_tool_digest(schema.to_dict()).sha256 for schema in mcp_server.get_tool_schemas()}
 
 
 def observe_digests(
@@ -92,10 +102,7 @@ def _observe_one(mcp_server_id: str, spec: dict[str, Any], timeout_s: float) -> 
                 error=f"did not reach READY within {timeout_s:.0f}s (state: {mcp_server.state.value})",
             )
 
-        digests = {
-            schema.name: compute_tool_digest(schema.to_dict()).sha256 for schema in mcp_server.get_tool_schemas()
-        }
-        return Observation(mcp_server_id, digests=digests)
+        return Observation(mcp_server_id, digests=digest_tools(mcp_server))
     except Exception as exc:  # noqa: BLE001 -- one unreachable server must not hide the others
         return Observation(mcp_server_id, error=str(exc))
     finally:
