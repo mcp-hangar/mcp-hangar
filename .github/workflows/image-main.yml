@@ -1,0 +1,84 @@
+# Publish a container image for every commit on main.
+#
+# The release workflow builds only on a `v*` tag, so there was no way to run an
+# unreleased Hangar anywhere -- which meant the only thing a staging cluster
+# could test was a version that had already shipped. This closes that: every
+# merge to main produces an image that a GitOps repository can pin.
+#
+# These images are NOT releases. They are unsigned, carry no provenance
+# attestation, and are overwritten by the next merge in the case of `:main`.
+# Anything that reaches users still comes from release.yml, which signs with
+# cosign and builds for both architectures.
+name: image-main
+
+on:
+  push:
+    branches: [main]
+    # Only what ends up inside the image. A README or a workflow change should
+    # not spend ten minutes rebuilding one.
+    paths:
+      - "src/**"
+      - "packages/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/image-main.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: image-main
+  cancel-in-progress: true
+
+# Read-only by default; the build job asks for `packages: write` and nothing
+# else. Without this the workflow inherits the repository default, which is
+# write on nearly everything.
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # `main` moves; `main-<sha>` does not. A deployment pins the second,
+          # so what is running can always be traced back to one commit -- and an
+          # image rebuilt under an unchanged tag is not re-pulled by kubelet.
+          tags: |
+            type=raw,value=main
+            type=raw,value=main-{{sha}}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # amd64 only, deliberately. Release images stay multi-arch; these
+          # exist to be deployed on a cluster, and arm64 under emulation roughly
+          # triples the run for something no cluster here pulls. Add
+          # `linux/arm64` back if a main image ever has to run on a laptop.
+          platforms: linux/amd64
