@@ -1,4 +1,6 @@
-# MCP Hangar
+<p align="center">
+  <img src=".github/brand/github-header-1280x640.png" alt="MCP Hangar" width="640">
+</p>
 
 **The policy enforcement plane for MCP -- deterministic admission and egress policy, attributable audit, and SIEM export for your MCP server fleet. MIT, self-hosted, no SaaS.**
 
@@ -98,6 +100,17 @@ mcp_servers:
 - [Kubernetes operator](https://github.com/mcp-hangar/mcp-hangar-operator) &middot; [Helm charts](https://github.com/mcp-hangar/helm-charts) &middot; [All docs](https://mcp-hangar.io/docs)
 - [Release compatibility matrix](https://github.com/mcp-hangar/docs/blob/main/operations/RELEASE_COMPATIBILITY.md) &middot; which core, operator, and chart versions are released and tested together
 
+## Name and logo
+
+The MCP Hangar name, the gate mark and the wordmarks are not covered by
+the MIT licence of this repository. They are licensed
+[CC BY-ND 4.0](https://creativecommons.org/licenses/by-nd/4.0/): you may
+redistribute them unchanged — for example to link to or write about this
+project — but not modify them or use them to name or brand a fork or a
+derivative product. Source assets live in `mcp-hangar/brand`.
+
 ## License
 
 [MIT](LICENSE)
+
+The name and logo are excluded — see "Name and logo" above.
