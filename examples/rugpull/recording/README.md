@@ -3,18 +3,12 @@
 The 20-second terminal recording at the top of the repository README, and the
 script that regenerates it.
 
-> **Held: do not merge this until #1231 is fixed.**
->
-> `client.py` polls for up to six seconds waiting for the upstream's catalogue
-> to appear (`for _ in range(15)` below). With that loop the recording works
-> every time. Without it the call fails with `Tool 'echo' not found` — which is
-> what a real MCP client hits, because a `front_door` gateway answers
-> `tools/list` before its upstreams are warm, advertises `list_changed=False`,
-> and then never notifies.
->
-> So this asset would put a run at the top of the README that a reader
-> following the quickstart may not reproduce. When #1231 lands, open the PR and
-> delete the polling loop — it exists only to paper over that bug.
+> **Needs a core carrying the #1231 fix.** Before it, a `front_door` gateway
+> answered `tools/list` before its upstreams were warm, so this demo only
+> worked if the client polled for the catalogue first — and a recording that
+> depends on the client papering over a bug is a recording of something the
+> reader cannot reproduce. The gateway waits for its own warm-up now, so
+> `client.py` is the plain thing it should always have been.
 
 ```bash
 cd examples/rugpull/recording
@@ -50,8 +44,8 @@ no flag suppresses (`--quiet`, `MCP_LOG_LEVEL` and `logging.level` are all
 ignored on that path), and a twenty-second asset cannot spend six seconds on
 them.
 
-`client.py` is a twenty-line MCP client standing in for Claude Code, Cursor or
-Claude Desktop; it is what makes the call you see. It waits for the upstream's
-catalogue before calling, because a `front_door` gateway answers `tools/list`
-before its upstreams are warm and the first answer carries only the `hangar_*`
-management tools.
+`client.py` is a small MCP client standing in for Claude Code, Cursor or Claude
+Desktop; it is what makes the call you see. It connects, calls, and prints the
+verdict — no retries, no waiting for the catalogue, nothing that a real client
+would not do. That is deliberate: anything it had to compensate for would be a
+defect the recording was hiding rather than showing.

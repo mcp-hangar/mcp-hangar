@@ -1,4 +1,4 @@
-"""A 20-line MCP client, standing in for Claude Code."""
+"""A tiny MCP client, standing in for Claude Code."""
 import anyio, os, sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -9,9 +9,6 @@ async def main():
     async with stdio_client(p, errlog=subprocess.DEVNULL) as (r, w):
         async with ClientSession(r, w) as s:
             await s.initialize()
-            for _ in range(15):
-                if "echo" in [t.name for t in (await s.list_tools()).tools]: break
-                await anyio.sleep(0.4)
             res = await s.call_tool("echo", {"text": "hi"})
             txt = "".join(c.text for c in res.content if hasattr(c, "text")).strip()
             print(("DENIED   " if res.is_error else "ALLOWED  ") + txt)
