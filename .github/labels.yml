@@ -1,6 +1,7 @@
 # Label taxonomy for mcp-hangar
-# Applied by: scripts/sync-labels.sh
-# Future automation: .github/workflows/labels-sync.yml (Task 1.5)
+# Applied by: .github/workflows/labels-sync.yml on every change to this file,
+# weekly as a drift catcher, and on demand. scripts/sync-labels.sh is what it
+# runs; the script still works by hand.
 
 - name: type/bug
   color: d73a4a
