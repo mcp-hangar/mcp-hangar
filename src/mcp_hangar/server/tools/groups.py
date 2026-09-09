@@ -7,7 +7,7 @@ from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
-from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
+from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_group_id_input
 
 
 def register_group_tools(mcp: FastMCP) -> None:
@@ -70,7 +70,7 @@ def register_group_tools(mcp: FastMCP) -> None:
         tool_name="hangar_group_rebalance",
         rate_limit_key=lambda group: f"hangar_group_rebalance:{group}",
         check_rate_limit=check_rate_limit,
-        validate=validate_mcp_server_id_input,
+        validate=validate_group_id_input,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
     )
