@@ -3,6 +3,19 @@
 The 20-second terminal recording at the top of the repository README, and the
 script that regenerates it.
 
+> **Held: do not merge this until #1231 is fixed.**
+>
+> `client.py` polls for up to six seconds waiting for the upstream's catalogue
+> to appear (`for _ in range(15)` below). With that loop the recording works
+> every time. Without it the call fails with `Tool 'echo' not found` — which is
+> what a real MCP client hits, because a `front_door` gateway answers
+> `tools/list` before its upstreams are warm, advertises `list_changed=False`,
+> and then never notifies.
+>
+> So this asset would put a run at the top of the README that a reader
+> following the quickstart may not reproduce. When #1231 lands, open the PR and
+> delete the polling loop — it exists only to paper over that bug.
+
 ```bash
 cd examples/rugpull/recording
 vhs demo.tape          # writes ../../../.github/demo/governed-deny.gif
