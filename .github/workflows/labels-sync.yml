@@ -1,0 +1,70 @@
+# Applies the label taxonomy in .github/labels.yml, which until now was a
+# manifest nobody ran: `scripts/sync-labels.sh` had to be invoked by hand, so
+# the file said what the labels should be and the repo said what they were.
+#
+# Scope is this repository. The other repos in the org carry their own extra
+# scopes (the operator has `controller`/`webhook`, the agent more still), so
+# fanning this manifest out would need a manifest per repo and a credential
+# that can write labels across them -- a separate decision, not a wider version
+# of this one.
+name: labels-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/labels.yml'
+      - 'scripts/sync-labels.sh'
+      - '.github/workflows/labels-sync.yml'
+  pull_request:
+    paths:
+      - '.github/labels.yml'
+      - 'scripts/sync-labels.sh'
+      - '.github/workflows/labels-sync.yml'
+  schedule:
+    - cron: "0 8 * * 1"  # weekly, Monday 08:00 UTC -- drift catcher
+  workflow_dispatch:
+
+# Not cancel-in-progress: a run that is halfway through applying labels should
+# finish rather than leave the taxonomy half-written.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Runs on pull requests too, where nothing is applied. A manifest that
+      # does not parse, or an entry missing a field sync-labels.sh reads, used
+      # to surface only when somebody ran the script -- which is to say, late.
+      - name: Validate the manifest
+        run: |
+          set -euo pipefail
+          yq --version
+          count="$(yq 'length' .github/labels.yml)"
+          if [ "${count}" -lt 1 ]; then
+            echo "::error file=.github/labels.yml::manifest declares no labels."
+            exit 1
+          fi
+          incomplete="$(yq -r '[.[] | select((has("name") and has("color") and has("description")) == false) | .name // "(unnamed entry)"] | join(", ")' .github/labels.yml)"
+          if [ -n "${incomplete}" ]; then
+            echo "::error file=.github/labels.yml::entries missing name, color or description: ${incomplete}"
+            exit 1
+          fi
+          echo "${count} labels declared."
+
+      - name: Apply the manifest
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/sync-labels.sh
