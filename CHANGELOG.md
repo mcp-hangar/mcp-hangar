@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.1...v2.18.2) (2026-09-09)
+
+### Fixed
+
+- **core:** a `front_door` gateway answered `tools/list` before its upstreams
+  were warm, so a client that connected during the boot warm-up was handed a
+  catalogue containing only the `hangar_*` management tools — and since the
+  legacy handshake advertises `tools.listChanged: false` and no notification
+  follows, a client that lists once at startup and caches kept that empty
+  catalogue until it reconnected. The quickstart lands squarely in that window:
+  it says "restart your MCP client", which is exactly when a client lists.
+
+  The boot is still not gated on a backend handshake — that deadlocks the
+  deployment, which is why the warm-up runs on its own thread. Instead the
+  *listing* now waits for the warm-up that is already running, and only where an
+  empty answer would be knowably wrong: the caller has an identity, nothing has
+  been discovered yet, and the warm-up has not finished. A missing identity is
+  still refused instantly, a policy-filtered empty list is still the truth, and
+  when the deadline passes the listing is served with whatever exists.
+
+  The same wait covers `tools/call`, where the symptom was a `-32601` for a tool
+  that was about to exist — on a multi-replica front door, a tool the client had
+  listed successfully against another replica. ([#1231](https://github.com/mcp-hangar/mcp-hangar/pull/1231))
+- **core:** the PyPI *Documentation* link 404'd. It pointed at
+  `https://mcp-hangar.io/getting-started/quickstart/`; the site serves that page
+  at `/docs/getting-started/quickstart`. The link is in the sidebar of the
+  package's own landing page, so it was the first thing a broken path cost.
+
+  The README's deny demo also referenced a `demo.yaml` it never created, and set
+  the tool description through a shell variable that cannot reach the upstream
+  when your MCP client is the one starting the gateway. It now writes the config
+  and carries the description in that config's `env:`. ([#1229](https://github.com/mcp-hangar/mcp-hangar/pull/1229))
+
 ## [2.18.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.0...v2.18.1) (2026-09-09)
 
 ### Added
