@@ -40,6 +40,9 @@ def test_http_outbound_puts_traceparent_in_params_meta() -> None:
             auth_config=AuthConfig(),
             http_config=HttpClientConfig(),
         )
+        # The protocol envelope rides once the connection is known to accept
+        # it (#1211) -- the handshake decides that, not a default.
+        client.modern_envelope = True
         tracer = otel_trace.get_tracer("test")
         with patch("mcp_hangar.observability.tracing._initialized", True):
             with tracer.start_as_current_span("parent"):
