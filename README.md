@@ -10,6 +10,15 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14273/badge)](https://www.bestpractices.dev/projects/14273)
 [![HVTrust](https://hvtracker.net/badge/mcp-hangar.svg)](https://hvtracker.net/agents/mcp-hangar/)
 
+<p align="center">
+  <img src=".github/demo/governed-deny.gif" alt="An MCP server rewrites its tool's description between runs; Hangar refuses the identical call against the pinned digest" width="900">
+</p>
+
+<p align="center">
+  <sub>Same tool, same arguments, same call — refused because the description changed underneath it.<br>
+  Real output; <a href="examples/rugpull/recording/">regenerate it</a> with <code>vhs demo.tape</code>.</sub>
+</p>
+
 ## Why
 
 In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a policy enforcement plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
