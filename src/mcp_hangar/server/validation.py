@@ -93,6 +93,23 @@ def validate_mcp_server_id_input(mcp_server: str) -> None:
         raise ValueError(f"invalid_mcp_server_id: {result.errors[0].message if result.errors else 'validation failed'}")
 
 
+def validate_group_id_input(group: str) -> None:
+    """Validate a group ID and raise exception if invalid.
+
+    Groups share the mcp_server identifier namespace (letters, digits, hyphens,
+    underscores, max 64 chars), so the same shape check applies -- see #1209.
+    """
+    result = validate_mcp_server_id(group)
+    if not result.valid:
+        ctx = get_context()
+        ctx.security_handler.log_validation_failed(
+            field="group",
+            message=(result.errors[0].message if result.errors else "Invalid group ID"),
+            mcp_server_id=group,
+        )
+        raise ValueError(f"invalid_group_id: {result.errors[0].message if result.errors else 'validation failed'}")
+
+
 def validate_tool_name_input(tool: str) -> None:
     """Validate tool name and raise exception if invalid."""
     result = validate_tool_name(tool)
