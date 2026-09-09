@@ -1,0 +1,44 @@
+# Thin caller -- logic lives in mcp-hangar/.github (reusable). Edit the
+# reusable there to change behavior everywhere.
+#
+# Replaces project-add.yml and project-status.yml, which were two workflows
+# doing the same two GraphQL calls. project-add was a local copy in five repos,
+# and the copies had drifted.
+#
+#   issue opened/reopened          -> on the board
+#   PR opened/reopened/ready       -> on the board, and every issue it declares
+#                                     it closes moves to In Progress
+#   status/blocked added/removed   -> Blocked, and back out again
+#
+# Triage and Done come from the built-in Projects workflows, not from here.
+name: project-board
+
+on:
+  # pull_request_target, not pull_request: the App key has to reach the job on
+  # a pull request from a fork, and nothing here checks out or runs pull
+  # request code.
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+# Not cancel-in-progress: two labels applied in quick succession are two
+# separate moves, and dropping the first would leave the board on the status
+# the second one was meant to replace.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  project-board:
+    uses: mcp-hangar/.github/.github/workflows/project-board.yml@6da0703f58fb135e3e8cddb406fa825292f87322 # main
+    with:
+      project_number: ${{ vars.PROJECT_NUMBER }}
+    secrets:
+      # The App mints a token per run. PROJECT_AUTOMATION_TOKEN is deliberately
+      # not passed: five unrotatable copies of one static credential, one of
+      # them already dead, is what this migration exists to end.
+      APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
