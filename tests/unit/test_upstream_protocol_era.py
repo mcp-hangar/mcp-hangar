@@ -22,6 +22,13 @@ What these tests can do is pin the two halves that were got wrong:
 * `_meta` still EXISTS when it is withheld -- the bug in the first fix, which
   turned a clean refusal into a `KeyError` because `_meta` is also the
   trace-context carrier and the caller writes into it immediately after.
+
+#1211: stamping the envelope on the handshake `initialize` call itself has the
+same shape of problem one level up -- a spec-current upstream's era gate reacts
+to the `_meta` era key alone, and Hangar cannot complete what that gate then
+requires on that call. So clients now default to the envelope OFF and
+`_perform_mcp_handshake` (see `test_outbound_handshake.py`) turns it on once it
+knows the connection can carry it.
 """
 
 from __future__ import annotations
@@ -75,26 +82,30 @@ class TestTheModernEnvelopeIsConditional:
         assert "_meta" not in original
 
 
-class TestClientsDefaultToTheModernEnvelope:
-    """Default True so the handshake itself, and stateless upstreams, carry it.
+class TestClientsDefaultToTheLegacyEnvelopeUntilTheHandshakeKnowsBetter:
+    """Default False: the era key on `initialize` itself is what breaks #1211.
 
-    A SEP-2575 upstream has no `initialize` at all -- the envelope is the only
-    way it learns the protocol version and client info, so defaulting to False
-    would break exactly the case the envelope exists for.
+    A spec-current upstream applies its full era gate off the presence of the
+    `_meta` era key alone -- and Hangar cannot complete that gate's
+    requirements (`Mcp-Protocol-Version`/`Mcp-Method` headers, a handshake
+    method that isn't `initialize`) on the handshake call. So the handshake
+    itself must go out without it; `_perform_mcp_handshake` turns the envelope
+    on afterwards, once the negotiated response (or a stateless
+    method-not-found) says it is safe to.
     """
 
-    def test_stdio_client_starts_modern(self):
+    def test_stdio_client_starts_legacy(self):
         from unittest.mock import MagicMock
 
         from mcp_hangar.stdio_client import StdioClient
 
         client = StdioClient(MagicMock(), "probe")
 
-        assert client.modern_envelope is True
+        assert client.modern_envelope is False
 
-    def test_http_client_starts_modern(self):
+    def test_http_client_starts_legacy(self):
         from mcp_hangar.http_client import HttpClient
 
         client = HttpClient("http://127.0.0.1:1/mcp", mcp_server_id="probe")
 
-        assert client.modern_envelope is True
+        assert client.modern_envelope is False

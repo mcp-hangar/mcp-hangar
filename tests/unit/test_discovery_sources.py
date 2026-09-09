@@ -231,6 +231,41 @@ class TestKubernetesDiscoverySource:
         assert providers[0].connection_info["port"] == 8080
         assert providers[0].metadata["namespace"] == "mcp-providers"
 
+    def test_parse_pod_defaults_the_path_to_mcp(self, mock_k8s_client):
+        """#1208: no path annotation used to mean no path at all in the built endpoint."""
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
+
+        source = KubernetesDiscoverySource(in_cluster=False)
+        pod = Mock()
+        pod.metadata = Mock(uid="uid-1", annotations={"mcp-hangar.io/enabled": "true"}, labels={})
+        pod.metadata.name = "my-pod"
+        pod.status = Mock(pod_ip="10.0.0.5", phase="Running")
+        pod.spec = Mock(node_name="node-1")
+
+        discovered = source._parse_pod(pod, "mcp-providers")
+
+        assert discovered is not None
+        assert discovered.connection_info["path"] == "/mcp"
+
+    def test_parse_pod_honours_the_path_annotation(self, mock_k8s_client):
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
+
+        source = KubernetesDiscoverySource(in_cluster=False)
+        pod = Mock()
+        pod.metadata = Mock(
+            uid="uid-1",
+            annotations={"mcp-hangar.io/enabled": "true", "mcp-hangar.io/path": "/rpc"},
+            labels={},
+        )
+        pod.metadata.name = "my-pod"
+        pod.status = Mock(pod_ip="10.0.0.5", phase="Running")
+        pod.spec = Mock(node_name="node-1")
+
+        discovered = source._parse_pod(pod, "mcp-providers")
+
+        assert discovered is not None
+        assert discovered.connection_info["path"] == "/rpc"
+
     @pytest.mark.asyncio
     async def test_discover_skips_disabled(self, mock_k8s_client):
         """Test discovery skips pods without enabled annotation."""

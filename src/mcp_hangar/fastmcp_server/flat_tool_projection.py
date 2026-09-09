@@ -181,7 +181,7 @@ def _groups() -> dict[str, Any]:
 
 
 def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
-    """Every id a withdrawal for *mcp_server* can have been declared under (#1037).
+    """Every id a withdrawal for *mcp_server* can have been declared under (#1037, #1210).
 
     For a group id that is the group AND each of its members, and the union is
     fail-closed: any member's withdrawal hides the item for the whole group.
@@ -190,12 +190,20 @@ def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
     and the surfaces that ask about a group (prompts, resources) ask under the
     group id alone, so a member's declaration was previously invisible to them.
 
-    For anything else it is the id itself, which is what every caller had.
+    For a MEMBER id it is symmetric: the member itself and its owning group,
+    via `_member_to_group()` (the same collapse `is_governed_allowed` already
+    uses for the access-policy half below). Without this half a `withdrawn:`
+    declared on the group was written under the group id and never consulted,
+    because listing and calling always ask under the member id.
+
+    For anything else -- a plain server id -- it is the id itself, which is
+    what every caller had.
     """
     group = _groups().get(mcp_server)
-    if group is None:
-        return (mcp_server,)
-    return (mcp_server, *(member.id for member in group.members))
+    if group is not None:
+        return (mcp_server, *(member.id for member in group.members))
+    owner = _member_to_group().get(mcp_server)
+    return (mcp_server, owner) if owner else (mcp_server,)
 
 
 def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:

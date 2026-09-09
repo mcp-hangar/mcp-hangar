@@ -105,3 +105,42 @@ def test_genuine_initialize_error_still_fails_startup() -> None:
     with patch.object(McpServer, "_collect_startup_diagnostics", return_value={}):
         with pytest.raises(McpServerStartError):
             _server()._perform_mcp_handshake(client)
+
+
+class TestModernEnvelopeIsSetFromWhatTheHandshakeLearned:
+    """#1211: the envelope decision is made AFTER the handshake, never before.
+
+    `client.modern_envelope` starts False (the `initialize` call itself must
+    never carry the era key -- see `test_upstream_protocol_era.py`), and each
+    branch below sets the real value once the handshake result says what the
+    connection can carry.
+    """
+
+    def test_a_stateless_upstream_turns_the_envelope_on(self) -> None:
+        client = _client({"error": {"code": _METHOD_NOT_FOUND, "message": "Method not found"}})
+
+        _server()._perform_mcp_handshake(client)
+
+        assert client.modern_envelope is True
+
+    def test_a_modern_negotiated_version_turns_the_envelope_on(self) -> None:
+        client = _client({"result": {"protocolVersion": "2026-07-28"}})
+
+        _server()._perform_mcp_handshake(client)
+
+        assert client.modern_envelope is True
+
+    def test_a_legacy_negotiated_version_leaves_the_envelope_off(self) -> None:
+        client = _client({"result": {"protocolVersion": "2025-06-18"}})
+
+        _server()._perform_mcp_handshake(client)
+
+        assert client.modern_envelope is False
+
+    def test_a_missing_negotiated_version_leaves_the_envelope_off(self) -> None:
+        """Can't tell what era this is -- stay conservative rather than guess."""
+        client = _client({"result": {}})
+
+        _server()._perform_mcp_handshake(client)
+
+        assert client.modern_envelope is False
