@@ -1,0 +1,4 @@
+# The tape pins a throwaway copy of demo.yaml so regenerating the recording
+# does not rewrite a tracked file. `pin --write` also leaves a .bak beside it.
+.demo.run.yaml
+.demo.run.yaml.bak

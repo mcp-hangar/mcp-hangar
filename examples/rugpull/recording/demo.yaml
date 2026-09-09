@@ -1,0 +1,22 @@
+# The configuration the quickstart writes, pointed at the rug-pull server one
+# directory up. No pins here on purpose: the tape copies this file and pins the
+# copy off camera, so the digests in the frame are the ones this machine just
+# measured -- and regenerating the recording leaves the repository untouched.
+#
+# `logging.level` is honoured on the `serve` path but not by `pin`, which is the
+# other reason pinning happens off camera: a twenty-second asset cannot spend
+# six seconds on stdio-client log lines.
+logging:
+  level: ERROR
+mcp_servers:
+  demo:
+    mode: subprocess
+    command: [python, ../server.py]
+tool_access:
+  mode: front_door
+auth:
+  stdio:
+    principal:
+      id: local-user
+      tenant_id: local
+      roles: [viewer]
