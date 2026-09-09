@@ -1,4 +1,11 @@
-# The tape pins a throwaway copy of demo.yaml so regenerating the recording
-# does not rewrite a tracked file. `pin --write` also leaves a .bak beside it.
+# Everything a `vhs demo.tape` run leaves behind. Regenerating the recording
+# must not dirty the tree, and `git add -A` in this repo must not be able to
+# sweep any of it in.
+#
+# The tape pins a throwaway COPY of demo.yaml, because `pin --write` rewrites
+# its config in place (stripping comments) and drops a .bak beside it.
 .demo.run.yaml
 .demo.run.yaml.bak
+
+# The gateway's event store, created in whatever directory it is started from.
+data/
