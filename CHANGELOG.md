@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.0...v2.18.1) (2026-09-09)
+
+### Added
+
+- **core:** the live tier now carries the three claims 2.18.0 rests on, driven the way an
+  operator drives them rather than through internal APIs: `mcp-hangar pin` (a digest per
+  tool, `--write`, `--check` exiting 1 on a changed *description* and 2 on a question it
+  cannot answer), what `init` writes (a config `config check` accepts, with `front_door`, a
+  stdio principal, and no pins when the smoke test was skipped), and the quickstart's own
+  sequence over stdio with the SDK client, ending in `Tool 'echo' schema does not match its
+  pinned digest`. The last one also pins the half that must not move: without the principal
+  block, the same configuration still serves an empty list. ([#1207](https://github.com/mcp-hangar/mcp-hangar/pull/1207))
+
+### Fixed
+
+- **core:** the outbound handshake stamped the `2026-07-28` protocol era on its
+  own `initialize` call. A spec-current upstream's era gate reacts to that
+  `_meta` key alone, and Hangar could not complete what the gate then requires
+  (`Mcp-Protocol-Version`/`Mcp-Method` headers, a handshake method other than
+  `initialize`) -- so any spec-current upstream refused to connect at all.
+  `initialize` now goes out legacy-shaped; the negotiated response (or a
+  stateless upstream's method-not-found) decides whether later calls on that
+  connection carry the modern envelope. ([#1211](https://github.com/mcp-hangar/mcp-hangar/pull/1211))
+- **core:** a `tool_projection.withdrawn` (or `withdrawn_resources`/`withdrawn_prompts`)
+  declared on a **group** withdrew nothing. It was registered under the group id,
+  but `tools/list` and a tool call always ask under the group's MEMBER id, and
+  that direction of the group/member collapse was missing -- so the withdrawal
+  was silently never consulted. The symptom impersonated success: a name
+  collision between a group member and an unrelated server (#857 drops both
+  sides) looked exactly like the withdrawal having worked, on the wrong server.
+  `_withdrawal_scopes` now resolves a member id to its owning group too,
+  symmetric with how the access-policy half already worked. ([#1210](https://github.com/mcp-hangar/mcp-hangar/pull/1210))
+- **core:** `hangar_group_rebalance` was uncallable since it was introduced --
+  the tool's own parameter is `group`, but the validator wired via
+  `mcp_tool_wrapper` was `validate_mcp_server_id_input`, whose parameter is
+  `mcp_server`. MCP delivers tool arguments by name, so no call could satisfy
+  both. Now wired to a dedicated `validate_group_id_input`. ([#1209](https://github.com/mcp-hangar/mcp-hangar/pull/1209))
+- **core:** the `kubernetes` discovery source could register a server that
+  nothing could ever reach. It reports the pod's own address (so it clears the
+  SSRF check that refuses the `filesystem` source's private endpoints), but the
+  endpoint it built was always `http://<host>:<port>` with nothing after it --
+  a 404 against every server mounted the way the SDK's own reference server and
+  `mcp-proxy` both default to, and there was no annotation to say otherwise. A
+  new `mcp-hangar.io/path` pod annotation (default `/mcp`, matching that
+  convention) closes it; the address itself is still exactly what the API
+  server reported, so the SSRF property this source exists for is unchanged. ([#1208](https://github.com/mcp-hangar/mcp-hangar/pull/1208))
+
 ## [2.18.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.17.1...v2.18.0) (2026-09-03)
 
 This release makes a first run produce a verdict on a laptop. `mcp-hangar init` writes a
