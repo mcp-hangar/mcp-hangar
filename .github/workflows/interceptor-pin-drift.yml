@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Compare pinned SHA to upstream HEAD
+        id: drift
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -43,10 +44,43 @@ jobs:
           echo "::warning::Interceptor pin ${pinned_short} is behind upstream ${short} (ADR-012)."
           title="interceptor pin drift: upstream moved to ${short}"
           body="The vendored interceptor schema is pinned to \`${pinned_short}\` (ADR-012), but \`${UPSTREAM}\` HEAD is now \`${short}\`. Per the deliberate-cadence policy, review the upstream diff and decide whether to bump the pin + re-derive the vendored schema (tests/unit/test_interceptors_list_schema.py), or hold. Informational -- not a forced bump."
-          existing="$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "in:title interceptor pin drift" --json number --jq '.[0].number // ""')"
+          # The URL rather than the number: it is what `gh project item-add`
+          # takes, and `gh issue comment` accepts it just as well.
+          existing="$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "in:title interceptor pin drift" --json url --jq '.[0].url // ""')"
           if [ -n "${existing}" ]; then
             gh issue comment "${existing}" -R "${GITHUB_REPOSITORY}" --body "Still drifted: upstream HEAD is now \`${short}\`."
+            url="${existing}"
+          elif url="$(gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}" --label "type/chore")"; then
+            :
           else
-            gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}" --label "type/chore" \
-              || gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
+            url="$(gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}")"
           fi
+          echo "issue_url=${url}" >> "$GITHUB_OUTPUT"
+
+      # `project-add.yml` never sees this issue. It reacts to `issues: opened`,
+      # and an issue filed with GITHUB_TOKEN raises no event that can start a
+      # workflow -- the same rule scripts/refire_release_pr_checks.sh exists
+      # for. So the drift notice has to put itself on the board, with the token
+      # and project number project-add already uses.
+      #
+      # It runs on the comment path too: `item-add` is idempotent, so a drift
+      # issue filed before this step existed is adopted on the next run rather
+      # than staying off the board for its whole life (#1158).
+      - name: Put the issue on the project board
+        if: steps.drift.outputs.issue_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          ISSUE_URL: ${{ steps.drift.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          # Never fatal. The drift notice is already filed; failing here would
+          # turn an informational run red over a board that is reachable by
+          # hand.
+          if [ -z "${GH_TOKEN}" ] || [ -z "${PROJECT_NUMBER}" ]; then
+            echo "::warning::PROJECT_AUTOMATION_TOKEN or PROJECT_NUMBER is unset; add ${ISSUE_URL} to the board by hand."
+            exit 0
+          fi
+          gh project item-add "${PROJECT_NUMBER}" --owner "${OWNER}" --url "${ISSUE_URL}" \
+            || echo "::warning::Could not add ${ISSUE_URL} to project ${PROJECT_NUMBER}; add it by hand."
