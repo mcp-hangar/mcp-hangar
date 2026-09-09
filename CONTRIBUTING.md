@@ -5,8 +5,10 @@ See [docs/development/CONTRIBUTING.md](https://github.com/mcp-hangar/docs/blob/m
 ## Repository Structure
 
 The Python core lives at the repository root. Related components — the
-Kubernetes operator, agent, Helm charts, and Terraform provider — live in
+Kubernetes operator, the Helm charts, and the documentation site — live in
 separate repositories under the [mcp-hangar org](https://github.com/mcp-hangar).
+(The agent and the Terraform provider are archived; the SaaS tier they served
+was retired.)
 
 | Package | Language | Location |
 |---------|----------|----------|
