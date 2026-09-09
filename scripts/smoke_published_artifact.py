@@ -488,6 +488,41 @@ anyio.run(main)
 """
 
 
+# The other half of the front door's identity rule, driven the same way: with no
+# declared caller there is nothing to project, and the refusal is an empty list
+# rather than an error. Polled rather than listed once, so "empty" has to mean
+# "empty because nobody said who is calling" and not "empty because the gateway
+# was still warming when we asked" (#1231).
+ANON_LISTING_DRIVER = """\
+import json, os, sys
+
+import anyio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+BINARY, CONFIG = sys.argv[1], sys.argv[2]
+
+
+async def main() -> None:
+    params = StdioServerParameters(
+        command=BINARY,
+        args=["--config", CONFIG, "serve"],
+        env=dict(os.environ),
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            seen = set()
+            for _ in range(6):
+                seen |= {t.name for t in (await session.list_tools()).tools}
+                await anyio.sleep(1)
+            print(json.dumps({"tools": sorted(seen)}))
+
+
+anyio.run(main)
+"""
+
+
 def walk_the_quickstart(python: Path, binary: Path, workdir: Path) -> None:
     """Run the quickstart's own sequence against the installed artifact (#1193).
 
@@ -516,6 +551,7 @@ def walk_the_quickstart(python: Path, binary: Path, workdir: Path) -> None:
     server.write_text(RUGPULL_SERVER)
     config.write_text(QUICKSTART_CONFIG.format(python=str(python), server=str(server)))
     driver.write_text(QUICKSTART_DRIVER)
+    (quickdir / "anon_driver.py").write_text(ANON_LISTING_DRIVER)
 
     def call(env_extra: dict[str, str] | None = None) -> dict:
         env = {**os.environ, **(env_extra or {})}
@@ -562,6 +598,33 @@ def walk_the_quickstart(python: Path, binary: Path, workdir: Path) -> None:
     if "drift" not in checked.stdout:
         raise SystemExit(f"FAIL: `pin --check` reported no drift\n{checked.stdout}")
     log("`mcp-hangar pin --check` exits 1 and names the drifted tool")
+
+    # 6. the same gateway, with nobody declared: fail-closed, and empty rather
+    # than loud. This runs AFTER the calls above on purpose -- the upstream and
+    # its pins are known good by now, so an empty list here can only be the
+    # missing identity, which is the whole claim (ADR-026). Over stdio there is
+    # no channel to carry a credential, so `auth.stdio.principal` is the only
+    # thing standing between a caller and nothing.
+    anon_config = quickdir / "config-no-principal.yaml"
+    written_config = config.read_text()
+    stripped = written_config.split("\nauth:")[0].rstrip() + "\n"
+    if stripped == written_config.rstrip() + "\n":
+        raise SystemExit("FAIL: the quickstart config grew no `auth:` block to strip -- this check is testing nothing")
+    anon_config.write_text(stripped)
+
+    anon = run(
+        [str(python), str(quickdir / "anon_driver.py"), str(binary), str(anon_config)],
+        cwd=str(quickdir),
+        timeout=180,
+    )
+    if anon.returncode != 0:
+        raise SystemExit(f"FAIL: the anonymous listing did not complete\n{anon.stdout}\n{anon.stderr}")
+    listed = json.loads(anon.stdout.strip().splitlines()[-1])["tools"]
+    if listed:
+        raise SystemExit(
+            f"FAIL: front_door served tools to a caller with no declared principal; expected none, got {listed}"
+        )
+    log("front_door serves nothing at all to a caller it cannot name")
 
 
 def assert_metrics(base_url: str) -> None:
