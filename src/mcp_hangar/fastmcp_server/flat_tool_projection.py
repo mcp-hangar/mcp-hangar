@@ -74,6 +74,7 @@ from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from ..tasks_wire import HEADER_MISMATCH
+from .catalogue_warmup import is_warming, wait_for_catalogue
 from .resource_link_read_through import project_result_uris
 
 logger = logging.getLogger(__name__)
@@ -622,6 +623,12 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
             _mark_param_validation_skipped(mcp_ctx)
         raise
 
+    # Nothing discovered yet, and the boot warm-up still running: wait for it
+    # rather than hand back a catalogue the client will cache forever (#1231).
+    if await _catalogue_settled(tenant_id, not governed):
+        flat_map = _build_flat_map(tenant_id)
+        governed = _build_mcp_tool_list(flat_map)
+
     # The SDK's pre-dispatch tools/list on a tools/call (#1049) is not a listing
     # the client received: it must not be counted as one.
     if _envelope(mcp_ctx).get("method") != "tools/call":
@@ -655,6 +662,37 @@ def _classify_empty_projection(tenant_id: str | None) -> str:
     if not get_tool_projection_registry().all():
         return EMPTY_NOTHING_DISCOVERED
     return EMPTY_FILTERED
+
+
+async def _catalogue_settled(tenant_id: str | None, projection_is_empty: bool) -> bool:
+    """Wait out the boot warm-up when an empty answer would be knowably wrong (#1231).
+
+    True means the caller should re-read the projection: the warm-up finished
+    while we waited, so what was empty a moment ago may not be now.
+
+    One function rather than the condition inline at both call sites, because
+    the two must not drift: the listing and the call path have to agree exactly
+    on when waiting is legitimate. Waiting where it is not costs a fail-closed
+    deny its speed, or delays a true `-32601` for a tool that does not exist.
+    """
+    if not projection_is_empty or not is_warming():
+        return False
+    if _classify_empty_projection(tenant_id) != EMPTY_NOTHING_DISCOVERED:
+        return False
+    return await wait_for_catalogue()
+
+
+async def _settled_flat_map(mcp_ctx: Any, tenant_id: str | None) -> dict[str, Any]:
+    """This request's flat map, having waited out the boot warm-up if it was empty.
+
+    The call path's half of #1231, as an assignment rather than a branch at the
+    call site: ``register_flat_tool_handlers`` is at the complexity ceiling and
+    a wait is not what should push it over.
+    """
+    flat_map = _memoised_flat_map(mcp_ctx, tenant_id)
+    if await _catalogue_settled(tenant_id, not flat_map):
+        flat_map = _build_flat_map(tenant_id)
+    return flat_map
 
 
 def _report_empty_projection(tenant_id: str | None) -> None:
@@ -852,7 +890,11 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # map level; enforcement below also re-checks independently). Reuse
         # the per-request memo when the SDK already listed for Mcp-Param
         # validation on this same POST (#1049).
-        flat_map = _memoised_flat_map(mcp_ctx, tenant_id)
+        # Waits out the boot warm-up when the map is empty (#1231): a call that
+        # lands mid-warm-up would otherwise be refused -32601 for a tool that is
+        # about to exist -- and on a multi-replica front door that is a call the
+        # client listed successfully against another replica.
+        flat_map = await _settled_flat_map(mcp_ctx, tenant_id)
 
         if name not in flat_map:
             if name in management_tools_for(mcp_ctx):
