@@ -9,9 +9,15 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+# Not cancel-in-progress, matching pr-title, pr-body and branch-name. This
+# workflow reacts to `labeled` and `unlabeled`, which do not move the head, so
+# a cancelled run lands on the SAME commit as the successful one -- and branch
+# protection can read the cancelled one, leaving a pull request mergeable:true
+# and blocked with nothing failing (#1250). Cancelling is safe where it happens
+# because the head moved; here it is not.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
