@@ -227,7 +227,12 @@ async def _on_mcp_server_register(mcp_server) -> bool:
             if endpoint:
                 mcp_server_kwargs["endpoint"] = endpoint
             elif host and port:
-                mcp_server_kwargs["endpoint"] = f"http://{host}:{port}"
+                # A source that reports host/port without a full endpoint (the
+                # kubernetes source) may also report the path the server is
+                # mounted on (#1208, mcp-hangar.io/path); other sources that
+                # never set it get the pre-#1208 bare host:port they always got.
+                path = conn_info.get("path", "")
+                mcp_server_kwargs["endpoint"] = f"http://{host}:{port}{path}"
             else:
                 logger.warning(
                     "http_mcp_server_no_endpoint_skipping",
