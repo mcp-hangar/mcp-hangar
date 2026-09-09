@@ -12,6 +12,7 @@ Example Pod Annotations:
     mcp-hangar.io/port: "8080"
     mcp-hangar.io/group: "data-team"
     mcp-hangar.io/health-path: "/health"
+    mcp-hangar.io/path: "/mcp"
 """
 
 from dataclasses import dataclass
@@ -205,6 +206,11 @@ class KubernetesDiscoverySource(DiscoverySource):
         port = annotations.get(f"{self.ANNOTATION_PREFIX}port", "8080")
         group = annotations.get(f"{self.ANNOTATION_PREFIX}group")
         health_path = annotations.get(f"{self.ANNOTATION_PREFIX}health-path", "/health")
+        # The MCP endpoint's path (#1208). Without this the built endpoint was
+        # always `http://<host>:<port>` with nothing after it -- a 404 against
+        # every server mounted the way the SDK's own reference server and
+        # `mcp-proxy` both default to. Defaults to that same convention.
+        path = annotations.get(f"{self.ANNOTATION_PREFIX}path", "/mcp")
         ttl = int(annotations.get(f"{self.ANNOTATION_PREFIX}ttl", str(self.default_ttl)))
 
         # Get pod IP
@@ -223,6 +229,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         connection_info = {
             "host": pod_ip,
             "port": int(port),
+            "path": path,
             "health_path": health_path,
         }
 
