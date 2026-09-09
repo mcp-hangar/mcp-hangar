@@ -163,6 +163,52 @@ class TestAnOrdinaryContainerActuallyRegisters:
         assert commands.sent[0].runtime_addresses is None
 
 
+class TestAReportedPathReachesTheEndpoint:
+    """#1208: host/port with no explicit `endpoint` used to build one with no path.
+
+    Every MCP server this installation deploys answers on `/mcp`, so the
+    built-from-host-port fallback was unreachable for any of them -- a source
+    reporting `host`/`port` alone had no way to say so.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reported_path_rides_into_the_built_endpoint(self, wired, monkeypatch) -> None:
+        _repo, _events, commands = wired
+        monkeypatch.setattr(
+            "mcp_hangar.domain.security.ssrf.socket.getaddrinfo",
+            lambda *a, **k: [(None, None, None, None, ("10.88.0.7", 0))],
+        )
+
+        registered = await bootstrap_discovery._on_mcp_server_register(
+            _discovered(
+                "probe",
+                mode="http",
+                host="10.88.0.7",
+                port=8080,
+                path="/mcp",
+                runtime_addresses=["10.88.0.7"],
+            )
+        )
+
+        assert registered is True
+        assert commands.sent[0].endpoint == "http://10.88.0.7:8080/mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_source_reporting_no_path_keeps_the_old_bare_endpoint(self, wired, monkeypatch) -> None:
+        """A source that never sets `path` (e.g. filesystem) must not change shape."""
+        _repo, _events, commands = wired
+        monkeypatch.setattr(
+            "mcp_hangar.domain.security.ssrf.socket.getaddrinfo",
+            lambda *a, **k: [(None, None, None, None, ("10.88.0.7", 0))],
+        )
+
+        await bootstrap_discovery._on_mcp_server_register(
+            _discovered("probe2", mode="http", host="10.88.0.7", port=8080, runtime_addresses=["10.88.0.7"])
+        )
+
+        assert commands.sent[0].endpoint == "http://10.88.0.7:8080"
+
+
 class TestGuardsDiscoveryUsedToBypass:
     @pytest.mark.asyncio
     async def test_a_duplicate_is_refused(self, wired) -> None:

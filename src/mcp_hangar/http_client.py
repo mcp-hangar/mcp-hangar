@@ -285,11 +285,17 @@ class HttpClient:
         self._http_config = http_config or HttpClientConfig()
         self._mcp_server_id = mcp_server_id
         #: Whether this connection accepts the 2026-07-28 `_meta` envelope.
-        #: Starts True so the handshake itself and stateless (SEP-2575) upstreams
-        #: carry it; `_perform_mcp_handshake` clears it the moment a legacy
-        #: `initialize` succeeds, because from mcp 2.0.0 such a connection
-        #: rejects the modern envelope on every later request (-32600).
-        self.modern_envelope = True
+        #: Starts False: the era key on the `initialize` call itself is what
+        #: makes a spec-current upstream apply its full era gate (missing
+        #: `Mcp-Protocol-Version`/`Mcp-Method` headers, then "initialize" not
+        #: existing in that era) before Hangar ever completes that envelope
+        #: (#1211) -- so the handshake itself goes out legacy-shaped.
+        #: `_perform_mcp_handshake` sets the real value once it knows it:
+        #: True on a stateless (SEP-2575) upstream's method-not-found, True or
+        #: False on a legacy upstream's negotiated `protocolVersion`, because
+        #: from mcp 2.0.0 a connection that negotiated a legacy version rejects
+        #: the modern envelope on every later request (-32600).
+        self.modern_envelope = False
 
         # Parse endpoint URL
         self._scheme, self._host, self._port, self._base_path = self._parse_endpoint(endpoint)

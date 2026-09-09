@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.18.0"
+version = "2.18.1"
 description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
@@ -69,8 +69,8 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.5",
-    "import-linter==2.14",
+    "ruff==0.16.6",
+    "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
     "jsonschema>=4.20.0",
@@ -117,7 +117,7 @@ full = [
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
 [project.urls]
 Homepage = "https://mcp-hangar.io"
-Documentation = "https://mcp-hangar.io/getting-started/quickstart/"
+Documentation = "https://mcp-hangar.io/docs/getting-started/quickstart"
 Repository = "https://github.com/mcp-hangar/mcp-hangar"
 [build-system]
 requires = ["hatchling"]
