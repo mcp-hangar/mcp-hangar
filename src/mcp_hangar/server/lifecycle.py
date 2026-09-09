@@ -120,19 +120,29 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     """
     from ..application.commands import StartMcpServerCommand
     from ..domain.services.tool_access_resolver import is_front_door
+    from ..fastmcp_server import catalogue_warmup
 
     if not is_front_door():
         return
 
     warmed = failed = 0
 
-    for mcp_server_id in runtime.repository.get_all_ids():
-        try:
-            runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
-            warmed += 1
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
-            failed += 1
-            logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+    # A listing that arrives before this finishes would be answered with an
+    # empty catalogue the client then caches forever (#1231). It waits instead,
+    # briefly and only when the answer would otherwise be knowably wrong.
+    catalogue_warmup.warmup_started()
+    try:
+        for mcp_server_id in runtime.repository.get_all_ids():
+            try:
+                runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
+                warmed += 1
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
+                failed += 1
+                logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+    finally:
+        # In `finally`: a warm-up that dies must not leave every later listing
+        # waiting out the full deadline for something that will never finish.
+        catalogue_warmup.warmup_finished()
 
     logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
 
