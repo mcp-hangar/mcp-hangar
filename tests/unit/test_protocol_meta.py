@@ -72,6 +72,10 @@ def test_http_client_call_injects_protocol_meta_on_outbound_request() -> None:
         auth_config=AuthConfig(),
         http_config=HttpClientConfig(),
     )
+    # A per-request call carries the envelope once the connection is known to
+    # accept it (#1211) -- the handshake itself decides that, not a default;
+    # see test_outbound_handshake.py and test_upstream_protocol_era.py.
+    client.modern_envelope = True
 
     resp = MagicMock()
     resp.status_code = 200

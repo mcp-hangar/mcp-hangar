@@ -50,6 +50,10 @@ class TestHttp:
 
     def test_carries_the_protocol_envelope(self) -> None:
         client = _http_client()
+        # The envelope rides once the connection is known to accept it (#1211)
+        # -- the handshake decides that, not a default; see
+        # test_outbound_handshake.py and test_upstream_protocol_era.py.
+        client.modern_envelope = True
 
         with patch.object(client._client, "post", return_value=_accepted()) as post:
             client.notify("notifications/initialized")
