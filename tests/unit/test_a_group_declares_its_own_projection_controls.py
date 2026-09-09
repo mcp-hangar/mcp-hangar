@@ -22,6 +22,7 @@ from mcp_hangar.application.read_models.tool_projection import (
 )
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.tool_digest import DigestEnforcement
+from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 from mcp_hangar.server.config import load_config
 
 _GROUP = "group_g"
@@ -98,6 +99,30 @@ class TestAGroupCanPin:
         _load({"digest_enforcement": "audit"})
 
         assert get_tool_projection_registry().digest_enforcement(_GROUP) == DigestEnforcement.AUDIT
+
+
+class TestAGroupWithdrawalReachesItsMembers:
+    """#1210: `withdrawn` is written under the group id but must be read for a
+
+    MEMBER id too -- `tools/list` and a tool call both ask under the member id,
+    not the group id, so a withdrawal that only the write side honoured never
+    withdrew anything a caller could observe.
+    """
+
+    def test_a_withdrawn_tool_is_hidden_on_the_member(self) -> None:
+        _load({"withdrawn": ["legacy_tool"]})
+
+        assert not is_governed_allowed(_MEMBER, "legacy_tool", kind="tool", tenant_id=None)
+
+    def test_an_unrelated_tool_stays_visible_on_the_member(self) -> None:
+        _load({"withdrawn": ["legacy_tool"]})
+
+        assert is_governed_allowed(_MEMBER, "other_tool", kind="tool", tenant_id=None)
+
+    def test_a_prompt_or_a_resource_withdrawal_also_reaches_the_member(self) -> None:
+        _load({"withdrawn_resources": ["secret://x"]})
+
+        assert not is_governed_allowed(_MEMBER, "secret://x", kind="resource", tenant_id=None)
 
 
 class TestTheServerBranchIsUnchanged:
