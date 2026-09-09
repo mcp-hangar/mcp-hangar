@@ -929,8 +929,13 @@ class McpServer(AggregateRoot):
         init_error = init_resp.get("error")
         if init_error is not None and init_error.get("code") == _JSONRPC_METHOD_NOT_FOUND:
             # Stateless upstream (SEP-2575): no initialize handshake. Expected.
-            # Keep the modern envelope -- it is the only way such an upstream
-            # learns the protocol version and client info at all.
+            # Turn the modern envelope ON for every later call -- it is the
+            # only way such an upstream learns the protocol version and
+            # client info at all. The handshake attempt itself went out
+            # without it (#1211): the era key is what makes a spec-current
+            # upstream apply its full era gate, and Hangar cannot complete
+            # that gate's requirements on the `initialize` call.
+            client.modern_envelope = True
             logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
         elif init_error is not None:
             error_msg = init_error.get("message", "unknown")
@@ -952,11 +957,14 @@ class McpServer(AggregateRoot):
             # the upstream negotiated -- and from mcp 2.0.0 a legacy connection
             # REJECTS the 2026-07-28 `_meta` envelope on every later request
             # (-32600), which reads as a hang: discovery fails, the cold start
-            # never completes, the batch times out. Stop stamping it unless the
-            # upstream actually negotiated the modern generation.
+            # never completes, the batch times out. Set the envelope from the
+            # negotiated version explicitly (not only a downgrade): the
+            # handshake call itself went out legacy-shaped regardless of era
+            # (#1211), so a modern-negotiating upstream needs turning ON just
+            # as much as a legacy one needs to stay OFF.
             negotiated = (init_resp.get("result") or {}).get("protocolVersion")
-            if isinstance(negotiated, str) and negotiated < _MODERN_PROTOCOL_VERSION:
-                client.modern_envelope = False
+            client.modern_envelope = isinstance(negotiated, str) and negotiated >= _MODERN_PROTOCOL_VERSION
+            if not client.modern_envelope:
                 logger.debug(
                     "upstream_legacy_era",
                     mcp_server_id=self.mcp_server_id,
