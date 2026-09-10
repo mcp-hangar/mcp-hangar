@@ -56,7 +56,9 @@ def _counter(action: str, rule_kind: str) -> float:
         (
             sample.value
             for sample in prometheus_metrics.EGRESS_POLICY_ENFORCED_TOTAL.collect()
-            if sample.labels.get("action") == action and sample.labels.get("rule_kind") == rule_kind
+            if sample.labels.get("mcp_server") == "s"
+            and sample.labels.get("action") == action
+            and sample.labels.get("rule_kind") == rule_kind
         ),
         0.0,
     )
