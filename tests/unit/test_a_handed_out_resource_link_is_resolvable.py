@@ -129,7 +129,8 @@ class TestEvictionsAreCounted:
 
     def test_the_counter_is_scraped(self) -> None:
         prometheus_metrics.record_resource_links_evicted("tenant_cap", 1)
-        assert "mcp_hangar_resource_links_evicted_total" in prometheus_metrics.get_metrics()
+        exposition = prometheus_metrics.get_metrics().splitlines()
+        assert any(line.startswith("mcp_hangar_resource_links_evicted_total") for line in exposition)
 
     def test_only_a_reason_label_never_a_tenant(self) -> None:
         assert prometheus_metrics.RESOURCE_LINKS_EVICTED_TOTAL.label_names == ["reason"]

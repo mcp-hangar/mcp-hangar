@@ -394,5 +394,5 @@ class TestDiscoveryMetricsIntegration:
         out = get_metrics()
         assert 'mcp_hangar_discovery_registrations_total{source_type="docker"}' in out
         assert 'mcp_hangar_discovery_errors_total{error_type="ValueError",source_type="orchestrator"}' in out
-        assert "mcp_hangar_discovery_validation_failures_total" in out
+        assert any(line.startswith("mcp_hangar_discovery_validation_failures_total{") for line in out.splitlines())
         assert "mcp_hangar_discovery_validation_duration_seconds_bucket" in out

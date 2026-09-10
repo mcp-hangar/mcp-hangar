@@ -72,7 +72,8 @@ def test_an_incremented_approval_counter_is_scrapable() -> None:
     """End to end through the exposition, not just the registry index."""
     prometheus_metrics.APPROVAL_DECISIONS_TOTAL.inc(channel="slack", decision="granted")
 
-    assert "mcp_hangar_approval_decisions_total" in prometheus_metrics.get_metrics()
+    exposition = prometheus_metrics.get_metrics().splitlines()
+    assert any(line.startswith("mcp_hangar_approval_decisions_total{") for line in exposition)
 
 
 def _absolute(module: str | None, level: int, package: str) -> str:

@@ -39,7 +39,7 @@ def test_successful_call_observes_latency_histogram() -> None:
 def test_events_compacted_has_no_stream_id_label() -> None:
     m.record_events_compacted("stream-" + "x" * 40, 3)
     out = m.get_metrics()
-    assert "mcp_hangar_events_compacted_total" in out
+    assert any(line.startswith("mcp_hangar_events_compacted_total") for line in out.splitlines())
     assert "stream_id" not in out
 
 
