@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.mark.otel_sdk
 def test_http_outbound_puts_traceparent_in_params_meta() -> None:
-    pytest.importorskip("opentelemetry.sdk.trace")
     from opentelemetry import trace as otel_trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor

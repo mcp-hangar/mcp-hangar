@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytest.importorskip("opentelemetry.sdk.trace")
+pytestmark = pytest.mark.otel_sdk
 
 
 def _exporter_tracer():

@@ -22,14 +22,13 @@ from mcp_hangar.observability.tracing import (
 class TestBaggageRoundTrip:
     """Baggage must be extracted from inbound carriers and available in-context."""
 
+    # extract_trace_context is a no-op unless the full OTEL SDK is installed
+    # (OTEL_AVAILABLE). Gate on the SDK, not just opentelemetry.baggage: mcp v2
+    # pulls opentelemetry-api transitively, so an api-only (SDK-less) dev env
+    # imports opentelemetry.baggage yet extract_trace_context still returns None.
+    @pytest.mark.otel_sdk
     def test_inbound_baggage_extracted_and_available(self) -> None:
         """Baggage present on an inbound carrier round-trips through extract/inject."""
-        # extract_trace_context is a no-op unless the full OTEL SDK is installed
-        # (OTEL_AVAILABLE). Gate on the SDK, not just opentelemetry.baggage: mcp v2
-        # pulls opentelemetry-api transitively, so an api-only (SDK-less) dev env
-        # imports opentelemetry.baggage yet extract_trace_context still returns None.
-        pytest.importorskip("opentelemetry.sdk.trace")
-
         from opentelemetry import baggage
         from opentelemetry import context as otel_context
 
@@ -108,10 +107,9 @@ class TestCrossTenantScrub:
 class TestTraceContextUnchanged:
     """Adding baggage handling must not drop traceparent/tracestate propagation."""
 
+    @pytest.mark.otel_sdk
     def test_traceparent_still_propagates(self) -> None:
         """A valid inbound traceparent still round-trips through inject/extract."""
-        pytest.importorskip("opentelemetry.sdk.trace")
-
         from opentelemetry import context as otel_context
 
         traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"

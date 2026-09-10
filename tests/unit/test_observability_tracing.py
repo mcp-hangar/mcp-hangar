@@ -4,13 +4,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-try:
-    import opentelemetry.sdk.trace.export  # noqa: F401
-
-    _OTEL_SDK_AVAILABLE = True
-except ImportError:
-    _OTEL_SDK_AVAILABLE = False
-
 from mcp_hangar.observability.tracing import (
     get_current_span_id,
     get_current_trace_id,
@@ -152,17 +145,9 @@ class TestGetCurrentSpanId:
         assert result is None or isinstance(result, str)
 
 
+@pytest.mark.otel_sdk
 class TestMeteredSpanExporter:
-    """Tests for the _MeteredSpanExporter export-failure meter.
-
-    Requires the OpenTelemetry SDK; the whole class is skipped when it is not
-    installed (the ``opentelemetry`` extra is not part of the default test env).
-    """
-
-    pytestmark = pytest.mark.skipif(
-        not _OTEL_SDK_AVAILABLE,
-        reason="requires the opentelemetry extra",
-    )
+    """Tests for the _MeteredSpanExporter export-failure meter."""
 
     @staticmethod
     def _failures_total() -> float:
@@ -230,7 +215,7 @@ class TestMeteredSpanExporter:
         inner.force_flush.assert_called_once_with(1234)
 
 
-@pytest.mark.skipif(not _OTEL_SDK_AVAILABLE, reason="requires opentelemetry-sdk")
+@pytest.mark.otel_sdk
 class TestBuildSampler:
     """_build_sampler honors OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG."""
 
@@ -295,7 +280,7 @@ class TestBuildSampler:
         assert "AlwaysOn" in s.get_description()
 
 
-@pytest.mark.skipif(not _OTEL_SDK_AVAILABLE, reason="requires opentelemetry-sdk")
+@pytest.mark.otel_sdk
 class TestUpstreamCallSpan:
     """upstream_call_span emits a SpanKind.CLIENT span with GenAI/MCP semconv attrs."""
 
