@@ -378,16 +378,34 @@ class CollectorRegistry:
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _family_name(name: str, collector) -> str:
+        """The name a collector's samples are exposed under.
+
+        `# HELP` and `# TYPE` must name this family, not the declared name: a
+        counter declared as `x` is sampled as `x_total` and an info metric as
+        `x_info`, which is also how `prometheus_client` writes their headers.
+        Headers carrying the bare name made Prometheus file every counter's
+        type and help text under a family with no samples, leaving the series
+        anyone queries untyped (#1260).
+        """
+        if isinstance(collector, Counter):
+            return f"{name}_total"
+        if isinstance(collector, Info):
+            return f"{name}_info"
+        return name
+
     def _format_metric(self, name: str, collector) -> list[str]:
-        """Format a single metric in Prometheus format."""
+        """Format a single metric in Prometheus text format 0.0.4."""
+        family = self._family_name(name, collector)
         lines = []
-        lines.append(f"# HELP {name} {collector.description}")
+        lines.append(f"# HELP {family} {collector.description}")
 
         if isinstance(collector, Counter):
-            lines.append(f"# TYPE {name} counter")
+            lines.append(f"# TYPE {family} counter")
             for sample in collector.collect():
                 labels = self._format_labels(sample.labels)
-                lines.append(f"{name}_total{labels} {sample.value}")
+                lines.append(f"{family}{labels} {sample.value}")
 
         elif isinstance(collector, Gauge):
             lines.append(f"# TYPE {name} gauge")
@@ -419,10 +437,10 @@ class CollectorRegistry:
                 lines.append(f"{name}_count{labels} {int(sample.value)}")
 
         elif isinstance(collector, Info):
-            lines.append(f"# TYPE {name}_info gauge")
+            lines.append(f"# TYPE {family} gauge")
             for sample in collector.collect():
                 labels = self._format_labels(sample.labels)
-                lines.append(f"{name}_info{labels} 1")
+                lines.append(f"{family}{labels} 1")
 
         return lines
 
