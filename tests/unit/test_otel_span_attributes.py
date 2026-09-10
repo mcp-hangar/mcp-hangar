@@ -10,6 +10,8 @@ from unittest.mock import MagicMock
 
 from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
+pytestmark = pytest.mark.otel_sdk
+
 
 @pytest.fixture(autouse=True)
 def otel_setup():
@@ -19,8 +21,6 @@ def otel_setup():
     our test TracerProvider so spans are captured by InMemorySpanExporter.
     This avoids fighting with the global TracerProvider singleton.
     """
-    pytest.importorskip("opentelemetry.sdk.trace")  # skip if SDK not installed
-
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor

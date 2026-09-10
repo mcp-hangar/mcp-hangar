@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.otel_sdk
+
 
 @pytest.fixture()
 def otel_setup():
@@ -27,8 +29,6 @@ def otel_setup():
     Patches get_tracer in the executor module to use our provider directly,
     avoiding the OTEL global set_tracer_provider (which can only be set once).
     """
-    pytest.importorskip("opentelemetry.sdk.trace")
-
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor

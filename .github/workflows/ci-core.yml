@@ -69,6 +69,28 @@ jobs:
         # companion test guards the baseline itself.
         run: python scripts/check_dead_symbols.py
 
+      - name: Tracing without the SDK is a no-op
+        # The test jobs install the `opentelemetry` extra; this job does not, so
+        # it is the one run of the API-only install (`mcp` pulls in the OTel API,
+        # not the SDK). Tracing there must degrade to a no-op, never raise. The
+        # first assert keeps this honest: if a dev dependency ever pulls the SDK
+        # in, the step would prove nothing, so it fails instead.
+        run: |
+          python - <<'EOF'
+          import importlib.util
+          assert importlib.util.find_spec("opentelemetry.sdk") is None, "lint must stay API-only"
+          from mcp_hangar.observability import tracing as t
+          assert not t.OTEL_AVAILABLE and not t.is_tracing_enabled() and t.init_tracing() is False
+          assert isinstance(t.get_tracer(), t.NoOpTracer)
+          with t.upstream_call_span("tools/call", {"name": "x"}) as span:
+              assert isinstance(span, t.NoOpSpan)
+              t.mark_span_error(span, "boom")
+          carrier = {}
+          t.inject_trace_context(carrier)
+          assert carrier == {} and t.extract_trace_context({"traceparent": "x"}) is None
+          assert t.get_current_trace_id() is None and t.get_current_span_id() is None
+          EOF
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -84,7 +106,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # `.[dev]` carries only the OTel API (via `mcp`); the tracing contract
+        # tests need the SDK from the `opentelemetry` extra. Under CI they fail
+        # without it (tests/conftest.py) rather than skip, so dropping the extra
+        # here turns the job red. `lint` stays API-only and smoke-tests that.
+        run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run tests
         # `--ignore`, not a list of directories: a new test directory is picked
@@ -120,7 +146,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # With the SDK, as in `test` -- see the note there.
+        run: pip install -e ".[dev,opentelemetry]"
 
       - name: Measure branch coverage
         # Selection pinned to match the one the floors were measured with.
@@ -167,7 +194,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # With the SDK, as in `test` -- see the note there.
+        run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run integration tests
         run: pytest tests/integration/ -v --tb=short --timeout=60
