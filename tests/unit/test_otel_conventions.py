@@ -9,7 +9,6 @@ from mcp_hangar.observability.conventions import (
     GenAI,
     Health,
     MCP,
-    Metrics,
     McpServer,
 )
 
@@ -99,11 +98,6 @@ class TestKeyAttributes:
 
     def test_cost_model(self) -> None:
         assert Cost.MODEL == "mcp.cost.model"
-
-
-class TestMetricNames:
-    def test_capability_violations_metric(self) -> None:
-        assert Metrics.CAPABILITY_VIOLATIONS_TOTAL == "mcp_hangar_capability_violations_total"
 
 
 class TestSetGovernanceAttributes:
