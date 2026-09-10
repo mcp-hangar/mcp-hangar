@@ -7,17 +7,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   stale:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # delete-branch removes the head branch of a PR it closes
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11
         with:
           days-before-stale: 90
           days-before-close: 30
+          delete-branch: true
           exempt-issue-labels: priority/p0-critical,priority/p1-high,status/blocked,pinned,type/bug
           exempt-pr-labels: priority/p0-critical,priority/p1-high,status/blocked,pinned
           operations-per-run: 30
