@@ -36,10 +36,9 @@ class TestHttpTraceContextInjection:
             for call_args in mock_inject.call_args_list:
                 assert isinstance(call_args.args[0], dict), "inject_trace_context must be called with a dict carrier"
 
+    @pytest.mark.otel_sdk
     def test_outbound_headers_contain_traceparent_when_trace_active(self) -> None:
         """Headers passed to HTTP request include traceparent when an active trace exists."""
-        pytest.importorskip("opentelemetry.sdk.trace")
-
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -90,6 +89,7 @@ class TestHttpTraceContextInjection:
             otel_trace.set_tracer_provider(old_provider)
 
 
+@pytest.mark.otel_sdk
 class TestStdioTraceContextInjection:
     """StdioClient propagates W3C TraceContext into the MCP request `_meta` field.
 
@@ -117,7 +117,6 @@ class TestStdioTraceContextInjection:
         import json
         from queue import Queue
 
-        pytest.importorskip("opentelemetry.sdk.trace")
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry import trace as otel_trace
 
@@ -148,7 +147,6 @@ class TestStdioTraceContextInjection:
         """Injecting `_meta` must not mutate the caller's params dict."""
         from queue import Queue
 
-        pytest.importorskip("opentelemetry.sdk.trace")
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry import trace as otel_trace
 
