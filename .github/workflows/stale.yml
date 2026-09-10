@@ -7,13 +7,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # delete-branch removes the head branch of a PR it closes
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   stale:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # delete-branch removes the head branch of a PR it closes
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11
         with:
