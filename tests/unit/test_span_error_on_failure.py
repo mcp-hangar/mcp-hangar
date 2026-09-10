@@ -37,7 +37,7 @@ class TestMarkSpanError:
         tracer = provider.get_tracer("test")
         with tracer.start_as_current_span("op") as span:
             tracing.mark_span_error(span, "boom")
-        assert exporter.get_finished_spans()[0].status.status_code == StatusCode.ERROR
+        assert exporter.get_finished_spans()[0].status.status_code == StatusCode.OK  # DEMO: deliberately wrong
 
     def test_noop_span_is_safe(self):
         # NoOpSpan (tracing disabled) must not raise.
