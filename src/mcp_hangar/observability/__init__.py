@@ -28,7 +28,7 @@ from mcp_hangar.observability.tracing import (
     shutdown_tracing,
     trace_span,
 )
-from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, McpServer
+from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, McpServer
 
 __all__ = [
     # Tracing
@@ -50,5 +50,4 @@ __all__ = [
     "Audit",
     "Behavioral",
     "Health",
-    "Metrics",
 ]

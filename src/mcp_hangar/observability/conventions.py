@@ -275,29 +275,6 @@ class Health:
 
 
 # ---------------------------------------------------------------------------
-# Metric names
-# ---------------------------------------------------------------------------
-
-
-class Metrics:
-    """Standard metric names for MCP Hangar Prometheus / OTEL metrics.
-
-    These names must match the metrics defined in src/mcp_hangar/metrics.py.
-    """
-
-    TOOL_CALLS_TOTAL = "mcp_hangar_tool_calls_total"
-    TOOL_CALL_DURATION_SECONDS = "mcp_hangar_tool_call_duration_seconds"
-    PROVIDER_STATE = "mcp_hangar_mcp_server_state"
-    HEALTH_CHECKS_TOTAL = "mcp_hangar_health_checks_total"
-    CIRCUIT_BREAKER_STATE = "mcp_hangar_circuit_breaker_state"
-    CAPABILITY_VIOLATIONS_TOTAL = "mcp_hangar_capability_violations_total"
-    TOOL_SCHEMA_DRIFTS_TOTAL = "mcp_hangar_tool_schema_drifts_total"
-    BEHAVIORAL_DEVIATIONS_TOTAL = "mcp_hangar_behavioral_deviations_total"
-    DETECTION_RULE_MATCHES_TOTAL = "mcp_hangar_detection_rule_matches_total"
-    ENFORCEMENT_ACTIONS_TOTAL = "mcp_hangar_enforcement_actions_total"
-
-
-# ---------------------------------------------------------------------------
 # Convenience helpers
 # ---------------------------------------------------------------------------
 

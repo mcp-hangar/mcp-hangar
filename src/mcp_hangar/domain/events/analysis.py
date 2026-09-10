@@ -16,12 +16,12 @@ from .base import DomainEvent
 class DetectionRuleMatched(DomainEvent):
     """Published when a session's call sequence matches a detection rule.
 
-    Emitted by the semantic analysis engine after evaluating a session's
-    sliding window of tool invocations against the active rule set. One
-    event per rule match (a single invocation can trigger multiple rules).
-
-    This event is consumed by the DetectionRuleMatchedEventHandler which
-    increments Prometheus counters and creates OTLP spans.
+    Would be emitted by the semantic analysis engine after evaluating a
+    session's sliding window of tool invocations against the active rule set,
+    one event per rule match (a single invocation can trigger multiple rules).
+    That engine is not shipped, so nothing emits it yet -- see
+    `[tool.event_contracts]` in pyproject.toml. `DetectionEnforcementHandler`
+    and risk scoring consume it and are waiting for it.
 
     Attributes:
         rule_id: Unique identifier of the matched rule (e.g. "credential-exfiltration").
@@ -61,13 +61,9 @@ class DetectionRuleMatched(DomainEvent):
 class EnforcementActionTaken(DomainEvent):
     """Published when an automated response action is executed for a rule match.
 
-    Emitted by the ResponseOrchestrator after executing an IResponseAction
-    (alert, throttle, suspend, block) in response to a DetectionRuleMatched
-    event. One event per action execution.
-
-    This event is consumed by the EnforcementActionTakenEventHandler which
-    increments Prometheus counters and creates OTLP spans with
-    ``mcp.enforcement.action`` attributes.
+    Emitted by `DetectionEnforcementHandler` after it executes a local
+    response action (suspend_session, block_mcp_server) for a
+    DetectionRuleMatched event. One event per action execution.
 
     Attributes:
         action: The response action type that was executed ("alert", "throttle",

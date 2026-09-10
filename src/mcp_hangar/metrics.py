@@ -917,34 +917,6 @@ EGRESS_POLICY_ENFORCED_TOTAL = Counter(
     labels=["mcp_server", "action", "rule_kind"],
 )
 
-BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
-    name="mcp_hangar_behavioral_deviations",
-    description="Total number of behavioral deviations detected",
-    labels=["mcp_server", "deviation_type"],
-)
-
-TOOL_SCHEMA_DRIFTS_TOTAL = Counter(
-    name="mcp_hangar_tool_schema_drifts",
-    description="Total number of tool schema changes detected between mcp_server restarts",
-    labels=["mcp_server", "change_type"],
-)
-
-# -----------------------------------------------------------------------------
-# Semantic Analysis Metrics (Phase 57)
-# -----------------------------------------------------------------------------
-
-DETECTION_RULE_MATCHES_TOTAL = Counter(
-    name="mcp_hangar_detection_rule_matches",
-    description="Total number of detection rule matches from semantic analysis",
-    labels=["rule_id", "severity"],
-)
-
-ENFORCEMENT_ACTIONS_TOTAL = Counter(
-    name="mcp_hangar_enforcement_actions",
-    description="Total number of automated enforcement actions taken in response to detection rule matches",
-    labels=["action", "rule_id"],
-)
-
 # -----------------------------------------------------------------------------
 # Cost Attribution Metrics
 # -----------------------------------------------------------------------------
@@ -1244,17 +1216,7 @@ def _register_all_metrics():
     )
 
     # Capability enforcement metrics
-    metrics.extend(
-        [
-            CAPABILITY_VIOLATIONS_TOTAL,
-            BEHAVIORAL_DEVIATIONS_TOTAL,
-            TOOL_SCHEMA_DRIFTS_TOTAL,
-        ]
-    )
-
-    # Semantic analysis metrics
-    metrics.append(DETECTION_RULE_MATCHES_TOTAL)
-    metrics.append(ENFORCEMENT_ACTIONS_TOTAL)
+    metrics.append(CAPABILITY_VIOLATIONS_TOTAL)
 
     # Task relay metrics (ADR-014 Phase 3)
     metrics.extend(
