@@ -194,7 +194,7 @@ instance — Hangar is self-hosted only.
 ## Listed on
 
 [![MCP Hangar on Glama](https://glama.ai/mcp/servers/mcp-hangar/mcp-hangar/badges/score.svg)](https://glama.ai/mcp/servers/mcp-hangar/mcp-hangar)
-[![MCP Hangar on LobeHub](https://lobehub.com/badge/mcp-full/mcp-hangar-mcp-hangar)](https://lobehub.com/mcp/mcp-hangar-mcp-hangar)
+[![MCP Hangar on LobeHub](https://lobehub.com/badge/mcp/mcp-hangar-mcp-hangar?style=plastic)](https://lobehub.com/mcp/mcp-hangar-mcp-hangar)
 
 Both scores are computed by the directories themselves, from a live probe of
 the server. They can go down; that is the point of showing them.
