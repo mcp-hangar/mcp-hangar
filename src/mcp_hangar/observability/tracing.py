@@ -4,10 +4,26 @@ Provides distributed tracing with automatic context propagation
 through tool invocations and mcp_server calls.
 
 Configuration via environment variables:
-    OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
+    OTEL_EXPORTER_OTLP_[TRACES_]PROTOCOL: grpc (default) or http/protobuf
+    OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT, _INSECURE, _HEADERS and the other
+        standard exporter variables: read by the OpenTelemetry SDK itself
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
     OTEL_TRACES_SAMPLER: Sampler type (default: always_on)
     MCP_TRACING_ENABLED: Enable/disable tracing (default: true)
+
+OTLP trace exporter precedence, first match wins (resolve_otlp_exporter_settings):
+    protocol: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, OTEL_EXPORTER_OTLP_PROTOCOL,
+        then grpc. Any other value adds no OTLP exporter and logs why.
+    endpoint: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, OTEL_EXPORTER_OTLP_ENDPOINT,
+        then Hangar's own (``observability.tracing.otlp_endpoint`` in
+        config.yaml, or ``init_tracing(otlp_endpoint=...)``), then the SDK
+        default: http://localhost:4317 for grpc, http://localhost:4318/v1/traces
+        for http/protobuf. The environment beats config.yaml, as everywhere in
+        the bootstrap. An empty OTEL_EXPORTER_OTLP_ENDPOINT adds no OTLP exporter.
+    TLS: https:// always uses TLS. For grpc otherwise
+        OTEL_EXPORTER_OTLP_TRACES_INSECURE, OTEL_EXPORTER_OTLP_INSECURE, then
+        the scheme: http:// is plaintext (so both defaults are), a scheme-less
+        endpoint uses TLS. For http/protobuf the scheme alone decides.
 
 Example:
     from mcp_hangar.observability.tracing import init_tracing, get_tracer
@@ -26,6 +42,7 @@ Example:
 
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 import os
 import sys
 import threading
@@ -79,14 +96,22 @@ except ImportError:
     OTEL_AVAILABLE = False
     trace = None  # type: ignore[assignment]
 
-# Try to import OTLP exporter
+# The OTLP/gRPC span exporter, the default protocol's. OTLP/HTTP is imported
+# only when selected: see _build_otlp_span_exporter().
 try:
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as _GrpcSpanExporter
 
+    OTLPSpanExporter: Any = _GrpcSpanExporter
     OTLP_AVAILABLE = True
 except ImportError:
     OTLP_AVAILABLE = False
     OTLPSpanExporter = None
+
+# The OTLP protocols Hangar builds a span exporter for, and the package each needs.
+_OTLP_SPAN_EXPORTER_PACKAGES = {
+    "grpc": "opentelemetry-exporter-otlp-proto-grpc",
+    "http/protobuf": "opentelemetry-exporter-otlp-proto-http",
+}
 
 # Try to import Jaeger exporter
 try:
@@ -253,6 +278,108 @@ def _build_sampler() -> Any:
     return ParentBased(ALWAYS_ON)
 
 
+@dataclass(frozen=True)
+class OtlpExporterSettings:
+    """What Hangar passes an SDK OTLP exporter. None leaves a value to the SDK."""
+
+    protocol: str
+    endpoint: str | None
+    insecure: bool | None
+
+
+def resolve_otlp_exporter_settings(
+    signal: str = "traces",
+    endpoint: str | None = None,
+    insecure: bool | None = None,
+) -> OtlpExporterSettings:
+    """Effective settings for one signal's OTLP exporter, env over Hangar's own.
+
+    ``endpoint`` and ``insecure`` are Hangar's configuration (config.yaml or an
+    argument); ``signal`` names the ``OTEL_EXPORTER_OTLP_<SIGNAL>_*`` family
+    (``traces``, ``logs``). The environment beats Hangar's configuration, and
+    the signal-specific variable the generic one. First match wins:
+
+    protocol: ``OTEL_EXPORTER_OTLP_<SIGNAL>_PROTOCOL``,
+        ``OTEL_EXPORTER_OTLP_PROTOCOL``, ``grpc``. Lower-cased, not validated:
+        the caller rejects what it cannot build.
+    endpoint: ``OTEL_EXPORTER_OTLP_<SIGNAL>_ENDPOINT``,
+        ``OTEL_EXPORTER_OTLP_ENDPOINT``, ``endpoint``, the SDK default. While
+        either variable is set this is None and the SDK reads them itself, in
+        that order, adding ``/v1/<signal>`` to the generic one for
+        http/protobuf as the spec requires. ``""`` -- an empty ``endpoint``, or
+        an empty generic variable and no signal one -- means no OTLP exporter.
+    insecure (gRPC only): ``OTEL_EXPORTER_OTLP_<SIGNAL>_INSECURE``,
+        ``OTEL_EXPORTER_OTLP_INSECURE``, ``insecure`` (only with the
+        ``endpoint`` it came with), then the SDK's rule: ``http://`` is
+        plaintext, a scheme-less endpoint uses TLS. The SDK uses TLS for
+        ``https://`` whatever this returns.
+
+    An empty variable counts as unset, the generic endpoint aside.
+    """
+    signal_var = f"OTEL_EXPORTER_OTLP_{signal.upper()}_"
+    env = os.environ
+    protocol = env.get(signal_var + "PROTOCOL") or env.get("OTEL_EXPORTER_OTLP_PROTOCOL") or "grpc"
+    if env.get(signal_var + "ENDPOINT"):
+        endpoint = insecure = None
+    elif "OTEL_EXPORTER_OTLP_ENDPOINT" in env:
+        endpoint = None if env["OTEL_EXPORTER_OTLP_ENDPOINT"].strip() else ""
+        insecure = None
+    if env.get(signal_var + "INSECURE") or env.get("OTEL_EXPORTER_OTLP_INSECURE"):
+        insecure = None
+    return OtlpExporterSettings(protocol.strip().lower(), endpoint, insecure)
+
+
+def _otlp_http_span_exporter_class() -> Any:
+    """The SDK's OTLP/HTTP span exporter class, or None when its package is absent."""
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPHttpSpanExporter
+    except ImportError:
+        return None
+    return OTLPHttpSpanExporter
+
+
+def _build_otlp_span_exporter(settings: OtlpExporterSettings) -> Any:
+    """The SDK span exporter ``settings`` select, or None with the reason logged.
+
+    Logs the protocol, never the endpoint (a URL may carry userinfo) nor any
+    header (OTEL_EXPORTER_OTLP_HEADERS carries credentials). Building an
+    exporter connects to nothing, so it says nothing about delivery.
+    """
+    if settings.endpoint == "":
+        logger.info("tracing_otlp_exporter_skipped", reason="empty_endpoint")
+        return None
+    package = _OTLP_SPAN_EXPORTER_PACKAGES.get(settings.protocol)
+    if package is None:
+        logger.warning(
+            "tracing_otlp_exporter_unavailable",
+            reason="unsupported_protocol",
+            protocol=settings.protocol,
+            supported=sorted(_OTLP_SPAN_EXPORTER_PACKAGES),
+        )
+        return None
+    if settings.protocol == "grpc":
+        exporter_class = OTLPSpanExporter if OTLP_AVAILABLE else None
+        kwargs: dict[str, Any] = {"endpoint": settings.endpoint, "insecure": settings.insecure}
+    else:
+        exporter_class = _otlp_http_span_exporter_class()
+        kwargs = {"endpoint": settings.endpoint}  # TLS follows the URL scheme
+    if exporter_class is None:
+        logger.warning(
+            "tracing_otlp_exporter_unavailable",
+            reason="package_missing",
+            protocol=settings.protocol,
+            package=package,
+        )
+        return None
+    exporter = exporter_class(**kwargs)
+    logger.info(
+        "tracing_otlp_exporter_added",
+        protocol=settings.protocol,
+        endpoint_from="hangar_config" if settings.endpoint else "otel_env_or_sdk_default",
+    )
+    return exporter
+
+
 def init_tracing(
     service_name: str = "mcp-hangar",
     otlp_endpoint: str | None = None,
@@ -264,13 +391,16 @@ def init_tracing(
 
     Args:
         service_name: Service name for traces.
-        otlp_endpoint: OTLP collector endpoint (gRPC).
+        otlp_endpoint: Hangar's OTLP collector endpoint. An
+            OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT variable beats it; see the
+            module docstring for the protocol and TLS.
         jaeger_host: Jaeger agent host for UDP export.
         jaeger_port: Jaeger agent port.
         console_export: Enable console span export (for debugging).
 
     Returns:
-        True if tracing was initialized, False otherwise.
+        True if Hangar registered its own provider with at least one exporter,
+        False otherwise. Not proof of delivery: no collector has been contacted.
     """
     global _tracer_mcp_server, _initialized
 
@@ -299,9 +429,6 @@ def init_tracing(
         return False
 
     try:
-        # Get endpoint from env or parameter
-        otlp_endpoint = otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-
         # Create resource with service info
         resource = Resource.create(
             {
@@ -320,15 +447,16 @@ def init_tracing(
         # Add exporters
         exporters_added = 0
 
-        # OTLP exporter (preferred)
-        if OTLP_AVAILABLE and otlp_endpoint:
-            try:
-                otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-                provider.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
-                exporters_added += 1
-                logger.info("tracing_otlp_exporter_added", endpoint=otlp_endpoint)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
-                logger.warning("tracing_otlp_exporter_failed", error=str(e))
+        # OTLP exporter (preferred): protocol, endpoint and TLS from one effective config.
+        otlp_settings = resolve_otlp_exporter_settings("traces", otlp_endpoint)
+        try:
+            otlp_exporter = _build_otlp_span_exporter(otlp_settings)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
+            otlp_exporter = None
+            logger.warning("tracing_otlp_exporter_failed", protocol=otlp_settings.protocol, error=str(e))
+        if otlp_exporter is not None:
+            provider.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
+            exporters_added += 1
 
         # Jaeger exporter (fallback)
         if JAEGER_AVAILABLE and jaeger_host:
