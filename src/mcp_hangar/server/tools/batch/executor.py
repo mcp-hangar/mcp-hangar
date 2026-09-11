@@ -40,7 +40,7 @@ from ....domain.services.digest_validator import DigestValidator
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error
+from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -1471,7 +1471,7 @@ class BatchExecutor:
                 cs_span.set_attribute("cold_start.result", "success")
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
-                cs_span.record_exception(e)
+                record_handled_failure(cs_span, e)
                 return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
         return None
 
