@@ -14,6 +14,7 @@ from typing import Any
 from ...logging_config import get_logger
 from ...metrics import record_otlp_audit_export_failure
 from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer
+from ...observability.tracing import OtlpExporterSettings, resolve_otlp_exporter_settings
 
 logger = get_logger(__name__)
 
@@ -39,14 +40,20 @@ try:
 except ImportError:
     OTEL_LOGS_AVAILABLE = False
 
+# The OTLP/gRPC log exporter, the default protocol's. OTLP/HTTP is imported only
+# when selected: see _build_otlp_log_exporter().
 try:
     from opentelemetry.exporter.otlp.proto.grpc import _log_exporter as _otlp_logs
 
     OTLPLogExporter: Any = _otlp_logs.OTLPLogExporter
-    OTLP_LOGS_AVAILABLE = True
 except ImportError:
     OTLPLogExporter = None
-    OTLP_LOGS_AVAILABLE = False
+
+# The OTLP protocols Hangar builds a log exporter for, and the package each needs.
+_OTLP_LOG_EXPORTER_PACKAGES = {
+    "grpc": "opentelemetry-exporter-otlp-proto-grpc",
+    "http/protobuf": "opentelemetry-exporter-otlp-proto-http",
+}
 
 # The record an SDK provider can export. Before 1.38 its Logger passes an API
 # LogRecord on without the provider's resource, and the OTLP encoder then fails
@@ -100,9 +107,9 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
     No endpoint, no audit export. With one, audit export is on
     (``audit_log_export_configured``) whatever happens next, and Hangar
     registers its own LoggerProvider -- a batch processor and a metered OTLP log
-    exporter -- unless the SDK is absent (records then go to the structured log)
-    or another provider was registered first (records then go through that one,
-    which Hangar never replaces and never shuts down).
+    exporter -- unless the SDK or a usable OTLP exporter is absent (records then
+    go to the structured log) or another provider was registered first (records
+    then go through that one, which Hangar never replaces and never shuts down).
 
     Returns:
         True if Hangar's own provider is the registered one.
@@ -118,17 +125,21 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
     if _shut_down:
         logger.warning("audit_log_export_init_refused", reason="already_shut_down")
         return False
-    if not (OTEL_LOGS_AVAILABLE and OTLP_LOGS_AVAILABLE):
+    if not OTEL_LOGS_AVAILABLE:
         logger.info("audit_log_export_sdk_not_installed", fallback="structlog")
         return False
     if _logger_provider_registered():
         logger.info("audit_log_external_provider_in_use", provider=type(get_logger_provider()).__name__)
         return False
 
+    settings = resolve_otlp_exporter_settings("logs", otlp_endpoint)
     try:
+        otlp_exporter = _build_otlp_log_exporter(settings)
+        if otlp_exporter is None:
+            return False
         provider = LoggerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
         # Duck-typed: the SDK renamed the exporter base it would otherwise subclass.
-        exporter: Any = _MeteredLogExporter(OTLPLogExporter(endpoint=otlp_endpoint, insecure=True))
+        exporter: Any = _MeteredLogExporter(otlp_exporter)
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
         # One-shot, and a second registration is refused with only a warning:
         # confirm this one took, as tracing does.
@@ -142,8 +153,47 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
         return False
 
     _audit_provider = provider
-    logger.info("audit_log_export_initialized", otlp_endpoint=otlp_endpoint)
+    logger.info("audit_log_export_initialized", protocol=settings.protocol)
     return True
+
+
+def _build_otlp_log_exporter(settings: OtlpExporterSettings) -> Any:
+    """The SDK log exporter ``settings`` select, or None with the reason logged.
+
+    A None setting is left to the SDK, as for spans (``_build_otlp_span_exporter``).
+    Logs the protocol, never the endpoint (it may carry userinfo) nor any header.
+    """
+    package = _OTLP_LOG_EXPORTER_PACKAGES.get(settings.protocol)
+    exporter_class: Any = None
+    if settings.endpoint == "":
+        reason = "empty_endpoint"
+    elif package is None:
+        reason = "unsupported_protocol"
+    else:
+        reason = "package_missing"
+        exporter_class = OTLPLogExporter if settings.protocol == "grpc" else _otlp_http_log_exporter_class()
+    if exporter_class is None:
+        logger.warning(
+            "audit_log_otlp_exporter_unavailable",
+            reason=reason,
+            protocol=settings.protocol,
+            package=package,
+            supported=sorted(_OTLP_LOG_EXPORTER_PACKAGES),
+            fallback="structlog",
+        )
+        return None
+    if settings.protocol == "grpc":
+        return exporter_class(endpoint=settings.endpoint, insecure=settings.insecure)
+    return exporter_class(endpoint=settings.endpoint)  # TLS follows the URL scheme
+
+
+def _otlp_http_log_exporter_class() -> Any:
+    """The SDK's OTLP/HTTP log exporter class, or None when its package is absent."""
+    try:
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter as OTLPHttpLogExporter
+    except ImportError:
+        return None
+    return OTLPHttpLogExporter
 
 
 def audit_log_export_configured() -> bool:

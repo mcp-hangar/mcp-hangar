@@ -68,8 +68,11 @@ def _record_constructors(module: Any) -> dict[str, list[Any]]:
         return seen
 
     def exporter(**kwargs: Any) -> Any:
-        seen["endpoints"].append(kwargs.get("endpoint"))
-        return exporter_cls(**kwargs)
+        built = exporter_cls(**kwargs)
+        # What the SDK resolved, not what Hangar passed: with the endpoint in
+        # the env, Hangar passes None and the SDK reads it (#1326).
+        seen["endpoints"].append(built._endpoint)
+        return built
 
     def processor(inner: Any, *args: Any, **kwargs: Any) -> Any:
         seen["batched"].append(type(inner).__name__)

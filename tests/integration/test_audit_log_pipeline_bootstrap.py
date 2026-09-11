@@ -82,7 +82,8 @@ def test_an_endpoint_in_the_file_or_the_env_builds_the_owned_pipeline(runs, mode
     assert run["audit_exporters"] == ["OTLPAuditExporter"]
     assert run["logger_provider"] == "LoggerProvider" and run["owned"] is True
     # One OTLP exporter, to the configured endpoint, metered, behind a batch processor.
-    assert run["endpoints"] == [run["endpoint"]]
+    # The gRPC exporter keeps the target it resolved, host:port.
+    assert run["endpoints"] == [run["endpoint"].removeprefix("http://")]
     assert run["batched"] == ["_MeteredLogExporter"]
     assert "audit_log_export_initialized" in run["stderr"]
 

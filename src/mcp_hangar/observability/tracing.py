@@ -760,6 +760,28 @@ def record_upstream_outcome(
         pass
 
 
+def record_handled_failure(span: Any, error: BaseException) -> None:
+    """End a span ERROR for a failure its fault barrier caught and did not re-raise.
+
+    ``record_exception`` alone leaves the status UNSET, so a failed append,
+    handler, discovery cycle or cold start read as a success. This records the
+    exception, sets ERROR, and sets ``error.type`` to the exception's qualified
+    class name. On a span several handlers share, the first failure names it and
+    a later success never resets it. For operational failures only: a policy
+    refusal is a correct answer, not an ERROR. No-op without the SDK or on a
+    NoOp span; never raises.
+    """
+    if not OTEL_AVAILABLE:
+        return
+    mark_span_error(span)
+    try:
+        if ERROR_TYPE not in (getattr(span, "attributes", None) or {}):
+            span.set_attribute(ERROR_TYPE, type(error).__qualname__)
+        span.record_exception(error)
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
+
+
 def _answer_error_type(answer: Any) -> str | None:
     """``error.type`` of a failed JSON-RPC envelope, None for a success; the aggregate's test."""
     if not isinstance(answer, dict):
