@@ -9,4 +9,4 @@ each only when the event has it, at the same level as before. The full event
 is logged in a separate `domain_event_detail` line at DEBUG, built only when
 DEBUG is enabled. Consumers that parse event payloads from INFO or WARNING
 lines must enable DEBUG or read the event store. The event store, the audit
-trail and the security log are unchanged
+trail and the security log are unchanged.
