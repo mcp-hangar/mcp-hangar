@@ -150,9 +150,6 @@ class TestASuccessfulCallOverHttp:
         assert tree.descends_from(client, tree.one("batch.call.add"))
         assert [_ids(c["header"]) for c in tree.http_calls] == [(tree.trace_id, client["span_id"])]
 
-    @pytest.mark.xfail(
-        strict=True, raises=AssertionError, reason="#1271 HTTP _meta is injected before the CLIENT span opens"
-    )
     def test_the_meta_traceparent_names_the_upstream_client_span(self, run):
         tree = Tree(run, "http_success")
 
