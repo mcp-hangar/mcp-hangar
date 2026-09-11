@@ -128,7 +128,8 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "hot_loading": frozenset({"cache", "enabled", "registry"}),
     "interceptors": frozenset({"validators"}),
     "logging": frozenset({"file", "json_format", "level"}),
-    "observability": frozenset({"langfuse", "tracing"}),
+    # `audit.enabled` (#1327), read by `bootstrap/observability._parse_observability_config`.
+    "observability": frozenset({"audit", "langfuse", "tracing"}),
     "persistence": frozenset({"backend", "postgresql", "sqlite"}),
     # The command-bus limit, read by `bootstrap/runtime.resolve_rate_limit_config`.
     # There is a second `rate_limit` nested under `auth`; both spellings are live

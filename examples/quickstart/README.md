@@ -129,6 +129,13 @@ MCP_TRACING_ENABLED=false docker compose up -d
 Or point it at a real collector via `OTEL_EXPORTER_OTLP_ENDPOINT` (see
 `examples/otel-collector/`).
 
+An OTLP endpoint set explicitly, in `OTEL_EXPORTER_OTLP_ENDPOINT` or in
+`observability.tracing.otlp_endpoint`, also turns on OTLP export of audit
+records, which carry caller identities. To export traces without them, set
+`MCP_AUDIT_EXPORT_ENABLED=false`, or `observability.audit.enabled: false` in
+`config.yaml`. The environment variable wins over the file, and the default is
+`true`.
+
 ## Cleanup
 
 ```bash

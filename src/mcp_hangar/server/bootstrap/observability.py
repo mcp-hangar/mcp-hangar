@@ -10,6 +10,8 @@ Configuration via environment variables:
     OTEL_EXPORTER_OTLP_*: standard OTLP exporter settings; their precedence
         over otlp_endpoint is in mcp_hangar.observability.tracing
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
+    MCP_AUDIT_EXPORT_ENABLED: Export audit records over OTLP to an OTLP endpoint
+        set explicitly (default: true). False turns audit export off, not tracing
     MCP_LANGFUSE_ENABLED: Enable Langfuse (default: false)
     LANGFUSE_PUBLIC_KEY: Langfuse public key
     LANGFUSE_SECRET_KEY: Langfuse secret key
@@ -22,6 +24,8 @@ Or via config.yaml:
         enabled: true
         otlp_endpoint: http://localhost:4317
         service_name: mcp-hangar
+      audit:
+        enabled: true  # MCP_AUDIT_EXPORT_ENABLED wins over this
       langfuse:
         enabled: true
         public_key: ${LANGFUSE_PUBLIC_KEY}
@@ -82,6 +86,8 @@ class ObservabilityConfig:
     langfuse: LangfuseBootstrapConfig
     audit_otlp_endpoint: str | None = None
     """Where OTLP audit records go; None keeps audit export off."""
+    audit_export_enabled: bool = True
+    """`observability.audit.enabled`: false keeps audit export off whatever the endpoint."""
 
 
 def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
@@ -122,11 +128,22 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
 
     # Audit records go to the tracing endpoint, but only to one set explicitly,
     # in the env or the file (#1289): `otlp_endpoint` defaults to localhost, and
-    # nobody chose that. Not gated on `tracing.enabled`: audit is its own signal.
+    # nobody chose that. Not gated on `tracing.enabled`: audit is its own signal,
+    # with its own switch (#1327), the env's word beating the file's. A string is
+    # read as the env var is: `${VAR:-false}` interpolates to a truthy "false".
+    audit_enabled = (obs_config.get("audit") or {}).get("enabled", True)
+    if isinstance(audit_enabled, str):
+        audit_enabled = audit_enabled.lower() in ("true", "1", "yes")
+    audit_enabled = _get_bool_env("MCP_AUDIT_EXPORT_ENABLED", bool(audit_enabled))
     explicit = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") is not None or "otlp_endpoint" in tracing_dict
-    audit_otlp_endpoint = tracing.otlp_endpoint if explicit and tracing.otlp_endpoint else None
+    audit_otlp_endpoint = tracing.otlp_endpoint if audit_enabled and explicit and tracing.otlp_endpoint else None
 
-    return ObservabilityConfig(tracing=tracing, langfuse=langfuse, audit_otlp_endpoint=audit_otlp_endpoint)
+    return ObservabilityConfig(
+        tracing=tracing,
+        langfuse=langfuse,
+        audit_otlp_endpoint=audit_otlp_endpoint,
+        audit_export_enabled=audit_enabled,
+    )
 
 
 def _get_bool_env(key: str, default: bool) -> bool:
@@ -282,6 +299,9 @@ def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, Obs
 
     # The audit log pipeline: its own provider, beside tracing's, not inside it.
     # Before `init_event_handlers`, which selects the audit exporter from it.
+    # Switched off, no endpoint reaches it, so it builds and turns on nothing.
+    if not obs_config.audit_export_enabled:
+        logger.info("audit_log_export_disabled_by_config")
     init_audit_log_export(obs_config.audit_otlp_endpoint, obs_config.tracing.service_name)
 
     # Initialize Langfuse
