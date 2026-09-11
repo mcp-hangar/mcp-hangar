@@ -12,7 +12,7 @@ import uuid
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
-from .observability.tracing import inject_trace_context, upstream_call_span
+from .observability.tracing import inject_trace_context, record_upstream_outcome, upstream_call_span
 from .protocol import inject_protocol_meta
 
 if TYPE_CHECKING:
@@ -224,8 +224,8 @@ class StdioClient:
 
         # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv). Opened
         # before injection so the trace context written into `_meta` parents the
-        # upstream's span to this one.
-        with upstream_call_span(method, params):
+        # upstream's span to this one. The answer is classified inside it too.
+        with upstream_call_span(method, params) as span:
             # Inject Hangar protocol metadata, then propagate the active trace
             # context to the upstream over stdio: W3C traceparent/tracestate go
             # in the MCP `_meta` field (mirrors the HTTP transport, which injects
@@ -263,6 +263,7 @@ class StdioClient:
 
             try:
                 response = result_queue.get(timeout=timeout)
+                record_upstream_outcome(span, response)
                 return response
             except Empty:
                 with self.pending_lock:

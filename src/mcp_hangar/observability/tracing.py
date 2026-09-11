@@ -509,6 +509,10 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
     `_meta`) parents the upstream's server span to this one. Names/attributes
     follow OTel GenAI/MCP semconv. No-op when tracing is disabled.
 
+    Keep it open until the answer is classified: an exception leaving it ends
+    it in ERROR with the exception's class as ``error.type``, and a failure the
+    client returns as data is recorded with :func:`record_upstream_outcome`.
+
     Args:
         method: JSON-RPC method (e.g. "tools/call", "tools/list", "initialize").
         params: Request params; for tools/call the tool name is read from
@@ -526,7 +530,12 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
         name = method
 
     with trace_span(name, attributes=attributes, kind="client") as span:
-        yield span
+        try:
+            yield span
+        except Exception as e:
+            # The SDK sets ERROR on the way out; this adds the bounded type.
+            record_upstream_outcome(span, error=e)
+            raise
 
 
 def mark_span_error(span: Any, description: str | None = None) -> None:
@@ -542,6 +551,55 @@ def mark_span_error(span: Any, description: str | None = None) -> None:
         span.set_status(Status(StatusCode.ERROR, description or ""))
     except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
         pass
+
+
+#: OTel ``error.type``, the attribute the mcp SDK's server middleware sets.
+ERROR_TYPE = "error.type"
+
+
+def record_upstream_outcome(
+    span: Any, answer: Any = None, *, http_status: int | None = None, error: BaseException | None = None
+) -> None:
+    """Mark an upstream CLIENT span ERROR when its transport client says the call failed.
+
+    Observes only: the client has already decided on the envelope it returns
+    or the exception it raises, and this changes neither. ``error.type`` takes
+    the mcp SDK server middleware's values, so both ends of a hop agree:
+    ``http_<status>`` for a status failure, an exception's class name, the
+    JSON-RPC error code as a string, ``tool_error`` for ``isError: true``.
+    Nothing the upstream sent -- message, content, body -- is recorded.
+
+    Args:
+        span: The call's CLIENT span; a NoOp span is fine.
+        answer: The JSON-RPC envelope the client returns.
+        http_status: The status, when the client rejected the answer on it.
+        error: The exception the client raised, or turned into an envelope.
+    """
+    if http_status is not None:
+        error_type: str | None = f"http_{http_status}"
+    elif error is not None:
+        error_type = type(error).__qualname__
+    else:
+        error_type = _answer_error_type(answer)
+    if error_type is None:
+        return
+    mark_span_error(span)
+    try:
+        span.set_attribute(ERROR_TYPE, error_type)
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
+
+
+def _answer_error_type(answer: Any) -> str | None:
+    """``error.type`` of a failed JSON-RPC envelope, None for a success; the aggregate's test."""
+    if not isinstance(answer, dict):
+        return None
+    if "error" in answer:
+        code = answer["error"].get("code") if isinstance(answer["error"], dict) else None
+        # The spec's integer code; anything else is not copied onto the span.
+        return str(code) if type(code) is int else "_OTHER"
+    result = answer.get("result")
+    return "tool_error" if isinstance(result, dict) and result.get("isError") else None
 
 
 def inject_trace_context(carrier: dict[str, str]) -> None:

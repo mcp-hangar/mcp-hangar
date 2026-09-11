@@ -186,9 +186,6 @@ class TestAnUpstreamFailure:
         assert tree.descends_from(client, call)
         assert [_ids(c["traceparent"]) for c in tree.stdio_calls] == [(tree.trace_id, client["span_id"])]
 
-    @pytest.mark.xfail(
-        strict=True, raises=AssertionError, reason="#1277 the CLIENT span ends before the response is classified"
-    )
     def test_the_client_span_records_the_upstream_failure(self, run):
         assert Tree(run, "upstream_failure").one("execute_tool divide")["status"] == "ERROR"
 
