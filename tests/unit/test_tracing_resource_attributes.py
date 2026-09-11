@@ -126,8 +126,10 @@ def test_each_resource_attribute_takes_the_first_source_that_sets_it(
         assert resource["service.version"] == version("mcp-hangar")
 
 
-def test_without_an_instance_id_the_sdk_mints_its_own() -> None:
+def test_without_an_instance_id_hangar_leaves_it_to_the_sdk() -> None:
     """A bare init_tracing(), outside the bootstrap, leaves service.instance.id to the SDK."""
+    from opentelemetry.sdk.version import __version__ as sdk_version
+
     resource = _exported_resource("""
 from mcp_hangar.domain.events import ToolInvocationRequested
 
@@ -135,6 +137,10 @@ assert t.init_tracing()
 report_exported_resource(produced_by=ToolInvocationRequested(mcp_server_id="math").produced_by)
 """)
 
+    # opentelemetry-sdk 1.43.0 added ServiceInstanceIdResourceDetector (open-telemetry/opentelemetry-python#5259).
+    if tuple(int(part) for part in sdk_version.split(".")[:2]) < (1, 43):
+        assert "service.instance.id" not in resource
+        return
     assert uuid.UUID(resource["service.instance.id"]).version == 4
     assert resource["service.instance.id"] != resource["produced_by"]
 
