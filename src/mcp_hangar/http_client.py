@@ -495,6 +495,32 @@ class HttpClient:
         # Unreachable: the loop returns or raises on its last attempt.
         raise ClientError("retry_loop_exhausted")
 
+    def _outbound_carriers(
+        self, params: dict[str, Any] | None, tenant_id: str | None
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Fresh params and headers for one send, both carrying the current trace context.
+
+        Call it inside the CLIENT span so both traceparents name that span, as
+        over stdio: built before it, ``_meta`` named the caller's span, or had
+        no traceparent without one (#1271). A new copy per send: the caller's
+        ``params`` are never mutated, and a re-send never carries the context
+        injected for an earlier one.
+        """
+        sent = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
+        headers: dict[str, str] = {}
+        # SEP-414: trace context rides in params._meta as well as the headers,
+        # so it survives across MCP hops regardless of transport.
+        for carrier in (sent["_meta"], headers):
+            inject_trace_context(carrier)
+            # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+            scrub_baggage_for_tenant(carrier, tenant_id)
+        # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
+        # legacy session-based upstream that established one. Declaring the
+        # upstream stateless keeps _mcp_session_id None, so this is skipped.
+        if not self._http_config.stateless_upstream and self._mcp_session_id:
+            headers["Mcp-Session-Id"] = self._mcp_session_id
+        return sent, headers
+
     def call(
         self,
         method: str,
@@ -529,19 +555,6 @@ class HttpClient:
         _identity = get_identity_context()
         _tenant_id = _identity.caller.tenant_id if _identity and _identity.caller else None
 
-        params = inject_protocol_meta(params, modern_envelope=self.modern_envelope)
-        # SEP-414: carry W3C trace context in params._meta (not only HTTP headers),
-        # so it survives across MCP hops regardless of transport.
-        inject_trace_context(params["_meta"])
-        # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
-        scrub_baggage_for_tenant(params["_meta"], _tenant_id)
-        request_body = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }
-
         # Use endpoint directly - it should already include the full MCP path
         url = self._endpoint
 
@@ -559,20 +572,12 @@ class HttpClient:
 
         try:
             # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv),
-            # opened before injection so the traceparent written into the
-            # request headers parents the upstream's span to this one.
+            # opened before either carrier is built so the traceparent written
+            # into params._meta and the headers parents the upstream's span to
+            # this one.
             with upstream_call_span(method, params):
-                # Build per-request headers: W3C TraceContext (+ deprecated session id).
-                extra_headers: dict[str, str] = {}
-                inject_trace_context(extra_headers)
-                # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
-                scrub_baggage_for_tenant(extra_headers, _tenant_id)
-                # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
-                # legacy session-based upstream that established one. Declaring the
-                # upstream stateless keeps _mcp_session_id None, so this is skipped.
-                if not self._http_config.stateless_upstream and self._mcp_session_id:
-                    extra_headers["Mcp-Session-Id"] = self._mcp_session_id
-
+                sent_params, extra_headers = self._outbound_carriers(params, _tenant_id)
+                request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 response = self._post_with_retry(
                     url,
@@ -910,20 +915,12 @@ class HttpClient:
         identity = get_identity_context()
         tenant_id = identity.caller.tenant_id if identity and identity.caller else None
 
-        sent_params = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
-        inject_trace_context(sent_params["_meta"])
-        scrub_baggage_for_tenant(sent_params["_meta"], tenant_id)
-        body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
-
         mcp_server_label = self._mcp_server_id or self._host
         try:
-            with upstream_call_span(method, sent_params):
-                headers: dict[str, str] = {}
-                inject_trace_context(headers)
-                scrub_baggage_for_tenant(headers, tenant_id)
-                if not self._http_config.stateless_upstream and self._mcp_session_id:
-                    headers["Mcp-Session-Id"] = self._mcp_session_id
-
+            # Carriers built inside the CLIENT span, as in `call`.
+            with upstream_call_span(method, params):
+                sent_params, headers = self._outbound_carriers(params, tenant_id)
+                body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
                 response = self._client.post(
                     self._endpoint,
