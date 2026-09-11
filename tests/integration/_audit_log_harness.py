@@ -18,7 +18,12 @@ records and spans can be read back.
 
 Modes: ``yaml`` and ``env`` set the OTLP endpoint in the file or the env var
 (the parent sets the env); ``none`` sets neither; ``tracing_off`` sets it in the
-file with tracing disabled.
+file with tracing disabled. ``auth`` is ``yaml`` with API-key auth on: the app
+is wrapped in the auth enforcement ``serve --http`` applies, and each call
+presents a key minted in the bootstrapped store (#1342). ``bound`` is ``yaml``
+with an identity the served HTTP path has no source for -- a session id, an
+agent and no user -- declared through the process-wide fallback identity, the
+seam a stdio session's declared caller uses (ADR-026).
 """
 
 from __future__ import annotations
@@ -51,7 +56,21 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
     "env": [("sampled", "01")],
     "none": [("sampled", "01")],
     "tracing_off": [("no_trace_context", None)],
+    "auth": [("sampled", "01"), ("failed", "01")],
+    "bound": [("sampled", "01")],
 }
+
+#: call name -> (tool, arguments); every other call is add(1, 2).
+TOOLS: dict[str, tuple[str, dict[str, int]]] = {"failed": ("divide", {"a": 1, "b": 0})}
+
+#: The principal the ``auth`` mode's key authenticates as, and its tenant.
+AUTH_PRINCIPAL = "user:audit-harness"
+AUTH_TENANT = "tenant-audit"
+
+#: The identity the ``bound`` mode declares.
+BOUND_AGENT = "agent-audit"
+BOUND_SESSION = "session-audit"
+BOUND_TENANT = "tenant-bound"
 
 
 def caller(call: str) -> tuple[str, str]:
@@ -95,24 +114,55 @@ def _audit_exporters(runtime: Any) -> list[str]:
     )
 
 
-def _hangar_call(client: Any, call: str, flags: str | None) -> dict[str, Any]:
+def _hangar_call(client: Any, call: str, flags: str | None, headers: dict[str, str]) -> dict[str, Any]:
     meta: dict[str, Any] = dict(ENVELOPE)
     trace_id, span_id = caller(call)
     if flags is not None:
         meta["traceparent"] = f"00-{trace_id}-{span_id}-{flags}"
+    tool, arguments = TOOLS.get(call, ("add", {"a": 1, "b": 2}))
     params = {
         "name": "hangar_call",
-        "arguments": {"calls": [{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}]},
+        "arguments": {"calls": [{"mcp_server": "math", "tool": tool, "arguments": arguments}]},
         "_meta": meta,
     }
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
-    response = client.post("/mcp", headers=HEADERS, content=body)
+    response = client.post("/mcp", headers=headers, content=body)
     response.raise_for_status()
     text = response.text.lstrip()
     if not text.startswith("{"):  # SSE framing: take the data line
         text = next(line[len("data: ") :] for line in text.splitlines() if line.startswith("data: "))
     result = json.loads(text)["result"]
     return {"trace_id": trace_id, "remote_span_id": span_id, "batch": json.loads(result["content"][0]["text"])}
+
+
+def _resource(provider: Any) -> dict[str, Any]:
+    resource = getattr(provider, "resource", None)
+    return {k: v for k, v in dict(getattr(resource, "attributes", None) or {}).items() if isinstance(v, str)}
+
+
+def _authenticate(context: Any) -> dict[str, str]:
+    """Mint a key in the bootstrapped store, grant it tool calls, return its header."""
+    auth = context.auth_components
+    key = auth.api_key_store.create_key(principal_id=AUTH_PRINCIPAL, name="audit-harness", tenant_id=AUTH_TENANT)
+    auth.role_store.assign_role(AUTH_PRINCIPAL, "developer")
+    return {"X-API-Key": key}
+
+
+def _declare_bound_identity() -> None:
+    from mcp_hangar.context import set_fallback_identity
+    from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
+
+    set_fallback_identity(
+        IdentityContext(
+            caller=CallerIdentity(
+                user_id=None,
+                agent_id=BOUND_AGENT,
+                session_id=BOUND_SESSION,
+                principal_type="anonymous",
+                tenant_id=BOUND_TENANT,
+            )
+        )
+    )
 
 
 def main(mode: str, out: Path, endpoint: str) -> None:
@@ -136,9 +186,17 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     config: dict[str, Any] = {
         "mcp_servers": {"math": {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]}}
     }
-    if mode in ("yaml", "tracing_off"):
-        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode == "yaml"}}
+    if mode in ("yaml", "tracing_off", "auth", "bound"):
+        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode != "tracing_off"}}
+    if mode == "auth":
+        config["auth"] = {
+            "enabled": True,
+            "allow_anonymous": False,
+            "api_key": {"enabled": True, "header_name": "X-API-Key"},
+            "storage": {"driver": "memory"},
+        }
 
+    from mcp_hangar.server.api.middleware import create_auth_enforced_app
     from mcp_hangar.server.bootstrap import bootstrap
     from mcp_hangar.server.lifecycle import mcp_app_for_serving
 
@@ -155,8 +213,16 @@ def main(mode: str, out: Path, endpoint: str) -> None:
 
     from starlette.testclient import TestClient
 
-    with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
-        calls = {name: _hangar_call(client, name, flags) for name, flags in CALLS[mode]}
+    headers = dict(HEADERS)
+    app = mcp_app_for_serving(context.mcp_server)
+    if mode == "auth":
+        headers.update(_authenticate(context))
+        app = create_auth_enforced_app(app, context.auth_components)  # what `run_http` wraps it in
+    if mode == "bound":
+        _declare_bound_identity()
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        calls = {name: _hangar_call(client, name, flags, headers) for name, flags in CALLS[mode]}
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
@@ -181,6 +247,7 @@ def main(mode: str, out: Path, endpoint: str) -> None:
                 **seen,
                 "calls": calls,
                 "records": records,
+                "resources": {"audit": _resource(provider), "trace": _resource(tracer_provider)},
                 "spans": [
                     {
                         "name": s.name,
