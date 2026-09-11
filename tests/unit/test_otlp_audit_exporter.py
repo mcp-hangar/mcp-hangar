@@ -260,7 +260,8 @@ emit(
         seen = _observed(proc)
 
         assert seen["owned"] is True and seen["is_hangars"] is True and seen["configured"] is True
-        assert seen["exporter_kwargs"] == {"endpoint": ENDPOINT, "insecure": True}
+        # No forced insecure=True (#1326): the SDK's TLS rule decides, here http:// -> plaintext.
+        assert seen["exporter_kwargs"] == {"endpoint": ENDPOINT, "insecure": None}
         assert seen["resource"]["service.name"] == "mcp-hangar"
         in_span, no_span, unsampled = seen["records"]
         assert in_span["body"] == "tool_invocation"
