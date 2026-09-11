@@ -14,6 +14,7 @@ found once is then checked forever, on every platform, in 40 milliseconds.
 
 from __future__ import annotations
 
+import gc
 import pathlib
 import sys
 from typing import Any
@@ -56,12 +57,30 @@ class TestTheCorpusIsThere:
         assert len(PARSE_CORPUS) >= 5
 
 
+@pytest.fixture
+def nothing_pending_to_finalize() -> None:
+    """Run the collector now, so that no finalizer can fire inside the recursion.
+
+    A case that drives `evaluate` into the recursion limit is also a case where
+    any Python code the collector runs -- a leftover object's `__del__`, a
+    weakref callback -- starts with almost no stack left. It raises
+    RecursionError itself, and pytest's unraisable hook, called at the same
+    depth, can fail too; that failure is reported against this test (#1328).
+    What is pending depends on what earlier tests left behind, which is why it
+    failed only sometimes. Collecting here, at a shallow depth, removes that
+    dependency.
+    """
+    gc.collect()
+
+
 class TestEvaluateAlwaysAnswers:
+    @pytest.mark.usefixtures("nothing_pending_to_finalize")
     @pytest.mark.parametrize("depth", [0, 10, 1_000, 100_000])
     def test_nesting_of_any_depth_gets_a_verdict(self, depth: int) -> None:
         """The #1102 regression: 992 levels used to raise `RecursionError`."""
         check_evaluate("some_tool", _nested(depth), _ENFORCE, _MODERN)
 
+    @pytest.mark.usefixtures("nothing_pending_to_finalize")
     def test_audit_mode_answers_too(self) -> None:
         """Audit aborting the call is the opposite of ADR-013's adoption path."""
         check_evaluate("some_tool", _nested(1_200), {**_ENFORCE, "mode": "audit"}, _MODERN)
