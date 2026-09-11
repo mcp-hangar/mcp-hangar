@@ -40,12 +40,13 @@ except ImportError:
     OTEL_LOGS_AVAILABLE = False
 
 try:
-    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+    from opentelemetry.exporter.otlp.proto.grpc import _log_exporter as _otlp_logs
 
+    OTLPLogExporter: Any = _otlp_logs.OTLPLogExporter
     OTLP_LOGS_AVAILABLE = True
 except ImportError:
-    OTLP_LOGS_AVAILABLE = False
     OTLPLogExporter = None
+    OTLP_LOGS_AVAILABLE = False
 
 # The record an SDK provider can export. Before 1.38 its Logger passes an API
 # LogRecord on without the provider's resource, and the OTLP encoder then fails
@@ -53,7 +54,7 @@ except ImportError:
 # 1.38 the SDK converts API records itself and deprecates its own, gone in 1.39.
 _SdkLogRecord: Any = None
 if OTEL_LOGS_AVAILABLE and tuple(int(part) for part in _sdk_version.split(".")[:2]) < (1, 38):
-    _SdkLogRecord = _sdk_logs.LogRecord
+    _SdkLogRecord = getattr(_sdk_logs, "LogRecord", None)
 
 # Global state, separate from the tracer provider's: each signal has its own.
 _audit_provider: Any = None  # Hangar's own SDK LoggerProvider, once registered
@@ -126,7 +127,8 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
 
     try:
         provider = LoggerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
-        exporter = _MeteredLogExporter(OTLPLogExporter(endpoint=otlp_endpoint, insecure=True))
+        # Duck-typed: the SDK renamed the exporter base it would otherwise subclass.
+        exporter: Any = _MeteredLogExporter(OTLPLogExporter(endpoint=otlp_endpoint, insecure=True))
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
         # One-shot, and a second registration is refused with only a warning:
         # confirm this one took, as tracing does.
