@@ -18,7 +18,19 @@ set -euo pipefail
 TRIGGERING_PATTERN='^(src/|pyproject\.toml$|packages/(operator|helm-charts|ui)/)'
 FRAGMENT_PATTERN='^changelog\.d/[A-Za-z0-9._-]+\.(added|changed|deprecated|removed|fixed|security)\.md$'
 
-changed_files=$(git diff --name-only "$BASE_SHA".."$HEAD_SHA")
+# Diff from the merge base, never from BASE_SHA itself. The workflow passes the
+# base branch TIP, and a two-dot diff from it counts everything main did since
+# the branch point as this PR's (#1337): a test-only PR owed a fragment for
+# main's `src/` changes, and a release deleting the pending fragments made them
+# look ADDED by every branch cut before it. No fallback to two dots: without a
+# merge base the gate cannot tell the PR's changes from main's.
+if ! merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA"); then
+  echo "::error::Cannot resolve the merge base of BASE_SHA ($BASE_SHA) and HEAD_SHA ($HEAD_SHA)."
+  echo "::error::The clone lacks the history between them (shallow?). Check out with fetch-depth: 0."
+  exit 1
+fi
+
+changed_files=$(git diff --name-only "$merge_base" "$HEAD_SHA")
 
 # Checked before anything else, and on every PR rather than only the ones that
 # owe an entry: the mistake this catches -- writing the entry into CHANGELOG.md
@@ -60,7 +72,7 @@ fi
 
 # Only files ADDED by this PR count. An edit to someone else's pending fragment
 # is not this PR's changelog entry.
-added_fragments=$(git diff --name-only --diff-filter=A "$BASE_SHA".."$HEAD_SHA" \
+added_fragments=$(git diff --name-only --diff-filter=A "$merge_base" "$HEAD_SHA" \
   | grep -E "$FRAGMENT_PATTERN" || true)
 
 if [ -z "$added_fragments" ]; then
