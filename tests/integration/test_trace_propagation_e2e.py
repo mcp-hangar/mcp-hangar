@@ -86,13 +86,16 @@ class Tree:
         return False
 
     def assert_served_under_the_caller(self) -> None:
-        """Remote caller -> SDK SERVER span -> ``hangar_call`` -> ``batch.execute``."""
+        """Remote caller -> SDK SERVER span -> ``hangar_call`` -> ``batch.execute`` -> ``batch.call.*``."""
         server = self.one("tools/call hangar_call")
         assert server["kind"] == "SERVER"
         assert (server["parent_id"], server["parent_is_remote"]) == (self.remote_span_id, True)
         root = self.one("hangar_call")
         assert root["parent_id"] == server["span_id"]
-        assert self.one("batch.execute")["parent_id"] == root["span_id"]
+        batch = self.one("batch.execute")
+        assert batch["parent_id"] == root["span_id"]
+        calls = [s for s in self.spans if s["name"].startswith("batch.call.")]
+        assert calls and all(s["parent_id"] == batch["span_id"] for s in calls), calls
 
 
 class TestASuccessfulCallOverStdio:
@@ -125,11 +128,6 @@ class TestASuccessfulCallOverStdio:
         for name in ("tools/call hangar_call", "hangar_call", "batch.execute", "batch.call.add", "execute_tool add"):
             assert tree.one(name)["status"] != "ERROR", name
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="#1270 batch.call is parented on the remote caller, not batch.execute",
-    )
     def test_the_call_span_is_a_child_of_batch_execute(self, run):
         tree = Tree(run, "stdio_success")
 
