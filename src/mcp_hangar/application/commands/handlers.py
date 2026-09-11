@@ -1,13 +1,12 @@
 """Command handlers implementation."""
 
-import time
 from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
 from ...domain.contracts.mcp_server_runtime import McpServerRuntime
 from ...domain.contracts.runtime_store import IRuntimeMcpServerStore
-from ...domain.exceptions import McpServerNotFoundError
+from ...domain.exceptions import McpServerNotFoundError, ToolInvocationError
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
@@ -134,34 +133,28 @@ class InvokeToolHandler(BaseMcpServerHandler):
         """
         mcp_server = self._get_mcp_server(command.mcp_server_id)
 
-        start_time = time.perf_counter()
-        error_type = None
-        success = False
-
         try:
-            result = mcp_server.invoke_tool(
+            return mcp_server.invoke_tool(
                 command.tool_name,
                 command.arguments,
                 command.timeout,
                 l7_approval_id=command.l7_approval_id,
                 progress_token=command.progress_token,
             )
-            success = True
-            return result
 
         except Exception as e:  # noqa: BLE001 -- fault-barrier: catch for metrics recording, then re-raise
-            error_type = type(e).__name__
+            # A call's Prometheus record is its ToolInvocationCompleted/Failed,
+            # written by MetricsEventHandler -- which also sees calls made
+            # outside this bus. Observing here as well counted each call twice
+            # (#1299). A failure raised before either event (a refusal, an
+            # unknown tool, a failed cold start) has none, so it counts here.
+            # Every raise after a ToolInvocationFailed carries its correlation_id.
+            # Ask the exception, not the batch: a concurrent call can drain it.
+            if not (isinstance(e, ToolInvocationError) and "correlation_id" in e.details):
+                observe_tool_call(command.mcp_server_id, command.tool_name, 0.0, False, type(e).__name__)
             raise
 
         finally:
-            duration = time.perf_counter() - start_time
-            observe_tool_call(
-                mcp_server=command.mcp_server_id,
-                tool=command.tool_name,
-                duration=duration,
-                success=success,
-                error_type=error_type or "",
-            )
             self._publish_events(mcp_server)
 
 

@@ -102,6 +102,87 @@ class TestGetTracer:
             pass
 
 
+@pytest.mark.otel_sdk
+class TestProviderGate:
+    """Which provider the helpers use, decided without registering one globally.
+
+    Global registration is one-shot per process, so these patch the lookup;
+    tests/unit/test_tracing_provider_lifecycle.py registers for real, one
+    subprocess per case.
+    """
+
+    TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+
+    @pytest.fixture(autouse=True)
+    def _hangar_never_initialized(self):
+        # An earlier test may bootstrap and shut down Hangar's provider in this
+        # process, which leaves _shut_down set; each case states its own premise.
+        from mcp_hangar.observability import tracing
+
+        with patch.object(tracing, "_initialized", False), patch.object(tracing, "_shut_down", False):
+            yield
+
+    def test_nothing_registered_hands_out_the_shared_noop(self):
+        """Nothing registered and Hangar not initialized: the allocation-free path."""
+        from opentelemetry import trace
+
+        from mcp_hangar.observability import tracing
+
+        with patch.object(trace, "get_tracer_provider", return_value=trace.ProxyTracerProvider()):
+            assert tracing.get_tracer("x") is tracing._noop_tracer
+            carrier: dict[str, str] = {}
+            tracing.inject_trace_context(carrier)
+            assert carrier == {}
+            assert tracing.extract_trace_context({"traceparent": self.TRACEPARENT}) is None
+
+    def test_a_provider_registered_elsewhere_is_used(self):
+        """An application's own provider serves get_tracer and the propagation helpers."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        from mcp_hangar.observability import tracing
+
+        host = TracerProvider()
+        try:
+            with patch.object(trace, "get_tracer_provider", return_value=host):
+                with tracing.get_tracer("x").start_as_current_span("s") as span:
+                    carrier: dict[str, str] = {}
+                    tracing.inject_trace_context(carrier)
+                    trace_id = format(span.get_span_context().trace_id, "032x")
+                    assert tracing.get_current_trace_id() == trace_id
+                    assert carrier["traceparent"].split("-")[1] == trace_id
+                extracted = tracing.extract_trace_context({"traceparent": self.TRACEPARENT})
+                assert trace.get_current_span(extracted).get_span_context().is_valid
+        finally:
+            host.shutdown()
+
+    def test_disabled_by_env_ignores_a_registered_provider(self):
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        from mcp_hangar.observability import tracing
+
+        with (
+            patch.dict("os.environ", {"MCP_TRACING_ENABLED": "false"}),
+            patch.object(trace, "get_tracer_provider", return_value=TracerProvider()),
+        ):
+            assert tracing.get_tracer("x") is tracing._noop_tracer
+
+    def test_after_hangar_shut_down_its_own_provider_tracing_stays_off(self):
+        """The registered global is then Hangar's dead provider, not someone else's."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        from mcp_hangar.observability import tracing
+
+        with (
+            patch.object(trace, "get_tracer_provider", return_value=TracerProvider()),
+            patch.object(tracing, "_shut_down", True),
+        ):
+            assert tracing.get_tracer("x") is tracing._noop_tracer
+            assert tracing.get_current_span_id() is None
+
+
 class TestTraceSpan:
     """Tests for trace_span context manager."""
 
