@@ -10,4 +10,4 @@ is still not emitted, because a call's identity carries no roles. A failed
 call's `mcp.tool.duration_ms` is now the call's duration instead of 0.0. The
 audit resource is now built as the trace resource is, so it carries the same
 `service.instance.id`, `service.version` and `deployment.environment`, with
-the same precedence. With no identity (auth off), records are unchanged
+the same precedence. With no identity (auth off), records are unchanged.
