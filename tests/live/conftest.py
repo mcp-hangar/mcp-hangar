@@ -6,13 +6,15 @@ Everything here is opt-in: a fixture that cannot meet its prerequisites
 (missing `mcp-hangar` on PATH, Docker/compose, Keycloak, a free port, or a
 startup timeout) calls ``pytest.skip`` rather than failing, so the suite is
 safe to run anywhere. See ``tests/live/README.md`` and the tier markers
-(``live``/``t0``/``t1``/``t2``) registered in ``pyproject.toml``.
+(``live``/``t0``/``t1``/``t2``) registered in ``pyproject.toml``; ``t3`` is
+registered below, with the only tier that uses it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import closing
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 import os
 import shutil
@@ -30,6 +32,10 @@ from tests.live import _group_support as gs
 # `pytest tests/` (incl. the release test run) never starts servers. The
 # `live-verify` workflow sets this env var.
 _OPT_IN_ENV = "MCP_HANGAR_LIVE_VERIFY"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "t3: live tier 3 -- trace and audit export to a real OTLP receiver")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -76,14 +82,29 @@ def _hangar_bin() -> str:
     return binary
 
 
-def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
-    """Start `mcp-hangar serve --http` with ``config_text`` and yield its base URL.
+@dataclass
+class RunningHangar:
+    """A live `serve --http` process: its URL, the process, and its output file."""
+
+    base_url: str
+    proc: subprocess.Popen[bytes]
+    log_path: Path
+
+    def output(self) -> str:
+        return self.log_path.read_text(errors="replace")[-4000:]
+
+
+@contextmanager
+def running_hangar(workdir: Path, config_text: str, env: dict[str, str] | None = None) -> Iterator[RunningHangar]:
+    """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
     config into ``workdir``, binds a free loopback port, polls ``/health/live``
-    until healthy, then yields the base URL and tears the process down on exit.
-    Skips cleanly (never fails) if the binary is missing or the server does not
-    become healthy within the startup budget.
+    until healthy, then yields and tears the process down on exit. ``env``, when
+    given, is the process's whole environment. Output goes to a file, not a pipe
+    nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
+    (never fails) if the binary is missing or the server does not become healthy
+    within the startup budget.
     """
     binary = _hangar_bin()
 
@@ -91,13 +112,16 @@ def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
     config_path.write_text(config_text)
 
     port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen(
-        [binary, "--config", str(config_path), "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(workdir),
-    )
+    log_path = workdir / "hangar.log"
+    with log_path.open("wb") as log:
+        proc = subprocess.Popen(
+            [binary, "--config", str(config_path), "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            cwd=str(workdir),
+            env=env,
+        )
+    hangar = RunningHangar(base_url=f"http://127.0.0.1:{port}", proc=proc, log_path=log_path)
 
     deadline = time.monotonic() + _STARTUP_TIMEOUT_S
     healthy = False
@@ -107,7 +131,7 @@ def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
                 break
             try:
                 # `serve --http` exposes liveness at /health/live (the operational probe).
-                if httpx.get(f"{base_url}/health/live", timeout=1.0).status_code == 200:
+                if httpx.get(f"{hangar.base_url}/health/live", timeout=1.0).status_code == 200:
                     healthy = True
                     break
             except httpx.HTTPError:
@@ -116,16 +140,13 @@ def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
 
         if not healthy:
             proc.terminate()
-            out = b""
             try:
-                out = proc.communicate(timeout=5)[0] or b""
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-            pytest.skip(
-                f"hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{out.decode(errors='replace')[-2000:]}"
-            )
+            pytest.skip(f"hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{hangar.output()[-2000:]}")
 
-        yield base_url
+        yield hangar
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -133,6 +154,12 @@ def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
+    """Yield the base URL of a :func:`running_hangar`; the form the fixtures below use."""
+    with running_hangar(workdir, config_text) as hangar:
+        yield hangar.base_url
 
 
 @pytest.fixture(scope="session")

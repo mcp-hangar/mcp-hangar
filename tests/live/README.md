@@ -15,8 +15,11 @@ anywhere. They run on demand via the `live-verify` workflow (manual + nightly).
 | **T0** | single process + a stub backend (`examples/provider_math`) — operational surface, `hangar_call`, lifecycle, tool-access policy, withdrawal/digest-pin, truncation/continuation | `mcp-hangar` on PATH (i.e. `uv run`) |
 | **T1** | multi-backend / groups — group invocation, canary/failover, discovery, load-balancing | Docker + compose (≥2 backends) |
 | **T2** | auth / IdP — JWT/OIDC, multi-issuer, RFC 8707 audience binding, `front_door` DENY, RBAC | Keycloak (`examples/auth-keycloak`) |
+| **T3** | trace and audit export — `serve --http` exports to a real OTLP/gRPC receiver: a warm call's spans (with the upstream CLIENT span), a tool-access-denied call's span and no CLIENT span, a `tool_invocation` audit record under scope `mcp_hangar.audit`, and the spans of a call made right before SIGTERM | `grpcio` + the `opentelemetry` extra; the receiver runs in the test process (no Collector, no Docker) |
 
-(T3 observability stack and T4 Kubernetes are out of scope for now.)
+(T4 Kubernetes is out of scope for now. T3 does not cover a Collector, inbound or
+outbound W3C trace context, or a trace link from an audit record to its call;
+the audit record's trace ID is only reported.)
 
 ## Running
 
@@ -27,7 +30,10 @@ Live verification is **opt-in**: set `MCP_HANGAR_LIVE_VERIFY=1`, otherwise every
 # T0 only (no Docker needed):
 MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t0"
 
-# everything available (T1/T2 skip if their prerequisites are absent):
+# T3 only (skips if grpcio or the OTLP protos are missing):
+MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t3"
+
+# everything available (T1/T2/T3 skip if their prerequisites are absent):
 MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live
 ```
 
