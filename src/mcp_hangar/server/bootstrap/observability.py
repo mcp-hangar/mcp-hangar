@@ -7,7 +7,8 @@ This module handles initialization of:
 
 Configuration via environment variables:
     MCP_TRACING_ENABLED: Enable OpenTelemetry (default: true)
-    OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
+    OTEL_EXPORTER_OTLP_*: standard OTLP exporter settings; their precedence
+        over otlp_endpoint is in mcp_hangar.observability.tracing
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
     MCP_LANGFUSE_ENABLED: Enable Langfuse (default: false)
     LANGFUSE_PUBLIC_KEY: Langfuse public key
@@ -51,7 +52,9 @@ class TracingConfig:
     """Configuration for OpenTelemetry tracing."""
 
     enabled: bool = True
-    otlp_endpoint: str = "http://localhost:4317"
+    # None: nobody chose one, and the OpenTelemetry SDK resolves it -- from the
+    # OTEL_EXPORTER_OTLP_* variables, else its own default for the protocol.
+    otlp_endpoint: str | None = None
     service_name: str = "mcp-hangar"
     jaeger_host: str | None = None
     jaeger_port: int = 6831
@@ -92,10 +95,10 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
     tracing_dict = obs_config.get("tracing", {})
     tracing = TracingConfig(
         enabled=_get_bool_env("MCP_TRACING_ENABLED", tracing_dict.get("enabled", True)),
-        otlp_endpoint=os.getenv(
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            tracing_dict.get("otlp_endpoint", "http://localhost:4317"),
-        ),
+        # Still mirrors the env var, which beats the file as before. The trace
+        # exporter itself defers to any OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT:
+        # see resolve_otlp_exporter_settings().
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", tracing_dict.get("otlp_endpoint")),
         service_name=os.getenv(
             "OTEL_SERVICE_NAME",
             tracing_dict.get("service_name", "mcp-hangar"),
@@ -173,11 +176,9 @@ def init_tracing(config: TracingConfig) -> bool:
         )
 
         if result:
-            logger.info(
-                "tracing_initialized",
-                service_name=config.service_name,
-                otlp_endpoint=config.otlp_endpoint,
-            )
+            # No endpoint here: it is the SDK's to resolve, and the exporter is
+            # logged, by protocol, where it is built.
+            logger.info("tracing_initialized", service_name=config.service_name)
         return result
 
     except ImportError:
