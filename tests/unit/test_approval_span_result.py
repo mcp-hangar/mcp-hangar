@@ -318,6 +318,28 @@ def test_the_span_names_what_the_gate_decided(name: str, sdk) -> None:
     assert _approval_label(exporter) == path.label
 
 
+@pytest.mark.otel_sdk
+def test_a_label_that_cannot_be_worked_out_does_not_decide_the_call(sdk) -> None:
+    """The label's own L7 read is for the span only; if it fails, the pass stands."""
+    exporter, tracer = sdk
+    ctx, _ = _l7_without_gate()
+    real_rule = BatchExecutor._l7_approval_rule
+    reads: list[Any] = []
+
+    def fails_on_the_label_read(self: BatchExecutor, call: Any, ctx: Any) -> str | None:
+        reads.append(call)
+        if len(reads) > 1:
+            raise RuntimeError("policy unreadable")
+        return real_rule(self, call, ctx)
+
+    with patch.object(BatchExecutor, "_l7_approval_rule", fails_on_the_label_read):
+        result = _gate(ctx, tracer)
+
+    assert result is None
+    assert len(reads) == 2
+    assert _approval_label(exporter) == "not_required"
+
+
 # --- end to end through the executor ------------------------------------------
 
 

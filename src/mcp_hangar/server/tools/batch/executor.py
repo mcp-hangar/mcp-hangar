@@ -1433,8 +1433,26 @@ class BatchExecutor:
                     approval_span.set_attribute("approval.result", "revalidation_failed")
                     refusal.elapsed_ms = p.elapsed_ms()
                     return refusal
-            approval_span.set_attribute("approval.result", "not_required")
+            approval_span.set_attribute("approval.result", self._approval_pass_label(p, granted_id))
         return None
+
+    def _approval_pass_label(self, p: "_CallPipeline", granted_id: str | None) -> str:
+        """What a pass through the approval gate was, for its span (#1274).
+
+        Read-only, and it never raises: the label reports the decision already
+        made above and must not take part in it.
+        """
+        if granted_id is not None:
+            return "approved"  # granted by a human, then revalidated
+        if getattr(p.ctx, "approval_gate", None) is not None:
+            return "not_required"
+        try:
+            # An L7 requireApproval with nobody to ask passes the gate and is
+            # refused by the aggregate at dispatch (see _check_approval_gate).
+            l7_rule = self._l7_approval_rule(p.call, p.ctx)
+        except Exception:  # noqa: BLE001 -- a span label must never decide the call
+            return "not_required"
+        return "unavailable" if l7_rule is not None else "not_required"
 
     def _gate_cold_start(self, p: "_CallPipeline") -> CallResult | None:
         """Single-flight cold start of the resolved target."""
