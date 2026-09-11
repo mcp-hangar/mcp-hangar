@@ -226,8 +226,8 @@ def _run(mode: str, endpoint: str, soak: float = 0) -> tuple[list[dict], list[tu
 
 def _soak(seconds: float) -> dict:
     [run], samples = _run("sdk_otlp_unreachable", f"http://127.0.0.1:{_free_port()}", seconds)
-    # Past the window the child is exiting, and the SDK's atexit shutdown tries
-    # to flush to the dead endpoint: how long that takes is a finding, not soak.
+    # Past the window the child is exiting, which against a dead endpoint takes
+    # a while (likely the SDK's exit-time flush): reported, not counted as soak.
     exit_after = samples[-1][0] - seconds
     samples = [(t, r) for t, r in samples if t <= seconds]
     tail = [(t, r) for t, r in samples if t >= seconds / 2]
