@@ -255,27 +255,40 @@ def _build_sampler() -> Any:
     OTEL_TRACES_SAMPLER actually takes effect (the docstring long claimed
     support that was never wired). Defaults to parentbased_always_on, matching
     the SDK default. For ratio samplers, OTEL_TRACES_SAMPLER_ARG is the ratio
-    in [0, 1]; a missing/invalid arg falls back to 1.0 (sample everything).
+    in [0, 1]; unset it is 1.0 (sample everything), as in the SDK. Any other
+    value logs one warning and is 1.0 too, rather than raising in
+    TraceIdRatioBased and so turning tracing off for the whole process.
     """
     name = os.getenv("OTEL_TRACES_SAMPLER", "parentbased_always_on").strip().lower()
     arg = os.getenv("OTEL_TRACES_SAMPLER_ARG", "")
 
-    def _ratio(default: float) -> float:
+    def _ratio() -> float:
         try:
-            return float(arg)
-        except (TypeError, ValueError):
-            return default
+            ratio = float(arg) if arg.strip() else 1.0
+        except ValueError:
+            ratio = float("nan")
+        if 0.0 <= ratio <= 1.0:  # False for NaN, which the SDK's own range check lets through
+            return ratio
+        logger.warning(
+            "tracing_sampler_arg_invalid",
+            variable="OTEL_TRACES_SAMPLER_ARG",
+            value=arg,
+            sampler=name,
+            expected="a number in [0, 1]",
+            fallback=1.0,
+        )
+        return 1.0
 
     if name == "always_on":
         return ALWAYS_ON
     if name == "always_off":
         return ALWAYS_OFF
     if name == "traceidratio":
-        return TraceIdRatioBased(_ratio(1.0))
+        return TraceIdRatioBased(_ratio())
     if name == "parentbased_always_off":
         return ParentBased(ALWAYS_OFF)
     if name == "parentbased_traceidratio":
-        return ParentBased(TraceIdRatioBased(_ratio(1.0)))
+        return ParentBased(TraceIdRatioBased(_ratio()))
     if name != "parentbased_always_on":
         logger.warning("tracing_unknown_sampler", sampler=name, fallback="parentbased_always_on")
     return ParentBased(ALWAYS_ON)
@@ -448,7 +461,7 @@ def init_tracing(
         logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters
-        exporters_added = 0
+        exporters: list[str] = []  # by name, as the init log lists them
 
         # OTLP exporter (preferred): protocol, endpoint and TLS from one effective config.
         otlp_settings = resolve_otlp_exporter_settings("traces", otlp_endpoint)
@@ -459,7 +472,7 @@ def init_tracing(
             logger.warning("tracing_otlp_exporter_failed", protocol=otlp_settings.protocol, error=str(e))
         if otlp_exporter is not None:
             provider.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
-            exporters_added += 1
+            exporters.append("otlp_" + otlp_settings.protocol.split("/")[0])  # otlp_grpc, otlp_http
 
         # Jaeger exporter (fallback)
         if JAEGER_AVAILABLE and jaeger_host:
@@ -469,7 +482,7 @@ def init_tracing(
                     agent_port=jaeger_port,
                 )
                 provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
-                exporters_added += 1
+                exporters.append("jaeger")
                 logger.info(
                     "tracing_jaeger_exporter_added",
                     host=jaeger_host,
@@ -483,10 +496,10 @@ def init_tracing(
         if console_export:
             console_exporter = ConsoleSpanExporter(out=sys.stderr)
             provider.add_span_processor(BatchSpanProcessor(console_exporter))
-            exporters_added += 1
+            exporters.append("console")
             logger.info("tracing_console_exporter_added")
 
-        if exporters_added == 0:
+        if not exporters:
             logger.warning("tracing_no_exporters_configured")
             return False
 
@@ -501,11 +514,10 @@ def init_tracing(
         _tracer_mcp_server = provider
         _initialized = True
 
-        logger.info(
-            "tracing_initialized",
-            service_name=service_name,
-            exporters=exporters_added,
-        )
+        # The one init line, here because only this function knows what it
+        # attached. Exporter names only: never an endpoint (a URL may carry
+        # userinfo) nor a header (credentials).
+        logger.info("tracing_initialized", service_name=service_name, exporters=exporters)
         return True
 
     except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing init failure must not crash application
