@@ -4,11 +4,15 @@ Tests the two-level semaphore model (global + per-provider) used by
 the BatchExecutor to control parallel execution of tool invocations.
 """
 
+import asyncio
 import threading
 import time
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_hangar.server.tools.batch import concurrency
 from mcp_hangar.server.tools.batch.concurrency import (
     BATCH_CONCURRENCY_QUEUED_TOTAL,
     BATCH_CONCURRENCY_WAIT_SECONDS,
@@ -20,6 +24,8 @@ from mcp_hangar.server.tools.batch.concurrency import (
     init_concurrency_manager,
     reset_concurrency_manager,
 )
+from mcp_hangar.server.tools.batch.executor import BatchExecutor
+from mcp_hangar.server.tools.batch.models import CallResult, CallSpec
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -709,3 +715,246 @@ class TestThreadSafety:
         assert len(results) == 10
         # All should run in parallel (~20ms), not serially (~200ms)
         assert elapsed < 0.15, f"Expected ~20ms, got {elapsed * 1000:.0f}ms"
+
+
+# ---------------------------------------------------------------------------
+# The executor's concurrency.acquire span (#1273)
+# ---------------------------------------------------------------------------
+
+SERVER = "math"
+TOOL = "add"
+SLOW_INVOKE_S = 0.1
+HOLD_S = 0.05
+
+# A holder of one slot, and which server a second caller asks for to contend
+# for it: another server behind a global limit of one, or the same server.
+CONTENDED_SLOTS = pytest.mark.parametrize(
+    ("global_limit", "server_limit", "other_caller_server"),
+    [(1, 0, "other"), (0, 1, SERVER)],
+    ids=["global-slot", "server-slot"],
+)
+
+
+class _Upstream:
+    """The command bus the executor sends ``InvokeToolCommand`` to.
+
+    ``send`` sets ``invoking``, holds the invoke for ``hold`` seconds (until
+    ``release`` is set when ``hold`` is None), then raises ``raises`` if given.
+    """
+
+    def __init__(self, *, hold: float | None = 0.0, raises: BaseException | None = None) -> None:
+        self.hold = hold
+        self.raises = raises
+        self.invoking = threading.Event()
+        self.release = threading.Event()
+
+    def send(self, command: Any) -> dict[str, Any]:
+        self.invoking.set()
+        self.release.wait(self.hold)
+        if self.raises is not None:
+            raise self.raises
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+
+class _Running:
+    """One call through ``BatchExecutor._execute_call`` on its own worker thread."""
+
+    def __init__(self, executor: BatchExecutor, call: CallSpec) -> None:
+        self.result: CallResult | None = None
+        self.error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, args=(executor, call), daemon=True)
+        self._thread.start()
+
+    def _run(self, executor: BatchExecutor, call: CallSpec) -> None:
+        try:
+            self.result = executor._execute_call(call, threading.Event(), 60.0, time.perf_counter())
+        except BaseException as exc:  # noqa: BLE001 -- handed to the test, which asserts on it
+            self.error = exc
+
+    def join(self) -> "_Running":
+        self._thread.join(timeout=10)
+        assert not self._thread.is_alive(), "the call never finished"
+        return self
+
+
+class _Harness:
+    """The executor with a real SDK exporter behind its tracer.
+
+    The gates are emptied: they pass or refuse a call before capacity is asked
+    for, and everything asserted here happens after them. The retry store is
+    bypassed, so ``max_retries`` alone decides whether the retry span opens.
+    ``queued`` is set when a caller of ``ConcurrencyManager.acquire`` found no
+    free slot and is about to block, so contention is ordered by an event.
+    """
+
+    def __init__(self, exporter: Any, app_ctx: MagicMock, queued: threading.Event) -> None:
+        self.exporter = exporter
+        self.app_ctx = app_ctx
+        self.queued = queued
+
+    def run(self, cm: ConcurrencyManager, upstream: _Upstream, *, max_retries: int = 1) -> _Running:
+        self.app_ctx.command_bus.send.side_effect = upstream.send
+        call = CallSpec(
+            index=0, call_id="call-1273", mcp_server=SERVER, tool=TOOL, arguments={}, max_retries=max_retries
+        )
+        return _Running(BatchExecutor(concurrency_manager=cm), call)
+
+    def spans(self) -> dict[str, Any]:
+        finished = self.exporter.get_finished_spans()
+        by_name = {span.name: span for span in finished}
+        assert len(by_name) == len(finished), "one call opens each span once"
+        return by_name
+
+
+@pytest.fixture()
+def harness():
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    queued = threading.Event()
+    manager_logger = concurrency.logger
+
+    class _QueueSignal:
+        """The manager's logger, setting ``queued`` on its ``*_wait_start`` lines."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(manager_logger, name)
+
+        def debug(self, event: str, **kwargs: Any) -> None:
+            if event.endswith("_wait_start"):
+                queued.set()
+            manager_logger.debug(event, **kwargs)
+
+    app_ctx = MagicMock()
+    module = "mcp_hangar.server.tools.batch.executor"
+    with (
+        patch(f"{module}.get_tracer", return_value=provider.get_tracer(module)),
+        patch(f"{module}.get_context", return_value=app_ctx),
+        patch(f"{module}._GATES", ()),
+        patch(f"{module}.configured_retry_policy", return_value=None),
+        patch.object(concurrency, "logger", _QueueSignal()),
+    ):
+        yield _Harness(exporter, app_ctx, queued)
+    provider.shutdown()
+
+
+def _duration_s(span: Any) -> float:
+    return (span.end_time - span.start_time) / 1e9
+
+
+def _slots_free(cm: ConcurrencyManager, queued: threading.Event) -> bool:
+    """A fresh caller takes both slots without queuing. On a thread: a leaked
+    permit would block it rather than the test."""
+    taken = threading.Event()
+
+    def take() -> None:
+        with cm.acquire(SERVER):
+            taken.set()
+
+    threading.Thread(target=take, daemon=True).start()
+    return taken.wait(5) and not queued.is_set()
+
+
+@pytest.mark.otel_sdk
+class TestExecutorWaitSpan:
+    """``concurrency.acquire`` spans the wait for capacity, not the call (#1273).
+
+    Its duration used to include the invoke and every retry, because the span
+    stayed open for as long as the permit was held. Driven through
+    ``BatchExecutor._execute_call`` with a real ``ConcurrencyManager``.
+    """
+
+    @pytest.mark.parametrize("max_retries", [1, 2], ids=["single-attempt", "retry-policy"])
+    def test_a_slow_invoke_with_free_slots_stays_out_of_the_wait_span(self, harness, max_retries):
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=10)
+
+        run = harness.run(cm, _Upstream(hold=SLOW_INVOKE_S), max_retries=max_retries).join()
+
+        assert run.error is None and run.result is not None and run.result.success
+        spans = harness.spans()
+        call, acquire = spans[f"batch.call.{TOOL}"], spans["concurrency.acquire"]
+        invoke = spans["invoke_with_retry" if max_retries > 1 else "command.send.InvokeToolCommand"]
+        assert acquire.end_time <= invoke.start_time, "the wait span must end before the invoke starts"
+        assert _duration_s(acquire) < _duration_s(invoke)
+        assert acquire.parent.span_id == call.context.span_id
+        assert invoke.parent.span_id == call.context.span_id, "the invoke must hang off the call span"
+        if max_retries > 1:
+            assert spans["command.send.InvokeToolCommand"].parent.span_id == invoke.context.span_id
+        assert dict(acquire.attributes) == {"mcp.server.id": SERVER, "concurrency.wait_ms": pytest.approx(0, abs=10)}
+
+    @CONTENDED_SLOTS
+    def test_a_contended_slot_is_the_wait_the_span_measures(
+        self, harness, global_limit, server_limit, other_caller_server
+    ):
+        cm = ConcurrencyManager(global_limit=global_limit, default_mcp_server_limit=server_limit)
+        holding, done = threading.Event(), threading.Event()
+
+        def holder() -> None:
+            with cm.acquire(other_caller_server):
+                holding.set()
+                done.wait(10)
+
+        threading.Thread(target=holder, daemon=True).start()
+        assert holding.wait(5)
+        run = harness.run(cm, _Upstream(hold=SLOW_INVOKE_S))
+        assert harness.queued.wait(5), "the call must queue behind the holder"
+        # The call is blocked on the slot; holding it longer only sets a floor
+        # under the wait. The ordering comes from the events above.
+        time.sleep(HOLD_S)
+        done.set()
+        run.join()
+
+        assert run.error is None and run.result is not None and run.result.success
+        spans = harness.spans()
+        call, acquire = spans[f"batch.call.{TOOL}"], spans["concurrency.acquire"]
+        invoke = spans["command.send.InvokeToolCommand"]
+        assert acquire.attributes["concurrency.wait_ms"] >= HOLD_S * 1000 - 1
+        assert _duration_s(acquire) >= HOLD_S - 0.001
+        assert acquire.end_time <= invoke.start_time
+        assert acquire.parent.span_id == call.context.span_id
+        assert invoke.parent.span_id == call.context.span_id
+
+    @CONTENDED_SLOTS
+    def test_the_permit_is_held_until_the_invoke_returns(
+        self, harness, global_limit, server_limit, other_caller_server
+    ):
+        cm = ConcurrencyManager(global_limit=global_limit, default_mcp_server_limit=server_limit)
+        upstream = _Upstream(hold=None)
+        run = harness.run(cm, upstream)
+        assert upstream.invoking.wait(5)
+        assert not harness.queued.is_set()
+        acquired = threading.Event()
+
+        def other_caller() -> None:
+            with cm.acquire(other_caller_server):
+                acquired.set()
+
+        threading.Thread(target=other_caller, daemon=True).start()
+        assert harness.queued.wait(5), "a second caller must queue while the first is invoking"
+        assert not acquired.is_set()
+        upstream.release.set()
+        run.join()
+        assert acquired.wait(5), "the permit must be released once the invoke returns"
+
+    @pytest.mark.parametrize(
+        "raises",
+        [None, RuntimeError, asyncio.CancelledError],
+        ids=["success", "exception", "cancellation"],
+    )
+    def test_the_permit_is_released_however_the_invoke_ends(self, harness, raises):
+        cm = ConcurrencyManager(global_limit=1, default_mcp_server_limit=1)
+
+        run = harness.run(cm, _Upstream(raises=raises("upstream") if raises else None)).join()
+
+        if raises is asyncio.CancelledError:
+            # Not an Exception: it escapes the call's fault barrier, as before.
+            assert isinstance(run.error, asyncio.CancelledError)
+        else:
+            assert run.error is None and run.result is not None
+            assert run.result.success is (raises is None)
+        assert _slots_free(cm, harness.queued), "both slots must be free once the call is over"
+        assert harness.spans()["concurrency.acquire"].status.is_ok
