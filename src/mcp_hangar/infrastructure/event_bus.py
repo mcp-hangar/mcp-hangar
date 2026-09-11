@@ -19,7 +19,7 @@ from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.stream_ids import stream_id_for, stream_id_for_event
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_error
-from mcp_hangar.observability.tracing import get_tracer
+from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
 
 logger = get_logger(__name__)
 
@@ -357,7 +357,7 @@ class EventBus(IEventBus):
                         handler=getattr(handler, "__qualname__", repr(handler)),
                         error=str(e),
                     )
-                    evt_span.record_exception(e)
+                    record_handled_failure(evt_span, e)
 
             # Hook fan-out: deliver phase-wrapped event to hook subscribers.
             # Default phase is OBSERVE for events published via the flat API;
@@ -435,7 +435,7 @@ class EventBus(IEventBus):
                     detail="events delivered to handlers but NOT persisted; the audit log has a hole here",
                     exc_info=True,
                 )
-                store_span.record_exception(e)
+                record_handled_failure(store_span, e)
                 for event in events:
                     self._deliver(event)
                 return expected_version
@@ -596,8 +596,7 @@ class EventBus(IEventBus):
                     subscriber=type(subscriber).__name__,
                     error=str(e),
                 )
-                if hasattr(span, "record_exception"):
-                    span.record_exception(e)
+                record_handled_failure(span, e)
 
     def clear(self) -> None:
         """Clear all subscriptions (mainly for testing)."""

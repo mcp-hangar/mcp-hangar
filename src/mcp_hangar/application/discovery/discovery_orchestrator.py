@@ -25,7 +25,7 @@ from mcp_hangar.domain.events import (
     McpServerQuarantined,
 )
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.observability.tracing import get_tracer
+from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
 
 if TYPE_CHECKING:
     from mcp_hangar.domain.security.input_validator import InputValidator
@@ -417,7 +417,7 @@ class DiscoveryOrchestrator:
                 logger.error(f"Discovery cycle failed: {e}")
                 result.error_count += 1
                 main_metrics.record_discovery_error(source_type="orchestrator", error_type=type(e).__name__)
-                cycle_span.record_exception(e)
+                record_handled_failure(cycle_span, e)
 
             # Calculate duration
             duration_seconds = time.perf_counter() - start_time
@@ -599,7 +599,7 @@ class DiscoveryOrchestrator:
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash discovery
                     logger.error(f"Error registering mcp_server {mcp_server.name}: {e}")
                     prov_span.set_attribute("discovery.result", "skipped")
-                    prov_span.record_exception(e)
+                    record_handled_failure(prov_span, e)
                     return "skipped"
 
             # Track in lifecycle manager
