@@ -54,6 +54,8 @@ env:
 
 jobs:
   compose-up:
+    # Named explicitly so the matrix's `call` JSON stays out of the check name.
+    name: compose-up (${{ matrix.example }}, ${{ matrix.service }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
