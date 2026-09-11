@@ -54,16 +54,25 @@ env:
 
 jobs:
   compose-up:
+    # Named explicitly so the matrix's `call` JSON stays out of the check name.
+    name: compose-up (${{ matrix.example }}, ${{ matrix.service }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Unique to this run and attempt. The otel-collector example puts it on
+      # the OTLP resource as `service.instance.id`, so the Collector assertion
+      # matches this run's telemetry and nothing else.
+      HANGAR_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.example }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - example: quickstart
             service: mcp-hangar
+            call: '{"mcp_server": "everything", "tool": "echo", "arguments": {"message": "quickstart"}}'
           - example: otel-collector
             service: mcp-hangar
+            call: '{"mcp_server": "math", "tool": "add", "arguments": {"a": 2, "b": 3}}'
           - example: task_upstream
             service: mcp-hangar
 
@@ -72,6 +81,17 @@ jobs:
 
       - name: Build the image under test
         run: docker build -t "$HANGAR_IMAGE" .
+
+      - name: Validate the Collector config at the pinned version
+        if: matrix.example == 'otel-collector'
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          set -euo pipefail
+          # The image is read from docker-compose.yml, so this validates the
+          # version the example runs, not a second pin that could drift from it.
+          image="$(docker compose config --images | grep '^otel/opentelemetry-collector-contrib:')"
+          docker run --rm -v "$PWD:/cfg:ro" "$image" validate --config=/cfg/otel-collector-config.yaml
+          echo "valid at $image"
 
       - name: Bring ${{ matrix.example }} up and wait for healthy
         working-directory: examples/${{ matrix.example }}
@@ -140,12 +160,15 @@ jobs:
       #   * the envelope -- four headers and two `_meta` keys must agree, and
       #     each disagreement is a 400 rather than a wrong answer.
       - name: Assert the configured provider can actually be called
-        if: matrix.example == 'quickstart'
+        if: matrix.call
         working-directory: examples/${{ matrix.example }}
+        env:
+          # The one call to make, from the matrix: `mcp_server`, `tool`, `arguments`.
+          CALL: ${{ matrix.call }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, sys, time, urllib.error, urllib.request
+          import json, os, sys, time, urllib.error, urllib.request
 
           # `mcp.shared.inbound`: `_meta` must carry protocolVersion AND
           # clientCapabilities; the MCP-Protocol-Version header must equal the
@@ -155,11 +178,7 @@ jobs:
               "jsonrpc": "2.0", "id": 1, "method": "tools/call",
               "params": {
                   "name": "hangar_call",
-                  "arguments": {"calls": [{
-                      "mcp_server": "everything",
-                      "tool": "echo",
-                      "arguments": {"message": "quickstart"},
-                  }]},
+                  "arguments": {"calls": [json.loads(os.environ["CALL"])]},
                   "_meta": {
                       "io.modelcontextprotocol/protocolVersion": "2026-07-28",
                       "io.modelcontextprotocol/clientCapabilities": {},
@@ -213,6 +232,94 @@ jobs:
 
           print(f"::error::the configured provider never answered; last: {last[:600]}")
           sys.exit(1)
+          PY
+
+      # Health, a loaded config and a successful call still say nothing about
+      # telemetry, which is what the otel-collector example is for. The call
+      # above must show up in the Collector's `file` exporter output: OTLP JSON,
+      # one export request per line, `{"resourceSpans": [...]}` or
+      # `{"resourceLogs": [...]}`. Arrival is asynchronous (Hangar's batch
+      # processors, then the Collector's), so this polls to a deadline, and it
+      # matches this run's `service.instance.id` and the call itself, never a
+      # count of what arrived.
+      - name: Assert the call's span and audit record reached the Collector
+        if: matrix.example == 'otel-collector'
+        working-directory: examples/${{ matrix.example }}
+        env:
+          CALL: ${{ matrix.call }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys, time
+
+          RUN_ID = os.environ["HANGAR_RUN_ID"]
+          CALL = json.loads(os.environ["CALL"])
+          SOURCE = "otel-collector:/otel-output/telemetry.jsonl"
+          COPY = os.path.join(os.environ["RUNNER_TEMP"], "telemetry.jsonl")
+          DEADLINE_S = 120
+          deadline = time.monotonic() + DEADLINE_S
+
+          def attributes(items):
+              """OTLP JSON `[{"key": k, "value": {"stringValue": v}}]` -> {k: v}."""
+              return {i["key"]: next(iter(i.get("value", {}).values()), None) for i in items or []}
+
+          def this_run(resource):
+              found = attributes(resource.get("attributes"))
+              return found.get("service.name") == "mcp-hangar" and found.get("service.instance.id") == RUN_ID
+
+          def about_the_call(found):
+              return found.get("mcp.server.id") == CALL["mcp_server"] and found.get("gen_ai.tool.name") == CALL["tool"]
+
+          def scan(path):
+              spans, records = [], []
+              with open(path) as lines:
+                  for line in lines:
+                      try:
+                          request = json.loads(line)
+                      except json.JSONDecodeError:
+                          continue  # still being written; the next poll reads it whole
+                      for rs in request.get("resourceSpans", []):
+                          if not this_run(rs.get("resource", {})):
+                              continue
+                          for ss in rs.get("scopeSpans", []):
+                              # Hangar's own instrumentation, not the MCP SDK's.
+                              if ss.get("scope", {}).get("name", "").startswith("mcp_hangar."):
+                                  spans += [s for s in ss.get("spans", []) if about_the_call(attributes(s.get("attributes")))]
+                      for rl in request.get("resourceLogs", []):
+                          if not this_run(rl.get("resource", {})):
+                              continue
+                          for sl in rl.get("scopeLogs", []):
+                              if sl.get("scope", {}).get("name") != "mcp_hangar.audit":
+                                  continue
+                              for record in sl.get("logRecords", []):
+                                  found = attributes(record.get("attributes"))
+                                  if (found.get("mcp.event.name") == "tool_invocation"
+                                          and found.get("mcp.tool.status") == "success"
+                                          and about_the_call(found)):
+                                      records.append(record)
+              return spans, records
+
+          spans, records, last = [], [], ""
+          while True:
+              copied = subprocess.run(["docker", "compose", "cp", SOURCE, COPY], capture_output=True, text=True)
+              if copied.returncode == 0:
+                  spans, records = scan(COPY)
+              else:
+                  last = copied.stderr.strip()
+              if spans and records:
+                  break
+              if time.monotonic() > deadline:
+                  print(f"::error::within {DEADLINE_S}s the Collector received {len(spans)} matching span(s) and "
+                        f"{len(records)} matching tool_invocation record(s) for service.instance.id={RUN_ID}. {last}")
+                  sys.exit(1)
+              time.sleep(2)  # poll interval, bounded by the deadline above
+
+          print(f"service.instance.id={RUN_ID}")
+          for span in spans:
+              print("span:", span["name"], "trace", span["traceId"], json.dumps(attributes(span.get("attributes"))))
+          for record in records:
+              print("audit:", record["body"].get("stringValue"), "trace", record.get("traceId"),
+                    json.dumps(attributes(record.get("attributes"))))
           PY
 
       - name: Show the gateway log on failure
