@@ -1433,7 +1433,10 @@ class BatchExecutor:
                     approval_span.set_attribute("approval.result", "revalidation_failed")
                     refusal.elapsed_ms = p.elapsed_ms()
                     return refusal
-            approval_span.set_attribute("approval.result", self._approval_pass_label(p, granted_id))
+            if approval_span.is_recording():
+                # Only while someone will read it: without a gate the label
+                # costs a second L7 evaluation of the arguments.
+                approval_span.set_attribute("approval.result", self._approval_pass_label(p, granted_id))
         return None
 
     def _approval_pass_label(self, p: "_CallPipeline", granted_id: str | None) -> str:

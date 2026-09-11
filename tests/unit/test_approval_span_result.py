@@ -340,6 +340,39 @@ def test_a_label_that_cannot_be_worked_out_does_not_decide_the_call(sdk) -> None
     assert _approval_label(exporter) == "not_required"
 
 
+@pytest.mark.parametrize("tracer_kind", ["hangar_noop", "otel_api_noop"])
+def test_with_tracing_off_the_label_costs_no_policy_read(tracer_kind: str) -> None:
+    """Tracing off: the L7 rule is read once, by the gate, as on main; the refusal is unchanged.
+
+    The label's own L7 read would evaluate the arguments a second time for a
+    span nothing records. End to end, so the aggregate's refusal is asserted too.
+    """
+    from opentelemetry.trace import NoOpTracer as ApiNoOpTracer
+
+    from mcp_hangar.observability.tracing import NoOpTracer as HangarNoOpTracer
+
+    tracer = HangarNoOpTracer() if tracer_kind == "hangar_noop" else ApiNoOpTracer()
+    servers = _servers(_L7_REQUIRES_APPROVAL)
+    bus = CommandBus()
+    bus.register(InvokeToolCommand, InvokeToolHandler(servers, Mock()))
+    real_rule = BatchExecutor._l7_approval_rule
+    reads: list[str] = []
+
+    def counted(self: BatchExecutor, call: Any, ctx: Any) -> str | None:
+        reads.append(call.tool)
+        return real_rule(self, call, ctx)
+
+    with patch.object(BatchExecutor, "_l7_approval_rule", counted):
+        result = _execute(_executor_ctx(approval_gate=None, servers=servers, command_bus=bus), tracer)
+
+    assert reads == [TOOL], "tracing off must not add an L7 read for the label"
+    assert (result.success, result.error_type, result.error) == (
+        False,
+        "EgressPolicyApprovalRequiredError",
+        "Tool call requires approval",
+    )
+
+
 # --- end to end through the executor ------------------------------------------
 
 
