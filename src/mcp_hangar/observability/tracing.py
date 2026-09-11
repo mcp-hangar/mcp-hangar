@@ -27,6 +27,8 @@ Example:
 from collections.abc import Callable
 from contextlib import contextmanager
 import os
+import sys
+import threading
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
@@ -38,9 +40,17 @@ logger = get_logger(__name__)
 # Type variable for generic decorator
 F = TypeVar("F", bound=Callable[..., Any])
 
-# Global state
-_tracer_mcp_server = None
+# Global state. `_initialized` means Hangar's own provider is the registered one.
+_tracer_mcp_server: Any = None  # an SDK TracerProvider; the SDK may be absent
 _initialized = False
+# Set once Hangar has shut its own provider down. The API registers a global
+# provider once per process, so the shut-down one stays registered for good.
+_shut_down = False
+
+# Upper bound on shutdown_tracing(). The SDK's shutdown waits for an export in
+# flight, which against an unreachable collector is the whole OTLP export
+# timeout (10 s by default) per processor, and it takes no deadline of its own.
+TRACING_SHUTDOWN_TIMEOUT_S = 5.0
 
 # Check if OpenTelemetry is available
 try:
@@ -253,6 +263,10 @@ def init_tracing(
         logger.debug("tracing_already_initialized")
         return True
 
+    if _shut_down:
+        logger.warning("tracing_init_refused", reason="already_shut_down")
+        return False
+
     if not OTEL_AVAILABLE:
         logger.info(
             "tracing_disabled_otel_not_available",
@@ -262,6 +276,11 @@ def init_tracing(
 
     if not is_tracing_enabled():
         logger.info("tracing_disabled_by_config")
+        return False
+
+    if _provider_registered_elsewhere():
+        # Someone else owns the global: use it, build nothing, claim nothing.
+        logger.info("tracing_external_provider_in_use", provider=type(trace.get_tracer_provider()).__name__)
         return False
 
     try:
@@ -277,9 +296,10 @@ def init_tracing(
             }
         )
 
-        # Create tracer mcp_server
+        # Create tracer mcp_server. Held locally until registered: a provider
+        # the API refused to register must not end up in module state.
         sampler = _build_sampler()
-        _tracer_mcp_server = TracerProvider(resource=resource, sampler=sampler)
+        provider = TracerProvider(resource=resource, sampler=sampler)
         logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters
@@ -289,7 +309,7 @@ def init_tracing(
         if OTLP_AVAILABLE and otlp_endpoint:
             try:
                 otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
+                provider.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
                 exporters_added += 1
                 logger.info("tracing_otlp_exporter_added", endpoint=otlp_endpoint)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
@@ -302,7 +322,7 @@ def init_tracing(
                     agent_host_name=jaeger_host,
                     agent_port=jaeger_port,
                 )
-                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(jaeger_exporter))
+                provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
                 exporters_added += 1
                 logger.info(
                     "tracing_jaeger_exporter_added",
@@ -312,10 +332,11 @@ def init_tracing(
             except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
                 logger.warning("tracing_jaeger_exporter_failed", error=str(e))
 
-        # Console exporter (debugging)
+        # Console exporter (debugging). stderr, not the SDK's default stdout: on
+        # the stdio transport stdout is the JSON-RPC stream.
         if console_export:
-            console_exporter = ConsoleSpanExporter()
-            _tracer_mcp_server.add_span_processor(BatchSpanProcessor(console_exporter))
+            console_exporter = ConsoleSpanExporter(out=sys.stderr)
+            provider.add_span_processor(BatchSpanProcessor(console_exporter))
             exporters_added += 1
             logger.info("tracing_console_exporter_added")
 
@@ -323,8 +344,15 @@ def init_tracing(
             logger.warning("tracing_no_exporters_configured")
             return False
 
-        # Register the global tracer provider (third-party OTel API)
-        trace.set_tracer_provider(_tracer_mcp_server)
+        # Register the global tracer provider (third-party OTel API). A second
+        # registration is refused with only a warning, so confirm this one took:
+        # another component may have registered since the check above.
+        trace.set_tracer_provider(provider)
+        if trace.get_tracer_provider() is not provider:
+            provider.shutdown()
+            logger.warning("tracing_init_refused", reason="provider_registered_concurrently")
+            return False
+        _tracer_mcp_server = provider
         _initialized = True
 
         logger.info(
@@ -340,18 +368,67 @@ def init_tracing(
 
 
 def shutdown_tracing() -> None:
-    """Shutdown tracing and flush pending spans."""
-    global _tracer_mcp_server, _initialized
+    """Shut down Hangar's own tracer provider, flushing pending spans.
 
-    if _tracer_mcp_server is not None:
+    A provider someone else registered is left to its owner. Safe to call twice.
+    Returns within ``TRACING_SHUTDOWN_TIMEOUT_S``: the flush runs on a daemon
+    thread, and one still waiting on an unreachable collector is abandoned.
+    """
+    global _tracer_mcp_server, _initialized, _shut_down
+
+    provider = _tracer_mcp_server
+    if provider is None:
+        return
+    _tracer_mcp_server = None
+    _initialized = False
+    _shut_down = True
+
+    errors: list[Exception] = []
+
+    def _shutdown() -> None:
         try:
-            _tracer_mcp_server.shutdown()
-            logger.info("tracing_shutdown_complete")
+            provider.shutdown()
         except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
-            logger.warning("tracing_shutdown_error", error=str(e))
-        finally:
-            _tracer_mcp_server = None
-            _initialized = False
+            errors.append(e)
+
+    worker = threading.Thread(target=_shutdown, name="hangar-tracing-shutdown", daemon=True)
+    worker.start()
+    worker.join(TRACING_SHUTDOWN_TIMEOUT_S)
+    if worker.is_alive():
+        logger.warning("tracing_shutdown_timed_out", timeout_s=TRACING_SHUTDOWN_TIMEOUT_S)
+    elif errors:
+        logger.warning("tracing_shutdown_error", error=str(errors[0]))
+    else:
+        logger.info("tracing_shutdown_complete")
+
+
+def _provider_registered_elsewhere() -> bool:
+    """Whether a provider Hangar did not register owns the OTel global.
+
+    Until anything registers, ``get_tracer_provider()`` returns the API's
+    ``ProxyTracerProvider`` singleton -- a public class, though absent from the
+    API's ``__all__``; the lifecycle tests pin it. Registration is one-shot, so
+    any other type is registered for good. ``OTEL_PYTHON_TRACER_PROVIDER``, when
+    set, is loaded and registered by that first lookup: someone else's too.
+    Only meaningful while Hangar's own provider is not registered.
+    """
+    return not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+
+
+def _tracing_active() -> bool:
+    """Whether Hangar's spans and trace context go anywhere.
+
+    Yes while Hangar's own provider is registered, or when another was
+    registered first -- by the host application or an instrumentation agent --
+    which Hangar then uses without claiming. Nothing registered returns without
+    allocating. After Hangar shut its provider down, that dead provider is the
+    global for the rest of the process, so tracing stays off.
+    """
+    if not OTEL_AVAILABLE:
+        return False
+    if _initialized:
+        return True
+    return not _shut_down and _provider_registered_elsewhere() and is_tracing_enabled()
 
 
 def get_tracer(name: str = __name__) -> Any:
@@ -361,9 +438,10 @@ def get_tracer(name: str = __name__) -> Any:
         name: Tracer name (usually __name__).
 
     Returns:
-        OpenTelemetry tracer or NoOpTracer if disabled.
+        OpenTelemetry tracer from the registered provider, Hangar's own or one
+        registered before it; NoOpTracer when there is none or tracing is off.
     """
-    if not _initialized or not OTEL_AVAILABLE:
+    if not _tracing_active():
         return _noop_tracer
 
     return trace.get_tracer(name)
@@ -469,7 +547,7 @@ def inject_trace_context(carrier: dict[str, str]) -> None:
         inject_trace_context(headers)
         # headers now contains traceparent, tracestate (and baggage, if any)
     """
-    if not OTEL_AVAILABLE or not _initialized:
+    if not _tracing_active():
         return
 
     _get_propagator().inject(carrier)
@@ -493,7 +571,7 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
         with tracer.start_as_current_span("handle", context=context):
             ...
     """
-    if not OTEL_AVAILABLE or not _initialized:
+    if not _tracing_active():
         return None
 
     return _get_propagator().extract(carrier)
@@ -571,7 +649,7 @@ def get_current_trace_id() -> str | None:
     Returns:
         Trace ID or None if not in a trace.
     """
-    if not OTEL_AVAILABLE or not _initialized:
+    if not _tracing_active():
         return None
 
     span = trace.get_current_span()
@@ -591,7 +669,7 @@ def get_current_span_id() -> str | None:
     Returns:
         Span ID or None if not in a span.
     """
-    if not OTEL_AVAILABLE or not _initialized:
+    if not _tracing_active():
         return None
 
     span = trace.get_current_span()
