@@ -147,6 +147,9 @@ def init_tracing(config: TracingConfig) -> bool:
     """
     if not config.enabled:
         logger.info("tracing_disabled_by_config")
+        from ...observability.tracing import disable_tracing
+
+        disable_tracing()
         return False
 
     try:

@@ -114,6 +114,43 @@ emit(
         assert claim not in proc.stderr, claim
 
 
+@pytest.mark.parametrize(
+    ("route", "env"),
+    [("config_file", {}), ("env", {"MCP_TRACING_ENABLED": "false"})],
+)
+def test_tracing_disabled_keeps_hangars_spans_off_a_host_provider(route: str, env: dict[str, str]) -> None:
+    """An operator's "tracing disabled" holds whoever owns the provider."""
+    proc = _run(
+        f"ROUTE = {route!r}\n"
+        + """
+host_spans = InMemorySpanExporter()
+host = TracerProvider()
+host.add_span_processor(SimpleSpanProcessor(host_spans))
+trace.set_tracer_provider(host)
+
+from mcp_hangar.server.bootstrap.observability import TracingConfig, _parse_observability_config, init_tracing
+
+config = TracingConfig(enabled=False) if ROUTE == "config_file" else _parse_observability_config({}).tracing
+assert not config.enabled
+initialized = init_tracing(config)
+carrier = {}
+with trace.get_tracer("host").start_as_current_span("host-span"):
+    tracer = t.get_tracer("case")
+    with tracer.start_as_current_span("hangar-span"):
+        t.inject_trace_context(carrier)
+emit(initialized=initialized, noop=isinstance(tracer, t.NoOpTracer), carrier=carrier, spans=span_names(host_spans))
+""",
+        **env,
+    )
+    seen = _observed(proc)
+
+    assert seen["initialized"] is False
+    assert seen["noop"] is True
+    assert seen["carrier"] == {}
+    assert seen["spans"] == ["host-span"]
+    assert "tracing_disabled_by_config" in proc.stderr
+
+
 def test_a_second_init_is_a_noop() -> None:
     proc = _run("""
 use_in_memory_exporters()
