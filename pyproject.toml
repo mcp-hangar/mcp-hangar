@@ -314,8 +314,10 @@ drift_allowance = 3.0
   # 87.4 -> 89.0 when tests/unit/test_approval_span_result.py drove every
   # approval-gate terminal path (#1274): 91.49 measured on 3.11, so 87.4 sat
   # past the drift allowance. Not --bump's 91.4, which is tighter than the
-  # run-to-run swing noted above.
-  "server/tools/batch/executor.py" = 89.0
+  # run-to-run swing noted above. 89.0 -> 89.5 when
+  # tests/unit/test_span_error_on_failure.py drove _gate_cold_start's failure
+  # path (#1272): 92.03 on 3.11 against 91.52 in CI on main, past the allowance.
+  "server/tools/batch/executor.py" = 89.5
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
