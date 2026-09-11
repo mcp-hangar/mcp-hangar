@@ -161,6 +161,9 @@ if OTEL_AVAILABLE:
 class NoOpSpan:
     """No-op span for when tracing is disabled."""
 
+    def is_recording(self) -> bool:
+        return False
+
     def set_attribute(self, key: str, value: Any) -> None:
         pass
 
