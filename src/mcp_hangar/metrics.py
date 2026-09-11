@@ -965,6 +965,14 @@ OTLP_EXPORT_FAILURES_TOTAL = Counter(
     description="Total number of failed OTLP span-export batches (collector unreachable or export error)",
 )
 
+OTLP_AUDIT_EXPORT_FAILURES_TOTAL = Counter(
+    # The audit log pipeline's twin of the counter above (#1289): its
+    # BatchLogRecordProcessor also exports on a background thread and swallows
+    # failures, and each failed batch drops the audit records in it.
+    name="mcp_hangar_otlp_audit_export_failures",
+    description="Total number of failed OTLP audit log-record export batches (collector unreachable or export error)",
+)
+
 # -----------------------------------------------------------------------------
 # Task Relay Metrics (ADR-014 Phase 3)
 # -----------------------------------------------------------------------------
@@ -1202,8 +1210,9 @@ def _register_all_metrics():
         # Cost attribution metrics
         COST_CENTS_TOTAL,
         COST_ATTRIBUTIONS_TOTAL,
-        # OTLP trace export metrics
+        # OTLP trace and audit export metrics
         OTLP_EXPORT_FAILURES_TOTAL,
+        OTLP_AUDIT_EXPORT_FAILURES_TOTAL,
     ]
 
     # Concurrency metrics (defined above alongside other batch metrics)
@@ -1541,6 +1550,15 @@ def record_otlp_export_failure() -> None:
     a down or unreachable collector (and of the spans dropped with that batch).
     """
     OTLP_EXPORT_FAILURES_TOTAL.inc()
+
+
+def record_otlp_audit_export_failure() -> None:
+    """Record a failed OTLP audit log-record export batch.
+
+    The audit counterpart of `record_otlp_export_failure`, called from the
+    metered exporter the audit log pipeline wraps its OTLP exporter in.
+    """
+    OTLP_AUDIT_EXPORT_FAILURES_TOTAL.inc()
 
 
 # =============================================================================

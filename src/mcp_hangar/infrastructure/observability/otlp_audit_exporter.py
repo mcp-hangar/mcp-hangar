@@ -1,27 +1,197 @@
 """OTLP audit exporter for security-relevant domain events.
 
 Exports tool invocations and mcp_server state transitions as OTLP log records.
-Uses opentelemetry-api logs bridge when available; falls back to no-op.
+The bootstrap owns the pipeline they travel through (`init_audit_log_export`);
+without one -- no SDK, or nothing registered -- records go to the structured log.
 
 MIT licensed -- part of core observability infrastructure.
 """
 
+import threading
 import time
+from typing import Any
 
 from ...logging_config import get_logger
+from ...metrics import record_otlp_audit_export_failure
 from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer
 
 logger = get_logger(__name__)
 
-# Try to import OTEL logs API
+AUDIT_LOGGER_NAME = "mcp_hangar.audit"
+
+# Upper bound on shutdown_audit_log_export(), for the reason tracing has its own:
+# the SDK's shutdown waits out an export in flight to an unreachable collector.
+AUDIT_LOG_SHUTDOWN_TIMEOUT_S = 5.0
+
+# The logs API and SDK are underscore modules in every supported release; these
+# are the names relied on. ProxyLoggerProvider is what the API hands out until a
+# provider is registered, as ProxyTracerProvider is for traces.
 try:
-    from opentelemetry._logs import get_logger as otel_get_logger
-    from opentelemetry._logs import SeverityNumber
-    from opentelemetry.sdk._logs import LoggerProvider  # noqa: F401
+    from opentelemetry._logs import LogRecord, SeverityNumber, get_logger_provider, set_logger_provider
+    from opentelemetry._logs._internal import ProxyLoggerProvider
+    import opentelemetry.sdk._logs as _sdk_logs
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+    from opentelemetry.sdk.version import __version__ as _sdk_version
 
     OTEL_LOGS_AVAILABLE = True
 except ImportError:
     OTEL_LOGS_AVAILABLE = False
+
+try:
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+
+    OTLP_LOGS_AVAILABLE = True
+except ImportError:
+    OTLP_LOGS_AVAILABLE = False
+    OTLPLogExporter = None
+
+# The record an SDK provider can export. Before 1.38 its Logger passes an API
+# LogRecord on without the provider's resource, and the OTLP encoder then fails
+# on the batch thread, losing the batch; the SDK's own LogRecord carries it. From
+# 1.38 the SDK converts API records itself and deprecates its own, gone in 1.39.
+_SdkLogRecord: Any = None
+if OTEL_LOGS_AVAILABLE and tuple(int(part) for part in _sdk_version.split(".")[:2]) < (1, 38):
+    _SdkLogRecord = _sdk_logs.LogRecord
+
+# Global state, separate from the tracer provider's: each signal has its own.
+_audit_provider: Any = None  # Hangar's own SDK LoggerProvider, once registered
+_configured = False  # an OTLP endpoint was configured, so audit export is on
+_shut_down = False  # Hangar shut its own provider down; it stays the global
+
+
+class _MeteredLogExporter:
+    """Make audit export failures observable, as ``_MeteredSpanExporter`` does for spans.
+
+    ``BatchLogRecordProcessor`` exports on a background thread and swallows
+    failures, so an unreachable collector would drop every batch of audit
+    records without a signal. This increments
+    ``mcp_hangar_otlp_audit_export_failures_total`` when the wrapped exporter
+    returns a failure or raises, and changes nothing else: the result or the
+    exception is passed on, so the SDK's retry behaviour is untouched.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def export(self, batch: Any) -> Any:
+        try:
+            result = self._inner.export(batch)
+        except Exception:
+            record_otlp_audit_export_failure()
+            raise
+        # By name: the result enum was renamed (LogExportResult -> LogRecordExportResult).
+        if getattr(result, "name", None) != "SUCCESS":
+            record_otlp_audit_export_failure()
+        return result
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return bool(self._inner.force_flush(timeout_millis))
+
+
+def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-hangar") -> bool:
+    """Set up the pipeline audit records are exported through.
+
+    No endpoint, no audit export. With one, audit export is on
+    (``audit_log_export_configured``) whatever happens next, and Hangar
+    registers its own LoggerProvider -- a batch processor and a metered OTLP log
+    exporter -- unless the SDK is absent (records then go to the structured log)
+    or another provider was registered first (records then go through that one,
+    which Hangar never replaces and never shuts down).
+
+    Returns:
+        True if Hangar's own provider is the registered one.
+    """
+    global _audit_provider, _configured
+
+    if not otlp_endpoint:
+        return False
+    _configured = True
+
+    if _audit_provider is not None:
+        return True
+    if _shut_down:
+        logger.warning("audit_log_export_init_refused", reason="already_shut_down")
+        return False
+    if not (OTEL_LOGS_AVAILABLE and OTLP_LOGS_AVAILABLE):
+        logger.info("audit_log_export_sdk_not_installed", fallback="structlog")
+        return False
+    if _logger_provider_registered():
+        logger.info("audit_log_external_provider_in_use", provider=type(get_logger_provider()).__name__)
+        return False
+
+    try:
+        provider = LoggerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
+        exporter = _MeteredLogExporter(OTLPLogExporter(endpoint=otlp_endpoint, insecure=True))
+        provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+        # One-shot, and a second registration is refused with only a warning:
+        # confirm this one took, as tracing does.
+        set_logger_provider(provider)
+        if get_logger_provider() is not provider:
+            provider.shutdown()
+            logger.warning("audit_log_export_init_refused", reason="provider_registered_concurrently")
+            return False
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: audit export setup must not crash startup
+        logger.warning("audit_log_export_initialization_failed", error=str(e))
+        return False
+
+    _audit_provider = provider
+    logger.info("audit_log_export_initialized", otlp_endpoint=otlp_endpoint)
+    return True
+
+
+def audit_log_export_configured() -> bool:
+    """Whether the bootstrap turned audit export on, so `OTLPAuditExporter` is the exporter."""
+    return _configured
+
+
+def shutdown_audit_log_export() -> None:
+    """Shut down Hangar's own logger provider, flushing its pending records.
+
+    Only its own: a provider someone else registered, and its processors, are
+    left to their owner. Safe to call twice. Returns within
+    ``AUDIT_LOG_SHUTDOWN_TIMEOUT_S``; a flush still waiting on an unreachable
+    collector is abandoned on its daemon thread.
+    """
+    global _audit_provider, _shut_down
+
+    provider = _audit_provider
+    if provider is None:
+        return
+    _audit_provider = None
+    _shut_down = True
+
+    errors: list[Exception] = []
+
+    def _shutdown() -> None:
+        try:
+            provider.shutdown()
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: audit export shutdown must not crash application
+            errors.append(e)
+
+    worker = threading.Thread(target=_shutdown, name="hangar-audit-log-shutdown", daemon=True)
+    worker.start()
+    worker.join(AUDIT_LOG_SHUTDOWN_TIMEOUT_S)
+    if worker.is_alive():
+        logger.warning("audit_log_export_shutdown_timed_out", timeout_s=AUDIT_LOG_SHUTDOWN_TIMEOUT_S)
+    elif errors:
+        logger.warning("audit_log_export_shutdown_error", error=str(errors[0]))
+    else:
+        logger.info("audit_log_export_shutdown_complete")
+
+
+def _logger_provider_registered() -> bool:
+    """Whether any provider, Hangar's or another's, owns the OTel logs global.
+
+    Until one is registered the API returns its ``ProxyLoggerProvider``, which
+    drops records. ``OTEL_PYTHON_LOGGER_PROVIDER``, when set, is loaded and
+    registered by this first lookup.
+    """
+    return not isinstance(get_logger_provider(), ProxyLoggerProvider)
 
 
 class OTLPAuditExporter:
@@ -41,25 +211,30 @@ class OTLPAuditExporter:
         This method is the actual OTLP emission point. It is extracted
         to a separate method to allow unit testing via mock patching.
 
+        The record takes the current span's trace context, when there is one.
+
         Args:
             attributes: Dict of MCP governance attributes to include.
         """
-        if not OTEL_LOGS_AVAILABLE:
-            # Fallback: emit via structlog so the event is not lost entirely
+        # Nowhere to hand the record to: no SDK, nothing registered (the API's
+        # proxy would drop it), or Hangar's own provider already shut down.
+        if not OTEL_LOGS_AVAILABLE or _shut_down or not _logger_provider_registered():
             logger.info("audit_event", **attributes)
             return
 
-        otel_logger = otel_get_logger("mcp_hangar.audit")
-        from opentelemetry._logs import LogRecord
-
-        record = LogRecord(
-            timestamp=int(time.time_ns()),
-            severity_number=SeverityNumber.INFO,
-            severity_text="INFO",
-            body=attributes.get("mcp.event.name", "mcp.audit"),
-            attributes=attributes,
-        )
-        otel_logger.emit(record)
+        provider = get_logger_provider()
+        fields: dict[str, Any] = {
+            "timestamp": time.time_ns(),
+            "severity_number": SeverityNumber.INFO,
+            "severity_text": "INFO",
+            "body": attributes.get("mcp.event.name", "mcp.audit"),
+            "attributes": attributes,
+        }
+        if _SdkLogRecord is not None and isinstance(provider, LoggerProvider):
+            record = _SdkLogRecord(resource=provider.resource, **fields)
+        else:
+            record = LogRecord(**fields)
+        provider.get_logger(AUDIT_LOGGER_NAME).emit(record)
 
     def export_tool_invocation(
         self,

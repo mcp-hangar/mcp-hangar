@@ -39,6 +39,7 @@ from typing import Any
 from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ...domain.contracts.metrics_publisher import set_default_metrics_publisher
 from ...infrastructure.metrics_publisher import PrometheusMetricsPublisher
+from ...infrastructure.observability.otlp_audit_exporter import init_audit_log_export, shutdown_audit_log_export
 from ...logging_config import get_logger
 from .components import create_observability_adapter
 
@@ -76,6 +77,8 @@ class ObservabilityConfig:
 
     tracing: TracingConfig
     langfuse: LangfuseBootstrapConfig
+    audit_otlp_endpoint: str | None = None
+    """Where OTLP audit records go; None keeps audit export off."""
 
 
 def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
@@ -114,7 +117,13 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         scrub_outputs=_get_bool_env("MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", True)),
     )
 
-    return ObservabilityConfig(tracing=tracing, langfuse=langfuse)
+    # Audit records go to the tracing endpoint, but only to one set explicitly,
+    # in the env or the file (#1289): `otlp_endpoint` defaults to localhost, and
+    # nobody chose that. Not gated on `tracing.enabled`: audit is its own signal.
+    explicit = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") is not None or "otlp_endpoint" in tracing_dict
+    audit_otlp_endpoint = tracing.otlp_endpoint if explicit and tracing.otlp_endpoint else None
+
+    return ObservabilityConfig(tracing=tracing, langfuse=langfuse, audit_otlp_endpoint=audit_otlp_endpoint)
 
 
 def _get_bool_env(key: str, default: bool) -> bool:
@@ -272,12 +281,17 @@ def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, Obs
     # Initialize OpenTelemetry tracing
     tracing_enabled = init_tracing(obs_config.tracing)
 
+    # The audit log pipeline: its own provider, beside tracing's, not inside it.
+    # Before `init_event_handlers`, which selects the audit exporter from it.
+    init_audit_log_export(obs_config.audit_otlp_endpoint, obs_config.tracing.service_name)
+
     # Initialize Langfuse
     observability_adapter = init_langfuse(obs_config.langfuse)
 
     logger.info(
         "observability_initialized",
         tracing_enabled=tracing_enabled,
+        audit_log_export=obs_config.audit_otlp_endpoint is not None,
         langfuse_enabled=obs_config.langfuse.enabled
         and not isinstance(observability_adapter, NullObservabilityAdapter),
     )
@@ -309,3 +323,6 @@ def shutdown_observability(adapter: ObservabilityPort | None) -> None:
         pass
     except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
         logger.warning("tracing_shutdown_error", error=str(e))
+
+    # Audit export, separately bounded. It too shuts down only its own provider.
+    shutdown_audit_log_export()
