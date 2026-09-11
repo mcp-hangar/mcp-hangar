@@ -1,17 +1,19 @@
 # MCP Hangar + OpenTelemetry Collector + Prometheus
 #
-# Demonstrates OTLP governance telemetry export:
-#   Hangar emits spans, metrics, and audit logs via OTLP
-#   OTEL Collector receives them and exports to Prometheus + console
+# What is delivered, and how:
+#   traces      Hangar -> OTLP gRPC -> Collector (debug + file exporters)
+#   audit logs  Hangar -> OTLP gRPC -> Collector (debug + file exporters)
+#   metrics     NOT sent over OTLP; Prometheus scrapes Hangar's /metrics
 #
 # Usage:
-#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-#   docker-compose up
+#   docker compose up
+#   # optional: tag this run's telemetry (service.instance.id)
+#   HANGAR_RUN_ID=my-run docker compose up
 #
 # Ports:
 #   4317 - OTEL Collector OTLP gRPC receiver
 #   9090 - Prometheus UI
-#   8080 - Hangar HTTP API
+#   8080 - Hangar HTTP API and /metrics
 
 services:
   mcp-hangar:
@@ -46,12 +48,22 @@ services:
       MCP_CONFIG: /app/config.yaml
       MCP_MODE: http
       MCP_HTTP_PORT: "8080"
+      # `http://` on purpose: it selects plaintext gRPC for traces. Without a
+      # scheme the trace exporter would try TLS against a plaintext Collector.
+      # An explicit endpoint also turns on OTLP audit log export.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: mcp-hangar
+      # Lands on the resource of both spans and audit records, so one run's
+      # telemetry can be picked out of the Collector's output.
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=${HANGAR_RUN_ID:-local}
       MCP_TRACING_ENABLED: "true"
       MCP_LOG_LEVEL: INFO
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      # The image ships the wheel, not the repository, so the `math` server in
+      # config.yaml is mounted where `python -m examples.provider_math.server`
+      # finds it.
+      - ../provider_math:/app/examples/provider_math:ro
     depends_on:
       - otel-collector
     healthcheck:
@@ -77,9 +89,9 @@ services:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
       - "8888:8888"   # Collector self-metrics
-      - "8889:8889"   # Prometheus exporter
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - otel-output:/otel-output
     command: ["--config=/etc/otel-collector-config.yaml"]
 
   prometheus:
@@ -91,3 +103,14 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+
+volumes:
+  # The file exporter's output. The Collector image runs as uid 10001 and has
+  # no writable directory of its own, so the volume is a tmpfs owned by that
+  # uid. Read it with:
+  #   docker compose cp otel-collector:/otel-output/telemetry.jsonl .
+  otel-output:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=10001,size=64m"
