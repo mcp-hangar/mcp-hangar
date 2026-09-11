@@ -142,7 +142,8 @@ def init_tracing(config: TracingConfig) -> bool:
         config: Tracing configuration.
 
     Returns:
-        True if tracing was initialized successfully.
+        True if Hangar registered its own tracer provider. False when another
+        provider was registered first: Hangar's spans then go through that one.
     """
     if not config.enabled:
         logger.info("tracing_disabled_by_config")
@@ -295,12 +296,12 @@ def shutdown_observability(adapter: ObservabilityPort | None) -> None:
         except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse shutdown must not crash application
             logger.warning("langfuse_shutdown_error", error=str(e))
 
-    # Shutdown OpenTelemetry tracing
+    # Shutdown OpenTelemetry tracing. shutdown_tracing() logs its own outcome:
+    # it shuts down only a provider Hangar registered, within a bound.
     try:
         from ...observability.tracing import shutdown_tracing
 
         shutdown_tracing()
-        logger.debug("tracing_shutdown_complete")
     except ImportError:
         pass
     except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
