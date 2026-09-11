@@ -33,6 +33,7 @@ MCP, REST, or the CLI. So most "stable" claims are proven *in-process*, not
 | T0 | single process + stub backend (`examples/provider_math`) | `mcp-hangar` on PATH |
 | T1 | multi-backend / groups | Docker + compose |
 | T2 | auth / IdP | Keycloak (`examples/auth-keycloak`) |
+| T3 | trace and audit export to an OTLP receiver | `grpcio` + the `opentelemetry` extra (in-process receiver) |
 
 Status legend: ✅ live test exists · 🟡 covered only internally/mocked (NOT proven
 live) · 🔴 no coverage at all · ⬜ live test not yet written.
@@ -60,8 +61,9 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | Truncation + continuation (`hangar_fetch_continuation`/`delete_continuation`) | MCP tools | truncated payload then paged fetch | unit-ish only | 🔴 |
 | Approval gate via `hangar_approve` / approval REST | MCP tool + REST | pending→resolve→granted | REST fakes (`test_approval_api_e2e`) | 🟡 |
 | Hot reload via SIGHUP / `hangar_reload_config` takes effect | signal + MCP tool | reloaded state | file-watch real, effect mocked | 🟡 |
-| OTEL trace context (W3C) propagates Agent→hangar→backend | MCP `hangar_call` + collector | correlated spans | mocked ctx | 🟡 |
-| Audit log / CEF emitted on a real invocation | MCP `hangar_call` | CEF line in sink | exporter unit-ish | 🟡 |
+| OTEL trace context (W3C) propagates Agent→hangar→backend | MCP `hangar_call` + collector | correlated spans | mocked ctx. Export to a receiver is proven live (next row); an inbound agent `traceparent` and its injection into the backend are not driven live | 🟡 |
+| `serve --http` exports spans and OTLP audit records to a real OTLP receiver, including across SIGTERM (#1293) | MCP `hangar_call` over `/mcp` + in-process OTLP/gRPC receiver (`tests/live/_otlp_receiver.py`) | records at the receiver under the run's `service.instance.id` (set via `OTEL_RESOURCE_ATTRIBUTES`), keyed on the returned `call_id` (`batch.call.id`) | `tests/live/test_t3_export.py`: a warm call's trace holds `hangar_call`, `batch.call.add` and the CLIENT span `execute_tool add`; a call denied by a server `deny_list` has `batch.call.power` and `policy.check_access` (`policy.allowed=false`) and no CLIENT span; a `tool_invocation` record (`status=success`) arrives under scope `mcp_hangar.audit`, its trace ID reported, not asserted; with the batch timer at 600 s, a call's spans arrive after SIGTERM, delivered by the shutdown flush. Not covered: a Collector, trace context into or out of hangar | ✅ |
+| Audit log / CEF emitted on a real invocation | MCP `hangar_call` | CEF line in sink | exporter unit-ish. The OTLP audit record is proven live in the row above; CEF is not | 🟡 |
 
 > **Tool-access live finding (fail-OPEN on listing → FIXED).** Driving a per-tenant
 > `deny_list` over the real `/mcp` surface surfaced a split-brain: the invoke path
