@@ -1,9 +1,13 @@
 # OpenTelemetry Collector configuration for MCP Hangar governance telemetry.
 #
 # Pipeline:
-#   OTLP receiver <- Hangar (spans, metrics, audit logs)
-#   Batch processor (reduce OTLP calls)
-#   Exporters: Prometheus (metrics), logging (spans + logs to stdout)
+#   OTLP receiver <- Hangar (spans, audit logs; Hangar exports no OTLP metrics)
+#   Batch processor (reduce export calls)
+#   Exporters: debug (stdout) and file (OTLP JSON lines, read by CI)
+#
+# Checked with `validate` against the image pinned in docker-compose.yml
+# (0.96.0). `debug` replaces the `logging` exporter, which later releases
+# remove; both exist in 0.96.0.
 
 receivers:
   otlp:
@@ -18,41 +22,25 @@ processors:
     timeout: 5s
     send_batch_size: 512
 
-  # Add MCP Hangar resource attributes to all telemetry
-  resource:
-    attributes:
-      - key: service.namespace
-        value: mcp-hangar
-        action: upsert
-
 exporters:
-  # Prometheus exporter: exposes /metrics endpoint for scraping
-  prometheus:
-    endpoint: 0.0.0.0:8889
-    namespace: mcp_hangar
-    # Forward MCP governance attributes as Prometheus labels
-    const_labels:
-      source: otel-collector
+  # Console exporter: prints spans and audit logs to stdout.
+  debug:
+    verbosity: basic
 
-  # Console exporter: prints spans and audit logs to stdout (debug)
-  logging:
-    verbosity: normal
-    sampling_initial: 5
-    sampling_thereafter: 200
+  # One OTLP JSON object per line: `{"resourceSpans": [...]}` or
+  # `{"resourceLogs": [...]}`. `.github/workflows/examples-compose.yml` reads
+  # this file to prove that a tool call's span and audit record arrived.
+  file:
+    path: /otel-output/telemetry.jsonl
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
-
-    metrics:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [prometheus]
+      exporters: [debug, file]
 
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [debug, file]
