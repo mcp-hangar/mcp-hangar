@@ -44,9 +44,13 @@ class TestOtelCollectorConfig:
         config = yaml.safe_load((EXAMPLES_DIR / "otel-collector-config.yaml").read_text())
         assert "otlp" in config.get("receivers", {}), "Collector must have OTLP receiver"
 
-    def test_collector_config_has_traces_metrics_logs_pipelines(self) -> None:
+    def test_collector_config_has_traces_and_logs_pipelines_and_no_metrics(self) -> None:
         config = yaml.safe_load((EXAMPLES_DIR / "otel-collector-config.yaml").read_text())
         pipelines = config.get("service", {}).get("pipelines", {})
-        assert "traces" in pipelines
-        assert "metrics" in pipelines
-        assert "logs" in pipelines
+        for signal in ("traces", "logs"):
+            assert signal in pipelines, f"Collector must have a {signal} pipeline"
+            assert "otlp" in pipelines[signal]["receivers"], f"{signal} pipeline must receive OTLP"
+            for exporter in ("debug", "file"):
+                assert exporter in pipelines[signal]["exporters"], f"{signal} pipeline must export to {exporter}"
+        # Hangar exports no OTLP metrics; Prometheus scrapes its /metrics directly.
+        assert "metrics" not in pipelines
