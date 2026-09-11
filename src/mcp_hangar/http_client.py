@@ -32,6 +32,7 @@ from .logging_config import get_logger
 from .context import get_identity_context
 from .observability.tracing import (
     inject_trace_context,
+    record_upstream_outcome,
     scrub_baggage_for_tenant,
     upstream_call_span,
 )
@@ -574,8 +575,9 @@ class HttpClient:
             # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv),
             # opened before either carrier is built so the traceparent written
             # into params._meta and the headers parents the upstream's span to
-            # this one.
-            with upstream_call_span(method, params):
+            # this one. It stays open until the answer is classified, so a
+            # failure read from the response ends it in ERROR too (#1277).
+            with upstream_call_span(method, params) as span:
                 sent_params, extra_headers = self._outbound_carriers(params, _tenant_id)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
@@ -587,103 +589,115 @@ class HttpClient:
                     mcp_server_label,
                 )
 
-            duration_s = time.time() - start_time
-            duration_ms = duration_s * 1000
-            status_code = str(response.status_code)
+                duration_s = time.time() - start_time
+                duration_ms = duration_s * 1000
+                status_code = str(response.status_code)
 
-            # DEPRECATED (SEP-2567): capture the transport session id ONLY for
-            # backward-compat with legacy session-based upstreams. Stateless
-            # upstreams do not return this header, and declaring the upstream
-            # stateless suppresses capture entirely so no session is ever tracked.
-            if not self._http_config.stateless_upstream:
-                session_id = response.headers.get("Mcp-Session-Id")
-                if session_id:
-                    self._mcp_session_id = session_id
+                # DEPRECATED (SEP-2567): capture the transport session id ONLY for
+                # backward-compat with legacy session-based upstreams. Stateless
+                # upstreams do not return this header, and declaring the upstream
+                # stateless suppresses capture entirely so no session is ever tracked.
+                if not self._http_config.stateless_upstream:
+                    session_id = response.headers.get("Mcp-Session-Id")
+                    if session_id:
+                        self._mcp_session_id = session_id
 
-            # Record HTTP request metrics
-            prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(
-                mcp_server=mcp_server_label, method=method, status_code=status_code
-            )
-            prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(
-                duration_s, mcp_server=mcp_server_label, method=method
-            )
-
-            # Check for SSE response (streaming)
-            content_type = response.headers.get("Content-Type", "")
-            if "text/event-stream" in content_type:
-                # For SSE, response body is already read by httpx
-                # Parse it directly as SSE format
-                return self._parse_sse_body(response.text, request_id)
-
-            logger.debug(
-                "http_client_response_received",
-                request_id=request_id,
-                status=response.status_code,
-                duration_ms=duration_ms,
-            )
-
-            if response.status_code == 404 and self._mcp_session_id is not None:
-                # The session this client holds no longer exists upstream --
-                # typically because the upstream process restarted. Streamable
-                # HTTP answers a request carrying an unknown Mcp-Session-Id with
-                # 404, and the resolution is to establish a new session rather
-                # than keep presenting the dead one.
-                #
-                # Nothing did that. The id was captured once and never cleared,
-                # 404 is not in `retry_status_codes`, and the caller saw an
-                # opaque "HTTP error: 404". So every call after an upstream
-                # restart failed, forever, while /health/ready still reported the
-                # gateway healthy -- it recovered only when the gateway itself
-                # was restarted (#651).
-                #
-                # Dropping the id here is half the fix; the other half is the
-                # re-handshake, which lives in the domain layer because only it
-                # knows how to `initialize`.
-                dead_session = self._mcp_session_id
-                self._mcp_session_id = None
-                logger.warning(
-                    "http_client_session_terminated",
-                    request_id=request_id,
-                    mcp_server=mcp_server_label,
-                    method=method,
-                    session_id=dead_session,
+                # Record HTTP request metrics
+                prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(
+                    mcp_server=mcp_server_label, method=method, status_code=status_code
                 )
-                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="session_terminated")
-                return {
-                    "error": {
-                        "code": SESSION_TERMINATED_CODE,
-                        "message": "Session terminated",
-                        "data": {"reason": SESSION_TERMINATED_REASON},
-                    }
-                }
+                prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(
+                    duration_s, mcp_server=mcp_server_label, method=method
+                )
 
-            if response.status_code >= 400:
-                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type=f"http_{status_code}")
-                return {
-                    "error": {
-                        "code": -32000,
-                        "message": f"HTTP error: {response.status_code}",
-                        "data": response.text[:500],
-                    }
-                }
+                # Check for SSE response (streaming)
+                content_type = response.headers.get("Content-Type", "")
+                if "text/event-stream" in content_type:
+                    # For SSE, response body is already read by httpx
+                    # Parse it directly as SSE format
+                    answer = self._parse_sse_body(response.text, request_id)
+                    record_upstream_outcome(span, answer)
+                    return answer
 
-            try:
-                result = response.json()
-                if isinstance(result, dict):
-                    prometheus_metrics.record_message_received(
-                        mcp_server_label,
-                        prometheus_metrics.classify_jsonrpc_message(result),
-                        len(response.content),
+                logger.debug(
+                    "http_client_response_received",
+                    request_id=request_id,
+                    status=response.status_code,
+                    duration_ms=duration_ms,
+                )
+
+                if response.status_code == 404 and self._mcp_session_id is not None:
+                    # The session this client holds no longer exists upstream --
+                    # typically because the upstream process restarted. Streamable
+                    # HTTP answers a request carrying an unknown Mcp-Session-Id with
+                    # 404, and the resolution is to establish a new session rather
+                    # than keep presenting the dead one.
+                    #
+                    # Nothing did that. The id was captured once and never cleared,
+                    # 404 is not in `retry_status_codes`, and the caller saw an
+                    # opaque "HTTP error: 404". So every call after an upstream
+                    # restart failed, forever, while /health/ready still reported the
+                    # gateway healthy -- it recovered only when the gateway itself
+                    # was restarted (#651).
+                    #
+                    # Dropping the id here is half the fix; the other half is the
+                    # re-handshake, which lives in the domain layer because only it
+                    # knows how to `initialize`.
+                    dead_session = self._mcp_session_id
+                    self._mcp_session_id = None
+                    logger.warning(
+                        "http_client_session_terminated",
+                        request_id=request_id,
+                        mcp_server=mcp_server_label,
+                        method=method,
+                        session_id=dead_session,
                     )
-                return cast(dict[str, Any], result)
-            except json.JSONDecodeError as e:
-                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="json_decode_error")
-                return {
-                    "error": {
-                        "code": -32700,
-                        "message": f"Invalid JSON response: {e}",
+                    prometheus_metrics.HTTP_ERRORS_TOTAL.inc(
+                        mcp_server=mcp_server_label, error_type="session_terminated"
+                    )
+                    record_upstream_outcome(span, http_status=response.status_code)
+                    return {
+                        "error": {
+                            "code": SESSION_TERMINATED_CODE,
+                            "message": "Session terminated",
+                            "data": {"reason": SESSION_TERMINATED_REASON},
+                        }
                     }
-                }
+
+                if response.status_code >= 400:
+                    prometheus_metrics.HTTP_ERRORS_TOTAL.inc(
+                        mcp_server=mcp_server_label, error_type=f"http_{status_code}"
+                    )
+                    record_upstream_outcome(span, http_status=response.status_code)
+                    return {
+                        "error": {
+                            "code": -32000,
+                            "message": f"HTTP error: {response.status_code}",
+                            "data": response.text[:500],
+                        }
+                    }
+
+                try:
+                    result = response.json()
+                    if isinstance(result, dict):
+                        prometheus_metrics.record_message_received(
+                            mcp_server_label,
+                            prometheus_metrics.classify_jsonrpc_message(result),
+                            len(response.content),
+                        )
+                    record_upstream_outcome(span, result)
+                    return cast(dict[str, Any], result)
+                except json.JSONDecodeError as e:
+                    prometheus_metrics.HTTP_ERRORS_TOTAL.inc(
+                        mcp_server=mcp_server_label, error_type="json_decode_error"
+                    )
+                    record_upstream_outcome(span, error=e)
+                    return {
+                        "error": {
+                            "code": -32700,
+                            "message": f"Invalid JSON response: {e}",
+                        }
+                    }
 
         except httpx.TimeoutException as e:
             duration_s = time.time() - start_time
@@ -917,8 +931,9 @@ class HttpClient:
 
         mcp_server_label = self._mcp_server_id or self._host
         try:
-            # Carriers built inside the CLIENT span, as in `call`.
-            with upstream_call_span(method, params):
+            # Carriers built inside the CLIENT span, as in `call`, and the
+            # status read inside it; the rejection is still raised below.
+            with upstream_call_span(method, params) as span:
                 sent_params, headers = self._outbound_carriers(params, tenant_id)
                 body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
@@ -928,6 +943,8 @@ class HttpClient:
                     headers=headers or None,
                     timeout=self._http_config.read_timeout,
                 )
+                if response.status_code >= 300:
+                    record_upstream_outcome(span, http_status=response.status_code)
         except Exception as e:  # noqa: BLE001 -- infra-boundary: transport failure wrapped as ClientError
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="notify_failed")
             logger.error("http_client_notify_failed", method=method, error=str(e))
