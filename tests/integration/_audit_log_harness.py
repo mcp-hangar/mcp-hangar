@@ -18,12 +18,7 @@ records and spans can be read back.
 
 Modes: ``yaml`` and ``env`` set the OTLP endpoint in the file or the env var
 (the parent sets the env); ``none`` sets neither; ``tracing_off`` sets it in the
-file with tracing disabled. ``auth`` is ``yaml`` with API-key auth on: the app
-is wrapped in the auth enforcement ``serve --http`` applies, and each call
-presents a key minted in the bootstrapped store (#1342). ``bound`` is ``yaml``
-with an identity the served HTTP path has no source for -- a session id, an
-agent and no user -- declared through the process-wide fallback identity, the
-seam a stdio session's declared caller uses (ADR-026).
+file with tracing disabled.
 """
 
 from __future__ import annotations
@@ -52,12 +47,18 @@ HEADERS = {
 
 #: mode -> [(call name, traceparent flags or None for no traceparent)]
 CALLS: dict[str, list[tuple[str, str | None]]] = {
+    # `auth` is `yaml` with API-key auth on (#1342): the app is wrapped in the
+    # auth enforcement `serve --http` applies, and each call presents a key
+    # minted in the bootstrapped store.
+    "auth": [("sampled", "01"), ("failed", "01")],
+    # `bound` is `yaml` with an identity the served HTTP path has no source for
+    # -- a session, an agent and no user -- declared through the process-wide
+    # fallback identity, the seam a stdio session's declared caller uses (ADR-026).
+    "bound": [("sampled", "01")],
     "yaml": [("sampled", "01"), ("unsampled", "00")],
     "env": [("sampled", "01")],
     "none": [("sampled", "01")],
     "tracing_off": [("no_trace_context", None)],
-    "auth": [("sampled", "01"), ("failed", "01")],
-    "bound": [("sampled", "01")],
 }
 
 #: call name -> (tool, arguments); every other call is add(1, 2).
@@ -186,8 +187,14 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     config: dict[str, Any] = {
         "mcp_servers": {"math": {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]}}
     }
-    if mode in ("yaml", "tracing_off", "auth", "bound"):
-        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode != "tracing_off"}}
+    if mode in ("yaml", "tracing_off"):
+        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode == "yaml"}}
+
+    from mcp_hangar.server.bootstrap import bootstrap
+    from mcp_hangar.server.lifecycle import mcp_app_for_serving
+
+    if mode in ("auth", "bound"):
+        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": True}}
     if mode == "auth":
         config["auth"] = {
             "enabled": True,
@@ -195,10 +202,6 @@ def main(mode: str, out: Path, endpoint: str) -> None:
             "api_key": {"enabled": True, "header_name": "X-API-Key"},
             "storage": {"driver": "memory"},
         }
-
-    from mcp_hangar.server.api.middleware import create_auth_enforced_app
-    from mcp_hangar.server.bootstrap import bootstrap
-    from mcp_hangar.server.lifecycle import mcp_app_for_serving
 
     context = bootstrap(config_dict=config)
 
@@ -216,6 +219,8 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     headers = dict(HEADERS)
     app = mcp_app_for_serving(context.mcp_server)
     if mode == "auth":
+        from mcp_hangar.server.api.middleware import create_auth_enforced_app
+
         headers.update(_authenticate(context))
         app = create_auth_enforced_app(app, context.auth_components)  # what `run_http` wraps it in
     if mode == "bound":
