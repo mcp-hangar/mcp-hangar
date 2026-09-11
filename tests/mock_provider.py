@@ -5,6 +5,21 @@ import os
 import sys
 
 
+def _record_trace_carrier(method, params):
+    """Append the ``_meta.traceparent`` this request carried to ``MOCK_PROVIDER_RECORD``.
+
+    Off unless the variable names a file. It lets a test read the outbound trace
+    carrier the gateway actually wrote over stdio, rather than trust the code
+    that writes it (tests/integration/_trace_harness.py).
+    """
+    path = os.environ.get("MOCK_PROVIDER_RECORD")
+    if not path:
+        return
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    with open(path, "a", encoding="utf-8") as record:
+        record.write(json.dumps({"method": method, "traceparent": (meta or {}).get("traceparent")}) + "\n")
+
+
 def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extending
     """Run a simple JSON-RPC server for testing."""
     while True:
@@ -17,6 +32,7 @@ def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extendin
             request_id = request.get("id")
             method = request.get("method")
             params = request.get("params", {})
+            _record_trace_carrier(method, params)
 
             if method == "initialize":
                 response = {

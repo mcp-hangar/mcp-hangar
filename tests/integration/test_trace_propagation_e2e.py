@@ -1,176 +1,212 @@
-"""Integration test: end-to-end W3C TraceContext propagation.
+"""A caller's trace reaches the upstream through the real invocation path (#1284).
 
-Verifies the full propagation chain:
-  Agent (provides traceparent) -> BatchExecutor (extracts, creates child span)
+Each case enters the app ``serve --http`` serves with a stateless
+``tools/call hangar_call`` whose ``_meta.traceparent`` names a remote caller
+span, and completes (or is refused) against a controlled upstream: the stdio
+``tests/mock_provider.py`` or an in-process HTTP upstream. The spans come from
+Hangar's own ``init_tracing()`` provider with nothing patched; see
+``_trace_harness.py`` for why that runs in a subprocess.
 
-Expected span hierarchy:
-  [agent-root-span]
-      +-- [batch.call.{tool}] (created by BatchExecutor with parent = agent-root)
+The previous version of this file called the private ``_execute_call`` with a
+mock context and a patched tracer, and passed ``batch_start_time=0.0``, so the
+global-timeout gate refused the call before any invocation: it asserted a
+parent on a span that never reached an upstream. Those direct-executor checks
+now live in ``tests/unit/test_execute_call_trace_parent.py``.
 
-Uses InMemorySpanExporter -- no external collector required.
-
-Note: OTEL only allows set_tracer_provider() once per process. These tests
-use patch to inject a controlled TracerProvider into the get_tracer() call
-path, avoiding interference with other test modules.
+Invariants, not span counts. Known defects are strict xfails naming the issue
+that removes them.
 """
 
-import threading
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from typing import Any
 
 import pytest
 
 pytestmark = pytest.mark.otel_sdk
 
-
-@pytest.fixture()
-def otel_setup():
-    """Create a fresh TracerProvider + InMemorySpanExporter per test.
-
-    Patches get_tracer in the executor module to use our provider directly,
-    avoiding the OTEL global set_tracer_provider (which can only be set once).
-    """
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-
-    yield exporter, provider
-
-    exporter.clear()
+HARNESS = Path(__file__).with_name("_trace_harness.py")
 
 
-class TestEndToEndTracePropagation:
-    """Agent traceparent -> BatchExecutor -> child span correlated in one trace."""
+@pytest.fixture(scope="module")
+def run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    out = tmp_path_factory.mktemp("trace") / "run.json"
+    env = {**os.environ, "MCP_TRACING_ENABLED": "true", "OTEL_EXPORTER_OTLP_ENDPOINT": ""}
+    # Under the 60s pytest-timeout the integration job applies.
+    result = subprocess.run(
+        [sys.executable, str(HARNESS), str(out)], capture_output=True, text=True, timeout=45, env=env
+    )
+    assert result.returncode == 0 and out.exists(), f"harness exited {result.returncode}:\n{result.stderr[-4000:]}"
+    return json.loads(out.read_text())
 
-    def test_batch_executor_creates_child_span_from_agent_traceparent(self, otel_setup) -> None:
-        """
-        Given an agent request with a traceparent, BatchExecutor creates a child span.
 
-        Span hierarchy:
-          [test-agent-span] (root, simulating agent)
-              +-- [batch.call.add] (child, created by BatchExecutor)
-        """
-        exporter, provider = otel_setup
+def _ids(traceparent: str | None) -> tuple[str, str] | None:
+    """(trace id, span id) named by a W3C traceparent, or None."""
+    if not traceparent:
+        return None
+    _version, trace_id, span_id, _flags = traceparent.split("-")
+    return trace_id, span_id
 
-        from opentelemetry.propagate import inject
-        from mcp_hangar.server.tools.batch.executor import BatchExecutor
-        from mcp_hangar.server.tools.batch.models import CallSpec
 
-        executor = BatchExecutor()
+class Tree:
+    """One scenario's trace: its spans, its outcome, and the carriers upstreams saw."""
 
-        # Step 1: Simulate agent creating a root span and injecting traceparent.
-        # Use our test provider directly (not the global one).
-        tracer = provider.get_tracer("test-agent")
-        agent_span_id = None
-        agent_trace_id = None
-        carrier: dict[str, str] = {}
+    def __init__(self, run: dict[str, Any], scenario: str) -> None:
+        info = run["scenarios"][scenario]
+        self.trace_id: str = info["trace_id"]
+        self.remote_span_id: str = info["remote_span_id"]
+        self.is_error: bool = info["is_error"]
+        self.batch: dict[str, Any] = info["batch"]
+        self.spans = [s for s in run["spans"] if s["trace_id"] == self.trace_id]
+        self._by_id = {s["span_id"]: s for s in self.spans}
+        self.stdio_calls = [
+            c for c in run["stdio_seen"] if c["method"] == "tools/call" and self._ours(c["traceparent"])
+        ]
+        self.http_calls = [c for c in run["http_seen"] if c["method"] == "tools/call" and self._ours(c["header"])]
 
-        with tracer.start_as_current_span("test-agent-span") as agent_span:
-            ctx = agent_span.get_span_context()
-            agent_span_id = ctx.span_id
-            agent_trace_id = ctx.trace_id
-            inject(carrier)  # inject traceparent into carrier dict
+    def _ours(self, traceparent: str | None) -> bool:
+        return (_ids(traceparent) or ("", ""))[0] == self.trace_id
 
-        # carrier now has {"traceparent": "00-<trace_id>-<span_id>-01"}
-        assert "traceparent" in carrier, "W3C TraceContext must be injectable"
+    def one(self, name: str) -> dict[str, Any]:
+        found = [s for s in self.spans if s["name"] == name]
+        assert len(found) == 1, f"expected one {name!r} in trace {self.trace_id}: {[s['name'] for s in self.spans]}"
+        return found[0]
 
-        # Step 2: Submit batch call with agent's traceparent in metadata.
-        call_spec = CallSpec(
-            index=0,
-            call_id="test-call-e2e",
-            mcp_server="math",
-            tool="add",
-            arguments={"a": 1, "b": 2},
-            metadata=carrier,  # contains traceparent
-        )
+    def descends_from(self, span: dict[str, Any], ancestor: dict[str, Any]) -> bool:
+        parent = self._by_id.get(span["parent_id"])
+        while parent is not None:
+            if parent["span_id"] == ancestor["span_id"]:
+                return True
+            parent = self._by_id.get(parent["parent_id"])
+        return False
 
-        mock_ctx = MagicMock()
-        mock_ctx.get_mcp_server.return_value = None
-        mock_ctx.mcp_server_exists.return_value = False
+    def assert_served_under_the_caller(self) -> None:
+        """Remote caller -> SDK SERVER span -> ``hangar_call`` -> ``batch.execute``."""
+        server = self.one("tools/call hangar_call")
+        assert server["kind"] == "SERVER"
+        assert (server["parent_id"], server["parent_is_remote"]) == (self.remote_span_id, True)
+        root = self.one("hangar_call")
+        assert root["parent_id"] == server["span_id"]
+        assert self.one("batch.execute")["parent_id"] == root["span_id"]
 
-        # Clear the agent span from exporter so we only see BatchExecutor spans
-        exporter.clear()
 
-        # Patch get_tracer in the executor module to return our test provider's tracer.
-        # Patch _initialized so extract_trace_context runs for real.
-        test_tracer = provider.get_tracer("mcp_hangar.server.tools.batch.executor")
-        with (
-            patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=mock_ctx),
-            patch("mcp_hangar.server.tools.batch.executor.get_tracer", return_value=test_tracer),
-            patch("mcp_hangar.observability.tracing._initialized", True),
-        ):
-            executor._execute_call(
-                call_spec,
-                cancel_event=threading.Event(),
-                global_timeout=60.0,
-                batch_start_time=0.0,
-            )
+class TestASuccessfulCallOverStdio:
+    def test_the_tool_runs_on_the_upstream(self, run):
+        tree = Tree(run, "stdio_success")
 
-        # Step 3: Verify span hierarchy
-        finished_spans = exporter.get_finished_spans()
-        batch_spans = [s for s in finished_spans if "add" in s.name or "batch" in s.name.lower()]
+        assert tree.is_error is False
+        assert tree.batch["success"] is True, tree.batch
+        assert tree.batch["results"][0]["result"] == {"result": 3}
 
-        assert len(batch_spans) >= 1, (
-            f"Expected at least one batch/tool span, got spans: {[s.name for s in finished_spans]}"
-        )
+    def test_the_server_span_hangar_call_and_batch_execute_nest_under_the_caller(self, run):
+        Tree(run, "stdio_success").assert_served_under_the_caller()
 
-        batch_span = batch_spans[0]
+    def test_the_upstream_client_span_descends_from_the_call_span(self, run):
+        tree = Tree(run, "stdio_success")
+        client = tree.one("execute_tool add")
 
-        # The batch span's trace_id must match the agent's trace_id
-        batch_ctx = batch_span.get_span_context()
-        assert batch_ctx.trace_id == agent_trace_id, (
-            f"Batch span trace_id {batch_ctx.trace_id:032x} must match agent trace_id {agent_trace_id:032x}"
-        )
+        assert client["kind"] == "CLIENT"
+        assert tree.descends_from(client, tree.one("batch.call.add"))
 
-        # The batch span's parent_span_id must be the agent span
-        assert batch_span.parent is not None, "Batch span must have a parent (agent span)"
-        assert batch_span.parent.span_id == agent_span_id, (
-            f"Batch span parent_id {batch_span.parent.span_id:016x} must match agent span_id {agent_span_id:016x}"
-        )
+    def test_the_stdio_meta_names_the_upstream_client_span(self, run):
+        tree = Tree(run, "stdio_success")
 
-    def test_batch_executor_creates_root_span_without_traceparent(self, otel_setup) -> None:
-        """Without traceparent, BatchExecutor creates a new root span (no crash)."""
-        exporter, provider = otel_setup
+        sent = [_ids(c["traceparent"]) for c in tree.stdio_calls]
+        assert sent == [(tree.trace_id, tree.one("execute_tool add")["span_id"])]
 
-        from mcp_hangar.server.tools.batch.executor import BatchExecutor
-        from mcp_hangar.server.tools.batch.models import CallSpec
+    def test_no_span_on_the_path_ends_in_error(self, run):
+        tree = Tree(run, "stdio_success")
 
-        executor = BatchExecutor()
-        call_spec = CallSpec(
-            index=0,
-            call_id="test-call-root",
-            mcp_server="math",
-            tool="multiply",
-            arguments={"a": 2, "b": 3},
-            metadata={},
-        )
+        for name in ("tools/call hangar_call", "hangar_call", "batch.execute", "batch.call.add", "execute_tool add"):
+            assert tree.one(name)["status"] != "ERROR", name
 
-        mock_ctx = MagicMock()
-        mock_ctx.get_mcp_server.return_value = None
-        mock_ctx.mcp_server_exists.return_value = False
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="#1270 batch.call is parented on the remote caller, not batch.execute",
+    )
+    def test_the_call_span_is_a_child_of_batch_execute(self, run):
+        tree = Tree(run, "stdio_success")
 
-        test_tracer = provider.get_tracer("mcp_hangar.server.tools.batch.executor")
-        with (
-            patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=mock_ctx),
-            patch("mcp_hangar.server.tools.batch.executor.get_tracer", return_value=test_tracer),
-            patch("mcp_hangar.observability.tracing._initialized", True),
-        ):
-            executor._execute_call(
-                call_spec,
-                cancel_event=threading.Event(),
-                global_timeout=60.0,
-                batch_start_time=0.0,
-            )
+        assert tree.one("batch.call.add")["parent_id"] == tree.one("batch.execute")["span_id"]
 
-        finished_spans = exporter.get_finished_spans()
-        tool_spans = [s for s in finished_spans if "multiply" in s.name or "batch" in s.name.lower()]
-        assert len(tool_spans) >= 1, (
-            f"Span must be created even without traceparent, got: {[s.name for s in finished_spans]}"
-        )
 
-        # Root span has no parent
-        root_span = tool_spans[0]
-        assert root_span.parent is None, "Span created without traceparent must be a root span"
+class TestASuccessfulCallOverHttp:
+    def test_the_tool_runs_on_the_upstream(self, run):
+        tree = Tree(run, "http_success")
+
+        assert tree.batch["success"] is True, tree.batch
+        tree.assert_served_under_the_caller()
+
+    def test_the_traceparent_header_names_the_upstream_client_span(self, run):
+        tree = Tree(run, "http_success")
+        client = tree.one("execute_tool add")
+
+        assert tree.descends_from(client, tree.one("batch.call.add"))
+        assert [_ids(c["header"]) for c in tree.http_calls] == [(tree.trace_id, client["span_id"])]
+
+    @pytest.mark.xfail(
+        strict=True, raises=AssertionError, reason="#1271 HTTP _meta is injected before the CLIENT span opens"
+    )
+    def test_the_meta_traceparent_names_the_upstream_client_span(self, run):
+        tree = Tree(run, "http_success")
+
+        assert [_ids(c["meta"]) for c in tree.http_calls] == [(tree.trace_id, tree.one("execute_tool add")["span_id"])]
+
+
+class TestAGovernanceDenial:
+    def test_the_call_is_refused(self, run):
+        tree = Tree(run, "denied")
+
+        assert tree.batch["success"] is False
+        assert tree.batch["results"][0]["error_type"] == "ToolAccessDeniedError", tree.batch
+
+    def test_the_call_span_ends_in_error_and_nothing_reaches_the_upstream(self, run):
+        tree = Tree(run, "denied")
+
+        tree.assert_served_under_the_caller()
+        assert tree.one("batch.call.multiply")["status"] == "ERROR"
+        assert [s["name"] for s in tree.spans if s["kind"] == "CLIENT"] == []
+        assert tree.stdio_calls == []
+
+
+class TestAnUpstreamFailure:
+    def test_the_call_fails_with_the_upstreams_error(self, run):
+        tree = Tree(run, "upstream_failure")
+
+        assert tree.batch["success"] is False
+        assert "division by zero" in tree.batch["results"][0]["error"], tree.batch
+
+    def test_the_call_span_ends_in_error_after_reaching_the_upstream(self, run):
+        tree = Tree(run, "upstream_failure")
+        call = tree.one("batch.call.divide")
+        client = tree.one("execute_tool divide")
+
+        assert call["status"] == "ERROR"
+        assert tree.descends_from(client, call)
+        assert [_ids(c["traceparent"]) for c in tree.stdio_calls] == [(tree.trace_id, client["span_id"])]
+
+    @pytest.mark.xfail(
+        strict=True, raises=AssertionError, reason="#1277 the CLIENT span ends before the response is classified"
+    )
+    def test_the_client_span_records_the_upstream_failure(self, run):
+        assert Tree(run, "upstream_failure").one("execute_tool divide")["status"] == "ERROR"
+
+
+def test_two_concurrent_requests_keep_separate_trees(run):
+    trees = [Tree(run, "concurrent_1"), Tree(run, "concurrent_2")]
+    held = [c.get("overlapped") for c in run["http_seen"] if "overlapped" in c]
+
+    # The upstream held each call until the other arrived, so both were in flight.
+    assert held == [True, True], held
+    for tree in trees:
+        assert tree.batch["success"] is True, tree.batch
+        tree.assert_served_under_the_caller()
+        client = tree.one("execute_tool add")
+        assert tree.descends_from(client, tree.one("batch.call.add"))
+        assert [_ids(c["header"]) for c in tree.http_calls] == [(tree.trace_id, client["span_id"])]
