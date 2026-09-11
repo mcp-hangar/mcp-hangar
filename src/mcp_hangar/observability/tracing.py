@@ -198,10 +198,25 @@ def _get_propagator() -> Any:
     return CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
 
 
+# Set by disable_tracing(): the operator turned tracing off in configuration.
+_disabled = False
+
+
 def is_tracing_enabled() -> bool:
     """Check if tracing is enabled."""
     enabled = os.getenv("MCP_TRACING_ENABLED", "true").lower()
-    return enabled in ("true", "1", "yes") and OTEL_AVAILABLE
+    return not _disabled and enabled in ("true", "1", "yes") and OTEL_AVAILABLE
+
+
+def disable_tracing() -> None:
+    """Turn Hangar's tracing off for the process, as configuration asked.
+
+    The env var alone reaches is_tracing_enabled(); a config file does not, so
+    the bootstrap calls this. Without it a provider registered by someone else
+    would still carry Hangar's spans and trace context.
+    """
+    global _disabled
+    _disabled = True
 
 
 def _build_sampler() -> Any:

@@ -119,7 +119,11 @@ class TestProviderGate:
         # process, which leaves _shut_down set; each case states its own premise.
         from mcp_hangar.observability import tracing
 
-        with patch.object(tracing, "_initialized", False), patch.object(tracing, "_shut_down", False):
+        with (
+            patch.object(tracing, "_initialized", False),
+            patch.object(tracing, "_shut_down", False),
+            patch.object(tracing, "_disabled", False),
+        ):
             yield
 
     def test_nothing_registered_hands_out_the_shared_noop(self):

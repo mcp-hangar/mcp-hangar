@@ -7,8 +7,9 @@ init never ran, as when it is embedded, it handed out no-op tracers and
 propagated no `traceparent`, even under the host's active span. Now Hangar
 builds no exporters in that case, logs `tracing_external_provider_in_use`, and
 sends its spans and trace context through the host's provider, which it leaves
-to the host to shut down. `MCP_TRACING_ENABLED=false` still turns Hangar's
-spans off.
+to the host to shut down. Tracing disabled in configuration, by
+`observability.tracing.enabled: false` or `MCP_TRACING_ENABLED=false`, keeps
+Hangar's spans and trace context off even when another provider is registered.
 
 With `MCP_TRACING_CONSOLE` on, spans are now written to stderr. They went to
 stdout, which on the stdio transport is the JSON-RPC stream.

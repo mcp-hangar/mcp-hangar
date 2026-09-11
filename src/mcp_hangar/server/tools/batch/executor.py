@@ -78,6 +78,29 @@ def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
         return {}
 
 
+def _call_span_parent(carrier_context: Any) -> dict[str, Any]:
+    """Keyword arguments placing a ``batch.call`` span in its trace (#1270).
+
+    A valid ambient span is the parent: ``batch.execute`` in the worker, whose
+    context the worker inherited, under the SDK's SERVER span that already
+    parented the request on the caller's ``_meta``. The extracted carrier parents
+    the span only when there is no valid ambient span, as for a direct executor
+    caller. A carrier naming another trace than the ambient span is kept as a
+    link rather than dropped. ``None`` means tracing is off: no OTel state is read.
+    """
+    if carrier_context is None:
+        return {}
+    from opentelemetry import trace
+
+    ambient = trace.get_current_span().get_span_context()
+    if not ambient.is_valid:
+        return {"context": carrier_context}
+    carried = trace.get_current_span(carrier_context).get_span_context()
+    if carried.is_valid and carried.trace_id != ambient.trace_id:
+        return {"links": [trace.Link(carried)]}
+    return {}
+
+
 def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
     """Return the inbound request's ``params._meta`` as a plain dict, or ``None``.
 
@@ -1022,18 +1045,14 @@ class BatchExecutor:
         # has no request_context); when request_ctx is None the helper yields {} and
         # only call.metadata is used -- the pre-bridge default, unchanged.
         metadata = call.metadata or {}
-        parent_context = extract_trace_context({**metadata, **_inbound_trace_meta(request_ctx)})
+        carrier_context = extract_trace_context({**metadata, **_inbound_trace_meta(request_ctx)})
 
-        # Create a span for this batch call, parented to the agent's trace
-        # context when traceparent was provided. This links the Hangar span
-        # to the upstream agent trace for end-to-end distributed tracing.
+        # Create a span for this batch call under its local parent. The carrier
+        # only parents it when nothing local does; see _call_span_parent.
         tracer = get_tracer(__name__)
-        span_ctx_kwargs = {}
-        if parent_context is not None:
-            span_ctx_kwargs["context"] = parent_context
         with tracer.start_as_current_span(
             f"batch.call.{call.tool}",
-            **span_ctx_kwargs,
+            **_call_span_parent(carrier_context),
         ) as span:
             span.set_attribute("mcp.server.id", call.mcp_server)
             span.set_attribute("gen_ai.tool.name", call.tool)
