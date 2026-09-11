@@ -71,7 +71,7 @@ TRACING_SHUTDOWN_TIMEOUT_S = 5.0
 
 # Check if OpenTelemetry is available
 try:
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry.sdk.resources import OTELResourceDetector, Resource, SERVICE_NAME
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
@@ -160,6 +160,9 @@ if OTEL_AVAILABLE:
 
 class NoOpSpan:
     """No-op span for when tracing is disabled."""
+
+    def is_recording(self) -> bool:
+        return False
 
     def set_attribute(self, key: str, value: Any) -> None:
         pass
@@ -252,27 +255,40 @@ def _build_sampler() -> Any:
     OTEL_TRACES_SAMPLER actually takes effect (the docstring long claimed
     support that was never wired). Defaults to parentbased_always_on, matching
     the SDK default. For ratio samplers, OTEL_TRACES_SAMPLER_ARG is the ratio
-    in [0, 1]; a missing/invalid arg falls back to 1.0 (sample everything).
+    in [0, 1]; unset it is 1.0 (sample everything), as in the SDK. Any other
+    value logs one warning and is 1.0 too, rather than raising in
+    TraceIdRatioBased and so turning tracing off for the whole process.
     """
     name = os.getenv("OTEL_TRACES_SAMPLER", "parentbased_always_on").strip().lower()
     arg = os.getenv("OTEL_TRACES_SAMPLER_ARG", "")
 
-    def _ratio(default: float) -> float:
+    def _ratio() -> float:
         try:
-            return float(arg)
-        except (TypeError, ValueError):
-            return default
+            ratio = float(arg) if arg.strip() else 1.0
+        except ValueError:
+            ratio = float("nan")
+        if 0.0 <= ratio <= 1.0:  # False for NaN, which the SDK's own range check lets through
+            return ratio
+        logger.warning(
+            "tracing_sampler_arg_invalid",
+            variable="OTEL_TRACES_SAMPLER_ARG",
+            value=arg,
+            sampler=name,
+            expected="a number in [0, 1]",
+            fallback=1.0,
+        )
+        return 1.0
 
     if name == "always_on":
         return ALWAYS_ON
     if name == "always_off":
         return ALWAYS_OFF
     if name == "traceidratio":
-        return TraceIdRatioBased(_ratio(1.0))
+        return TraceIdRatioBased(_ratio())
     if name == "parentbased_always_off":
         return ParentBased(ALWAYS_OFF)
     if name == "parentbased_traceidratio":
-        return ParentBased(TraceIdRatioBased(_ratio(1.0)))
+        return ParentBased(TraceIdRatioBased(_ratio()))
     if name != "parentbased_always_on":
         logger.warning("tracing_unknown_sampler", sampler=name, fallback="parentbased_always_on")
     return ParentBased(ALWAYS_ON)
@@ -380,23 +396,57 @@ def _build_otlp_span_exporter(settings: OtlpExporterSettings) -> Any:
     return exporter
 
 
+def _build_resource(service_name: str, service_instance_id: str | None) -> Any:
+    """The provider's resource: Hangar's own attributes, the environment's over them.
+
+    ``Resource.create`` merges its detectors, the one reading
+    OTEL_RESOURCE_ATTRIBUTES and OTEL_SERVICE_NAME included, underneath the
+    attributes it is given, so on its own Hangar's values beat the operator's.
+    The environment is merged again on top. Per attribute, first match wins:
+
+    service.name: OTEL_SERVICE_NAME, ``service.name`` in
+        OTEL_RESOURCE_ATTRIBUTES (those two in the SDK's own order),
+        ``service_name`` (the bootstrap passes config.yaml's), ``mcp-hangar``.
+    deployment.environment: OTEL_RESOURCE_ATTRIBUTES, MCP_ENVIRONMENT,
+        ``development``.
+    service.instance.id: OTEL_RESOURCE_ATTRIBUTES, ``service_instance_id``,
+        then the SDK's own detector (SDK 1.44 mints a random UUID), if any.
+    service.version and any other key: OTEL_RESOURCE_ATTRIBUTES, then Hangar's.
+    """
+    attributes: dict[str, Any] = {
+        SERVICE_NAME: service_name,
+        "service.version": _get_version(),
+        "deployment.environment": os.getenv("MCP_ENVIRONMENT", "development"),
+    }
+    if service_instance_id:
+        attributes["service.instance.id"] = service_instance_id
+    return Resource.create(attributes).merge(OTELResourceDetector().detect())
+
+
 def init_tracing(
     service_name: str = "mcp-hangar",
     otlp_endpoint: str | None = None,
     jaeger_host: str | None = None,
     jaeger_port: int = 6831,
     console_export: bool = False,
+    service_instance_id: str | None = None,
 ) -> bool:
     """Initialize OpenTelemetry tracing.
 
     Args:
-        service_name: Service name for traces.
+        service_name: Service name for traces. OTEL_SERVICE_NAME and a
+            ``service.name`` in OTEL_RESOURCE_ATTRIBUTES beat it; see
+            _build_resource() for every resource attribute's precedence.
         otlp_endpoint: Hangar's OTLP collector endpoint. An
             OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT variable beats it; see the
             module docstring for the protocol and TLS.
         jaeger_host: Jaeger agent host for UDP export.
         jaeger_port: Jaeger agent port.
         console_export: Enable console span export (for debugging).
+        service_instance_id: ``service.instance.id``, unless
+            OTEL_RESOURCE_ATTRIBUTES sets one. The bootstrap passes
+            ``current_instance_id()``, the ``produced_by`` of domain events.
+            None leaves it to the SDK.
 
     Returns:
         True if Hangar registered its own provider with at least one exporter,
@@ -429,14 +479,7 @@ def init_tracing(
         return False
 
     try:
-        # Create resource with service info
-        resource = Resource.create(
-            {
-                SERVICE_NAME: service_name,
-                "service.version": _get_version(),
-                "deployment.environment": os.getenv("MCP_ENVIRONMENT", "development"),
-            }
-        )
+        resource = _build_resource(service_name, service_instance_id)
 
         # Create tracer mcp_server. Held locally until registered: a provider
         # the API refused to register must not end up in module state.
@@ -445,7 +488,7 @@ def init_tracing(
         logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters
-        exporters_added = 0
+        exporters: list[str] = []  # by name, as the init log lists them
 
         # OTLP exporter (preferred): protocol, endpoint and TLS from one effective config.
         otlp_settings = resolve_otlp_exporter_settings("traces", otlp_endpoint)
@@ -456,7 +499,7 @@ def init_tracing(
             logger.warning("tracing_otlp_exporter_failed", protocol=otlp_settings.protocol, error=str(e))
         if otlp_exporter is not None:
             provider.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
-            exporters_added += 1
+            exporters.append("otlp_" + otlp_settings.protocol.split("/")[0])  # otlp_grpc, otlp_http
 
         # Jaeger exporter (fallback)
         if JAEGER_AVAILABLE and jaeger_host:
@@ -466,7 +509,7 @@ def init_tracing(
                     agent_port=jaeger_port,
                 )
                 provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
-                exporters_added += 1
+                exporters.append("jaeger")
                 logger.info(
                     "tracing_jaeger_exporter_added",
                     host=jaeger_host,
@@ -480,10 +523,10 @@ def init_tracing(
         if console_export:
             console_exporter = ConsoleSpanExporter(out=sys.stderr)
             provider.add_span_processor(BatchSpanProcessor(console_exporter))
-            exporters_added += 1
+            exporters.append("console")
             logger.info("tracing_console_exporter_added")
 
-        if exporters_added == 0:
+        if not exporters:
             logger.warning("tracing_no_exporters_configured")
             return False
 
@@ -498,11 +541,10 @@ def init_tracing(
         _tracer_mcp_server = provider
         _initialized = True
 
-        logger.info(
-            "tracing_initialized",
-            service_name=service_name,
-            exporters=exporters_added,
-        )
+        # The one init line, here because only this function knows what it
+        # attached. Exporter names only: never an endpoint (a URL may carry
+        # userinfo) nor a header (credentials).
+        logger.info("tracing_initialized", service_name=service_name, exporters=exporters)
         return True
 
     except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing init failure must not crash application
@@ -637,6 +679,10 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
     `_meta`) parents the upstream's server span to this one. Names/attributes
     follow OTel GenAI/MCP semconv. No-op when tracing is disabled.
 
+    Keep it open until the answer is classified: an exception leaving it ends
+    it in ERROR with the exception's class as ``error.type``, and a failure the
+    client returns as data is recorded with :func:`record_upstream_outcome`.
+
     Args:
         method: JSON-RPC method (e.g. "tools/call", "tools/list", "initialize").
         params: Request params; for tools/call the tool name is read from
@@ -654,7 +700,12 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
         name = method
 
     with trace_span(name, attributes=attributes, kind="client") as span:
-        yield span
+        try:
+            yield span
+        except Exception as e:
+            # The SDK sets ERROR on the way out; this adds the bounded type.
+            record_upstream_outcome(span, error=e)
+            raise
 
 
 def mark_span_error(span: Any, description: str | None = None) -> None:
@@ -670,6 +721,55 @@ def mark_span_error(span: Any, description: str | None = None) -> None:
         span.set_status(Status(StatusCode.ERROR, description or ""))
     except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
         pass
+
+
+#: OTel ``error.type``, the attribute the mcp SDK's server middleware sets.
+ERROR_TYPE = "error.type"
+
+
+def record_upstream_outcome(
+    span: Any, answer: Any = None, *, http_status: int | None = None, error: BaseException | None = None
+) -> None:
+    """Mark an upstream CLIENT span ERROR when its transport client says the call failed.
+
+    Observes only: the client has already decided on the envelope it returns
+    or the exception it raises, and this changes neither. ``error.type`` takes
+    the mcp SDK server middleware's values, so both ends of a hop agree:
+    ``http_<status>`` for a status failure, an exception's class name, the
+    JSON-RPC error code as a string, ``tool_error`` for ``isError: true``.
+    Nothing the upstream sent -- message, content, body -- is recorded.
+
+    Args:
+        span: The call's CLIENT span; a NoOp span is fine.
+        answer: The JSON-RPC envelope the client returns.
+        http_status: The status, when the client rejected the answer on it.
+        error: The exception the client raised, or turned into an envelope.
+    """
+    if http_status is not None:
+        error_type: str | None = f"http_{http_status}"
+    elif error is not None:
+        error_type = type(error).__qualname__
+    else:
+        error_type = _answer_error_type(answer)
+    if error_type is None:
+        return
+    mark_span_error(span)
+    try:
+        span.set_attribute(ERROR_TYPE, error_type)
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
+
+
+def _answer_error_type(answer: Any) -> str | None:
+    """``error.type`` of a failed JSON-RPC envelope, None for a success; the aggregate's test."""
+    if not isinstance(answer, dict):
+        return None
+    if "error" in answer:
+        code = answer["error"].get("code") if isinstance(answer["error"], dict) else None
+        # The spec's integer code; anything else is not copied onto the span.
+        return str(code) if type(code) is int else "_OTHER"
+    result = answer.get("result")
+    return "tool_error" if isinstance(result, dict) and result.get("isError") else None
 
 
 def inject_trace_context(carrier: dict[str, str]) -> None:

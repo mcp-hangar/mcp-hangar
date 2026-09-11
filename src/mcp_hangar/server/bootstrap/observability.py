@@ -165,21 +165,19 @@ def init_tracing(config: TracingConfig) -> bool:
         return False
 
     try:
+        from ...domain.events import current_instance_id
         from ...observability.tracing import init_tracing as otel_init_tracing
 
-        result = otel_init_tracing(
+        # No init line here: `tracing_initialized` is logged once, by
+        # otel_init_tracing, with the exporters it actually attached.
+        return otel_init_tracing(
             service_name=config.service_name,
             otlp_endpoint=config.otlp_endpoint,
             jaeger_host=config.jaeger_host,
             jaeger_port=config.jaeger_port,
             console_export=config.console_export,
+            service_instance_id=current_instance_id(),
         )
-
-        if result:
-            # No endpoint here: it is the SDK's to resolve, and the exporter is
-            # logged, by protocol, where it is built.
-            logger.info("tracing_initialized", service_name=config.service_name)
-        return result
 
     except ImportError:
         logger.info(
