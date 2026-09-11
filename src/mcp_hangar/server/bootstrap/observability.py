@@ -156,6 +156,7 @@ def init_tracing(config: TracingConfig) -> bool:
         return False
 
     try:
+        from ...domain.events import current_instance_id
         from ...observability.tracing import init_tracing as otel_init_tracing
 
         # No init line here: `tracing_initialized` is logged once, by
@@ -166,6 +167,7 @@ def init_tracing(config: TracingConfig) -> bool:
             jaeger_host=config.jaeger_host,
             jaeger_port=config.jaeger_port,
             console_export=config.console_export,
+            service_instance_id=current_instance_id(),
         )
 
     except ImportError:

@@ -71,7 +71,7 @@ TRACING_SHUTDOWN_TIMEOUT_S = 5.0
 
 # Check if OpenTelemetry is available
 try:
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry.sdk.resources import OTELResourceDetector, Resource, SERVICE_NAME
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
@@ -396,23 +396,57 @@ def _build_otlp_span_exporter(settings: OtlpExporterSettings) -> Any:
     return exporter
 
 
+def _build_resource(service_name: str, service_instance_id: str | None) -> Any:
+    """The provider's resource: Hangar's own attributes, the environment's over them.
+
+    ``Resource.create`` merges its detectors, the one reading
+    OTEL_RESOURCE_ATTRIBUTES and OTEL_SERVICE_NAME included, underneath the
+    attributes it is given, so on its own Hangar's values beat the operator's.
+    The environment is merged again on top. Per attribute, first match wins:
+
+    service.name: OTEL_SERVICE_NAME, ``service.name`` in
+        OTEL_RESOURCE_ATTRIBUTES (those two in the SDK's own order),
+        ``service_name`` (the bootstrap passes config.yaml's), ``mcp-hangar``.
+    deployment.environment: OTEL_RESOURCE_ATTRIBUTES, MCP_ENVIRONMENT,
+        ``development``.
+    service.instance.id: OTEL_RESOURCE_ATTRIBUTES, ``service_instance_id``,
+        then the SDK's own detector (SDK 1.44 mints a random UUID), if any.
+    service.version and any other key: OTEL_RESOURCE_ATTRIBUTES, then Hangar's.
+    """
+    attributes: dict[str, Any] = {
+        SERVICE_NAME: service_name,
+        "service.version": _get_version(),
+        "deployment.environment": os.getenv("MCP_ENVIRONMENT", "development"),
+    }
+    if service_instance_id:
+        attributes["service.instance.id"] = service_instance_id
+    return Resource.create(attributes).merge(OTELResourceDetector().detect())
+
+
 def init_tracing(
     service_name: str = "mcp-hangar",
     otlp_endpoint: str | None = None,
     jaeger_host: str | None = None,
     jaeger_port: int = 6831,
     console_export: bool = False,
+    service_instance_id: str | None = None,
 ) -> bool:
     """Initialize OpenTelemetry tracing.
 
     Args:
-        service_name: Service name for traces.
+        service_name: Service name for traces. OTEL_SERVICE_NAME and a
+            ``service.name`` in OTEL_RESOURCE_ATTRIBUTES beat it; see
+            _build_resource() for every resource attribute's precedence.
         otlp_endpoint: Hangar's OTLP collector endpoint. An
             OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT variable beats it; see the
             module docstring for the protocol and TLS.
         jaeger_host: Jaeger agent host for UDP export.
         jaeger_port: Jaeger agent port.
         console_export: Enable console span export (for debugging).
+        service_instance_id: ``service.instance.id``, unless
+            OTEL_RESOURCE_ATTRIBUTES sets one. The bootstrap passes
+            ``current_instance_id()``, the ``produced_by`` of domain events.
+            None leaves it to the SDK.
 
     Returns:
         True if Hangar registered its own provider with at least one exporter,
@@ -445,14 +479,7 @@ def init_tracing(
         return False
 
     try:
-        # Create resource with service info
-        resource = Resource.create(
-            {
-                SERVICE_NAME: service_name,
-                "service.version": _get_version(),
-                "deployment.environment": os.getenv("MCP_ENVIRONMENT", "development"),
-            }
-        )
+        resource = _build_resource(service_name, service_instance_id)
 
         # Create tracer mcp_server. Held locally until registered: a provider
         # the API refused to register must not end up in module state.
