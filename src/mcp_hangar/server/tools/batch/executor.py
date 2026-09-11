@@ -10,6 +10,7 @@ Provides parallel execution of batch invocations with:
 """
 
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from contextlib import ExitStack
 import asyncio
 import atexit
 import contextvars
@@ -1124,27 +1125,32 @@ class BatchExecutor:
         # is full, this thread blocks until a slot frees up. Crucially, the call
         # starts as soon as ANY slot is freed -- it does not wait for an entire
         # batch wave to complete (unlike sequential chunking).
+        #
+        # The span measures only that wait (#1273). The slots are held by
+        # `permit`, which outlives the span, so the invoke and its retries run
+        # under the call span and the slots are released only once they return.
         cm = self.concurrency_manager
-        with pipeline.tracer.start_as_current_span("concurrency.acquire") as conc_span:
-            conc_span.set_attribute("mcp.server.id", call.mcp_server)
-            with cm.acquire(call.mcp_server) as wait_s:
+        with ExitStack() as permit:
+            with pipeline.tracer.start_as_current_span("concurrency.acquire") as conc_span:
+                conc_span.set_attribute("mcp.server.id", call.mcp_server)
+                wait_s = permit.enter_context(cm.acquire(call.mcp_server))
                 conc_span.set_attribute("concurrency.wait_ms", round(wait_s * 1000, 2))
-                if wait_s > 0.01:
-                    logger.debug(
-                        "concurrency_slot_wait",
-                        call_id=call.call_id,
-                        mcp_server=call.mcp_server,
-                        wait_ms=round(wait_s * 1000, 2),
-                    )
-
-                result = self._invoke_with_retry(
-                    call,
-                    cancel_event,
-                    pipeline.effective_timeout,
-                    call_start,
-                    ctx,
-                    pipeline.target_server_id,
+            if wait_s > 0.01:
+                logger.debug(
+                    "concurrency_slot_wait",
+                    call_id=call.call_id,
+                    mcp_server=call.mcp_server,
+                    wait_ms=round(wait_s * 1000, 2),
                 )
+
+            result = self._invoke_with_retry(
+                call,
+                cancel_event,
+                pipeline.effective_timeout,
+                call_start,
+                ctx,
+                pipeline.target_server_id,
+            )
 
         relayed = self._relay_upstream_task(pipeline, result)
         if relayed is not None:
