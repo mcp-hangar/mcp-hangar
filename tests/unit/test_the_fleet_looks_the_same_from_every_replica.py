@@ -36,7 +36,17 @@ class _SyncLoop:
     """Runs the projection's read inline, so tests need no background thread."""
 
     def run(self, coro, timeout):
-        return asyncio.run(coro)
+        try:
+            return asyncio.run(coro)
+        except Exception as error:  # noqa: BLE001 -- re-raised, only without its frames
+            # Its traceback runs through `run_until_complete`, whose frame
+            # holds the task, which holds this exception: a cycle that kept a
+            # closed loop and its task alive until the collector found them,
+            # at whatever depth the next test was at (#1328). The projection
+            # logs the message, never the traceback, so drop the frames.
+            # `BackgroundLoop` gets the same break from
+            # `concurrent.futures.Future.result`.
+            raise error.with_traceback(None)
 
 
 class _Replica:
@@ -305,3 +315,36 @@ class TestAPolicyOnOneReplicaEnforcesOnTheOthers:
             b.configs.get = real_get
 
         assert b.l7_of("egress-demo") == before is not None
+
+
+class TestAFailedReadLeavesNothingForTheCollector:
+    """Regression for #1328: a failed read left its closed loop and its task in
+    a reference cycle, for the collector to finalize whenever it next ran -- at
+    whatever depth the next test was at. Inside the fuzz test's 1000-deep
+    recursion, those finalizers raised RecursionError themselves."""
+
+    def test_its_loop_and_task_are_freed_as_soon_as_it_returns(self, replicas) -> None:
+        import gc
+        import weakref
+
+        _a, b = replicas
+        left: list[weakref.ref] = []
+
+        class _Broken:
+            async def get(self, mcp_server_id: str):
+                left.append(weakref.ref(asyncio.get_running_loop()))
+                left.append(weakref.ref(asyncio.current_task()))
+                raise RuntimeError("the database is unreachable")
+
+        was_enabled = gc.isenabled()
+        gc.disable()  # reference counting alone: a collection here would free the cycle and hide it
+        try:
+            FleetProjection(b.fleet, _Broken(), _SyncLoop()).handle(
+                McpServerRegistered(mcp_server_id="math", source="api", mode="subprocess")
+            )
+            alive = [ref() is not None for ref in left]
+        finally:
+            if was_enabled:
+                gc.enable()
+
+        assert alive == [False, False]
