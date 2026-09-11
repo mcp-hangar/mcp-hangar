@@ -38,17 +38,38 @@ def _make_buffer(mcp_server_id: str = "test-p") -> ProviderLogBuffer:
 
 class TestStartStderrReader:
     def test_no_log_buffer_skips_reader(self):
-        """When no log buffer is configured, no thread is started."""
-        provider = _make_provider(log_buffer=None)
-        # Create a fake client with a stderr pipe
+        """When no log buffer is configured, no thread is started.
+
+        The log-buffer guard lives in ``_create_client``; ``_start_stderr_reader``
+        itself always spawns a reader. So drive ``_create_client`` with a client
+        that has a live stderr pipe, and watch ``threading.Thread`` where the code
+        under test looks it up. Counting ``threading.active_count()`` would see
+        every thread in the process, including daemons left by earlier tests
+        that exit on their own schedule.
+        """
         r, w = _make_pipe()
-        fake_client = _fake_client_with_stderr(r)
-        threads_before = threading.active_count()
-        provider._start_stderr_reader(fake_client)
-        w.close()
-        r.close()
-        # No new threads should have been spawned
-        assert threading.active_count() == threads_before
+        fake_launcher = MagicMock()
+        fake_launcher.launch.return_value = _fake_client_with_stderr(r)
+        try:
+            with (
+                patch("mcp_hangar.infrastructure.launchers.get_launcher", return_value=fake_launcher),
+                patch("mcp_hangar.domain.model.mcp_server.threading") as mock_threading,
+            ):
+                provider = _make_provider(log_buffer=None)
+                provider._metrics_publisher = MagicMock()
+                provider._create_client()
+                mock_threading.Thread.assert_not_called()
+
+                # Positive control: the same harness sees the reader when a buffer is set,
+                # so the assertion above cannot pass because the patch missed.
+                buffered = _make_provider(log_buffer=_make_buffer())
+                buffered._metrics_publisher = MagicMock()
+                buffered._create_client()
+                mock_threading.Thread.assert_called_once()
+                assert mock_threading.Thread.call_args.kwargs["name"] == "stderr-reader-test-p"
+        finally:
+            w.close()
+            r.close()
 
     def test_lines_appended_to_buffer(self):
         """Lines emitted on stderr are appended to the buffer."""
