@@ -12,6 +12,7 @@ from ...application.event_handlers import (
     get_audit_handler,
 )
 from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler
+from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.event_handlers.cost_handler import CostAttributionEventHandler
 from ...application.event_handlers.risk_scoring_handler import RiskScoringEventHandler
@@ -78,10 +79,11 @@ def init_event_handlers(runtime: "Runtime") -> None:
     tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
     runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
 
+    # The decision that built the audit log pipeline in `init_observability`: an
+    # OTLP endpoint in the env or the file. The env var alone used to decide
+    # here, so a file-only endpoint left audit export off (#1289).
     otlp_audit_exporter: IAuditExporter
-    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
-
+    if audit_log_export_configured():
         otlp_audit_exporter = OTLPAuditExporter()
     else:
         otlp_audit_exporter = NullAuditExporter()
