@@ -1,6 +1,8 @@
 # Upgrading MCP Hangar
 
-## Next — a suspended session is refused
+## Upgrade to 2.19.1
+
+### a suspended session is refused
 
 `POST /api/sessions/{id}/suspend` now blocks the session it names. Before, it
 answered 200 and replicated the suspension to every replica, and no request
@@ -50,7 +52,7 @@ To suspend API-key callers by session, put a proxy in front of Hangar that sets
 - A replica that starts after a suspension does not learn of it.
 - A suspension expires after 24 hours. Each replica holds at most 10,000.
 
-## Next — only `MCP_TRUSTED_PROXIES` decides the forwarded client address
+### only `MCP_TRUSTED_PROXIES` decides the forwarded client address
 
 Hangar now starts its HTTP server with uvicorn's forwarded-header handling
 turned off. Before, uvicorn rewrote the client address from `X-Forwarded-For`,
@@ -83,7 +85,7 @@ What to do:
 - The protected-resource metadata already read `X-Forwarded-Proto` itself, so
   the scheme it advertises is unchanged.
 
-## Next — traces, the security log and Langfuse carry no error text
+### traces, the security log and Langfuse carry no error text
 
 Hangar's telemetry no longer says what a failure said: a tool's error message
 can hold whatever the tool returned. A failed span ends in ERROR with an empty
@@ -113,7 +115,7 @@ If a dashboard or alert matched on span status descriptions, on
 `ToolInvocationFailed` event in the event store, or the result the caller
 received. Neither has changed.
 
-## Next — `scrub_baggage_for_tenant` is removed, and baggage is not forwarded
+### `scrub_baggage_for_tenant` is removed, and baggage is not forwarded
 
 `scrub_baggage_for_tenant` is removed from `mcp_hangar.observability`, with no
 replacement. If you call it, delete the call. There is nothing to do instead:
