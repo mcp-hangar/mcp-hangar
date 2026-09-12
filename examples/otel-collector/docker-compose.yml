@@ -50,7 +50,8 @@ services:
       MCP_HTTP_PORT: "8080"
       # `http://` on purpose: it selects plaintext gRPC for traces. Without a
       # scheme the trace exporter would try TLS against a plaintext Collector.
-      # An explicit endpoint also turns on OTLP audit log export.
+      # An explicit endpoint also turns on OTLP audit log export;
+      # MCP_AUDIT_EXPORT_ENABLED: "false" keeps that off and traces on.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: mcp-hangar
       # Lands on the resource of both spans and audit records, so one run's
