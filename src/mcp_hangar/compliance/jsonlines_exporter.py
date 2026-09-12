@@ -32,6 +32,7 @@ def _record_to_json_line(record: AuditRecord) -> str:
         "duration_ms": data.get("duration_ms"),
         "user_id": record.caller_user_id,
         "session_id": record.caller_session_id,
+        "tenant_id": record.tenant_id or None,  # an empty tenant is no tenant
         "error_type": data.get("error_type"),
         "from_state": data.get("from_state"),
         "to_state": data.get("to_state"),

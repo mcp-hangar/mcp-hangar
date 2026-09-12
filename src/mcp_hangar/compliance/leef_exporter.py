@@ -52,6 +52,9 @@ def _format_record(record: AuditRecord) -> str:
         extensions.append(f"usrName={_escape_value(record.caller_user_id)}")
     if record.caller_session_id:
         extensions.append(f"sessID={_escape_value(record.caller_session_id)}")
+    if record.tenant_id:
+        # LEEF 2.0 predefines no tenant attribute, so this is a custom key.
+        extensions.append(f"tenantID={_escape_value(record.tenant_id)}")
     tool_name = data.get("tool_name")
     if tool_name is not None:
         extensions.append(f"action={_escape_value(str(tool_name))}")
