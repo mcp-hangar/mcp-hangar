@@ -17,7 +17,6 @@ from mcp_hangar.domain.events import SessionSuspended, DetectionRuleMatched, Enf
 from mcp_hangar.server.api.sessions import (
     _suspended_sessions,
     get_session_suspension_registry,
-    is_session_suspended,
 )
 
 
@@ -92,7 +91,7 @@ class TestDetectionEnforcementHandler:
 
         handler.handle(_detection_event("suspend"))
 
-        assert is_session_suspended("session-123") is True
+        assert get_session_suspension_registry().is_suspended("session-123") is True
         # Two now: the suspension itself, which peers apply so the block is not
         # bypassable by retrying against another replica (#790, phase 3.2), and
         # the enforcement record for the audit trail.
@@ -139,7 +138,7 @@ class TestDetectionEnforcementHandler:
 
         assert command_bus.commands == []
         assert event_bus.published == []
-        assert is_session_suspended("session-123") is False
+        assert get_session_suspension_registry().is_suspended("session-123") is False
 
     def test_handler_swallow_errors(self):
         event_bus = RecordingEventBus()
@@ -164,7 +163,7 @@ class TestSessionSuspensionEndpoint:
 
         assert response.status_code == 200
         assert response.json() == {"session_id": "session-123", "suspended": True}
-        assert is_session_suspended("session-123") is True
+        assert get_session_suspension_registry().is_suspended("session-123") is True
 
 
 class TestBlockProviderEndpoint:
