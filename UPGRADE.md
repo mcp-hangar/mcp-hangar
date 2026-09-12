@@ -1,6 +1,8 @@
 # Upgrading MCP Hangar
 
-## Next — tenant-scoped role grants are limited to their tenant
+## Upgrade to 2.19.0
+
+### tenant-scoped role grants are limited to their tenant
 
 A role bound at `tenant:<id>` is now a grant within that tenant only. That
 covers an `auth.role_assignments` entry with `scope: "tenant:<id>"`,

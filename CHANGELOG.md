@@ -5,6 +5,291 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.2...v2.19.0) (2026-09-12)
+
+### Added
+
+- **core:** the CEF, LEEF, JSON-lines and syslog audit output now prints the
+  caller's tenant, which the records have carried since #1342, so a SIEM can
+  tell tenants apart. CEF prints it as `cs6` with `cs6Label=TenantID`, LEEF as
+  the custom attribute `tenantID`, JSON-lines as `tenant_id`, and syslog as the
+  `tenant` parameter of the `mcp@49152` structured data. Each sits beside the
+  session field and is escaped by that format's existing rules. A record with no
+  tenant, or an empty one, prints no tenant field, so its line is unchanged. ([#1349](https://github.com/mcp-hangar/mcp-hangar/pull/1349))
+- **core:** Hangar now bounds the length of the values it records. Span
+  attributes on Hangar's own tracer provider are cut at 256 characters, and so
+  are span event and link attributes, including an exception's message and
+  stack trace. Attributes of OTLP audit records sent through Hangar's own logger
+  provider are cut at 256, a string in a structured-log record at 2048, and a
+  free-text field of a domain event, such as `error_message`, `reason` or
+  `reasons`, at 4096. A cut value ends with `…[truncated N]`, and the marker
+  counts toward the limit. Span attributes are the exception: the OpenTelemetry
+  SDK cuts them and adds no marker. Log records are cut after secrets are
+  redacted, and a domain event is cut once, when it is constructed, so the event
+  store, `/ws/events`, the audit trail and the logs all hold the same value. Set
+  `MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT`, `MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT`,
+  `MCP_LOG_FIELD_LENGTH_LIMIT` or `MCP_EVENT_TEXT_LENGTH_LIMIT` to change a
+  limit. `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT`,
+  `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` and
+  `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` win over Hangar's span and audit variables
+  when set. A tracer or logger provider registered before Hangar starts is not
+  reconfigured. ([#1350](https://github.com/mcp-hangar/mcp-hangar/pull/1350))
+- **core:** OTLP audit log export can now be turned off without turning off
+  tracing. Set `observability.audit.enabled: false` in the config file, or
+  `MCP_AUDIT_EXPORT_ENABLED=false` in the environment; the environment variable
+  wins over the file. The default is `true`, so an OTLP endpoint set explicitly
+  (`OTEL_EXPORTER_OTLP_ENDPOINT` or `observability.tracing.otlp_endpoint`) still
+  turns audit export on, as it has since #1318. Switched off, Hangar builds no
+  audit log pipeline and exports no audit records over OTLP, so the caller
+  identities they carry are not sent. Trace export, the in-process audit trail
+  and the compliance feed selected by `MCP_COMPLIANCE_FORMAT` are unaffected. ([#1341](https://github.com/mcp-hangar/mcp-hangar/pull/1341))
+
+### Changed
+
+- **core:** resource attributes set through the standard OpenTelemetry
+  environment now win over Hangar's own on exported traces.
+  `OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod` now exports `prod`
+  instead of `development`; `MCP_ENVIRONMENT` (default `development`) still
+  applies when the environment sets none. The service name comes from
+  `OTEL_SERVICE_NAME`, then `service.name` in `OTEL_RESOURCE_ATTRIBUTES`, then
+  `observability.tracing.service_name` in config.yaml, then `mcp-hangar`. One
+  behaviour change: a `service.name` in `OTEL_RESOURCE_ATTRIBUTES` used to be
+  overridden and now beats the one in config.yaml. A server started by Hangar's
+  bootstrap now reports `service.instance.id` as the instance identity that domain
+  events carry in `produced_by`, instead of a random id from the OpenTelemetry SDK,
+  unless `OTEL_RESOURCE_ATTRIBUTES` sets one ([#1324](https://github.com/mcp-hangar/mcp-hangar/pull/1324))
+- **core:** the trace exporter honours the standard OTLP exporter configuration
+  instead of overriding it. `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` or
+  `OTEL_EXPORTER_OTLP_PROTOCOL` selects the exporter: `grpc`, the default, or
+  `http/protobuf`. Any other value, or a missing exporter package, adds no OTLP
+  exporter and logs the reason. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` now takes
+  effect and beats `OTEL_EXPORTER_OTLP_ENDPOINT`. `observability.tracing.otlp_endpoint`
+  in config.yaml is still used when neither is set, and the environment still
+  beats it, as before. `OTEL_EXPORTER_OTLP_INSECURE` and
+  `OTEL_EXPORTER_OTLP_TRACES_INSECURE` are honoured. A scheme-less gRPC endpoint
+  such as `collector:4317` therefore now uses TLS, as the OpenTelemetry SDK
+  defaults; write `http://collector:4317`, or set one of those to `true`, to keep
+  plaintext. `https://` always uses TLS, and the default `http://localhost:4317`
+  stays plaintext ([#1321](https://github.com/mcp-hangar/mcp-hangar/pull/1321))
+
+### Removed
+
+- **core:** four metrics that nothing has written to since #1002 are no longer
+  exposed: `mcp_hangar_behavioral_deviations_total`,
+  `mcp_hangar_tool_schema_drifts_total`, `mcp_hangar_detection_rule_matches_total`
+  and `mcp_hangar_enforcement_actions_total`. Each was a `# TYPE` header with no
+  sample, which reads to a dashboard exactly like a signal that is working and
+  quiet; the features that would feed them -- anomaly detection, behavioural
+  profiling and schema-drift detection -- are not shipped. `Metrics` is gone from
+  `mcp_hangar.observability` with them: a table of metric-name constants that
+  nothing read, seven of whose ten entries named no real family. The test meant
+  to catch all four now counts only reads that reach the metrics module, and no
+  longer counts the registration list as one -- either hole alone had kept it
+  green ([#1261](https://github.com/mcp-hangar/mcp-hangar/pull/1261))
+
+### Fixed
+
+- **core:** the `domain_event` log line no longer carries the whole event.
+  `LoggingEventHandler` wrote `event.to_dict()` into every line, so at the
+  default INFO level the structured log held each event's `identity_context`
+  and its free-text fields, such as error messages and reasons.
+  `ToolInvocationFailed`, `McpServerDegraded` and `HealthCheckFailed` did so at
+  WARNING. The `domain_event` line now carries only `event_type`, `event_id`,
+  `mcp_server_id`, `tool_name`, `error_type`, `tenant_id` and `correlation_id`,
+  each only when the event has it, at the same level as before. The full event
+  is logged in a separate `domain_event_detail` line at DEBUG, built only when
+  DEBUG is enabled. Consumers that parse event payloads from INFO or WARNING
+  lines must enable DEBUG or read the event store. The event store, the audit
+  trail and the security log are unchanged. ([#1345](https://github.com/mcp-hangar/mcp-hangar/pull/1345))
+- **core:** audit records now carry caller identity and tenant. The audit event
+  handler read identity keys that the identity context never produces, so no
+  OTLP audit record carried a caller id, a user, a session or a tenant, and the
+  CEF, LEEF, JSON-lines and syslog exporters never received a user or a session.
+  Audit records now carry `mcp.caller.id` (the user id, or the agent id when
+  there is no user), `mcp.user.id`, `mcp.session.id` when the identity has a
+  session, and the tenant as `mcp.caller.tenant_id`, beside `mcp.caller.type`.
+  The compliance exporters receive the user and the session. `mcp.caller.roles`
+  is still not emitted, because a call's identity carries no roles. A failed
+  call's `mcp.tool.duration_ms` is now the call's duration instead of 0.0. The
+  audit resource is now built as the trace resource is, so it carries the same
+  `service.instance.id`, `service.version` and `deployment.environment`, with
+  the same precedence. With no identity (auth off), records are unchanged. ([#1346](https://github.com/mcp-hangar/mcp-hangar/pull/1346))
+- **core:** the OTLP audit log exporter always sent plaintext gRPC, even where
+  the trace exporter used TLS for the same endpoint, and it ignored the standard
+  exporter variables. It now resolves them as the trace exporter does, for the
+  logs signal. A scheme-less audit endpoint such as `collector:4317` therefore
+  now uses TLS; write `http://collector:4317`, or set
+  `OTEL_EXPORTER_OTLP_LOGS_INSECURE` or `OTEL_EXPORTER_OTLP_INSECURE` to `true`,
+  to keep plaintext. `https://` always uses TLS.
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` now beats `OTEL_EXPORTER_OTLP_ENDPOINT`, and
+  `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL` or `OTEL_EXPORTER_OTLP_PROTOCOL` selects
+  `grpc`, the default, or `http/protobuf`. Any other protocol, or a missing
+  exporter package, builds no audit log pipeline and logs the reason, and audit
+  records then go to the structured log. What turns audit export on is
+  unchanged: `OTEL_EXPORTER_OTLP_ENDPOINT` or `observability.tracing.otlp_endpoint`.
+  The audit endpoint is no longer written to the log ([#1333](https://github.com/mcp-hangar/mcp-hangar/pull/1333))
+- **core:** An invalid `OTEL_TRACES_SAMPLER_ARG` no longer turns tracing off.
+  With `OTEL_TRACES_SAMPLER=traceidratio` or `parentbased_traceidratio`, a
+  ratio outside 0 to 1, or one that is not a number, made tracing
+  initialization fail with a single `tracing_initialization_failed` error, and
+  the process then ran with no tracing at all. Now Hangar logs one
+  `tracing_sampler_arg_invalid` warning that names the variable and its value,
+  samples every trace (ratio 1.0, the value when the variable is unset), and
+  keeps tracing on. A non-numeric value already fell back to 1.0, but without
+  a warning. Valid values behave as before.
+
+  Hangar now logs `tracing_initialized` once, listing the exporters it actually
+  attached, for example `exporters=["otlp_grpc", "console"]`. It used to log
+  the event twice: once with a count of exporters, and once with only the
+  service name. The line names no endpoint and no headers ([#1323](https://github.com/mcp-hangar/mcp-hangar/pull/1323))
+- **core:** every tool call through `hangar_call` or a projected tool was
+  counted twice: `InvokeToolHandler` observed it, and `MetricsEventHandler`
+  observed it again from the call's `ToolInvocationCompleted` or
+  `ToolInvocationFailed` event. `mcp_hangar_tool_calls_total`,
+  `mcp_hangar_tool_call_errors_total` and the count of
+  `mcp_hangar_tool_call_duration_seconds` now move by one per call, so every
+  call-volume series halves after upgrading. Review any alert or dashboard
+  threshold on call volume that was tuned against the doubled series. A failed
+  call now carries one `error_type`: the event's value (`OSError`, a JSON-RPC
+  code, `tool_error`) when the upstream was reached, the exception class
+  (`ToolNotFoundError`, `EgressPolicyDeniedError`) when it was not. The
+  `ToolInvocationError` series that duplicated upstream failures stops growing.
+  The latency histogram now holds only the upstream round trip; the dropped
+  second observation also timed policy checks and cold starts ([#1309](https://github.com/mcp-hangar/mcp-hangar/pull/1309))
+- **core:** With the OpenTelemetry SDK installed, audit records for tool calls
+  and server state changes were dropped. Nothing registered a logger provider,
+  so the OTLP audit exporter handed every record to the API's placeholder, and
+  the structured-log fallback was skipped as well. Now, when an OTLP endpoint is
+  configured, Hangar registers its own logger provider with a batch processor and
+  an OTLP log exporter, and sends audit records to that endpoint. An endpoint set
+  only in the config file (`observability.tracing.otlp_endpoint`) now turns audit
+  export on, as `OTEL_EXPORTER_OTLP_ENDPOINT` already did, and
+  `observability.tracing.enabled: false` does not turn it off. When another
+  component registered a logger provider first, Hangar sends its records through
+  that one and never replaces, flushes or shuts it down. Without the SDK, or with
+  no provider registered, audit records now go to the structured log instead of
+  nowhere. Failed export batches are counted in
+  `mcp_hangar_otlp_audit_export_failures_total`, and shutdown waits at most 5
+  seconds (`AUDIT_LOG_SHUTDOWN_TIMEOUT_S`) for records still pending. This is
+  verified as far as Hangar's own export pipeline; that a collector receives the
+  records is not yet verified end to end ([#1318](https://github.com/mcp-hangar/mcp-hangar/pull/1318))
+- **core:** Hangar no longer claims a tracer provider that the host application
+  registered first. It used to build its own anyway, attach its exporters to it
+  and log `tracing_initialized`, although the OpenTelemetry API had refused to
+  register it ("Overriding of current TracerProvider is not allowed"), so those
+  exporters never received a span. Before that point, or wherever Hangar's own
+  init never ran, as when it is embedded, it handed out no-op tracers and
+  propagated no `traceparent`, even under the host's active span. Now Hangar
+  builds no exporters in that case, logs `tracing_external_provider_in_use`, and
+  sends its spans and trace context through the host's provider, which it leaves
+  to the host to shut down. Tracing disabled in configuration, by
+  `observability.tracing.enabled: false` or `MCP_TRACING_ENABLED=false`, keeps
+  Hangar's spans and trace context off even when another provider is registered.
+
+  With `MCP_TRACING_CONSOLE` on, spans are now written to stderr. They went to
+  stdout, which on the stdio transport is the JSON-RPC stream.
+
+  `shutdown_tracing` now returns within 5 seconds (`TRACING_SHUTDOWN_TIMEOUT_S`)
+  when the collector is unreachable, instead of waiting out the OTLP export
+  timeout, and logs `tracing_shutdown_timed_out`; spans not exported by then are
+  dropped. Calling `init_tracing` after a shutdown now returns False and logs
+  `tracing_init_refused` with `reason=already_shut_down`, instead of building a
+  provider that could never be registered ([#1311](https://github.com/mcp-hangar/mcp-hangar/pull/1311))
+- **core:** the CLIENT span of an upstream call now ends in ERROR, with a
+  bounded `error.type`, when the upstream answered with a failure. Over HTTP the
+  span closed once the request was sent, so an HTTP error status, a terminated
+  session, a response that was not JSON, and a JSON-RPC error in the body or in
+  an SSE event all left it UNSET, and so did a rejected notification. Over stdio,
+  a JSON-RPC error or a tool result with `isError: true` left it UNSET as well.
+  `error.type` takes the mcp SDK's server-side values: `http_<status>` for a
+  status failure (`http_404` for a terminated session), the JSON-RPC error code as
+  a string, `tool_error` for `isError: true`, and otherwise the exception's class
+  name, such as `JSONDecodeError` for a response that is not JSON or `ReadTimeout`
+  and `ConnectError` for a transport failure. No message or body text is recorded.
+  What a call returns or raises, and how it retries, is unchanged ([#1320](https://github.com/mcp-hangar/mcp-hangar/pull/1320))
+- **core:** the `approval_gate.check` span's `approval.result` now says
+  `approved` when a human granted the hold and the dispatch re-check confirmed
+  it, and `unavailable` when an L7 egress policy requires approval for the tool
+  but no approval gate is configured, a call that is still refused at dispatch.
+  Both used to read `not_required`, so a human-approved call looked like one that
+  never needed approval. `not_required` now means no approval was asked for, and
+  the refusal values (`approval_denied`, `approval_timeout`, `ApprovalGateError`,
+  `ApprovalDenied`, `revalidation_failed`) are unchanged. Which calls are allowed
+  or refused is unchanged ([#1322](https://github.com/mcp-hangar/mcp-hangar/pull/1322))
+- **core:** the `concurrency.acquire` span of a batch call now covers only the
+  time spent waiting for a free global and per-server concurrency slot, and ends
+  as soon as the slots are held. It used to stay open until the tool invocation
+  and every retry had finished, so a slow tool looked like a long wait for
+  capacity even when slots were free. The `invoke_with_retry` and
+  `command.send.InvokeToolCommand` spans are now children of `batch.call.<tool>`
+  instead of `concurrency.acquire`. The slots are still held until the invocation
+  returns, and `concurrency.wait_ms` and the other span attributes are unchanged ([#1319](https://github.com/mcp-hangar/mcp-hangar/pull/1319))
+- **core:** failures Hangar catches and carries on from now end their span as
+  ERROR, with `error.type` set to the exception's class name. Six fault barriers
+  recorded the exception but left the span's status UNSET, so a trace showed the
+  failed operation as a success: an event handler or hook subscriber that raised
+  (`event.publish.<Event>`, `event.publish_hook.<phase>`), a failed event store
+  write (`event_store.append`), a failed discovery cycle (`discovery.cycle`), a
+  discovered server whose registration raised (`discovery.process_mcp_server`),
+  and a failed cold start in a batch call (`mcp_server.cold_start`). On a span
+  several handlers share, the first failure sets `error.type` and a later
+  success does not clear it. Nothing else changes: events are still delivered
+  when the store write fails, discovery still counts and skips as before,
+  `discovery.result` and `cold_start.result` keep their values, and the batch
+  call still returns the same cold-start refusal. A refusal is not an error, so
+  a control plane that rejects a discovered server still leaves its span UNSET ([#1331](https://github.com/mcp-hangar/mcp-hangar/pull/1331))
+- **core:** an HTTP upstream now receives, in `params._meta`, the `traceparent`
+  of the CLIENT span Hangar opens for that request, the same span the
+  `traceparent` header names, as over stdio. `_meta` was filled in before that
+  span opened, so it named the span that called into Hangar, or, when there was
+  none, carried no `traceparent` at all while the header did. HTTP notifications
+  are corrected the same way. While tracing is active, a `traceparent` already in
+  the caller's `_meta` is replaced by that span's rather than forwarded ([#1317](https://github.com/mcp-hangar/mcp-hangar/pull/1317))
+- **core:** each `hangar_call` invocation now shows up in a trace backend under
+  the request that made it: remote caller, the `tools/call hangar_call` server
+  span, `hangar_call`, `batch.execute`, then `batch.call.<tool>`. The
+  `batch.call.<tool>` span used to hang directly off the caller's span named in
+  `_meta.traceparent`, skipping `hangar_call` and `batch.execute`, and without a
+  valid `traceparent` it started a trace of its own. A `traceparent` in the
+  legacy `call.metadata` that names a different trace is now attached to
+  `batch.call.<tool>` as a span link instead of becoming its parent. Span names
+  and attributes are unchanged ([#1316](https://github.com/mcp-hangar/mcp-hangar/pull/1316))
+- **core:** `/metrics` put every counter's `# HELP` and `# TYPE` on a family
+  that has no samples. The header lines said `mcp_hangar_tool_calls` while the
+  samples said `mcp_hangar_tool_calls_total`, so Prometheus stored the type and
+  help text under a name that never returns a value and nothing under the one
+  anyone queries: Grafana's metric browser showed all 48 counters untyped and
+  undocumented, and `/api/v1/metadata` had no answer for them. The header lines
+  now name `..._total`, as `prometheus_client` writes them for text format 0.0.4.
+  `mcp_hangar_build_info` was split the same way, `# HELP` on `mcp_hangar_build`
+  and `# TYPE` on `mcp_hangar_build_info`, and now names `_info` in both. No
+  series is renamed, so dashboards, alerts and `rate()` queries are unaffected ([#1263](https://github.com/mcp-hangar/mcp-hangar/pull/1263))
+
+### Security
+
+- **security:** tenant-scoped role grants are now limited to their tenant
+  (GHSA-48jg-9vqq-gmqv). A role bound at `tenant:<id>` used to authorize REST
+  routes, the `/ws/events` stream and the `hangar_*` management tools as if it
+  were bound globally.
+
+  A tenant-scoped grant now passes only the routes that confine what they serve
+  to the caller's tenant, and each of those serves or changes only that tenant:
+
+  - `/ws/events` delivers only events that name the tenant. Events that name no
+    tenant are withheld.
+  - `GET /mcp_servers/{id}/tools/history` returns only that tenant's invocations.
+  - `POST /admin/tools/{server}/{tool}/withdraw|restore` acts on that tenant only.
+    An omitted `tenant_id` means that tenant, never every tenant, and lifting a
+    withdrawal that covers every tenant needs a global grant.
+  - the approvals routes list, show and resolve only approvals that name the
+    tenant. Approvals that name no tenant are withheld.
+
+  Every other route answers 403 (close code 1008 on a websocket), and every
+  `hangar_*` management tool is refused and left out of the front-door listing.
+  Global grants and deployments with auth disabled are unchanged. If you gave a
+  principal fleet-wide access through a `tenant:` binding, rebind that role at
+  `global` scope.
+
 ## [2.18.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.1...v2.18.2) (2026-09-09)
 
 ### Fixed
