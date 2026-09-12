@@ -275,7 +275,10 @@ jobs:
   publish-registry:
     name: Publish to MCP Registry
     needs: [validate, publish-pypi]
-    if: needs.validate.result == 'success' && needs.publish-pypi.result == 'success' && needs.validate.outputs.is_prerelease == 'false'
+    # `always()`, as publish-pypi has: without it a skipped `test` (a
+    # `skip_tests` dispatch) skips this job through the needs chain even when
+    # PyPI published, and v2.19.0 reached PyPI but not the registry.
+    if: always() && needs.validate.result == 'success' && needs.publish-pypi.result == 'success' && needs.validate.outputs.is_prerelease == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The private key is an ENVIRONMENT secret on this environment, never a repo
