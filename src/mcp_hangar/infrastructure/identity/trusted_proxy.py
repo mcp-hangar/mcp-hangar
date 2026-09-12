@@ -91,14 +91,26 @@ def resolve_source_ip(
     """Resolve the effective request source IP.
 
     Uses the direct socket peer by default. If the peer is a trusted proxy and
-    ``X-Forwarded-For`` is present, returns the first forwarded address.
+    ``X-Forwarded-For`` is present, returns the rightmost forwarded address that
+    is not itself a trusted proxy -- or the leftmost, when every hop is trusted.
+
+    Rightmost, not first: a proxy appends the address it saw, so everything to
+    the left of the last untrusted hop was written by the client. Taking the
+    first entry let a client name any address it liked, and pick the key the
+    auth rate limiter and lockout count against. This is the rule uvicorn's
+    proxy-header handling applied before Hangar turned it off, so a peer that
+    sees the connecting address resolves the same client uvicorn did.
     """
     source_ip = client_host or default
     normalized_headers = normalize_http_headers(headers)
 
     if client_host and trusted_proxies and trusted_proxies.is_trusted(client_host):
         forwarded_for = normalized_headers.get("x-forwarded-for")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
+        hops = [hop.strip() for hop in forwarded_for.split(",") if hop.strip()] if forwarded_for else []
+        untrusted = [hop for hop in hops if not trusted_proxies.is_trusted(hop)]
+        if untrusted:
+            return untrusted[-1]
+        if hops:
+            return hops[0]
 
     return source_ip

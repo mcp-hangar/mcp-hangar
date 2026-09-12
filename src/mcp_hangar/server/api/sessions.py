@@ -7,20 +7,18 @@ The registry itself is an infrastructure adapter -- see
 from __future__ import annotations
 
 import json
-import re
 from typing import cast
 
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...domain.contracts.session_suspension import is_well_formed_session_id
 from ...domain.events import DomainEvent, SessionSuspended, SessionUnsuspended
 from ...infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from ...logging_config import get_logger
 from .serializers import HangarJSONResponse
 
 logger = get_logger(__name__)
-
-_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 # The process-wide registry. It stays a module global because the routes are
 # plain functions with no injection point; the enforcement handler no longer
@@ -70,7 +68,7 @@ async def suspend_session(request: Request) -> HangarJSONResponse:
     """Suspend a session in the local in-memory registry."""
     session_id = cast(str, request.path_params["session_id"])
 
-    if not _SESSION_ID_RE.match(session_id):
+    if not is_well_formed_session_id(session_id):
         return HangarJSONResponse(
             {"error": "invalid session_id: must be 1-128 alphanumeric, dash, or underscore"},
             status_code=400,
@@ -103,7 +101,7 @@ async def unsuspend_session(request: Request) -> HangarJSONResponse:
     """Remove a session from the suspended registry."""
     session_id = cast(str, request.path_params["session_id"])
 
-    if not _SESSION_ID_RE.match(session_id):
+    if not is_well_formed_session_id(session_id):
         return HangarJSONResponse(
             {"error": "invalid session_id"},
             status_code=400,

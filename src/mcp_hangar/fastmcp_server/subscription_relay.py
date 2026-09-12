@@ -262,6 +262,9 @@ def maybe_register_subscription_relay(mcp: Any) -> bool:
     from .asgi import bind_caller_identity, release_caller_identity
     from .prompt_proxy import _upstream_ids
 
+    # Lazily, like the rest: `server` imports this module back (#894).
+    from ..server.session_guard import refuse_request_if_session_suspended
+
     handler = ListenHandler(_bus)
 
     async def _listen(ctx: Any, params: Any) -> Any:
@@ -269,6 +272,8 @@ def maybe_register_subscription_relay(mcp: Any) -> bool:
 
         token = bind_caller_identity(ctx)
         try:
+            # Before subscribing upstream for the caller (GHSA-fhwh-fmq2-7m5c).
+            refuse_request_if_session_suspended("subscription", ctx)
             _loop = asyncio.get_running_loop()
             tenant_id = _tenant()
             upstreams = frozenset(await asyncio.to_thread(_upstream_ids, tenant_id))

@@ -4,12 +4,16 @@ Provides functions to create ASGI applications with health endpoints
 and optional authentication middleware.
 """
 
+import functools
 from typing import Any, TYPE_CHECKING
 
 
 from ..context import bind_routing_headers, identity_context_var, release_routing_headers  # noqa: F401
+from ..domain.contracts.session_suspension import VERIFIED_SESSION_ID_KEY, is_well_formed_session_id
 from ..domain.value_objects.identity import CallerIdentity, IdentityContext
 from ..domain.value_objects.security import PrincipalType
+from ..infrastructure.identity.header_extractor import HEADER_SESSION_ID, HeaderIdentityExtractor
+from ..infrastructure.identity.trusted_proxy import TrustedProxyResolver
 from ..logging_config import get_logger
 from ..trusted_hosts import WILDCARD, trusted_hosts
 
@@ -20,7 +24,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _principal_to_identity_context(principal: Any) -> IdentityContext:
+def _principal_to_identity_context(principal: Any, session_id: str | None = None) -> IdentityContext:
     """Bridge an authenticated Principal to an IdentityContext for identity_context_var.
 
     Mapping rules:
@@ -30,6 +34,8 @@ def _principal_to_identity_context(principal: Any) -> IdentityContext:
                                   closest valid literal is "service"), user_id = principal.id.value
     - Anonymous (id == "anonymous") → principal_type "anonymous", user_id = None
     - tenant_id passes through from Principal.tenant_id.
+    - session_id is whatever :func:`_caller_session_id` resolved for the
+      request; it is never read off the principal here.
 
     CallerIdentity.__post_init__ requires user_id non-None for "user"/"service".
     We fall back to "anonymous" only if principal_type would require a user_id but
@@ -40,7 +46,7 @@ def _principal_to_identity_context(principal: Any) -> IdentityContext:
             caller=CallerIdentity(
                 user_id=None,
                 agent_id=None,
-                session_id=None,
+                session_id=session_id,
                 principal_type="anonymous",
                 tenant_id=None,
             )
@@ -62,7 +68,7 @@ def _principal_to_identity_context(principal: Any) -> IdentityContext:
             caller=CallerIdentity(
                 user_id=None,
                 agent_id=None,
-                session_id=None,
+                session_id=session_id,
                 principal_type="anonymous",
                 tenant_id=principal.tenant_id,
             )
@@ -72,11 +78,78 @@ def _principal_to_identity_context(principal: Any) -> IdentityContext:
         caller=CallerIdentity(
             user_id=principal_id_value,
             agent_id=None,
-            session_id=None,
+            session_id=session_id,
             principal_type=mapped_type,  # type: ignore[arg-type]
             tenant_id=principal.tenant_id,
         )
     )
+
+
+@functools.cache
+def _forwarded_session_extractor() -> HeaderIdentityExtractor:
+    """The one reader of ``x-session-id``, and the trust decision it makes.
+
+    Built once per process, like the auth middleware's own resolver: the
+    trusted-proxy list is read from ``MCP_TRUSTED_PROXIES`` at construction.
+    """
+    return HeaderIdentityExtractor(trusted_proxies=TrustedProxyResolver())
+
+
+def _forwarded_session_id(request: Any) -> str | None:
+    """The ``x-session-id`` a trusted proxy put on *request*, or None.
+
+    The header is caller-chosen: a client that could set it could evade a
+    suspension by sending another session's id, or none. So it is honoured on
+    exactly the terms this gateway already honours a forwarded address
+    (``X-Forwarded-For``): only when the peer that connected is in
+    ``MCP_TRUSTED_PROXIES`` (default: loopback). The peer is the connection's
+    address as the HTTP server reports it, never a forwarded one, so a client
+    cannot make itself trusted by claiming to be forwarded.
+    """
+    headers = getattr(request, "headers", None)
+    value = headers.get(HEADER_SESSION_ID) if headers is not None else None
+    if not value:
+        return None
+    peer = getattr(getattr(request, "client", None), "host", None)
+    forwarded = _forwarded_session_extractor().extract({HEADER_SESSION_ID: value}, source_ip=peer)
+    session_id = forwarded.caller.session_id if forwarded is not None else None
+    return session_id if is_well_formed_session_id(session_id) else None
+
+
+def _caller_session_id(request: Any, principal: Any) -> str | None:
+    """The session id this request's caller carries, or None (GHSA-fhwh-fmq2-7m5c).
+
+    In order of authority:
+
+    1. the ``sid`` claim of the bearer token the authenticator verified. It is
+       authoritative: a header cannot replace it, because otherwise a caller
+       holding a token for a suspended session could name another one;
+    2. an ``x-session-id`` header from a trusted proxy (see
+       :func:`_forwarded_session_id`).
+
+    A caller with neither has no session id. A suspension cannot match it, and
+    suspension therefore does not apply to it.
+    """
+    verified = (getattr(principal, "metadata", None) or {}).get(VERIFIED_SESSION_ID_KEY)
+    if is_well_formed_session_id(verified):
+        return verified
+    return _forwarded_session_id(request)
+
+
+def identity_for_request(request_context: Any) -> IdentityContext | None:
+    """The caller identity a per-request context carries, or None.
+
+    Reads the principal the auth middleware left on ``request.state.auth`` and
+    the session id resolved for the same request. Accepts a
+    ``ServerRequestContext`` or anything exposing one as ``.request_context``.
+    None when there is no request or no principal: stdio, and HTTP with auth off.
+    """
+    inner = getattr(request_context, "request_context", None) or request_context
+    request = getattr(inner, "request", None)
+    principal = getattr(getattr(getattr(request, "state", None), "auth", None), "principal", None)
+    if principal is None:
+        return None
+    return _principal_to_identity_context(principal, _caller_session_id(request, principal))
 
 
 def bind_caller_identity(request_context: Any) -> Any:
@@ -104,12 +177,10 @@ def bind_caller_identity(request_context: Any) -> Any:
 
         if get_identity_context() is not None:
             return None
-        inner = getattr(request_context, "request_context", None) or request_context
-        auth_state = getattr(getattr(inner, "request", None), "state", None)
-        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
-        if principal is None:
+        identity = identity_for_request(request_context)
+        if identity is None:
             return None
-        return identity_context_var.set(_principal_to_identity_context(principal))
+        return identity_context_var.set(identity)
     except Exception:  # noqa: BLE001 -- identity bridging must never break a call
         return None
 
@@ -253,6 +324,7 @@ def mcp_transport_security() -> "TransportSecuritySettings":
 
 __all__ = [
     "bind_caller_identity",
+    "identity_for_request",
     "release_caller_identity",
     "mcp_transport_security",
 ]

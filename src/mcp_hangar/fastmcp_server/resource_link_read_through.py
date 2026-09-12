@@ -361,6 +361,11 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     from .asgi import bind_caller_identity, release_caller_identity
     from .flat_tool_projection import build_projected_list_cache_meta
 
+    # Every handler below reaches an upstream for the caller (the listings relay
+    # to each upstream), so each refuses a suspended session first
+    # (GHSA-fhwh-fmq2-7m5c). Lazily, like the rest.
+    from ..server.session_guard import refuse_request_if_session_suspended
+
     def _tenant() -> str | None:
         identity = get_identity_context()
         return identity.caller.tenant_id if identity is not None else None
@@ -368,6 +373,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     async def _read(ctx: Any, params: Any) -> Any:
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("resource", ctx)
             uri = str(params.uri)
             tenant_id = _tenant()
             target = await asyncio.to_thread(_resolve_target, tenant_id, uri)
@@ -395,6 +401,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     async def _list(ctx: Any, params: Any) -> Any:
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("resource", ctx)
             tenant_id = _tenant()
             catalog = await asyncio.to_thread(_build_catalog, tenant_id, RESOURCES)
             listed = {resource["uri"] for resource in catalog}
@@ -418,6 +425,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     async def _templates(ctx: Any, params: Any) -> Any:
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("resource", ctx)
             tenant_id = _tenant()
             templates = await asyncio.to_thread(_build_catalog, tenant_id, TEMPLATES)
             return ListResourceTemplatesResult.model_validate(

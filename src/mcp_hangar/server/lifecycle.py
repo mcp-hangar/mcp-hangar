@@ -542,6 +542,15 @@ class ServerLifecycle:
             port=port,
             log_config=None,  # Disable uvicorn's default logging
             access_log=False,  # Disable access logs (we'll handle them via structlog if needed)
+            # Off, so the peer the app sees is the peer that connected.
+            # uvicorn's default rewrote a loopback peer (or any in
+            # FORWARDED_ALLOW_IPS) to its X-Forwarded-For address before Hangar
+            # saw the request -- so a loopback proxy never looked like a proxy
+            # and its x-session-id was ignored (GHSA-fhwh-fmq2-7m5c), and the
+            # forwarded-address trust lived in a variable Hangar never read.
+            # `MCP_TRUSTED_PROXIES` (`TrustedProxyResolver`) is now the one
+            # decision, applied by the auth middleware and the identity bridge.
+            proxy_headers=False,
         )
 
         async def run_server():

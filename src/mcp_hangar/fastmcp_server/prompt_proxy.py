@@ -201,6 +201,10 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
     from .flat_tool_projection import build_projected_list_cache_meta
     from .resource_link_read_through import project_result_uris
 
+    # Every handler below reaches an upstream for the caller, so each refuses a
+    # suspended session first (GHSA-fhwh-fmq2-7m5c). Lazily, like the rest.
+    from ..server.session_guard import refuse_request_if_session_suspended
+
     def _tenant() -> str | None:
         identity = get_identity_context()
         return identity.caller.tenant_id if identity is not None else None
@@ -208,6 +212,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
     async def _list(ctx: Any, params: Any) -> Any:
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("prompt", ctx)
             tenant_id = _tenant()
             prompt_map = await asyncio.to_thread(_build_prompt_map, tenant_id)
             return ListPromptsResult.model_validate(
@@ -223,6 +228,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
     async def _get(ctx: Any, params: Any) -> Any:
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("prompt", ctx)
             name = params.name
             tenant_id = _tenant()
             # Rebuilt per request, same TOCTOU stance as the flat tool call:
@@ -250,6 +256,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
         """Complete a prompt argument against the upstream that owns the prompt (#1026)."""
         token = bind_caller_identity(ctx)
         try:
+            refuse_request_if_session_suspended("completion", ctx)
             tenant_id = _tenant()
             server_id = await asyncio.to_thread(_completion_target, tenant_id, params.ref)
             if server_id is None:

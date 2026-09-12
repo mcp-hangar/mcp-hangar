@@ -59,6 +59,7 @@ from typing import Any
 
 from ...domain.contracts.authorization import GrantScope
 from ...logging_config import get_logger
+from ..session_guard import refuse_if_session_suspended
 
 logger = get_logger(__name__)
 
@@ -289,9 +290,17 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
         mcp_ctx: The MCP request Context the wrapper injected, carrying the
             authenticated principal on ``request.state.auth``.
 
+    Before any of that, a caller whose session is suspended is refused, whatever
+    its grants and whether or not auth is on. Every tool this function guards
+    passes here, the continuation tools included, so this is where the
+    management surface enforces a suspension (GHSA-fhwh-fmq2-7m5c).
+
     Raises:
         ToolAccessNotAuthorizedError: If the call is not authorized.
+        SessionSuspendedError: If the caller's session is suspended.
     """
+    refuse_if_session_suspended("management_tool", mcp_ctx)
+
     if tool_name in SELF_AUTHORIZING_TOOLS:
         return
 

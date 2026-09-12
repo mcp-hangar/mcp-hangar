@@ -406,6 +406,7 @@ def bootstrap_auth(
                     groups_claim=entry.groups_claim,
                     tenant_claim=entry.tenant_claim,
                     email_claim=entry.email_claim,
+                    session_id_claim=entry.session_id_claim,
                     max_token_lifetime=entry.max_token_lifetime_seconds,
                     clock_skew_leeway=entry.clock_skew_leeway_seconds,
                     require_tenant=entry.require_tenant,

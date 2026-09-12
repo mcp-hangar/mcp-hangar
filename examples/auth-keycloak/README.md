@@ -117,6 +117,9 @@ auth:
     issuer: http://keycloak:8080/realms/mcp-hangar
     audience: mcp-hangar
     groups_claim: groups
+    # The claim `POST /api/sessions/{id}/suspend` matches. Keycloak issues
+    # `sid`, the default; set this only if your IdP uses another claim.
+    session_id_claim: sid
 
   role_assignments:
     - principal: "group:platform-engineering"

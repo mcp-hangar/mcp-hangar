@@ -204,6 +204,25 @@ class TestServerLifecycle:
         finally:
             del sys.modules["uvicorn"]
 
+    def test_run_http_does_not_let_uvicorn_rewrite_the_peer(self, mock_context):
+        """uvicorn's forwarded-header handling is off (GHSA-fhwh-fmq2-7m5c).
+
+        On, it replaced a loopback peer with its X-Forwarded-For address before
+        Hangar saw the request, so `MCP_TRUSTED_PROXIES` was not the decision it
+        claims to be and a loopback proxy's x-session-id was ignored.
+        """
+        mock_uvicorn = MagicMock()
+        sys.modules["uvicorn"] = mock_uvicorn
+
+        try:
+            with patch("asyncio.run") as mock_asyncio_run:
+                mock_asyncio_run.side_effect = _close_run_coro
+                ServerLifecycle(mock_context).run_http("127.0.0.1", 9000)
+
+            assert mock_uvicorn.Config.call_args.kwargs["proxy_headers"] is False
+        finally:
+            del sys.modules["uvicorn"]
+
     def test_run_http_wraps_the_front_door(self, mock_context):
         """run_http() must wrap the MCP app in SEP-2243 front-door routing (#560).
 

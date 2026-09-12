@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from jwt.types import Options
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest, IAuthenticator, ITokenValidator
+from mcp_hangar.domain.contracts.session_suspension import VERIFIED_SESSION_ID_KEY, is_well_formed_session_id
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, TokenLifetimeExceededError
 from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
 
@@ -33,6 +34,9 @@ class OIDCConfig:
         groups_claim: JWT claim for groups (default: groups).
         tenant_claim: JWT claim for tenant ID (default: tenant_id).
         email_claim: JWT claim for email (default: email).
+        session_id_claim: JWT claim carrying the session id a session suspension
+            matches (default: sid, as in OIDC logout). Recorded only once the
+            token is verified, and only in the shape the suspend route accepts.
         max_token_lifetime: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled (no lifetime check). Default: 3600.
         require_tenant: Fail-closed multi-tenant gate. When True, a validated token
@@ -62,6 +66,7 @@ class OIDCConfig:
     groups_claim: str = "groups"
     tenant_claim: str = "tenant_id"
     email_claim: str = "email"
+    session_id_claim: str = "sid"
 
     # Lifetime enforcement
     max_token_lifetime: int = 3600
@@ -292,17 +297,28 @@ class JWTAuthenticator(IAuthenticator):
 
         email = claims.get(config.email_claim)
 
+        metadata: dict[str, object] = {
+            "email": email,
+            "issuer": claims.get("iss"),
+            "issued_at": claims.get("iat"),
+            "expires_at": claims.get("exp"),
+        }
+        # The token's session id, recorded only here, after the signature,
+        # issuer, audience and lifetime checks passed. It is what a session
+        # suspension matches (GHSA-fhwh-fmq2-7m5c), and a verified claim is the
+        # one source the caller cannot swap for another session's id. One that
+        # could never name a suspension is not recorded. The claim name is this
+        # issuer's own, so a multi-issuer registry reads each issuer's claim.
+        session_id = claims.get(config.session_id_claim)
+        if is_well_formed_session_id(session_id):
+            metadata[VERIFIED_SESSION_ID_KEY] = session_id
+
         return Principal(
             id=PrincipalId(subject),
             type=PrincipalType.USER,
             tenant_id=tenant_id,
             groups=frozenset(groups) if groups else frozenset(),
-            metadata={
-                "email": email,
-                "issuer": claims.get("iss"),
-                "issued_at": claims.get("iat"),
-                "expires_at": claims.get("exp"),
-            },
+            metadata=metadata,
         )
 
     def _enforce_tenant_audience(

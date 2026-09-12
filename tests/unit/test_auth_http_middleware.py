@@ -232,7 +232,11 @@ class TestAuthMiddlewareHTTP:
 
         await mw.dispatch(request, call_next)
 
-        assert captured_request[0].source_ip == "203.0.113.50"
+        # The rightmost untrusted hop: the address the trusted proxy appended.
+        # The leftmost entry is whatever the client sent, so reading it let a
+        # client pick the key the rate limiter and lockout count against
+        # (GHSA-fhwh-fmq2-7m5c, when uvicorn stopped resolving this first).
+        assert captured_request[0].source_ip == "70.41.3.18"
 
     @pytest.mark.asyncio
     async def test_untrusted_proxy_ignores_x_forwarded_for(self):

@@ -99,7 +99,7 @@ from mcp_hangar.tasks_wire import (
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import get_identity_context, identity_context_var
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
-from mcp_hangar.fastmcp_server.asgi import _principal_to_identity_context
+from mcp_hangar.fastmcp_server.asgi import identity_for_request
 from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
 from mcp_hangar.logging_config import get_logger
 
@@ -331,6 +331,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
     """
     low = lowlevel_server(mcp)
 
+    # Lazily: `server` imports this module back through bootstrap (#894).
+    from ..server.session_guard import refuse_request_if_session_suspended
+
     def _bridge_identity(ctx: Any) -> Any:
         """Bridge the request's authenticated principal into ``identity_context_var``.
 
@@ -352,11 +355,10 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         if get_identity_context() is not None:
             return None
         try:
-            request = getattr(ctx, "request", None) or getattr(getattr(ctx, "request_context", None), "request", None)
-            state = getattr(request, "state", None)
-            principal = getattr(getattr(state, "auth", None), "principal", None)
-            if principal is not None:
-                return identity_context_var.set(_principal_to_identity_context(principal))
+            # The shared bridge reads both spellings, and carries the session id.
+            identity = identity_for_request(ctx)
+            if identity is not None:
+                return identity_context_var.set(identity)
         except Exception:  # noqa: BLE001 -- identity bridging must never break the serving path
             return None
         return None
@@ -451,6 +453,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         """
         token = _bridge_identity(ctx)
         try:
+            # First: before the capability ladder, the ownership check and any
+            # upstream call (GHSA-fhwh-fmq2-7m5c).
+            refuse_request_if_session_suspended("task_relay", ctx)
             task_id = params.task_id
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)
@@ -536,6 +541,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         """
         token = _bridge_identity(ctx)
         try:
+            # First: before the capability ladder, the ownership check and any
+            # upstream call (GHSA-fhwh-fmq2-7m5c).
+            refuse_request_if_session_suspended("task_relay", ctx)
             task_id = params.task_id
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)
@@ -579,6 +587,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         """
         token = _bridge_identity(ctx)
         try:
+            # First: before the capability ladder, the ownership check and any
+            # upstream call (GHSA-fhwh-fmq2-7m5c).
+            refuse_request_if_session_suspended("task_relay", ctx)
             task_id = params.task_id
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)

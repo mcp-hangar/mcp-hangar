@@ -42,6 +42,8 @@ class OIDCIssuerConfig:
         groups_claim: JWT claim for group memberships.
         tenant_claim: JWT claim for tenant identifier.
         email_claim: JWT claim for email address.
+        session_id_claim: JWT claim carrying the session id a session suspension
+            matches (GHSA-fhwh-fmq2-7m5c). Default ``sid``.
         max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled. Default: 3600.
         require_tenant: Fail-closed multi-tenant gate. When True, tokens from this
@@ -68,6 +70,7 @@ class OIDCIssuerConfig:
     groups_claim: str = "groups"
     tenant_claim: str = "tenant_id"
     email_claim: str = "email"
+    session_id_claim: str = "sid"
 
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
@@ -100,6 +103,9 @@ class OIDCAuthConfig:
         groups_claim: JWT claim for group memberships.
         tenant_claim: JWT claim for tenant identifier.
         email_claim: JWT claim for email address.
+        session_id_claim: JWT claim carrying the session id a session suspension
+            matches. Default ``sid``; inherited by per-issuer entries that do not
+            set their own.
         max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled. Default: 3600.
         resource_uri: Public URI of this resource server (RFC 9728 "resource" field).
@@ -135,6 +141,7 @@ class OIDCAuthConfig:
     groups_claim: str = "groups"
     tenant_claim: str = "tenant_id"
     email_claim: str = "email"
+    session_id_claim: str = "sid"
 
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
@@ -175,6 +182,7 @@ class OIDCAuthConfig:
                     groups_claim=self.groups_claim,
                     tenant_claim=self.tenant_claim,
                     email_claim=self.email_claim,
+                    session_id_claim=self.session_id_claim,
                     max_token_lifetime_seconds=self.max_token_lifetime_seconds,
                     clock_skew_leeway_seconds=self.clock_skew_leeway_seconds,
                     require_tenant=self.require_tenant,
@@ -410,6 +418,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                     groups_claim=issuer_dict.get("groups_claim", oidc_dict.get("groups_claim", "groups")),
                     tenant_claim=issuer_dict.get("tenant_claim", oidc_dict.get("tenant_claim", "tenant_id")),
                     email_claim=issuer_dict.get("email_claim", oidc_dict.get("email_claim", "email")),
+                    session_id_claim=issuer_dict.get("session_id_claim", oidc_dict.get("session_id_claim", "sid")),
                     max_token_lifetime_seconds=issuer_dict.get(
                         "max_token_lifetime_seconds", max_token_lifetime_seconds
                     ),
@@ -433,6 +442,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         groups_claim=oidc_dict.get("groups_claim", "groups"),
         tenant_claim=oidc_dict.get("tenant_claim", "tenant_id"),
         email_claim=oidc_dict.get("email_claim", "email"),
+        session_id_claim=oidc_dict.get("session_id_claim", "sid"),
         max_token_lifetime_seconds=max_token_lifetime_seconds,
         resource_uri=oidc_dict.get("resource_uri", ""),
         require_tenant=oidc_dict.get("require_tenant", False),
@@ -538,6 +548,8 @@ auth:
     # jwks_uri auto-discovered from issuer if not specified
     groups_claim: groups
     tenant_claim: org_id
+    # The claim a session suspension matches; sid unless your IdP differs.
+    session_id_claim: sid
 
   opa:
     enabled: false  # Use built-in RBAC by default

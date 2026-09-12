@@ -42,6 +42,7 @@ from .concurrency import (
     reset_concurrency_manager,
 )
 from ...context import get_context
+from ...session_guard import refuse_if_session_suspended
 from .executor import BatchExecutor, format_result_dict
 from .models import (
     BatchResult,
@@ -437,6 +438,12 @@ def hangar_call(
         hangar_call(calls=[...], max_attempts=3)
         # On failure: {"results": [{"retry_metadata": {"attempts": 3, "retries": [...]}, ...}]}
     """
+    # A suspended session is refused before anything is done on its behalf:
+    # no validation, authorization, cold start or upstream call, and no span
+    # (GHSA-fhwh-fmq2-7m5c). Raised rather than returned as a batch, so the
+    # whole call is an error and no partial result can be read as served.
+    refuse_if_session_suspended("hangar_call", ctx)
+
     batch_id = str(uuid.uuid4())
 
     # Clamp max_attempts to valid range
@@ -549,12 +556,13 @@ def hangar_call(
         _identity_token = None
         if get_identity_context() is None:
             try:
-                _auth = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
-                _principal = getattr(getattr(_auth, "auth", None), "principal", None)
-                if _principal is not None:
-                    from ....fastmcp_server.asgi import _principal_to_identity_context
+                from ....fastmcp_server.asgi import identity_for_request
 
-                    _identity_token = identity_context_var.set(_principal_to_identity_context(_principal))
+                # The same identity the suspension check above resolved,
+                # session id included, so the audit record names the session.
+                _identity = identity_for_request(ctx)
+                if _identity is not None:
+                    _identity_token = identity_context_var.set(_identity)
             except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
                 _identity_token = None
 

@@ -47,6 +47,8 @@ surface is fully intact.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
+import functools
 import hashlib
 import json
 import logging
@@ -769,6 +771,32 @@ def _register_caller_progress_forwarder(mcp_ctx: Any) -> str | None:
     return upstream_token
 
 
+def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Refuse a suspended session before the flat ``tools/call`` does anything.
+
+    Before the flat map, the warm-up wait and every gate the handler runs
+    (GHSA-fhwh-fmq2-7m5c). The refusal is a tool error (``isError``), the shape
+    an enforcement refusal from the executor already takes on this path; the
+    tool name is the caller's text and is not echoed. A decorator rather than a
+    branch in the handler, which is at the complexity ceiling.
+    """
+
+    @functools.wraps(call_tool)
+    async def guarded(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
+        from mcp_hangar._sdk_compat import CallToolResult
+
+        # Lazily, for the same import cycle as the batch package (#894).
+        from ..server.session_guard import SessionSuspendedError, refuse_if_session_suspended
+
+        try:
+            refuse_if_session_suspended("flat_tool", mcp_ctx)
+        except SessionSuspendedError as exc:
+            return CallToolResult.model_validate({"content": [{"type": "text", "text": str(exc)}], "isError": True})
+        return await call_tool(name, arguments, mcp_ctx)
+
+    return guarded
+
+
 def register_flat_tool_handlers(mcp: FastMCP) -> None:
     """Replace the default tools/list and tools/call handlers with flat-projection ones.
 
@@ -829,6 +857,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         """
         return await _list_projected_tools(mcp_ctx, _management_tools)
 
+    # A suspended session never reaches the body (GHSA-fhwh-fmq2-7m5c).
+    @_refusing_suspended_sessions
     async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
         """Flat tool call dispatch for front_door mode.
 

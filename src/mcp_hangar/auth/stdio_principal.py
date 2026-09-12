@@ -39,6 +39,9 @@ def set_stdio_principal(principal: Principal) -> None:
         caller=CallerIdentity(
             user_id=principal.id.value,
             agent_id=None,
+            # A pipe carries no bearer token and no proxy header, the two
+            # sources a session id may come from, so a stdio caller has none
+            # and a session suspension cannot match it (GHSA-fhwh-fmq2-7m5c).
             session_id=None,
             principal_type="user",
             tenant_id=principal.tenant_id,
