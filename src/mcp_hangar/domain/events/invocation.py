@@ -54,6 +54,7 @@ class ToolInvocationRequested(DomainEvent):
             self.arguments_hash = hash_arguments(self.arguments)
         if self.arguments:
             self.arguments = redact_arguments(self.arguments)
+        super().__post_init__()
 
 
 @accepts_legacy_provider_id

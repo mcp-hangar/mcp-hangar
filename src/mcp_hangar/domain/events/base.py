@@ -3,12 +3,23 @@
 """The DomainEvent base and its replay seam."""
 
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+import functools
 import time
 from typing import Any
 import uuid
 
+from ...logging_config import env_length_limit, truncate_text
 from .producer import UNKNOWN_PRODUCER, current_instance_id
+
+#: Hangar's bound on a free-text field of a domain event, in characters.
+EVENT_TEXT_LENGTH_LIMIT = 4096
+EVENT_TEXT_LENGTH_LIMIT_ENV = "MCP_EVENT_TEXT_LENGTH_LIMIT"
+#: The field names that hold prose -- an error's message, a reason, a detail --
+#: rather than an identifier. Matched by name, so a new event cannot forget.
+FREE_TEXT_FIELDS = frozenset(
+    {"description", "detail", "error_message", "message", "reason", "reasons", "violation_detail"}
+)
 
 
 @dataclass(kw_only=True)
@@ -41,6 +52,23 @@ class DomainEvent(ABC):
     #: aggregates, which have no business knowing what a replica is. See
     #: `producer` for why the identity is minted instead of configured.
     produced_by: str = field(default_factory=current_instance_id, compare=False)
+
+    def __post_init__(self) -> None:
+        """Bound the free-text fields, once, where the event is made.
+
+        A string in a ``FREE_TEXT_FIELDS`` field, or in a list there, longer than
+        MCP_EVENT_TEXT_LENGTH_LIMIT characters (default ``EVENT_TEXT_LENGTH_LIMIT``)
+        is cut to it and ends with the truncation marker. The event store,
+        ``/ws/events``, the audit trail and the logs are all handed this
+        instance, so all of them see the bounded value. A subclass that defines
+        its own ``__post_init__`` calls this one.
+        """
+        names = _free_text_fields(type(self))
+        if not names:
+            return
+        limit = env_length_limit(EVENT_TEXT_LENGTH_LIMIT_ENV) or EVENT_TEXT_LENGTH_LIMIT
+        for name in names:
+            setattr(self, name, _bounded(getattr(self, name), limit))
 
     @classmethod
     def rehydrate(
@@ -90,3 +118,18 @@ class DomainEvent(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary for serialization."""
         return {"event_type": self.__class__.__name__, **self.__dict__}
+
+
+@functools.cache
+def _free_text_fields(cls: type) -> tuple[str, ...]:
+    """The fields of event class ``cls`` named in ``FREE_TEXT_FIELDS``."""
+    return tuple(f.name for f in fields(cls) if f.name in FREE_TEXT_FIELDS)
+
+
+def _bounded(value: Any, limit: int) -> Any:
+    """``value`` with every string in it cut to ``limit``; the same object when nothing is cut."""
+    if isinstance(value, str):
+        return truncate_text(value, limit)
+    if isinstance(value, list) and any(isinstance(v, str) and len(v) > limit for v in value):
+        return [truncate_text(v, limit) if isinstance(v, str) else v for v in value]
+    return value

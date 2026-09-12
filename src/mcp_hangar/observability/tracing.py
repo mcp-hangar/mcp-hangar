@@ -10,6 +10,9 @@ Configuration via environment variables:
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
     OTEL_TRACES_SAMPLER: Sampler type (default: always_on)
     MCP_TRACING_ENABLED: Enable/disable tracing (default: true)
+    MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT: Longest attribute value on Hangar's own
+        provider, in characters (default: 256). The OTEL_*_LENGTH_LIMIT
+        variables win when set: see _span_limits().
 
 OTLP trace exporter precedence, first match wins (resolve_otlp_exporter_settings):
     protocol: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -48,7 +51,7 @@ import sys
 import threading
 from typing import Any, TypeVar
 
-from mcp_hangar.logging_config import get_logger
+from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
 from mcp_hangar.observability.conventions import GenAI, MCP
 
@@ -69,6 +72,10 @@ _shut_down = False
 # timeout (10 s by default) per processor, and it takes no deadline of its own.
 TRACING_SHUTDOWN_TIMEOUT_S = 5.0
 
+#: Hangar's bound on an attribute value on its own provider, in characters; see _span_limits().
+SPAN_ATTRIBUTE_LENGTH_LIMIT = 256
+SPAN_ATTRIBUTE_LENGTH_LIMIT_ENV = "MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT"
+
 # Check if OpenTelemetry is available
 try:
     from opentelemetry.sdk.resources import OTELResourceDetector, Resource, SERVICE_NAME
@@ -78,7 +85,7 @@ try:
         SpanExporter,
         SpanExportResult,
     )
-    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace import SpanLimits, TracerProvider
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_OFF,
         ALWAYS_ON,
@@ -294,6 +301,28 @@ def _build_sampler() -> Any:
     return ParentBased(ALWAYS_ON)
 
 
+def _span_limits() -> Any:
+    """The SpanLimits of Hangar's own provider: attribute values bounded, the SDK's variables first.
+
+    Per value, first match wins:
+
+    span attributes: OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+        OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT, MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT, 256.
+    span event and link attributes, an exception's message and stack trace
+        among them: OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+        MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT, 256.
+
+    The SDK reads the OTEL_* variables itself, so Hangar passes its own value
+    only while the global one is unset or empty. The SDK cuts a value to the
+    limit and has no hook to mark the cut: span attributes carry no marker.
+    """
+    if os.getenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "").strip():
+        return SpanLimits()
+    return SpanLimits(
+        max_attribute_length=env_length_limit(SPAN_ATTRIBUTE_LENGTH_LIMIT_ENV) or SPAN_ATTRIBUTE_LENGTH_LIMIT
+    )
+
+
 @dataclass(frozen=True)
 class OtlpExporterSettings:
     """What Hangar passes an SDK OTLP exporter. None leaves a value to the SDK."""
@@ -484,7 +513,7 @@ def init_tracing(
         # Create tracer mcp_server. Held locally until registered: a provider
         # the API refused to register must not end up in module state.
         sampler = _build_sampler()
-        provider = TracerProvider(resource=resource, sampler=sampler)
+        provider = TracerProvider(resource=resource, sampler=sampler, span_limits=_span_limits())
         logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters

@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 from ...domain.events import current_instance_id
-from ...logging_config import get_logger
+from ...logging_config import env_length_limit, get_logger, truncate_text
 from ...metrics import record_otlp_audit_export_failure
 from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer
 from ...observability.tracing import OtlpExporterSettings, _build_resource, resolve_otlp_exporter_settings
@@ -24,6 +24,10 @@ AUDIT_LOGGER_NAME = "mcp_hangar.audit"
 # Upper bound on shutdown_audit_log_export(), for the reason tracing has its own:
 # the SDK's shutdown waits out an export in flight to an unreachable collector.
 AUDIT_LOG_SHUTDOWN_TIMEOUT_S = 5.0
+
+#: Hangar's bound on an attribute value of an audit record, in characters; see _audit_attribute_limit().
+AUDIT_ATTRIBUTE_LENGTH_LIMIT = 256
+AUDIT_ATTRIBUTE_LENGTH_LIMIT_ENV = "MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT"
 
 # The logs API and SDK are underscore modules in every supported release; these
 # are the names relied on. ProxyLoggerProvider is what the API hands out until a
@@ -67,6 +71,25 @@ if OTEL_LOGS_AVAILABLE and tuple(int(part) for part in _sdk_version.split(".")[:
 _audit_provider: Any = None  # Hangar's own SDK LoggerProvider, once registered
 _configured = False  # an OTLP endpoint was configured, so audit export is on
 _shut_down = False  # Hangar shut its own provider down; it stays the global
+_attribute_limit = AUDIT_ATTRIBUTE_LENGTH_LIMIT  # resolved when Hangar's provider is registered
+
+
+def _audit_attribute_limit() -> int:
+    """The bound on attribute values of the audit records Hangar emits through its own provider.
+
+    First match wins: OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT, MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT, 256.
+    Each must be a positive integer; any other value is logged and skipped.
+    Hangar applies it itself, with the truncation marker, because the SDK has
+    no provider-wide record limit: 1.35 takes limits per SDK record, which
+    Hangar never passed, and later releases read the variables per record.
+    """
+    return (
+        env_length_limit("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT")
+        or env_length_limit("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT")
+        or env_length_limit(AUDIT_ATTRIBUTE_LENGTH_LIMIT_ENV)
+        or AUDIT_ATTRIBUTE_LENGTH_LIMIT
+    )
 
 
 class _MeteredLogExporter:
@@ -111,10 +134,13 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
     go to the structured log) or another provider was registered first (records
     then go through that one, which Hangar never replaces and never shuts down).
 
+    Records through Hangar's own provider have their attribute values bounded
+    (``_audit_attribute_limit``); a provider registered by someone else is not.
+
     Returns:
         True if Hangar's own provider is the registered one.
     """
-    global _audit_provider, _configured
+    global _audit_provider, _configured, _attribute_limit
 
     if not otlp_endpoint:
         return False
@@ -154,6 +180,7 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
         logger.warning("audit_log_export_initialization_failed", error=str(e))
         return False
 
+    _attribute_limit = _audit_attribute_limit()
     _audit_provider = provider
     logger.info("audit_log_export_initialized", protocol=settings.protocol)
     return True
@@ -277,6 +304,10 @@ class OTLPAuditExporter:
             return
 
         provider = get_logger_provider()
+        if provider is _audit_provider:  # Hangar's own bounds its records; another's is its owner's to limit
+            attributes = {
+                k: truncate_text(v, _attribute_limit) if isinstance(v, str) else v for k, v in attributes.items()
+            }
         fields: dict[str, Any] = {
             "timestamp": time.time_ns(),
             "severity_number": SeverityNumber.INFO,
