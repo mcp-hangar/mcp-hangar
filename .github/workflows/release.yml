@@ -275,7 +275,14 @@ jobs:
   publish-registry:
     name: Publish to MCP Registry
     needs: [validate, publish-pypi]
-    if: needs.validate.result == 'success' && needs.publish-pypi.result == 'success' && needs.validate.outputs.is_prerelease == 'false'
+    # `always()` for the same reason every other publishing job has it: a
+    # skipped job skips everything downstream of it, transitively, unless the
+    # dependant uses a status check function. `test` is skipped whenever the
+    # run is a `skip_tests` dispatch, and without `always()` that skip reached
+    # here through `publish-pypi` -- so the registry job could never run on the
+    # one kind of run used to recover a release whose test job failed. It read
+    # as `skipped`, not `failed`, so nothing pointed at it.
+    if: always() && needs.validate.result == 'success' && needs.publish-pypi.result == 'success' && needs.validate.outputs.is_prerelease == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The private key is an ENVIRONMENT secret on this environment, never a repo
