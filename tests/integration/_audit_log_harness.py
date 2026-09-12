@@ -18,7 +18,9 @@ records and spans can be read back.
 
 Modes: ``yaml`` and ``env`` set the OTLP endpoint in the file or the env var
 (the parent sets the env); ``none`` sets neither; ``tracing_off`` sets it in the
-file with tracing disabled.
+file with tracing disabled. ``audit_off_file`` is ``yaml`` with
+``observability.audit.enabled: false``; ``audit_off_env`` is ``env`` with the
+parent also setting ``MCP_AUDIT_EXPORT_ENABLED=false`` (#1327).
 """
 
 from __future__ import annotations
@@ -51,6 +53,8 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
     "env": [("sampled", "01")],
     "none": [("sampled", "01")],
     "tracing_off": [("no_trace_context", None)],
+    "audit_off_file": [("sampled", "01")],
+    "audit_off_env": [("sampled", "01")],
 }
 
 
@@ -136,8 +140,10 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     config: dict[str, Any] = {
         "mcp_servers": {"math": {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]}}
     }
-    if mode in ("yaml", "tracing_off"):
-        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode == "yaml"}}
+    if mode in ("yaml", "tracing_off", "audit_off_file"):
+        config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": mode != "tracing_off"}}
+    if mode == "audit_off_file":
+        config["observability"]["audit"] = {"enabled": False}
 
     from mcp_hangar.server.bootstrap import bootstrap
     from mcp_hangar.server.lifecycle import mcp_app_for_serving
@@ -160,6 +166,9 @@ def main(mode: str, out: Path, endpoint: str) -> None:
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
+    from mcp_hangar.application.event_handlers import get_audit_handler
+    from mcp_hangar.observability.tracing import is_tracing_enabled
+
     records = []
     for item in logs.get_finished_logs():
         r = item.log_record
@@ -178,6 +187,11 @@ def main(mode: str, out: Path, endpoint: str) -> None:
                 "audit_exporters": _audit_exporters(context.runtime),
                 "logger_provider": type(provider).__name__,
                 "owned": provider is getattr(otlp_audit_exporter, "_audit_provider", None),
+                "audit_configured": otlp_audit_exporter.audit_log_export_configured(),
+                "tracer_provider": type(tracer_provider).__name__,
+                "tracing_enabled": is_tracing_enabled(),
+                # The in-process audit trail, which no OTLP setting touches.
+                "in_process_audit": len(get_audit_handler().query(event_type="ToolInvocationCompleted")),
                 **seen,
                 "calls": calls,
                 "records": records,
