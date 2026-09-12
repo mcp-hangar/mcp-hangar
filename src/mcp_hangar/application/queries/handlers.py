@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from ...domain.contracts.runtime_store import IRuntimeMcpServerStore
+from ...domain.events.tenancy import event_tenant_id
 from ...domain.exceptions import McpServerNotFoundError
 from ...domain.policies.mcp_server_health import to_health_status_string
 from ...domain.repository import IMcpServerRepository
@@ -302,6 +303,10 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         events = event_store.read_stream(target_stream_id, from_version=max(0, query.from_position))
         for event in events:
             if type(event).__name__ not in tool_event_types:
+                continue
+            # Filtered before the limit, so another tenant's traffic can neither
+            # appear in a tenant-confined answer nor crowd its own rows out.
+            if query.tenant_id is not None and event_tenant_id(event) != query.tenant_id:
                 continue
             history.append(event.to_dict())
             if len(history) >= limit:

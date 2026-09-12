@@ -3,6 +3,7 @@
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false
 
 from ....domain.events import DomainEvent
+from ....domain.events.tenancy import event_tenant_id
 from ....domain.value_objects.event_pattern import EventPattern
 
 
@@ -48,6 +49,21 @@ def compile_event_patterns(raw_patterns: list[str]) -> list[EventPattern]:
         except ValueError:
             pass
     return compiled
+
+
+def visible_to_tenant(event: DomainEvent, tenant_id: str | None) -> bool:
+    """Whether a subscriber confined to *tenant_id* may receive *event*.
+
+    None is a subscriber whose grant reaches the whole fleet, and it receives
+    everything. A confined subscriber receives only events that name its tenant
+    and no other. An event that names none -- fleet lifecycle, health,
+    discovery, an all-tenants withdrawal -- is withheld from it: that is fleet
+    business, and fail-closed means not guessing whose it is.
+
+    Unlike :func:`matches_filters` this is not the client's choice. It is
+    decided by the grant and applied before any filter the client sends.
+    """
+    return tenant_id is None or event_tenant_id(event) == tenant_id
 
 
 def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:

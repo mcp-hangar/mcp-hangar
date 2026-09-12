@@ -23,6 +23,7 @@ from mcp_hangar.domain.exceptions import MissingCredentialsError
 from mcp_hangar.domain.value_objects.security import Principal
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.server.api.serializers import HangarJSONResponse
+from mcp_hangar.server.api.tenant_scope import confined_tenant
 from mcp_hangar.server.context import get_context
 
 from ..commands.resolve import ResolveApprovalCommand, ResolveApprovalHandler, ResolveOutcome
@@ -85,6 +86,18 @@ def _tenant_visible(approval: Any, principal: Principal) -> bool:
     return bool(getattr(principal, "tenant_id", None) == approval_tenant)
 
 
+def _within_grant(approval: Any, confined: str | None) -> bool:
+    """Whether a grant confined to *confined* covers *approval*.
+
+    ``None`` is a grant that reaches the whole fleet (or auth off), and this does
+    not narrow it. A grant held within a tenant covers that tenant's approvals
+    only: an approval naming no tenant is fleet business and is withheld, the
+    rule ``/ws/events`` applies to an event naming none. The resolve handler
+    applies the same rule, so no transport resolves what this hides.
+    """
+    return confined is None or getattr(approval, "tenant_id", None) == confined
+
+
 def _unavailable() -> HangarJSONResponse:
     """503 for a gateway with no approval gate service wired."""
     return HangarJSONResponse(
@@ -138,7 +151,8 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
 
     requests = await service._repository.list_by_state(state, provider_id)
     principal = _require_principal(request, _auth_components())
-    visible = [r for r in requests if _tenant_visible(r, principal)]
+    confined = confined_tenant(request)
+    visible = [r for r in requests if _tenant_visible(r, principal) and _within_grant(r, confined)]
     return HangarJSONResponse([_to_dto(r) for r in visible])
 
 
@@ -154,7 +168,7 @@ async def get_approval(request: Request) -> HangarJSONResponse:
         return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
 
     principal = _require_principal(request, _auth_components())
-    if not _tenant_visible(approval, principal):
+    if not (_tenant_visible(approval, principal) and _within_grant(approval, confined_tenant(request))):
         # 404, not 403: a caller in another tenant should not be able to
         # distinguish "exists elsewhere" from "does not exist" (matches resolve).
         return HangarJSONResponse({"error": "Approval not found"}, status_code=404)

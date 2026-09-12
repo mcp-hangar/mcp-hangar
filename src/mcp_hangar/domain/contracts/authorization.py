@@ -48,12 +48,17 @@ class AuthorizationResult:
         reason: Human-readable reason for the decision.
         matched_permission: The permission that granted access (if allowed).
         matched_role: The role that provided the permission (if allowed).
+        grant_scope: The scope of the role binding that granted access --
+            ``"global"`` or ``"tenant:<id>"`` -- from an authorizer that binds
+            roles to scopes. ``None`` when the deciding authorizer has no notion
+            of a scoped grant. :class:`GrantScope` says how each is honoured.
     """
 
     allowed: bool
     reason: str = ""
     matched_permission: Permission | None = None
     matched_role: str | None = None
+    grant_scope: str | None = None
 
     @classmethod
     def allow(
@@ -61,6 +66,7 @@ class AuthorizationResult:
         reason: str = "",
         permission: Permission | None = None,
         role: str | None = None,
+        scope: str | None = None,
     ) -> "AuthorizationResult":
         """Create an allow result."""
         return cls(
@@ -68,12 +74,55 @@ class AuthorizationResult:
             reason=reason,
             matched_permission=permission,
             matched_role=role,
+            grant_scope=scope,
         )
 
     @classmethod
     def deny(cls, reason: str = "") -> "AuthorizationResult":
         """Create a deny result."""
         return cls(allowed=False, reason=reason)
+
+
+@dataclass(frozen=True)
+class GrantScope:
+    """How far an allow decision reaches: the whole fleet, or one tenant.
+
+    A role bound at ``tenant:<id>`` is a grant *within that tenant*. The control
+    plane checks its permissions against ``resource_id="*"``, so "allowed" on
+    its own cannot tell a tenant's viewer from a fleet-wide one. A caller that
+    serves one tenant's data -- or none of it -- has to ask how far the grant
+    reaches, and this is the answer.
+
+    Attributes:
+        confined: False when the grant reaches the whole fleet.
+        tenant_id: The tenant a confined grant is limited to. ``None`` while
+            ``confined`` is a scope this code does not recognise. That is
+            honoured nowhere: not knowing how far a grant reaches is no reason
+            to assume it reaches everywhere.
+    """
+
+    confined: bool = False
+    tenant_id: str | None = None
+
+    @classmethod
+    def of(cls, result: object) -> "GrantScope":
+        """Read the reach of *result*, an allow decision.
+
+        * ``"global"`` -- fleet-wide.
+        * ``"tenant:<id>"`` -- confined to ``<id>``.
+        * ``None`` -- fleet-wide. The authorizer binds no grants to scopes (a
+          policy engine, or the null authorizer that answers with auth off), so
+          nothing narrows its decision; that is how every decision read before
+          scopes were reported. An object that is not an
+          :class:`AuthorizationResult` carries no scope and reads the same way.
+        * anything else -- confined to no tenant, so refused wherever asked.
+        """
+        scope = result.grant_scope if isinstance(result, AuthorizationResult) else None
+        if scope is None or scope == GLOBAL_SCOPE:
+            return cls()
+        if scope.startswith(TENANT_SCOPE_PREFIX) and len(scope) > len(TENANT_SCOPE_PREFIX):
+            return cls(confined=True, tenant_id=scope[len(TENANT_SCOPE_PREFIX) :])
+        return cls(confined=True, tenant_id=None)
 
 
 @runtime_checkable
@@ -528,7 +577,8 @@ class NullToolAccessPolicyEnforcer:
 
 #: The scopes `RBACAuthorizer._collect_roles` actually queries. Anything else is
 #: stored and then never read, so the grant silently does nothing.
-SUPPORTED_SCOPE_PREFIXES = ("tenant:",)
+TENANT_SCOPE_PREFIX = "tenant:"
+SUPPORTED_SCOPE_PREFIXES = (TENANT_SCOPE_PREFIX,)
 GLOBAL_SCOPE = "global"
 
 

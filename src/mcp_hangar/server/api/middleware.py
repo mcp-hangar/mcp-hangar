@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ...domain.contracts.authentication import AuthRequest
+from ...domain.contracts.authorization import GrantScope
 from ...application.ports.bus import HandlerNotRegisteredError
 from ...domain.exceptions import (
     AccessDeniedError,
@@ -48,6 +49,7 @@ from ...infrastructure.identity.trusted_proxy import TrustedProxyResolver, heade
 from ..context import get_context
 from .route_permissions import resolve_rule
 from .serializers import HangarJSONResponse
+from .tenant_scope import record_grant_scope
 
 logger = logging.getLogger(__name__)
 
@@ -375,6 +377,13 @@ class AuthorizationEnforcementMiddleware:
     unauthenticated app answers 401 to every caller with no credential that
     could ever satisfy it. Binding both to one object makes the invariant
     structural: authorization is armed if and only if authentication is mounted.
+
+    A grant held only at tenant scope passes a rule only when the rule is
+    ``tenant_aware``; everywhere else it is refused, because the permission was
+    checked against every resource and the grant covers one tenant's. The
+    reach of the grant that did pass is recorded on the scope
+    (:func:`.tenant_scope.record_grant_scope`) so a tenant-aware handler confines
+    itself by the same decision rather than by a second one.
     """
 
     app: ASGIApp
@@ -411,6 +420,9 @@ class AuthorizationEnforcementMiddleware:
 
         authz = self._authz
         if authz is None:
+            # Auth off narrows nothing. Recording that spares a tenant-aware
+            # handler from having to infer it.
+            record_grant_scope(scope, GrantScope())
             await self.app(scope, receive, send)
             return
 
@@ -446,7 +458,7 @@ class AuthorizationEnforcementMiddleware:
 
         resource_type, action = rule.permission
         try:
-            authz.authorize(
+            decision = authz.authorize(
                 principal=principal,
                 action=action,
                 resource_type=resource_type,
@@ -456,6 +468,31 @@ class AuthorizationEnforcementMiddleware:
             await _send_authz_failure(scope, receive, send, exc)
             return
 
+        grant = GrantScope.of(decision)
+        if grant.confined and (not rule.tenant_aware or grant.tenant_id is None):
+            principal_id = str(getattr(principal, "id", "unknown"))
+            _AuthLoggerAdapter.warning(
+                "authz_tenant_scoped_grant_refused",
+                path=path,
+                method=method,
+                principal_id=principal_id,
+                grant_tenant=grant.tenant_id,
+                rule=rule.template,
+            )
+            await _send_authz_failure(
+                scope,
+                receive,
+                send,
+                AccessDeniedError(
+                    principal_id=principal_id,
+                    action=action,
+                    resource=f"{resource_type}:*",
+                    reason="tenant-scoped grant; route requires a global grant",
+                ),
+            )
+            return
+
+        record_grant_scope(scope, grant)
         await self.app(scope, receive, send)
 
     @staticmethod

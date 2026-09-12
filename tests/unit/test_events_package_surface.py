@@ -93,6 +93,9 @@ class TestModuleOrderStaysAcyclic:
         "approvals",
         "interceptors",
         "aliases",
+        # Defines no event: the helper that reads which tenant an event
+        # belongs to. It imports nothing from this package.
+        "tenancy",
     ]
 
     def test_no_submodule_imports_from_a_later_one(self):

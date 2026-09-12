@@ -41,12 +41,23 @@ requires, so no role migration is needed and no permission is invented:
 * the continuation tools take ``tool:invoke``. They hand back the truncated tail
   of a tool result, so whoever may invoke a tool may read the rest of what it
   returned.
+
+Tenant-scoped grants
+--------------------
+A role bound at ``tenant:<id>`` is a grant within that tenant, and every entry
+here is checked against ``resource_id="*"``. So the authorizer's scope is read
+as well as its verdict. A management tool acts on the whole fleet -- servers,
+groups, discovery, configuration, metrics -- so it requires a **global** grant,
+exactly as the REST route performing the same operation does. Only the names in
+``TENANT_SCOPED_GRANT_TOOLS`` accept a grant held within a tenant, and the list
+and the call agree on that as they agree on everything else.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from ...domain.contracts.authorization import GrantScope
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -86,6 +97,17 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "hangar_fetch_continuation": ("tool", "invoke"),
     "hangar_delete_continuation": ("tool", "invoke"),
 }
+
+#: Table-gated tools a tenant-scoped grant may call. Everything else in
+#: ``TOOL_PERMISSIONS`` needs a global grant.
+#:
+#: These two are the invoke path, not the control plane (see
+#: ``INVOKE_PATH_TOOLS``). A tenant-scoped ``tool:invoke`` is how a tenant's
+#: agents call tools -- ``hangar_call`` accepts one -- and these return the rest
+#: of a result that call truncated. They do not filter by tenant. What confines
+#: them is the continuation id: a uuid4 batch id plus 32 random bits, handed
+#: back in the truncated result to the caller that made the call.
+TENANT_SCOPED_GRANT_TOOLS: frozenset[str] = frozenset({"hangar_fetch_continuation", "hangar_delete_continuation"})
 
 #: Tools that authorize themselves and must NOT be gated by the table.
 #:
@@ -220,13 +242,17 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
         if tool_name in INVOKE_PATH_TOOLS:
             continue
         try:
-            authz.authorize(
+            decision = authz.authorize(
                 principal=principal,
                 action=action,
                 resource_type=resource_type,
                 resource_id="*",
             )
         except Exception:  # noqa: BLE001 -- a denial is the normal answer here, not an error
+            continue
+        if GrantScope.of(decision).confined:
+            # Same rule as authorize_tool: a management tool acts on the whole
+            # fleet, so a grant held within one tenant does not show it.
             continue
         permitted.add(tool_name)
     return frozenset(permitted)
@@ -255,6 +281,8 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
     * tool absent from the table and not self-authorizing -> deny. This is the
       fail-closed default that makes a forgotten entry safe.
     * otherwise the authorizer decides, and any error from it is a denial.
+    * an allow from a grant held only within a tenant -> deny, unless the tool
+      is in ``TENANT_SCOPED_GRANT_TOOLS``. The tool acts on the whole fleet.
 
     Args:
         tool_name: The registered tool name being invoked.
@@ -300,7 +328,7 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
 
     resource_type, action = permission
     try:
-        authz.authorize(
+        decision = authz.authorize(
             principal=principal,
             action=action,
             resource_type=resource_type,
@@ -311,3 +339,10 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
         raise ToolAccessNotAuthorizedError(
             f"Not authorized to call '{tool_name}': {resource_type}:{action} permission required"
         ) from exc
+
+    if GrantScope.of(decision).confined and tool_name not in TENANT_SCOPED_GRANT_TOOLS:
+        logger.warning("tool_authorization_denied", tool=tool_name, reason="tenant_scoped_grant")
+        raise ToolAccessNotAuthorizedError(
+            f"Not authorized to call '{tool_name}': {resource_type}:{action} is held only within a tenant, "
+            "and this tool acts on the whole fleet; a global role grant is required"
+        )

@@ -250,10 +250,13 @@ class CombinedAuthorizer:
             if not opa_result.allowed:
                 return AuthorizationResult.deny(reason=f"rbac_allowed_but_{opa_result.reason}")
 
+            # OPA narrows an RBAC allow; it never widens the scope RBAC granted
+            # at. Dropping the scope here would turn a tenant grant fleet-wide.
             return AuthorizationResult.allow(
                 reason=f"rbac_and_opa_allowed:{rbac_result.matched_role}",
                 permission=rbac_result.matched_permission,
                 role=rbac_result.matched_role,
+                scope=rbac_result.grant_scope,
             )
         else:
             # RBAC first, OPA as fallback

@@ -10,12 +10,12 @@ Design principles:
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 import structlog
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest, IAuthenticator
-from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, IAuthorizer
+from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer
 from mcp_hangar.domain.events import (
     AuthenticationFailed,
     AuthenticationSucceeded,
@@ -279,7 +279,7 @@ class AuthorizationMiddleware:
         resource_type: str,
         resource_id: str,
         context: dict | None = None,
-    ) -> None:
+    ) -> AuthorizationResult:
         """Check authorization, raise AccessDeniedError if denied.
 
         Args:
@@ -289,6 +289,11 @@ class AuthorizationMiddleware:
             resource_id: Specific resource identifier.
             context: Optional additional context for policy evaluation.
 
+        Returns:
+            The allow decision. A caller that only needs "allowed or raised" can
+            ignore it; one guarding data that belongs to a tenant reads its
+            ``grant_scope`` (see ``GrantScope``) to learn how far the grant reaches.
+
         Raises:
             AccessDeniedError: If the principal is not authorized.
         """
@@ -297,7 +302,7 @@ class AuthorizationMiddleware:
 
         if result.allowed:
             self._handle_authorization_granted(principal, action, resource_type, resource_id, result)
-            return
+            return result
 
         self._handle_authorization_denied(principal, action, resource_type, resource_id, result)
 
@@ -370,7 +375,7 @@ class AuthorizationMiddleware:
         resource_type: str,
         resource_id: str,
         result,
-    ) -> None:
+    ) -> NoReturn:
         """Handle denied authorization.
 
         Raises:

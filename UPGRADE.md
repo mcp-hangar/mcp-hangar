@@ -1,5 +1,38 @@
 # Upgrading MCP Hangar
 
+## Next — tenant-scoped role grants are limited to their tenant
+
+A role bound at `tenant:<id>` is now a grant within that tenant only. That
+covers an `auth.role_assignments` entry with `scope: "tenant:<id>"`,
+`assign-role --scope`, and `POST /api/auth/roles/assign` with a `scope`.
+Before, such a grant authorized every REST route, the `/ws/events` stream and
+the `hangar_*` management tools as if it were global.
+
+| Surface | With a tenant-scoped grant |
+| --- | --- |
+| `/ws/events` | only events that name the tenant |
+| `GET /api/mcp_servers/{id}/tools/history` | only that tenant's invocations |
+| `POST /api/admin/tools/{server}/{tool}/withdraw` and `restore` | that tenant only; no `tenant_id` means that tenant; an all-tenant withdrawal cannot be lifted |
+| `/api/approvals` (list, get, resolve) | only approvals that name the tenant; approvals naming no tenant are withheld |
+| every other route | 403, reason `tenant-scoped grant; route requires a global grant` |
+| `hangar_*` management tools | refused, and not listed on a front door |
+
+`hangar_call` and the continuation tools are unchanged.
+
+If a principal needs fleet-wide access, bind its role at `global` scope. That
+includes listing, starting and stopping servers, and reading configuration. It
+also includes managing groups, discovery or credentials.
+
+```yaml
+auth:
+  role_assignments:
+    - principal: "group:platform-engineering"
+      role: developer
+      scope: global        # was: tenant:platform
+```
+
+Global grants, and deployments with auth disabled, behave exactly as before.
+
 ## Upgrade to 2.18.0
 
 ### adopting the enforcement `init` now writes
