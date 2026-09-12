@@ -397,6 +397,15 @@ class ToolProjectionRegistry:
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
         )
 
+    def is_withdrawn_for_all_tenants(self, mcp_server: str, name: str, *, kind: str = "tool") -> bool:
+        """Is there a runtime withdrawal of *name* that covers every tenant?
+
+        The one entry a per-tenant :meth:`restore` leaves in place. Config
+        withdrawals are not consulted, because restore never touches them either.
+        """
+        with self._lock:
+            return self._runtime_withdrawals.get((mcp_server, kind, name)) is _ALL_TENANTS
+
     def _is_runtime_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None, kind: str = "tool") -> bool:
         """Return True if (mcp_server, kind, tool) is runtime-withdrawn for tenant_id."""
         entry = self._runtime_withdrawals.get((mcp_server, kind, tool))

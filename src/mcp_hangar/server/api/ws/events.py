@@ -10,10 +10,12 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from ....infrastructure.event_bus import get_event_bus
 from ....domain.contracts.event_bus import HandlerKind
+from ....domain.exceptions import AccessDeniedError
 from ....logging_config import get_logger
 from ..middleware import get_cors_config
 from ..serializers import HangarJSONEncoder
-from .filters import matches_filters, parse_subscription_filters
+from ..tenant_scope import confined_tenant
+from .filters import matches_filters, parse_subscription_filters, visible_to_tenant
 from .manager import EventStreamQueue, connection_manager
 
 logger = get_logger(__name__)
@@ -38,6 +40,9 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
 
     Protocol:
     1. Client connects; server accepts and waits briefly for an optional subscribe message.
+       A subscriber whose ``audit:read`` is held only within a tenant receives
+       only events that name that tenant (see ``filters.visible_to_tenant``);
+       that is the grant's decision, not a filter the client can change.
     2. Server streams events as JSON objects.
     3. Any client message with {"type": "pong"} is treated as keep-alive response.
     4. After idle timeout, server sends {"type": "ping"} and expects pong.
@@ -53,6 +58,15 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
             path=websocket.url.path,
         )
         await websocket.close(code=1008)
+        return
+
+    # How far this subscriber's grant reaches, decided before accept so a
+    # refused subscriber never sees the stream open. None: the whole fleet.
+    try:
+        tenant_id = confined_tenant(websocket)
+    except AccessDeniedError as exc:
+        logger.warning("ws_events_scope_refused", path=websocket.url.path, reason=exc.reason)
+        await websocket.close(code=1008, reason=exc.reason)
         return
 
     await websocket.accept()
@@ -124,7 +138,7 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
 
     def event_handler(event: DomainEvent) -> None:
         """EventBus callback: runs on any thread that publishes an event."""
-        if matches_filters(event, filters):
+        if visible_to_tenant(event, tenant_id) and matches_filters(event, filters):
             event_queue.put_threadsafe(event, loop)
 
     event_bus = get_event_bus()
@@ -134,7 +148,7 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
     # happened to give it.
     event_bus.subscribe_to_all(event_handler, kind=HandlerKind.PROJECTION)
     connection_manager.register(connection_id, {"endpoint": "events"})
-    logger.info("ws_events_connected", connection_id=connection_id)
+    logger.info("ws_events_connected", connection_id=connection_id, tenant_scope=tenant_id)
 
     try:
         while not client_gone.is_set():

@@ -78,11 +78,19 @@ class GetSystemMetricsQuery(Query):
 
 @dataclass(frozen=True)
 class GetToolInvocationHistoryQuery(Query):
-    """Query to get tool invocation history for a mcp_server."""
+    """Query to get tool invocation history for a mcp_server.
+
+    ``tenant_id`` confines the answer to invocations made by a caller in that
+    tenant, and is set when the caller's grant is tenant-scoped. An invocation
+    that names no tenant, or a different one, is not returned. ``None`` returns
+    every tenant's invocations and is for a caller whose grant reaches the whole
+    fleet.
+    """
 
     mcp_server_id: str
     limit: int = 100
     from_position: int = 0
+    tenant_id: str | None = None
 
 
 # legacy aliases

@@ -168,6 +168,10 @@ def format_audit_record(record: AuditRecord) -> str:
     if record.caller_principal_type:
         extensions.append(f"cs4={_escape_extension_value(record.caller_principal_type)}")
         extensions.append("cs4Label=PrincipalType")
+    # Tenant -> cs6, the one custom-string slot left (cs1-cs5 are taken)
+    if record.tenant_id:
+        extensions.append(f"cs6={_escape_extension_value(record.tenant_id)}")
+        extensions.append("cs6Label=TenantID")
 
     # Tool name from data (common in tool invocation events)
     data = record.data or {}

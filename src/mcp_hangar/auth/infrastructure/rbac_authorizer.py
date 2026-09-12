@@ -53,13 +53,13 @@ class RBACAuthorizer(IAuthorizer):
                 resource_type=request.resource_type,
                 resource_id=request.resource_id,
             )
-            return AuthorizationResult.allow(reason="system_principal")
+            return AuthorizationResult.allow(reason="system_principal", scope="global")
 
-        # Collect all roles for principal
-        roles = self._collect_roles(principal)
+        # (scope, role) bindings, global first: a permission held both
+        # fleet-wide and within the tenant is reported at the wider scope.
+        bindings = self._collect_roles(principal)
 
-        # Check each role for matching permission
-        for role in roles:
+        for scope, role in bindings:
             if role.has_permission(request.resource_type, request.action, request.resource_id):
                 # Find the specific permission that matched (for audit)
                 matched_permission = self._find_matching_permission(
@@ -70,15 +70,20 @@ class RBACAuthorizer(IAuthorizer):
                     "authorization_granted",
                     principal_id=principal.id.value,
                     role=role.name,
+                    grant_scope=scope,
                     action=request.action,
                     resource_type=request.resource_type,
                     resource_id=request.resource_id,
                 )
 
+                # The scope travels with the decision. A tenant binding is a
+                # grant within that tenant, and only the caller knows whether
+                # what it guards is tenant data or the whole fleet.
                 return AuthorizationResult.allow(
                     reason=f"granted_by_role:{role.name}",
                     permission=matched_permission,
                     role=role.name,
+                    scope=scope,
                 )
 
         # No matching permission found
@@ -88,48 +93,53 @@ class RBACAuthorizer(IAuthorizer):
             action=request.action,
             resource_type=request.resource_type,
             resource_id=request.resource_id,
-            roles_checked=[r.name for r in roles],
+            roles_checked=[role.name for _scope, role in bindings],
         )
 
         return AuthorizationResult.deny(reason="no_matching_permission")
 
-    def _collect_roles(self, principal: Principal) -> list[Role]:
-        """Collect all roles for a principal.
+    def _collect_roles(self, principal: Principal) -> list[tuple[str, Role]]:
+        """Collect every role binding that applies to a principal, with its scope.
 
-        Includes:
+        Includes, in this order:
         - Direct role assignments (global scope)
         - Group-based role assignments (global scope)
-        - Tenant-scoped assignments if principal has tenant_id
+        - Tenant-scoped assignments if principal has tenant_id, direct then group
+
+        The scope is kept rather than flattened away. A role bound at
+        ``tenant:<id>`` grants its permissions within that tenant only, and
+        every caller that authorizes against ``resource_id="*"`` needs to know
+        which kind of grant it got.
 
         Args:
             principal: The principal to collect roles for.
 
         Returns:
-            List of all applicable roles.
+            ``(scope, role)`` pairs, global bindings first.
         """
-        roles: list[Role] = []
+        bindings: list[tuple[str, Role]] = []
 
         # Direct assignments - global scope only
-        direct_roles = self._role_store.get_roles_for_principal(principal.id.value, scope="global")
-        roles.extend(direct_roles)
+        for role in self._role_store.get_roles_for_principal(principal.id.value, scope="global"):
+            bindings.append(("global", role))
 
         # Group-based assignments - global scope only
         for group in principal.groups:
-            group_roles = self._role_store.get_roles_for_principal(f"group:{group}", scope="global")
-            roles.extend(group_roles)
+            for role in self._role_store.get_roles_for_principal(f"group:{group}", scope="global"):
+                bindings.append(("global", role))
 
         # Tenant-scoped assignments (only if principal has tenant_id)
         if principal.tenant_id:
             tenant_scope = f"tenant:{principal.tenant_id}"
             # Direct tenant-scoped roles
-            tenant_roles = self._role_store.get_roles_for_principal(principal.id.value, scope=tenant_scope)
-            roles.extend(tenant_roles)
+            for role in self._role_store.get_roles_for_principal(principal.id.value, scope=tenant_scope):
+                bindings.append((tenant_scope, role))
             # Group-based tenant-scoped roles
             for group in principal.groups:
-                group_tenant_roles = self._role_store.get_roles_for_principal(f"group:{group}", scope=tenant_scope)
-                roles.extend(group_tenant_roles)
+                for role in self._role_store.get_roles_for_principal(f"group:{group}", scope=tenant_scope):
+                    bindings.append((tenant_scope, role))
 
-        return roles
+        return bindings
 
     def _find_matching_permission(
         self,

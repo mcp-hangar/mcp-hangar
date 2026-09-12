@@ -210,6 +210,12 @@ class RoleAssignment:
         principal: Principal ID (e.g., "user:admin@company.com", "group:platform-engineering").
         role: Role name (e.g., "admin", "developer").
         scope: Scope of the assignment (e.g., "global", "tenant:data-team").
+            A ``tenant:<id>`` assignment grants its permissions within that
+            tenant only, to a principal carrying that tenant. It opens the
+            routes that confine what they serve to the caller's tenant (the
+            event stream, tool-invocation history, runtime tool withdraw and
+            restore, approvals), confined to that tenant, and nothing that acts
+            on the whole fleet. Those need a ``global`` assignment.
     """
 
     principal: str

@@ -25,7 +25,8 @@ which is what a policy enforcement plane has to mean for its own control API.
 
 Reading the table
 -----------------
-Each rule is ``(path template, methods, permission)``. ``permission`` is the
+Each rule is ``(path template, methods, permission)``, plus the
+``tenant_aware`` flag described under "Tenant-scoped grants" below. ``permission`` is the
 ``(resource_type, action)`` pair passed to ``IAuthorizer.authorize``; ``None``
 means the route requires a valid principal but no specific permission (used for
 "describe myself" endpoints where the principal *is* the resource).
@@ -52,6 +53,28 @@ Permission choices worth knowing
   the whole credential- and role-management surface is admin-only without
   inventing new permission constants that existing custom roles would not hold.
 
+Tenant-scoped grants
+--------------------
+A role can be bound at ``tenant:<id>`` as well as ``global``, and a tenant
+binding is a grant *within that tenant*. The permission check here is made
+against ``resource_id="*"``, so on its own it cannot tell a tenant's viewer
+from a fleet-wide one. The authorizer therefore reports the scope of the grant
+that matched, and the guard honours it:
+
+* **By default a rule requires a global grant.** A grant that only exists at
+  tenant scope is refused (403, or close code 1008 on a websocket). Almost
+  every route here serves or changes the whole fleet -- servers, groups,
+  discovery, configuration, credentials -- and there is no tenant's share of
+  that to hand out.
+* **``tenant_aware=True`` opts a rule in**, and only a rule whose handler
+  confines what it serves or changes to the grant's tenant may carry it. The
+  handler reads that tenant from :func:`.tenant_scope.confined_tenant`,
+  and withholds anything naming no tenant: that is fleet business. The approvals
+  resolve handler applies the same rule itself. The flag is deliberately not
+  inferred: it is a claim about the
+  handler, and ``tests/unit/test_tenant_scoped_grants.py`` pins the exact set
+  that makes it, so a new route cannot inherit tenant access by accident.
+
 The permissions used here are deliberately restricted to constants that
 ``auth/roles.py`` already defines AND that a built-in role already grants, so
 this change tightens enforcement without requiring a role migration. Where the
@@ -77,6 +100,9 @@ class RouteRule:
     methods: frozenset[str] | None
     permission: tuple[str, str] | None
     template: str
+    #: The handler confines what it serves or changes to the grant's tenant, so
+    #: a tenant-scoped grant may pass. False: a global grant is required.
+    tenant_aware: bool = False
 
     def matches(self, method: str, path: str) -> bool:
         if self.methods is not None and method.upper() not in self.methods:
@@ -84,7 +110,13 @@ class RouteRule:
         return self.pattern.fullmatch(path) is not None
 
 
-def _rule(template: str, methods: str | None, permission: tuple[str, str] | None) -> RouteRule:
+def _rule(
+    template: str,
+    methods: str | None,
+    permission: tuple[str, str] | None,
+    *,
+    tenant_aware: bool = False,
+) -> RouteRule:
     """Compile a path template into a rule.
 
     ``{name}`` matches a single path segment; ``{name:path}`` matches across
@@ -106,6 +138,7 @@ def _rule(template: str, methods: str | None, permission: tuple[str, str] | None
         methods=method_set,
         permission=permission,
         template=f"{methods or 'ANY'} {template}",
+        tenant_aware=tenant_aware,
     )
 
 
@@ -118,7 +151,8 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     _rule("/mcp_servers/{id}/start", "POST", ("mcp_servers", "lifecycle")),
     _rule("/mcp_servers/{id}/stop", "POST", ("mcp_servers", "lifecycle")),
     _rule("/mcp_servers/{id}/block", "POST", ("mcp_servers", "lifecycle")),
-    _rule("/mcp_servers/{id}/tools/history", "GET", ("mcp_servers", "read")),
+    # Tenant-aware: a tenant grant reads only its own tenant's invocations.
+    _rule("/mcp_servers/{id}/tools/history", "GET", ("mcp_servers", "read"), tenant_aware=True),
     _rule("/mcp_servers/{id}/tools", "GET", ("mcp_servers", "read")),
     _rule("/mcp_servers/{id}/health", "GET", ("mcp_servers", "read")),
     _rule("/mcp_servers/{id}/logs", "GET", ("mcp_servers", "read")),
@@ -162,12 +196,15 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # --- Tools -------------------------------------------------------------
     _rule("/tools", "GET", ("tool", "list")),
     # `{tool:path}`: a resource is withdrawn by its upstream uri, slashes and all.
-    _rule("/admin/tools/{server}/{tool:path}/withdraw", "POST", ("mcp_servers", "lifecycle")),
-    _rule("/admin/tools/{server}/{tool:path}/restore", "POST", ("mcp_servers", "lifecycle")),
+    # Tenant-aware: a tenant grant withdraws and restores for its own tenant
+    # only; acting for every tenant needs a global grant.
+    _rule("/admin/tools/{server}/{tool:path}/withdraw", "POST", ("mcp_servers", "lifecycle"), tenant_aware=True),
+    _rule("/admin/tools/{server}/{tool:path}/restore", "POST", ("mcp_servers", "lifecycle"), tenant_aware=True),
     # --- WebSocket ---------------------------------------------------------
     # /ws/events streams EVERY domain event -- auth, quota, tenancy, tool
     # arguments -- so it is an audit-grade read, not a dashboard read.
-    _rule("/ws/events", None, ("audit", "read")),
+    # Tenant-aware: a tenant grant receives only events that name its tenant.
+    _rule("/ws/events", None, ("audit", "read"), tenant_aware=True),
     # --- System ------------------------------------------------------------
     # /system/me describes the calling principal; the principal is the resource.
     _rule("/system/me", "GET", AUTHENTICATED_ONLY),
@@ -175,9 +212,11 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # --- Approvals ---------------------------------------------------------
     # approval:resolve is additionally enforced at the command handler
     # (ADR-016 D1); this rule makes the REST edge agree with it.
-    _rule("/approvals/{approval_id}/resolve", "POST", ("approval", "resolve")),
-    _rule("/approvals/{approval_id}", "GET", ("approval", "read")),
-    _rule("/approvals", "GET", ("approval", "read")),
+    # Tenant-aware: a tenant grant sees and resolves only approvals naming its
+    # tenant; one naming no tenant is withheld (routes.py, commands/resolve.py).
+    _rule("/approvals/{approval_id}/resolve", "POST", ("approval", "resolve"), tenant_aware=True),
+    _rule("/approvals/{approval_id}", "GET", ("approval", "read"), tenant_aware=True),
+    _rule("/approvals", "GET", ("approval", "read"), tenant_aware=True),
     # --- Auth administration ----------------------------------------------
     # API keys, roles, principals, permissions and tool-access policies.
     # ("admin", "*") is satisfiable only by PERMISSION_ADMIN_ALL.

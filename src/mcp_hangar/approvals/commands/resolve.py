@@ -39,6 +39,7 @@ from enum import Enum
 from typing import Any
 
 from ...application.commands.commands import Command
+from ...domain.contracts.authorization import GrantScope
 from ...domain.contracts.command import CommandHandler
 from ...domain.exceptions import MissingCredentialsError
 from ...domain.value_objects.security import Principal
@@ -95,8 +96,8 @@ class ResolveApprovalHandler(CommandHandler):
         self._service = service
         self._auth_components = auth_components
 
-    def _authorize(self, principal: Principal, approval_id: str) -> None:
-        """Raise unless *principal* may resolve *approval_id*.
+    def _authorize(self, principal: Principal, approval_id: str) -> GrantScope:
+        """Raise unless *principal* may resolve *approval_id*; return how far the grant reaches.
 
         Mirrors ``server/api/mcp_servers.py:_check_permission``, including its
         hard-won detail: gate on ``auth_components.enabled``, not on the
@@ -104,21 +105,25 @@ class ResolveApprovalHandler(CommandHandler):
         ``authz_middleware``, so checking only ``is None`` leaves the guard armed
         with nobody able to satisfy it -- no principal is attached, and every call
         fails closed with no credential that could ever get past it (#600).
+
+        With auth off nothing is narrowed, so the answer is an unconfined scope.
         """
         components = self._auth_components
         authz = getattr(components, "authz_middleware", None)
 
         if authz is None or not getattr(components, "enabled", False):
-            return
+            return GrantScope()
 
         if principal is None or principal.is_anonymous():
             raise MissingCredentialsError("Authentication required")
 
-        authz.authorize(
-            principal=principal,
-            action=ACTION,
-            resource_type=RESOURCE_TYPE,
-            resource_id=approval_id,
+        return GrantScope.of(
+            authz.authorize(
+                principal=principal,
+                action=ACTION,
+                resource_type=RESOURCE_TYPE,
+                resource_id=approval_id,
+            )
         )
 
     @staticmethod
@@ -135,8 +140,23 @@ class ResolveApprovalHandler(CommandHandler):
             return True
         return bool(getattr(principal, "tenant_id", None) == approval_tenant)
 
+    @staticmethod
+    def _within_grant(grant: GrantScope, approval: Any) -> bool:
+        """Whether a grant of *grant*'s reach covers *approval*.
+
+        A grant held only within a tenant covers that tenant's approvals and no
+        others -- in particular not an approval naming no tenant. That one was
+        raised by a caller with no tenant and is fleet business, just as an event
+        naming no tenant is withheld from a confined ``/ws/events`` subscriber. A
+        confined grant whose tenant is unrecognised covers nothing. A fleet-wide
+        grant is not narrowed here: :meth:`_tenant_matches` still applies to it.
+        """
+        if not grant.confined:
+            return True
+        return grant.tenant_id is not None and getattr(approval, "tenant_id", None) == grant.tenant_id
+
     async def handle(self, command: ResolveApprovalCommand) -> ResolveApprovalResult:
-        self._authorize(command.principal, command.approval_id)
+        grant = self._authorize(command.principal, command.approval_id)
 
         repository = self._service._repository
         existing = await repository.get(command.approval_id)
@@ -148,6 +168,10 @@ class ResolveApprovalHandler(CommandHandler):
             # confirm that an approval exists in tenant A -- existence itself is
             # scoped. An approval with no tenant (single-tenant / auth-off) is
             # not restricted, so this only engages under multi-tenancy.
+            return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+        if not self._within_grant(grant, existing):
+            # The caller's grant is held within a tenant this approval does not
+            # name. Same answer as a foreign tenant: existence is scoped too.
             return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
         if existing.is_terminal():
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=existing.state.value)

@@ -314,6 +314,11 @@ drift_allowance = 3.0
   # now counted. Measured identically on 3.11 (CI) and 3.13 (local).
   "server/api/middleware.py" = 92.8
   "server/api/route_permissions.py" = 100.0
+  # The two chokepoints that confine a tenant-scoped grant: which tenant a
+  # guarded request may act on, and which tenant an event belongs to. Both
+  # measured at 100.0 on 3.11 when they were introduced.
+  "server/api/tenant_scope.py" = 100.0
+  "domain/events/tenancy.py" = 100.0
   # 87.4 -> 89.0 when tests/unit/test_approval_span_result.py drove every
   # approval-gate terminal path (#1274): 91.49 measured on 3.11, so 87.4 sat
   # past the drift allowance. Not --bump's 91.4, which is tighter than the

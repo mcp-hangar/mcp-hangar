@@ -33,6 +33,7 @@ from ...infrastructure.persistence.log_buffer import get_log_buffer
 from ..context import get_context
 from .middleware import dispatch_command, dispatch_query
 from .serializers import HangarJSONResponse
+from .tenant_scope import confined_tenant
 from .request_body import missing_fields
 
 
@@ -237,8 +238,11 @@ async def get_mcp_server_tool_history(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with {"mcp_server_id": ..., "history": [...], "total": int}.
+        A caller whose grant is tenant-scoped gets only invocations made in its
+        own tenant; a global grant gets every tenant's.
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
+    tenant_id = confined_tenant(request)
     mcp_server_id = request.path_params["mcp_server_id"]
     try:
         limit = int(request.query_params.get("limit", 100))
@@ -253,6 +257,7 @@ async def get_mcp_server_tool_history(request: Request) -> HangarJSONResponse:
             mcp_server_id=mcp_server_id,
             limit=limit,
             from_position=from_position,
+            tenant_id=tenant_id,
         )
     )
     return HangarJSONResponse(result)
