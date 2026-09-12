@@ -53,6 +53,7 @@ def _format_structured_data(record: AuditRecord) -> str:
         "duration": data.get("duration_ms"),
         "user": record.caller_user_id,
         "session": record.caller_session_id,
+        "tenant": record.tenant_id or None,  # an empty tenant is no tenant
         "error": data.get("error_type"),
         "fromState": data.get("from_state"),
         "toState": data.get("to_state"),
