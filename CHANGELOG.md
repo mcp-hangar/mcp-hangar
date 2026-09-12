@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.19.0...v2.19.1) (2026-09-12)
+
+### Removed
+
+- **core:** `mcp_hangar.server.api.sessions.is_session_suspended()` is removed.
+  Nothing in Hangar called it, and a helper that looked like the suspension
+  check while no request path used it is how session suspension went
+  unenforced (GHSA-fhwh-fmq2-7m5c). Calls are refused through
+  `mcp_hangar.server.session_guard`, and the registry itself is
+  `get_session_suspension_registry()`. ([#1376](https://github.com/mcp-hangar/mcp-hangar/pull/1376))
+
+### Security
+
+- **security:** traces, the security log and the Langfuse integration no longer
+  carry the text of a failed tool call, and Hangar no longer forwards W3C
+  baggage upstream (GHSA-qwq2-7g49-jxc6).
+
+  A failed `batch.call.<tool>` span used to take the call's error message as its
+  status description. Every other Hangar span recorded an escaping exception as
+  an `exception` event, message and stacktrace included, and the SDK set its
+  status description to `"<type>: <message>"`. That message can hold what an
+  upstream tool returned. Hangar's spans now end in ERROR with an empty status
+  description and a bounded `error.type`: the exception's class name, or the
+  upstream's JSON-RPC error code. The `exception` event is still recorded, but
+  its only attribute is `exception.type`, with no `exception.message` and no
+  `exception.stacktrace`. A type that does not look like a class name or a code
+  is recorded as `_OTHER`. The caller still gets the full error, and the event
+  store and `/ws/events` still keep `error_message`.
+
+  The security log now carries `error_type` instead of the error message for a
+  failed tool call, and no error text for repeated health-check failures. The
+  `health_check_failed` warning now logs the failure's `error_type` instead of its
+  text. The Langfuse integration sends a failed call's error type instead of its
+  message, in the span output, the status message and the `tool_success` score
+  comment. It still sends tool arguments and results.
+
+  An upstream JSON-RPC error whose `code` is not an integer is now recorded with
+  `error_type` `_OTHER`, OpenTelemetry's value for an unclassifiable error.
+  Before, `error_type` held the value sent, or `unknown` when there was no
+  `code`. The `error_type` stored in the event store for such errors changes
+  accordingly.
+
+  Hangar now propagates only `traceparent` and `tracestate`. It no longer reads
+  `baggage` from an inbound carrier, and no longer sends any upstream, over HTTP
+  or stdio. That includes baggage that host instrumentation attached to the
+  context and a `baggage` key in a request's `_meta`. Before, HTTP forwarded
+  entries whose keys started with `hangar.`, which any caller could write, and
+  stdio forwarded every entry.
+
+  `scrub_baggage_for_tenant` is removed from `mcp_hangar.observability`, with no
+  replacement. If you call it, delete the call. There is nothing to do instead:
+  Hangar forwards no baggage.
+- **security:** a suspended session is now refused (GHSA-fhwh-fmq2-7m5c).
+  `POST /api/sessions/{id}/suspend` answered 200 and replicated the suspension to
+  every replica, but no request path read it, so the session went on calling
+  tools. The earlier note that a suspended session "is now refused by every
+  replica" was not true until this release.
+
+  A request is now refused when the caller carries a suspended session id. It is
+  refused before any validation, authorization, cold start or upstream call. This
+  covers:
+
+  - `hangar_call`, every other `hangar_*` tool including the continuation tools,
+    and a front door's flat tool calls;
+  - `tasks/get`, `tasks/cancel` and `tasks/update`;
+  - on a front door, the prompt, completion, resource and subscription methods
+    that reach an upstream.
+
+  Every replica that has read the suspension refuses it.
+
+  A caller carries a session id from one of two sources. One is the session-id
+  claim of a verified OIDC token: `sid` by default, or the claim named by
+  `auth.oidc.session_id_claim`, per issuer if needed. A header cannot replace it.
+  The other is an `x-session-id` header, and only from a peer listed in
+  `MCP_TRUSTED_PROXIES`.
+
+  Not covered:
+
+  - a caller with no session id, which has nothing to match;
+  - stdio sessions;
+  - deployments with auth disabled;
+  - `tools/list`, the REST API and `/ws/events`.
+
+  Hangar now starts uvicorn with its forwarded-header handling off, so
+  `MCP_TRUSTED_PROXIES` alone decides which peer may forward a client address.
+  The client address is now the rightmost forwarded entry that is not a trusted
+  proxy, not the leftmost one, which the client can write. `FORWARDED_ALLOW_IPS`
+  is no longer read. `UPGRADE.md` covers both changes.
+
 ## [2.19.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.18.2...v2.19.0) (2026-09-12)
 
 ### Added
