@@ -31,6 +31,7 @@ from typing import Any
 import uuid
 
 from mcp_hangar.application.ports.observability import ObservabilityPort, SpanHandle, TraceContext
+from mcp_hangar.errors import bounded_error_type
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,12 @@ class LangfuseSpanHandle(SpanHandle):
         )
 
     def end_error(self, error: Exception) -> None:
-        """End span with error.
+        """End span with error: its bounded type, never its message.
+
+        The message can hold what the upstream tool returned
+        (GHSA-qwq2-7g49-jxc6), so the output, the status message and the score
+        comment carry only the exception's class name, bounded as a span's
+        ``error.type`` is. Tool arguments and results are still sent.
 
         Args:
             error: The exception that occurred.
@@ -334,12 +340,13 @@ class LangfuseSpanHandle(SpanHandle):
 
         self._ended = True
         duration_ms = (time.perf_counter() - self._start_time) * 1000
+        error_type = bounded_error_type(type(error).__qualname__)
 
         self._adapter.end_span(
             self._span,
-            output={"error": str(error), "type": type(error).__name__},
+            output={"type": error_type},
             level="ERROR",
-            status_message=f"Tool invocation failed: {error}",
+            status_message=f"Tool invocation failed: {error_type}",
         )
 
         # Record failure score
@@ -347,7 +354,7 @@ class LangfuseSpanHandle(SpanHandle):
             trace_id=self._trace_id,
             name="tool_success",
             value=0.0,
-            comment=str(error),
+            comment=error_type,
         )
 
         self._adapter.create_score(

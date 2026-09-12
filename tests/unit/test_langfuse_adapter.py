@@ -215,8 +215,8 @@ class TestLangfuseSpanHandle:
         assert latency_call.kwargs["trace_id"] == "trace-123"
         assert latency_call.kwargs["value"] > 0
 
-    def test_end_error_records_error_and_failure_score(self) -> None:
-        """end_error records error details and failure score."""
+    def test_end_error_records_the_error_type_and_failure_score_and_no_message(self) -> None:
+        """end_error sends the exception's type, never its message (GHSA-qwq2-7g49-jxc6)."""
         mock_adapter = MagicMock()
         mock_adapter.is_enabled = True
 
@@ -226,19 +226,25 @@ class TestLangfuseSpanHandle:
             trace_id="trace-123",
         )
 
-        error = ValueError("Test error")
-        handle.end_error(error)
+        canary = "canary-langfuse-error-text-91c4"
+        handle.end_error(ValueError(f"tool_error: {canary}"))
 
-        # Verify end_span was called with error info
+        # Verify end_span was called with the type only
         mock_adapter.end_span.assert_called_once()
         call_args = mock_adapter.end_span.call_args
-        assert "error" in call_args.kwargs["output"]
+        assert call_args.kwargs["output"] == {"type": "ValueError"}
         assert call_args.kwargs["level"] == "ERROR"
+        assert call_args.kwargs["status_message"] == "Tool invocation failed: ValueError"
 
         # Verify failure score
         score_calls = [c for c in mock_adapter.create_score.call_args_list]
         success_call = next(c for c in score_calls if c.kwargs.get("name") == "tool_success")
         assert success_call.kwargs["value"] == 0.0
+        assert success_call.kwargs["comment"] == "ValueError"
+
+        # Nothing sent to Langfuse carries the message.
+        sent = [*mock_adapter.end_span.call_args_list, *mock_adapter.create_score.call_args_list]
+        assert not any(canary in repr(call) for call in sent), sent
 
     def test_prevents_double_end(self) -> None:
         """Cannot end a span twice."""

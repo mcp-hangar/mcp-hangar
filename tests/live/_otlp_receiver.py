@@ -30,6 +30,9 @@ class Received:
     kind: int  # proto SpanKind; 0 for a log record
     trace_id: str  # hex; "" when the record carries none
     attributes: dict[str, Any]
+    status_code: int = 0  # proto Status.StatusCode; 2 is ERROR. 0 for a log record
+    status_message: str = ""  # the span status description; "" for a log record
+    events: tuple[tuple[str, dict[str, Any]], ...] = ()  # (name, attributes) per span event
 
 
 def _value(any_value: Any) -> Any:
@@ -95,6 +98,9 @@ class OtlpReceiver:
                             kind=span.kind,
                             trace_id=span.trace_id.hex(),
                             attributes=_attributes(span.attributes),
+                            status_code=span.status.code,
+                            status_message=span.status.message,
+                            events=tuple((e.name, _attributes(e.attributes)) for e in span.events),
                         )
                         self._spans.append((resource, record))
 

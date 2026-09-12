@@ -138,12 +138,16 @@ def _exceptions(span: Any) -> int:
     return sum(1 for event in span.events if event.name == "exception")
 
 
+def _exception_attributes(span: Any) -> list[dict[str, Any]]:
+    return [dict(event.attributes) for event in span.events if event.name == "exception"]
+
+
 def _attributes_but_outcome(span: Any) -> dict[str, Any]:
     return {k: v for k, v in span.attributes.items() if k != "error.type"}
 
 
 class TestRecordHandledFailure:
-    def test_records_error_status_type_and_exception(self, sdk):
+    def test_records_error_status_type_and_a_type_only_exception_event(self, sdk):
         from mcp_hangar.observability.tracing import record_handled_failure
 
         exporter, tracer = sdk
@@ -152,7 +156,8 @@ class TestRecordHandledFailure:
 
         [finished] = exporter.get_finished_spans()
         assert _outcome(finished) == ("ERROR", UNAVAILABLE)
-        assert _exceptions(finished) == 1
+        # No message, no stacktrace: either could carry what an upstream returned (GHSA-qwq2-7g49-jxc6).
+        assert _exception_attributes(finished) == [{"exception.type": UNAVAILABLE}]
 
     def test_the_first_failure_names_a_shared_span_and_a_success_never_resets_it(self, sdk):
         from mcp_hangar.observability.tracing import record_handled_failure
@@ -165,7 +170,9 @@ class TestRecordHandledFailure:
 
         [finished] = exporter.get_finished_spans()
         assert _outcome(finished) == ("ERROR", UNAVAILABLE)
-        assert _exceptions(finished) == 2, "every failure is still recorded as an exception event"
+        assert _exception_attributes(finished) == [{"exception.type": UNAVAILABLE}, {"exception.type": CRASHED}], (
+            "every failure is still an exception event, carrying its type only"
+        )
 
     def test_is_a_no_op_on_noop_spans(self):
         from opentelemetry.trace import INVALID_SPAN

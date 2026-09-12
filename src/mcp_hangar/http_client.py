@@ -29,11 +29,9 @@ from .domain.exceptions import ClientError
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
-from .context import get_identity_context
 from .observability.tracing import (
     inject_trace_context,
     record_upstream_outcome,
-    scrub_baggage_for_tenant,
     upstream_call_span,
 )
 from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject_protocol_meta
@@ -496,9 +494,7 @@ class HttpClient:
         # Unreachable: the loop returns or raises on its last attempt.
         raise ClientError("retry_loop_exhausted")
 
-    def _outbound_carriers(
-        self, params: dict[str, Any] | None, tenant_id: str | None
-    ) -> tuple[dict[str, Any], dict[str, str]]:
+    def _outbound_carriers(self, params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, str]]:
         """Fresh params and headers for one send, both carrying the current trace context.
 
         Call it inside the CLIENT span so both traceparents name that span, as
@@ -510,11 +506,10 @@ class HttpClient:
         sent = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
         headers: dict[str, str] = {}
         # SEP-414: trace context rides in params._meta as well as the headers,
-        # so it survives across MCP hops regardless of transport.
+        # so it survives across MCP hops regardless of transport. The shared
+        # outbound chokepoint also removes any baggage, as over stdio.
         for carrier in (sent["_meta"], headers):
             inject_trace_context(carrier)
-            # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
-            scrub_baggage_for_tenant(carrier, tenant_id)
         # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
         # legacy session-based upstream that established one. Declaring the
         # upstream stateless keeps _mcp_session_id None, so this is skipped.
@@ -551,11 +546,6 @@ class HttpClient:
 
         request_id = str(uuid.uuid4())
 
-        # Resolve the tenant this outbound request is attributed to, so we can
-        # strip any cross-tenant / untrusted W3C baggage before it leaves.
-        _identity = get_identity_context()
-        _tenant_id = _identity.caller.tenant_id if _identity and _identity.caller else None
-
         # Use endpoint directly - it should already include the full MCP path
         url = self._endpoint
 
@@ -578,7 +568,7 @@ class HttpClient:
             # this one. It stays open until the answer is classified, so a
             # failure read from the response ends it in ERROR too (#1277).
             with upstream_call_span(method, params) as span:
-                sent_params, extra_headers = self._outbound_carriers(params, _tenant_id)
+                sent_params, extra_headers = self._outbound_carriers(params)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 response = self._post_with_retry(
@@ -926,15 +916,12 @@ class HttpClient:
         if self._closed:
             raise ClientError("client_closed")
 
-        identity = get_identity_context()
-        tenant_id = identity.caller.tenant_id if identity and identity.caller else None
-
         mcp_server_label = self._mcp_server_id or self._host
         try:
             # Carriers built inside the CLIENT span, as in `call`, and the
             # status read inside it; the rejection is still raised below.
             with upstream_call_span(method, params) as span:
-                sent_params, headers = self._outbound_carriers(params, tenant_id)
+                sent_params, headers = self._outbound_carriers(params)
                 body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
                 response = self._client.post(

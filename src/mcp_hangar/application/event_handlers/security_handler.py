@@ -379,7 +379,12 @@ class SecurityEventHandler:
             )
 
     def _handle_tool_invocation_failed(self, event: ToolInvocationFailed) -> None:
-        """Handle failed tool invocation."""
+        """Handle failed tool invocation.
+
+        Carries the bounded ``error_type``, never ``error_message``: the message
+        can hold what the tool returned, and the log sink writes this at INFO
+        (GHSA-qwq2-7g49-jxc6). The full message stays on the event itself.
+        """
         self._record_failure(event.mcp_server_id)
 
         self._emit(
@@ -390,14 +395,20 @@ class SecurityEventHandler:
                 mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 details={
-                    "error": event.error_message,
+                    "error_type": event.error_type,
                 },
                 correlation_id=event.event_id,
             )
         )
 
     def _handle_health_check_failed(self, event: HealthCheckFailed) -> None:
-        """Handle health check failure."""
+        """Handle health check failure.
+
+        Carries no error text: ``error_message`` can hold what the upstream
+        answered, the log sink writes this at WARNING, and the event has no
+        bounded error type to log instead (GHSA-qwq2-7g49-jxc6). The full
+        message stays on the event itself.
+        """
         self._record_failure(event.mcp_server_id)
 
         if event.consecutive_failures >= self.FAILURE_THRESHOLD:
@@ -409,7 +420,6 @@ class SecurityEventHandler:
                     mcp_server_id=event.mcp_server_id,
                     details={
                         "consecutive_failures": event.consecutive_failures,
-                        "error": event.error_message,
                     },
                     correlation_id=event.event_id,
                 )

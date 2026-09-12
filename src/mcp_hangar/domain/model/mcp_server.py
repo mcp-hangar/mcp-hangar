@@ -4,6 +4,7 @@ import threading
 import time
 from typing import Any, TYPE_CHECKING, cast
 
+from ...errors import OTHER_ERROR_TYPE, bounded_error_type
 from ...logging_config import get_logger
 from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
 
@@ -95,6 +96,17 @@ def _tool_call_params(tool_name: str, arguments: dict[str, Any], progress_token:
     if progress_token is not None:
         params["_meta"] = {"progressToken": progress_token}
     return params
+
+
+def _rpc_error_type(error: dict[str, Any]) -> str:
+    """``ToolInvocationFailed.error_type`` for an upstream JSON-RPC error: its code, or ``_OTHER``.
+
+    The spec's code is an integer. Anything else the upstream sent in its place
+    is not copied: ``error_type`` is the bounded classifier that summary logs,
+    the security log and audit records carry (GHSA-qwq2-7g49-jxc6).
+    """
+    code = error.get("code")
+    return str(code) if type(code) is int else OTHER_ERROR_TYPE
 
 
 class McpServer(AggregateRoot):
@@ -1560,7 +1572,7 @@ class McpServer(AggregateRoot):
                         correlation_id=correlation_id,
                         duration_ms=duration_ms,
                         error_message=error_msg,
-                        error_type=str(response["error"].get("code", "unknown")),
+                        error_type=_rpc_error_type(response["error"]),
                         identity_context=identity_context_dict,
                     )
                 )
@@ -1736,14 +1748,18 @@ class McpServer(AggregateRoot):
         # Phase 2: Perform health check I/O outside lock
         start_time = time.time()
         check_error = None
+        # What the warning logs: never the error's text, which is upstream's (GHSA-qwq2-7g49-jxc6).
+        check_error_type: str | None = None
         response = None
 
         try:
             response = client.call("tools/list", {}, timeout=5.0)
             if "error" in response:
                 check_error = Exception(response["error"].get("message", "unknown"))
+                check_error_type = _rpc_error_type(response["error"])
         except (OSError, TimeoutError) as e:
             check_error = e
+            check_error_type = bounded_error_type(type(e).__qualname__)
 
         # Phase 3: Update state based on result under lock
         with self._lock:
@@ -1762,7 +1778,8 @@ class McpServer(AggregateRoot):
                     )
                 )
 
-                logger.warning(f"health_check_failed: {self.mcp_server_id}, error={check_error}")
+                # The JSON-RPC code, or the transport exception's class: never the text.
+                logger.warning(f"health_check_failed: {self.mcp_server_id}, error_type={check_error_type}")
 
                 if self._health.should_degrade():
                     self._state = McpServerState.DEGRADED

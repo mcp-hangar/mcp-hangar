@@ -43,7 +43,7 @@ Example:
         do_work()
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 import os
@@ -51,6 +51,7 @@ import sys
 import threading
 from typing import Any, TypeVar
 
+from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
 from mcp_hangar.observability.conventions import GenAI, MCP
@@ -93,8 +94,6 @@ try:
         TraceIdRatioBased,
     )
     from opentelemetry import trace
-    from opentelemetry.baggage.propagation import W3CBaggagePropagator
-    from opentelemetry.propagators.composite import CompositePropagator
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
 
@@ -203,34 +202,61 @@ class NoOpTracer:
 
 _noop_tracer = NoOpTracer()
 
-# W3C baggage handling (SEP-414).
+
+class _TextFreeTracer:
+    """The tracer every Hangar span comes from: no exception text reaches a span.
+
+    By default the SDK records an exception that escapes a span as an
+    ``exception`` event, message and stacktrace included, and sets the status
+    description to ``"<type>: <message>"``. An exception's message can carry
+    what an upstream tool returned (GHSA-qwq2-7g49-jxc6), so both are off here,
+    whichever way the span is started. A span an exception escapes still ends
+    in ERROR, with an ``exception`` event that carries only ``exception.type``.
+    Its ``error.type`` is the exception's qualified class name, unless
+    something closer to the failure already set one. That is the shape the mcp
+    SDK server middleware gives its own spans.
+    """
+
+    def __init__(self, tracer: Any) -> None:
+        self._tracer = tracer
+
+    @contextmanager
+    def start_as_current_span(self, name: str, **kwargs: Any) -> Iterator[Any]:
+        kwargs.update(record_exception=False, set_status_on_exception=False)
+        with self._tracer.start_as_current_span(name, **kwargs) as span:
+            try:
+                yield span
+            except Exception as error:
+                mark_span_error(span)
+                _set_error_type_if_absent(span, type(error).__qualname__)
+                _record_exception_type(span, error)
+                raise
+
+    def start_span(self, name: str, **kwargs: Any) -> Any:
+        """A span with the SDK's exception recording off; its caller records the outcome."""
+        kwargs.update(record_exception=False, set_status_on_exception=False)
+        return self._tracer.start_span(name, **kwargs)
+
+
+# W3C baggage (GHSA-qwq2-7g49-jxc6).
 #
-# Baggage is a set of opaque, application-defined key/value pairs propagated
-# alongside trace context. Unlike traceparent/tracestate (which are safe,
-# structural trace identifiers), baggage can carry arbitrary caller-supplied
-# data and therefore MUST NOT be allowed to leak across a tenant boundary.
-#
-# Hangar owns a dedicated baggage namespace: entries whose keys start with
-# ``HANGAR_BAGGAGE_PREFIX`` are considered "Hangar-set" (trusted, produced by
-# Hangar itself in the current request context). Everything else is treated as
-# untrusted / cross-origin baggage and is dropped on the outbound path.
+# Baggage is a set of opaque key/value pairs, and nothing on the wire says who
+# set an entry. Hangar sets none itself, so no entry in an inbound carrier or in
+# the ambient context can be attributed to it. A key prefix is not provenance:
+# any caller can write one. Hangar therefore extracts no baggage from inbound
+# carriers and forwards none upstream, whoever attached it to the context (host
+# auto-instrumentation, an embedding application). It propagates only W3C
+# trace context (traceparent/tracestate).
 BAGGAGE_HEADER = "baggage"
-HANGAR_BAGGAGE_PREFIX = "hangar."
-# Optional tenant marker Hangar may set to bind baggage to a single tenant.
-HANGAR_BAGGAGE_TENANT_KEY = "hangar.tenant"
 
 
 def _get_propagator() -> Any:
-    """Build the composite propagator used for inbound/outbound context.
+    """The propagator for inbound and outbound carriers: W3C TraceContext only.
 
-    Composes the existing W3C TraceContext propagator (traceparent/tracestate)
-    with the W3C Baggage propagator so that ``baggage`` is extracted from
-    inbound carriers (making it available in-context) and injected onto
-    outbound carriers. Trace-context behavior is unchanged: it is still the
-    first propagator in the composite and continues to handle traceparent /
-    tracestate exactly as before.
+    ``traceparent``/``tracestate`` are structural trace identifiers. Baggage is
+    deliberately absent; see the note above.
     """
-    return CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
+    return TraceContextTextMapPropagator()
 
 
 # Set by disable_tracing(): the operator turned tracing off in configuration.
@@ -652,13 +678,14 @@ def get_tracer(name: str = __name__) -> Any:
         name: Tracer name (usually __name__).
 
     Returns:
-        OpenTelemetry tracer from the registered provider, Hangar's own or one
-        registered before it; NoOpTracer when there is none or tracing is off.
+        A tracer from the registered provider, Hangar's own or one registered
+        before it, whose spans never record exception text (see
+        ``_TextFreeTracer``); NoOpTracer when there is none or tracing is off.
     """
     if not _tracing_active():
         return _noop_tracer
 
-    return trace.get_tracer(name)
+    return _TextFreeTracer(trace.get_tracer(name))
 
 
 @contextmanager
@@ -732,28 +759,63 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
         try:
             yield span
         except Exception as e:
-            # The SDK sets ERROR on the way out; this adds the bounded type.
+            # ERROR with the exception's class as the bounded type, no message.
             record_upstream_outcome(span, error=e)
             raise
 
 
-def mark_span_error(span: Any, description: str | None = None) -> None:
-    """Set ERROR status on a span. Safe for NoOp spans and when OTel is absent.
+#: OTel ``error.type``, the attribute the mcp SDK's server middleware sets.
+#: Its values pass ``mcp_hangar.errors.bounded_error_type``, the one allowlist.
+ERROR_TYPE = "error.type"
 
-    Use when a failure is handled as data (e.g. converted to a result object)
-    rather than raised, so the span would otherwise stay UNSET and the failing
-    operation would look successful in the trace UI.
-    """
-    if not OTEL_AVAILABLE:
-        return
+
+def _set_error_type_if_absent(span: Any, error_type: str) -> None:
+    """Set a bounded ``error.type`` unless the span has one: the failure closest to it names it."""
     try:
-        span.set_status(Status(StatusCode.ERROR, description or ""))
+        if ERROR_TYPE not in (getattr(span, "attributes", None) or {}):
+            span.set_attribute(ERROR_TYPE, bounded_error_type(error_type))
     except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
         pass
 
 
-#: OTel ``error.type``, the attribute the mcp SDK's server middleware sets.
-ERROR_TYPE = "error.type"
+#: The OTel exception event's type attribute, the only attribute Hangar gives that event.
+EXCEPTION_TYPE = "exception.type"
+
+
+def _record_exception_type(span: Any, error: BaseException) -> None:
+    """Add an ``exception`` event carrying only ``exception.type``: no message, no stacktrace.
+
+    The SDK's ``record_exception`` writes both, and either can carry what an
+    upstream returned (GHSA-qwq2-7g49-jxc6). The type is the exception's
+    qualified class name, bounded as ``error.type`` is.
+    """
+    try:
+        span.add_event("exception", {EXCEPTION_TYPE: bounded_error_type(type(error).__qualname__)})
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
+
+
+def mark_span_error(span: Any, error_type: str | None = None) -> None:
+    """Set ERROR status on a span, with no description. Safe for NoOp spans and when OTel is absent.
+
+    Use when a failure is handled as data (e.g. converted to a result object)
+    rather than raised, so the span would otherwise stay UNSET and the failing
+    operation would look successful in the trace UI.
+
+    The status never carries a description: a failure's message can hold what
+    an upstream tool returned (GHSA-qwq2-7g49-jxc6). What failed is said by
+    ``error.type``, set from ``error_type`` when one is given. It must look like
+    a class name or a code (letters, digits and ``_.-<>``, at most 128
+    characters); anything else is recorded as ``_OTHER``.
+    """
+    if not OTEL_AVAILABLE:
+        return
+    try:
+        span.set_status(Status(StatusCode.ERROR))
+        if error_type is not None:
+            span.set_attribute(ERROR_TYPE, bounded_error_type(error_type))
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
 
 
 def record_upstream_outcome(
@@ -782,33 +844,26 @@ def record_upstream_outcome(
         error_type = _answer_error_type(answer)
     if error_type is None:
         return
-    mark_span_error(span)
-    try:
-        span.set_attribute(ERROR_TYPE, error_type)
-    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
-        pass
+    mark_span_error(span, error_type)
 
 
 def record_handled_failure(span: Any, error: BaseException) -> None:
     """End a span ERROR for a failure its fault barrier caught and did not re-raise.
 
-    ``record_exception`` alone leaves the status UNSET, so a failed append,
-    handler, discovery cycle or cold start read as a success. This records the
-    exception, sets ERROR, and sets ``error.type`` to the exception's qualified
-    class name. On a span several handlers share, the first failure names it and
-    a later success never resets it. For operational failures only: a policy
-    refusal is a correct answer, not an ERROR. No-op without the SDK or on a
-    NoOp span; never raises.
+    Without this a failed append, handler, discovery cycle or cold start read
+    as a success. This sets ERROR and sets ``error.type`` to the exception's
+    qualified class name. On a span several handlers share, the first failure
+    names it and a later success never resets it. Each failure adds an
+    ``exception`` event carrying only ``exception.type``: an exception's message
+    and stacktrace can carry what an upstream returned (GHSA-qwq2-7g49-jxc6).
+    For operational failures only: a policy refusal is a correct answer, not an
+    ERROR. No-op without the SDK or on a NoOp span; never raises.
     """
     if not OTEL_AVAILABLE:
         return
     mark_span_error(span)
-    try:
-        if ERROR_TYPE not in (getattr(span, "attributes", None) or {}):
-            span.set_attribute(ERROR_TYPE, type(error).__qualname__)
-        span.record_exception(error)
-    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
-        pass
+    _set_error_type_if_absent(span, type(error).__qualname__)
+    _record_exception_type(span, error)
 
 
 def _answer_error_type(answer: Any) -> str | None:
@@ -823,24 +878,28 @@ def _answer_error_type(answer: Any) -> str | None:
     return "tool_error" if isinstance(result, dict) and result.get("isError") else None
 
 
-def inject_trace_context(carrier: dict[str, str]) -> None:
-    """Inject trace context into carrier dict for propagation.
+def inject_trace_context(carrier: dict[str, Any]) -> None:
+    """Write the current W3C trace context into an outbound carrier, and no baggage.
+
+    This is the one outbound chokepoint. Both transports call it on every
+    carrier they send upstream: HTTP on its headers and on ``params._meta``,
+    stdio on ``params._meta``. So the rule cannot differ between them. It
+    injects ``traceparent``/``tracestate`` and removes any ``baggage`` entry the
+    carrier already holds, such as one a caller put in ``params._meta``. Baggage
+    in the ambient context is never injected, whoever attached it: Hangar sets
+    none, so none can be attributed to it (GHSA-qwq2-7g49-jxc6). The removal
+    also runs with tracing off and without the SDK.
 
     Args:
-        carrier: Dict to inject trace context into.
-
-    Injects W3C TraceContext (traceparent/tracestate) and W3C ``baggage`` from
-    the current OTel context. Trace-context behavior is unchanged. Baggage that
-    happens to be present in the current context (for example, extracted from an
-    inbound request) is injected too; callers on a tenant-crossing outbound path
-    MUST additionally run :func:`scrub_baggage_for_tenant` to strip untrusted /
-    cross-tenant baggage before sending.
+        carrier: Outbound HTTP headers or MCP ``_meta``. Mutated in place.
 
     Example:
         headers = {}
         inject_trace_context(headers)
-        # headers now contains traceparent, tracestate (and baggage, if any)
+        # headers now contains traceparent (and tracestate, if any)
     """
+    for key in [k for k in carrier if isinstance(k, str) and k.lower() == BAGGAGE_HEADER]:
+        del carrier[key]
     if not _tracing_active():
         return
 
@@ -856,9 +915,8 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
     Returns:
         OpenTelemetry context or None.
 
-    Extracts W3C TraceContext (traceparent/tracestate) and W3C ``baggage`` from
-    the carrier so both are available in the returned context. Trace-context
-    behavior is unchanged.
+    Extracts W3C TraceContext (traceparent/tracestate) only. A ``baggage``
+    entry in the carrier is ignored, so none reaches the returned context.
 
     Example:
         context = extract_trace_context(request.headers)
@@ -869,72 +927,6 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
         return None
 
     return _get_propagator().extract(carrier)
-
-
-def scrub_baggage_for_tenant(carrier: dict[str, str], current_tenant_id: str | None) -> None:
-    """Strip cross-tenant / untrusted W3C ``baggage`` from an OUTBOUND carrier.
-
-    Baggage keys and values are opaque and application-defined, so Hangar cannot
-    reliably reason about the tenant-safety of arbitrary entries it did not
-    create. This function is therefore **conservative by default**: it drops any
-    baggage that is not attributable to Hangar in the current single-tenant
-    request context.
-
-    The rule (fail-safe against cross-tenant leak):
-
-    * Keep only entries in the Hangar-owned namespace (keys starting with
-      ``HANGAR_BAGGAGE_PREFIX``). These are entries Hangar itself set in the
-      current request context; inbound-originated / third-party baggage is
-      dropped.
-    * If a Hangar tenant marker (``HANGAR_BAGGAGE_TENANT_KEY``) is present and
-      its value does not match ``current_tenant_id``, treat the whole carrier as
-      cross-tenant and drop **all** baggage. A ``current_tenant_id`` of ``None``
-      means "tenant unknown", which is also treated as a mismatch — when we
-      cannot prove same-tenant, we do not forward.
-
-    The ``baggage`` carrier entry is removed entirely when nothing survives.
-
-    This mechanism is intentionally strict and refinable later (for example, an
-    allowlist of forwardable inbound keys once their provenance can be trusted).
-    It operates purely on the carrier string and does not depend on OTEL being
-    installed, so it remains a hard boundary even when tracing is disabled.
-
-    Args:
-        carrier: Outbound carrier dict (e.g. HTTP headers or MCP ``_meta``)
-            that may contain a ``baggage`` entry. Mutated in place.
-        current_tenant_id: The tenant the outbound request is attributed to, or
-            ``None`` if unknown.
-    """
-    raw = carrier.get(BAGGAGE_HEADER)
-    if not raw:
-        return
-
-    kept: list[str] = []
-    for item in raw.split(","):
-        item = item.strip()
-        if not item or "=" not in item:
-            continue
-        # A baggage member is "key=value" optionally followed by ";properties".
-        key_part, value_part = item.split("=", 1)
-        key = key_part.strip()
-
-        if not key.startswith(HANGAR_BAGGAGE_PREFIX):
-            # Untrusted / inbound-originated / cross-origin baggage: drop.
-            continue
-
-        if key == HANGAR_BAGGAGE_TENANT_KEY:
-            value = value_part.split(";", 1)[0].strip()
-            if current_tenant_id is None or value != current_tenant_id:
-                # Explicit cross-tenant signal: drop ALL baggage, not just this entry.
-                carrier.pop(BAGGAGE_HEADER, None)
-                return
-
-        kept.append(item)
-
-    if kept:
-        carrier[BAGGAGE_HEADER] = ",".join(kept)
-    else:
-        carrier.pop(BAGGAGE_HEADER, None)
 
 
 def get_current_trace_id() -> str | None:

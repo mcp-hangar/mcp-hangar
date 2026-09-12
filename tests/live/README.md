@@ -15,7 +15,7 @@ anywhere. They run on demand via the `live-verify` workflow (manual + nightly).
 | **T0** | single process + a stub backend (`examples/provider_math`) — operational surface, `hangar_call`, lifecycle, tool-access policy, withdrawal/digest-pin, truncation/continuation | `mcp-hangar` on PATH (i.e. `uv run`) |
 | **T1** | multi-backend / groups — group invocation, canary/failover, discovery, load-balancing | Docker + compose (≥2 backends) |
 | **T2** | auth / IdP — JWT/OIDC, multi-issuer, RFC 8707 audience binding, `front_door` DENY, RBAC | Keycloak (`examples/auth-keycloak`) |
-| **T3** | trace and audit export — `serve --http` exports to a real OTLP/gRPC receiver: a warm call's spans (with the upstream CLIENT span), a tool-access-denied call's span and no CLIENT span, a `tool_invocation` audit record under scope `mcp_hangar.audit`, and the spans of a call made right before SIGTERM | `grpcio` + the `opentelemetry` extra; the receiver runs in the test process (no Collector, no Docker) |
+| **T3** | trace and audit export — `serve --http` exports to a real OTLP/gRPC receiver: a warm call's spans (with the upstream CLIENT span), a tool-access-denied call's span and no CLIENT span, a `tool_invocation` audit record under scope `mcp_hangar.audit`, the spans of a call made right before SIGTERM, and a failing tool's error text reaching the caller but no exported span (no status message, event or attribute) | `grpcio` + the `opentelemetry` extra; the receiver runs in the test process (no Collector, no Docker) |
 
 (T4 Kubernetes is out of scope for now. T3 does not cover a Collector, inbound or
 outbound W3C trace context, or a trace link from an audit record to its call;

@@ -1069,8 +1069,10 @@ class BatchExecutor:
             # The inner call handles failures as data (CallResult), so the span
             # never sees an exception. Mark it ERROR explicitly so failing tool
             # calls are filterable as error traces instead of looking successful.
+            # The error's class names it; its message can hold what the tool
+            # returned, so it stays off the span (GHSA-qwq2-7g49-jxc6).
             if not result.success:
-                mark_span_error(span, result.error)
+                mark_span_error(span, result.error_type)
             return result
 
     def _execute_call_inner(

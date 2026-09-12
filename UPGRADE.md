@@ -83,6 +83,48 @@ What to do:
 - The protected-resource metadata already read `X-Forwarded-Proto` itself, so
   the scheme it advertises is unchanged.
 
+## Next — traces, the security log and Langfuse carry no error text
+
+Hangar's telemetry no longer says what a failure said: a tool's error message
+can hold whatever the tool returned. A failed span ends in ERROR with an empty
+status description and a bounded `error.type`. Where an exception escaped the
+span, or a fault barrier handled one, the span has an `exception` event whose
+only attribute is `exception.type`, with no `exception.message` and no
+`exception.stacktrace`.
+
+| Where | Before | Now |
+| --- | --- | --- |
+| `batch.call.<tool>` status description | the call's error message | empty; `error.type` is the error's class, e.g. `ToolInvocationError` |
+| any other Hangar span an exception escapes | `exception` event with type, message and stacktrace; description `"<type>: <message>"` | `exception` event with `exception.type` only; empty description; `error.type` is the exception's class |
+| a failure a fault barrier handled (event store append, discovery, cold start) | `exception` event with type, message and stacktrace | `exception` event with `exception.type` only; `error.type` as before |
+| security log, failed tool call | `details.error`: the message | `details.error_type` |
+| security log, repeated health-check failures | `details.error`: the message | no error field; `details.consecutive_failures` as before |
+| `health_check_failed` warning log | `error=<message>` | `error_type=<class>` |
+| Langfuse, failed tool call | output `{"error": <message>, "type": <class>}`, status message `Tool invocation failed: <message>`, `tool_success` score comment `<message>` | output `{"type": <class>}`, status message `Tool invocation failed: <class>`, score comment `<class>` |
+| `error_type` of an upstream JSON-RPC error whose `code` is not an integer | the value sent, or `unknown` when absent | `_OTHER` |
+
+An error type that does not look like a class name or a code is recorded as
+`_OTHER`. Langfuse still receives tool arguments and results.
+
+If a dashboard or alert matched on span status descriptions, on
+`exception.message` or `exception.stacktrace`, on the security log's
+`details.error`, or on the Langfuse error output, match on `error.type` or
+`exception.type` instead. For the message itself, look up the call's
+`ToolInvocationFailed` event in the event store, or the result the caller
+received. Neither has changed.
+
+## Next — `scrub_baggage_for_tenant` is removed, and baggage is not forwarded
+
+`scrub_baggage_for_tenant` is removed from `mcp_hangar.observability`, with no
+replacement. If you call it, delete the call. There is nothing to do instead:
+Hangar forwards no baggage.
+
+Hangar propagates `traceparent` and `tracestate` only, over HTTP and stdio
+alike, and ignores `baggage` on inbound requests. Hangar sets no baggage
+itself, so this changes something only where host instrumentation or an
+embedding application attached baggage to the context, or a request carried a
+`baggage` key in `_meta`. Those entries no longer reach upstream servers.
+
 ## Upgrade to 2.19.0
 
 ### tenant-scoped role grants are limited to their tenant

@@ -231,7 +231,8 @@ class StdioClient:
             # in the MCP `_meta` field (mirrors the HTTP transport, which injects
             # into request headers). Servers that don't understand `_meta` ignore
             # it. inject_protocol_meta returns a fresh dict, so the caller's is
-            # never mutated.
+            # never mutated. inject_trace_context is the outbound chokepoint
+            # both transports share: it also removes any baggage.
             params = inject_protocol_meta(params, modern_envelope=self.modern_envelope)
             inject_trace_context(params["_meta"])
 

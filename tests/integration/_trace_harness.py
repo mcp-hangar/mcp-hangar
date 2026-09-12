@@ -55,13 +55,19 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+#: What ``web``'s ``leak`` tool says in its ``isError: true`` result. It stands in
+#: for a token or personal data a tool echoes, and must reach no span.
+TOOL_ERROR_TEXT = "canary-isError-text-3d71"
+
 #: scenario -> (upstream, tool, arguments). ``math`` is stdio, ``web`` is HTTP.
-#: ``math``'s policy denies ``multiply``; ``divide`` by zero is an upstream error.
+#: ``math``'s policy denies ``multiply``; ``divide`` by zero is an upstream error;
+#: ``leak`` answers ``isError: true`` with ``TOOL_ERROR_TEXT``.
 SCENARIOS: dict[str, tuple[str, str, dict[str, Any]]] = {
     "stdio_success": ("math", "add", {"a": 1, "b": 2}),
     "http_success": ("web", "add", {"a": 1, "b": 2}),
     "denied": ("math", "multiply", {"a": 2, "b": 3}),
     "upstream_failure": ("math", "divide", {"a": 1, "b": 0}),
+    "tool_error": ("web", "leak", {}),
     "concurrent_1": ("web", "add", {"a": 1, "b": 1}),
     "concurrent_2": ("web", "add", {"a": 2, "b": 2}),
 }
@@ -99,10 +105,15 @@ class _HttpUpstream(BaseHTTPRequestHandler):
                 seen["overlapped"] = True
             except threading.BrokenBarrierError:
                 seen["overlapped"] = False
+        tools = [{"name": name, "inputSchema": {"type": "object"}} for name in ("add", "leak")]
+        if (request.get("params") or {}).get("name") == "leak":
+            call_result = {"isError": True, "content": [{"type": "text", "text": TOOL_ERROR_TEXT}]}
+        else:
+            call_result = {"content": [{"type": "text", "text": "ok"}]}
         answer = {
             "initialize": {"result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}}},
-            "tools/list": {"result": {"tools": [{"name": "add", "inputSchema": {"type": "object"}}]}},
-            "tools/call": {"result": {"content": [{"type": "text", "text": "ok"}]}},
+            "tools/list": {"result": {"tools": tools}},
+            "tools/call": {"result": call_result},
         }.get(method, {"error": {"code": -32601, "message": f"Unknown method: {method}"}})
         self._send(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], **answer}).encode())
 
@@ -196,6 +207,10 @@ def _span(span: Any) -> dict[str, Any]:
         "parent_id": f"{parent.span_id:016x}" if parent else None,
         "parent_is_remote": bool(parent and parent.is_remote),
         "status": span.status.status_code.name,
+        # Everything else a span exports that could carry text.
+        "status_description": span.status.description,
+        "attributes": dict(span.attributes),
+        "events": [{"name": e.name, "attributes": dict(e.attributes)} for e in span.events],
     }
 
 
@@ -215,7 +230,7 @@ def main(out: Path) -> None:
     scenarios: dict[str, Any] = {}
     app = wrap_front_door_routing(build_serving_mcp_server().streamable_http_app())
     with TestClient(app, base_url=BASE_URL) as client:
-        for scenario in ("stdio_success", "http_success", "denied", "upstream_failure"):
+        for scenario in ("stdio_success", "http_success", "denied", "upstream_failure", "tool_error"):
             scenarios[scenario] = _hangar_call(client, scenario)
         _HttpUpstream.rendezvous = threading.Barrier(2, timeout=10)
         with ThreadPoolExecutor(max_workers=2) as pool:

@@ -156,8 +156,9 @@ class TracedMcpServerService:
                 return result
 
             except Exception as e:  # noqa: BLE001 -- fault-barrier: record error in both spans, then re-raise
+                # The span ends ERROR with the exception's class as error.type
+                # on the way out; its message is not recorded (GHSA-qwq2-7g49-jxc6).
                 otel_span.set_attribute(MCP.TOOL_STATUS, "error")
-                otel_span.record_exception(e)
                 obs_span.end_error(error=e)
                 raise
 

@@ -79,7 +79,7 @@ class TestTracedProviderServiceOtelSpan:
             assert set_calls.get(MCP.TOOL_STATUS) == "success"
 
     def test_invoke_tool_span_sets_error_on_failure(self) -> None:
-        """Failed invocation sets MCP.TOOL_STATUS to 'error' and records exception."""
+        """Failed invocation sets MCP.TOOL_STATUS to 'error' and records no exception text."""
         from mcp_hangar.domain.exceptions import ToolInvocationError
 
         svc = _make_service(invoke_raises=ToolInvocationError("math", "add", "boom"))
@@ -97,7 +97,8 @@ class TestTracedProviderServiceOtelSpan:
 
             set_calls = {c.args[0]: c.args[1] for c in mock_span.set_attribute.call_args_list}
             assert set_calls.get(MCP.TOOL_STATUS) == "error"
-            mock_span.record_exception.assert_called_once()
+            # The message could carry what the tool returned (GHSA-qwq2-7g49-jxc6).
+            mock_span.record_exception.assert_not_called()
 
     def test_invoke_tool_span_carries_user_and_session_when_provided(self) -> None:
         """user_id and session_id appear as span attributes when provided."""

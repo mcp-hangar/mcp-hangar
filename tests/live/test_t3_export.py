@@ -14,8 +14,10 @@ attribute). Arrival is asynchronous, so every check polls to a deadline.
 Proven: a warm call's spans arrive, including the upstream CLIENT span; a call
 the tool-access policy denies has a span and no CLIENT span; a
 ``tool_invocation`` audit record for the warm call arrives under scope
-``mcp_hangar.audit``; and the spans of a call made right before SIGTERM arrive,
-delivered by the shutdown flush alone. Not proven: that the audit record is
+``mcp_hangar.audit``; the spans of a call made right before SIGTERM arrive,
+delivered by the shutdown flush alone; and a failing tool's error text reaches
+the caller but no exported span -- not a status message, an event or an
+attribute (GHSA-qwq2-7g49-jxc6). Not proven: that the audit record is
 linked to the call's trace (its trace ID is reported as observed), or anything
 about a Collector beyond this receiver. Run with::
 
@@ -50,7 +52,15 @@ _ARRIVAL_TIMEOUT_S = 30.0
 # which is itself bounded by TRACING_SHUTDOWN_TIMEOUT_S.
 _SIGTERM_BOUND_S = TRACING_SHUTDOWN_TIMEOUT_S + 15.0
 _DENIED_TOOL = "power"
-_ARGS = {"add": {"a": 2, "b": 3}, "multiply": {"a": 2, "b": 3}, "power": {"base": 2, "exponent": 3}}
+_ARGS = {
+    "add": {"a": 2, "b": 3},
+    "multiply": {"a": 2, "b": 3},
+    "power": {"base": 2, "exponent": 3},
+    "divide": {"a": 1, "b": 0},
+}
+# What the stub backend's `divide` says when it fails; it must reach no span.
+_TOOL_ERROR_TEXT = "division by zero"
+_STATUS_ERROR = 2  # opentelemetry.proto.trace.v1.Status.StatusCode.STATUS_CODE_ERROR
 
 # One stub backend. `power` is denied by the server's tool-access policy, the
 # governance gate the denied call is refused by, before any backend is reached.
@@ -136,6 +146,7 @@ class _Run:
     run_id: str
     warm: dict[str, Any]
     denied: dict[str, Any]
+    failed: dict[str, Any]
 
 
 @pytest.fixture(scope="module")
@@ -148,7 +159,7 @@ def receiver() -> Iterator[OtlpReceiver]:
 
 @pytest.fixture(scope="module")
 def exported_run(receiver: OtlpReceiver, tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Run]:
-    """A gateway exporting to ``receiver``: one warm call, then one denied call."""
+    """A gateway exporting to ``receiver``: one warm call, one denied call, one the tool fails."""
     run_id = f"t3-{uuid.uuid4()}"
     # Short batch delays only make arrival prompt; every check still polls.
     env = _gateway_env(receiver, run_id, OTEL_BSP_SCHEDULE_DELAY="200", OTEL_BLRP_SCHEDULE_DELAY="200")
@@ -156,7 +167,8 @@ def exported_run(receiver: OtlpReceiver, tmp_path_factory: pytest.TempPathFactor
         _call(hangar.base_url, "hangar_start", {"mcp_server": "math"})  # so the next call is warm
         warm = _hangar_call(hangar.base_url, "add")
         denied = _hangar_call(hangar.base_url, _DENIED_TOOL)
-        yield _Run(receiver=receiver, run_id=run_id, warm=warm, denied=denied)
+        failed = _hangar_call(hangar.base_url, "divide")
+        yield _Run(receiver=receiver, run_id=run_id, warm=warm, denied=denied, failed=failed)
 
 
 def test_warm_call_spans_arrive_under_the_run_instance_id(exported_run: _Run) -> None:
@@ -184,6 +196,28 @@ def test_denied_call_has_a_span_and_no_upstream_client_span(exported_run: _Run) 
     assert not [s for s in trace if s.kind == _CLIENT], trace
     assert not [s for s in run.receiver.spans(run.run_id) if s.name == f"execute_tool {_DENIED_TOOL}"]
     print(_evidence("denied call", trace))
+
+
+def test_a_failing_tools_error_text_reaches_the_caller_and_no_exported_span(exported_run: _Run) -> None:
+    run = exported_run
+    assert run.failed["success"] is False, run.failed
+    assert _TOOL_ERROR_TEXT in json.dumps(run.failed), run.failed
+
+    trace = poll(lambda: _upstream_trace(run.receiver, run.run_id, "divide", run.failed["call_id"]), _ARRIVAL_TIMEOUT_S)
+
+    assert trace, f"no complete trace for the failed call under {run.run_id}"
+    [call] = [s for s in trace if s.name == "batch.call.divide"]
+    assert (call.status_code, call.status_message) == (_STATUS_ERROR, ""), call
+    assert call.attributes.get("error.type") == "ToolInvocationError", call
+    # Every span this gateway exported, not only this trace's.
+    leaked = [s.name for s in run.receiver.spans(run.run_id) if _TOOL_ERROR_TEXT in repr(s)]
+    assert leaked == [], leaked
+    # The failure is still an exception event, carrying its type and nothing else.
+    exceptions = [(s.name, attributes) for s in trace for name, attributes in s.events if name == "exception"]
+    assert exceptions, trace
+    assert all(set(attributes) == {"exception.type"} for _span, attributes in exceptions), exceptions
+    print(_evidence("failed call", trace))
+    print(f"T3 failed call exception events: {exceptions}")
 
 
 def test_audit_record_for_the_warm_call_arrives(exported_run: _Run) -> None:

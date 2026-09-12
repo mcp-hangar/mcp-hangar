@@ -190,6 +190,45 @@ class TestAnUpstreamFailure:
         assert Tree(run, "upstream_failure").one("execute_tool divide")["status"] == "ERROR"
 
 
+# What each failing tool said: the stdio upstream's JSON-RPC error message, and
+# the HTTP upstream's isError text (_trace_harness.TOOL_ERROR_TEXT).
+TOOL_TEXTS = {"upstream_failure": ("divide", "division by zero"), "tool_error": ("leak", "canary-isError-text-3d71")}
+
+
+class TestAToolsErrorTextReachesNoSpan:
+    """GHSA-qwq2-7g49-jxc6: the caller gets the tool's text; the trace backend does not."""
+
+    @pytest.mark.parametrize("scenario", TOOL_TEXTS)
+    def test_the_caller_still_gets_the_text(self, run, scenario):
+        tree = Tree(run, scenario)
+
+        assert tree.batch["success"] is False, tree.batch
+        assert TOOL_TEXTS[scenario][1] in json.dumps(tree.batch), tree.batch
+
+    @pytest.mark.parametrize("scenario", TOOL_TEXTS)
+    def test_the_call_span_is_error_with_a_bounded_type(self, run, scenario):
+        tool, _text = TOOL_TEXTS[scenario]
+        call = Tree(run, scenario).one(f"batch.call.{tool}")
+
+        assert call["status"] == "ERROR"
+        assert not call["status_description"], call
+        assert call["attributes"].get("error.type") == "ToolInvocationError", call
+
+    @pytest.mark.parametrize("scenario", TOOL_TEXTS)
+    def test_no_exported_span_carries_the_text(self, run, scenario):
+        text = TOOL_TEXTS[scenario][1]
+
+        leaked = [s["name"] for s in run["spans"] if text in json.dumps(s)]
+
+        assert leaked == [], leaked
+
+    def test_exception_events_carry_the_type_only(self, run):
+        events = [(s["name"], e["attributes"]) for s in run["spans"] for e in s["events"] if e["name"] == "exception"]
+
+        assert events, "a failing call still records exception events"
+        assert all(set(attributes) == {"exception.type"} for _name, attributes in events), events
+
+
 def test_two_concurrent_requests_keep_separate_trees(run):
     trees = [Tree(run, "concurrent_1"), Tree(run, "concurrent_2")]
     held = [c.get("overlapped") for c in run["http_seen"] if "overlapped" in c]
