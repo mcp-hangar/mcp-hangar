@@ -263,6 +263,7 @@ class IAuditExporter(Protocol):
         cost_model: str | None = None,
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record."""
         ...

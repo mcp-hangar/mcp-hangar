@@ -116,6 +116,7 @@ class LEEFExporter:
         cost_model: str | None = None,
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -146,6 +147,7 @@ class LEEFExporter:
             data=data,
             caller_user_id=user_id,
             caller_session_id=session_id,
+            tenant_id=tenant_id,
         )
         self._emit(_format_record(record))
 

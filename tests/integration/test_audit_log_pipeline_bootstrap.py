@@ -8,6 +8,11 @@ it sends: the OTLP endpoint here is unreachable by design (#1291, #1293).
 
 Before this, nothing built a logger provider, so with the SDK installed every
 audit record was dropped; and only the env var turned audit export on.
+
+The record's caller (#1342): the handler read keys ``IdentityContext.to_dict()``
+never produces, so no record carried a caller id, a user, a session or a tenant;
+a failed call reported a duration of 0.0; and the audit resource was built apart
+from the trace resource, so records could not be joined to traces by instance.
 """
 
 from __future__ import annotations
@@ -26,7 +31,20 @@ import pytest
 pytestmark = pytest.mark.otel_sdk
 
 HARNESS = Path(__file__).with_name("_audit_log_harness.py")
-MODES = ("yaml", "env", "none", "tracing_off")
+MODES = ("yaml", "env", "none", "tracing_off", "auth", "bound")
+
+# As `_audit_log_harness.py` mints and declares them.
+AUTH_PRINCIPAL, AUTH_TENANT = "user:audit-harness", "tenant-audit"
+BOUND_AGENT, BOUND_SESSION, BOUND_TENANT = "agent-audit", "session-audit", "tenant-bound"
+
+# The `auth` run's resource environment: OTEL_RESOURCE_ATTRIBUTES must beat
+# MCP_ENVIRONMENT on both resources, since both are built by one function.
+RESOURCE_ENV = {
+    "MCP_ENVIRONMENT": "from-mcp-env",
+    "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment=from-otel-env,service.version=9.9.9-harness",
+}
+JOIN_KEYS = ("service.instance.id", "service.version", "deployment.environment")
+CALLER_KEYS = ("mcp.caller.id", "mcp.caller.type", "mcp.caller.roles", "mcp.caller.tenant_id")
 
 
 def _unreachable_endpoint() -> str:
@@ -39,9 +57,11 @@ def _unreachable_endpoint() -> str:
 def _run(mode: str, tmp: Path, endpoint: str) -> dict[str, Any]:
     out = tmp / mode / "run.json"
     out.parent.mkdir()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "MCP_TRACING_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "MCP_TRACING_", "MCP_ENVIRONMENT"))}
     if mode == "env":
         env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint
+    if mode == "auth":
+        env.update(RESOURCE_ENV)
     result = subprocess.run(
         [sys.executable, str(HARNESS), mode, str(out), endpoint],
         capture_output=True,
@@ -140,3 +160,64 @@ def test_with_tracing_off_the_record_is_emitted_without_trace_context(runs):
     assert run["calls"]["no_trace_context"]["batch"]["success"] is True
     [record] = _tool_records(run)
     assert (record["trace_id"], record["span_id"]) == ("0" * 32, "0" * 16)
+
+
+def test_an_authenticated_call_records_its_caller_and_tenant(runs):
+    run = runs["auth"]
+    assert run["calls"]["sampled"]["batch"]["success"] is True, run["calls"]
+
+    attributes = _record_for(run, "sampled")["attributes"]
+
+    assert attributes["mcp.caller.id"] == AUTH_PRINCIPAL
+    assert attributes["mcp.user.id"] == AUTH_PRINCIPAL
+    # An API key authenticates a service-account principal.
+    assert attributes["mcp.caller.type"] == "service"
+    assert attributes["mcp.caller.tenant_id"] == AUTH_TENANT
+    # Neither is invented: the served HTTP path's identity carries no session,
+    # and no identity carries roles.
+    assert "mcp.session.id" not in attributes
+    assert "mcp.caller.roles" not in attributes
+
+
+def test_a_declared_session_and_agent_reach_the_record(runs):
+    run = runs["bound"]
+    assert run["calls"]["sampled"]["batch"]["success"] is True, run["calls"]
+
+    attributes = _record_for(run, "sampled")["attributes"]
+
+    assert attributes["mcp.session.id"] == BOUND_SESSION
+    assert attributes["mcp.caller.id"] == BOUND_AGENT  # no user: the agent is the caller
+    assert attributes["mcp.caller.type"] == "anonymous"
+    assert attributes["mcp.caller.tenant_id"] == BOUND_TENANT
+    assert "mcp.user.id" not in attributes
+
+
+def test_a_failed_call_records_its_duration(runs):
+    run = runs["auth"]
+    assert run["calls"]["failed"]["batch"]["success"] is False, run["calls"]
+    trace_id = run["calls"]["failed"]["trace_id"]
+
+    failures = [r["attributes"] for r in _tool_records(run) if r["trace_id"] == trace_id]
+
+    assert failures and all(a["mcp.tool.status"] == "error" for a in failures), failures
+    assert all(a["mcp.tool.duration_ms"] > 0.0 for a in failures), failures
+    assert all(a["mcp.caller.id"] == AUTH_PRINCIPAL for a in failures), failures
+
+
+@pytest.mark.parametrize("mode", ["auth", "bound"], ids=["resource-env", "defaults"])
+def test_the_audit_resource_joins_the_trace_resource(runs, mode):
+    audit, trace = runs[mode]["resources"]["audit"], runs[mode]["resources"]["trace"]
+
+    assert {key: audit.get(key) for key in JOIN_KEYS} == {key: trace.get(key) for key in JOIN_KEYS}
+    assert all(trace.get(key) for key in JOIN_KEYS), trace
+    if mode == "auth":
+        assert audit["deployment.environment"] == "from-otel-env"
+        assert audit["service.version"] == "9.9.9-harness"
+
+
+def test_without_an_identity_the_record_has_no_caller_field(runs):
+    attributes = _record_for(runs["yaml"], "sampled")["attributes"]
+
+    assert not {key for key in attributes if key.startswith("mcp.caller.")}, attributes
+    assert "mcp.user.id" not in attributes and "mcp.session.id" not in attributes
+    assert all(key not in attributes for key in CALLER_KEYS)

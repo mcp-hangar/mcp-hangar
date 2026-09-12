@@ -242,6 +242,9 @@ class Caller:
     #: Roles held by the caller at invocation time (comma-separated).
     ROLES = "mcp.caller.roles"
 
+    #: Tenant of the authenticated caller (``IdentityContext`` tenant_id).
+    TENANT = "mcp.caller.tenant_id"
+
 
 class Cost:
     """Attributes for FinOps cost attribution on tool invocations.

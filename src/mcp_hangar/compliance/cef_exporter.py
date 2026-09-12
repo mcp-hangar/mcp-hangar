@@ -86,6 +86,7 @@ class CEFExporter:
         cost_model: str | None = None,
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """Export a tool invocation event as a CEF log line.
 
@@ -131,6 +132,7 @@ class CEFExporter:
             data=data,
             caller_user_id=user_id,
             caller_session_id=session_id,
+            tenant_id=tenant_id,
         )
 
         cef_line = format_audit_record(record)

@@ -11,10 +11,11 @@ import threading
 import time
 from typing import Any
 
+from ...domain.events import current_instance_id
 from ...logging_config import get_logger
 from ...metrics import record_otlp_audit_export_failure
 from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer
-from ...observability.tracing import OtlpExporterSettings, resolve_otlp_exporter_settings
+from ...observability.tracing import OtlpExporterSettings, _build_resource, resolve_otlp_exporter_settings
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,6 @@ try:
     import opentelemetry.sdk._logs as _sdk_logs
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.version import __version__ as _sdk_version
 
     OTEL_LOGS_AVAILABLE = True
@@ -137,7 +137,9 @@ def init_audit_log_export(otlp_endpoint: str | None, service_name: str = "mcp-ha
         otlp_exporter = _build_otlp_log_exporter(settings)
         if otlp_exporter is None:
             return False
-        provider = LoggerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
+        # The trace resource's builder, and the instance id tracing is given, so
+        # audit records join traces on the same resource attributes.
+        provider = LoggerProvider(resource=_build_resource(service_name, current_instance_id()))
         # Duck-typed: the SDK renamed the exporter base it would otherwise subclass.
         exporter: Any = _MeteredLogExporter(otlp_exporter)
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
@@ -304,6 +306,7 @@ class OTLPAuditExporter:
         cost_model: str | None = None,
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
@@ -322,6 +325,7 @@ class OTLPAuditExporter:
             cost_model: Optional pricing model used.
             cost_input_tokens: Optional input tokens consumed.
             cost_output_tokens: Optional output tokens produced.
+            tenant_id: Optional tenant of the caller.
         """
         try:
             attributes: dict = {
@@ -343,6 +347,8 @@ class OTLPAuditExporter:
                 attributes[Caller.ID] = caller_id
             if caller_roles is not None:
                 attributes[Caller.ROLES] = caller_roles
+            if tenant_id is not None:
+                attributes[Caller.TENANT] = tenant_id
             if cost_cents is not None:
                 attributes[Cost.CENTS] = cost_cents
             if cost_model is not None:
