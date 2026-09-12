@@ -31,7 +31,7 @@ import pytest
 from mcp_hangar.application.event_handlers import DetectionEnforcementHandler
 from mcp_hangar.domain.events import DetectionRuleMatched
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
-from mcp_hangar.server.api.sessions import get_session_suspension_registry, is_session_suspended
+from mcp_hangar.server.api.sessions import get_session_suspension_registry
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
 
@@ -85,7 +85,7 @@ class TestTheHandlerWritesWhereTheRoutesRead:
 
         handler.handle(_match("suspend", "s-shared"))
 
-        assert is_session_suspended("s-shared") is True
+        assert get_session_suspension_registry().is_suspended("s-shared") is True
         registry.unsuspend("s-shared")
 
     def test_a_separate_registry_does_not_leak_into_the_serving_path(self):
@@ -96,7 +96,7 @@ class TestTheHandlerWritesWhereTheRoutesRead:
         handler.handle(_match("suspend", "s-isolated"))
 
         assert "s-isolated" in other
-        assert is_session_suspended("s-isolated") is False
+        assert get_session_suspension_registry().is_suspended("s-isolated") is False
 
 
 class TestTheRegistryIsRequired:

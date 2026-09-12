@@ -59,11 +59,6 @@ def _announce(event: DomainEvent) -> None:
         )
 
 
-def is_session_suspended(session_id: str) -> bool:
-    """Return whether a session is currently suspended."""
-    return session_id in _suspended_sessions
-
-
 async def suspend_session(request: Request) -> HangarJSONResponse:
     """Suspend a session in the local in-memory registry."""
     session_id = cast(str, request.path_params["session_id"])
