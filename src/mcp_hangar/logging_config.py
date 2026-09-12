@@ -12,12 +12,19 @@ Usage:
     # In any module
     logger = get_logger(__name__)
     logger.info("event_name", key="value", count=42)
+
+Configuration via environment variables:
+    MCP_LOG_FIELD_LENGTH_LIMIT: Longest string value a log record carries, in
+        characters (default: 2048). Longer ones are cut after redaction and end
+        with ``TRUNCATION_MARKER``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping, Sequence
+import functools
 import logging
+import os
 import sys
 import threading
 import time
@@ -123,6 +130,76 @@ def _redact_secret_values(_logger: Any, _method_name: str, event_dict: MutableMa
     return cast(dict[str, Any], scrub(event_dict))
 
 
+#: How a cut value ends; the number is how many characters were removed.
+TRUNCATION_MARKER = "…[truncated {}]"
+
+#: Hangar's bound on one string value in a log record, in characters.
+LOG_FIELD_LENGTH_LIMIT = 2048
+LOG_FIELD_LENGTH_LIMIT_ENV = "MCP_LOG_FIELD_LENGTH_LIMIT"
+
+
+def truncate_text(value: str, limit: int) -> str:
+    """``value`` if it fits in ``limit`` characters, else cut to fit and ending with the marker.
+
+    The marker counts toward the limit, so the result is never longer than
+    ``limit``. A limit too short to hold the marker cuts to the limit without one.
+    """
+    if len(value) <= limit:
+        return value
+    keep = limit - len(TRUNCATION_MARKER.format(len(value)))  # room left beside the widest marker it can need
+    if keep <= 0:
+        return value[:limit]
+    return value[:keep] + TRUNCATION_MARKER.format(len(value) - keep)
+
+
+def env_length_limit(name: str) -> int | None:
+    """The positive integer in environment variable ``name``; None when it is unset or empty.
+
+    Any other value is ignored too, with one warning per distinct value.
+    """
+    raw = os.environ.get(name, "").strip()
+    return _parse_length_limit(name, raw) if raw else None
+
+
+@functools.lru_cache(maxsize=64)
+def _parse_length_limit(name: str, raw: str) -> int | None:
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value > 0:
+        return value
+    get_logger(__name__).warning("length_limit_invalid", variable=name, value=raw, expected="a positive integer")
+    return None
+
+
+def _truncate_long_values(limit: int) -> Processor:
+    """A processor cutting every string in the record to ``limit`` characters, marker included.
+
+    It must run after both redaction processors: a secret is redacted whole
+    before a cut could leave a fragment too short for its pattern to match. It
+    reaches as deep as they do, five levels.
+    """
+
+    def cut(obj: Any, depth: int = 0) -> Any:
+        if depth > 5:
+            return obj
+        if isinstance(obj, str):
+            return truncate_text(obj, limit)
+        if isinstance(obj, dict):
+            return {k: cut(v, depth + 1) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [cut(item, depth + 1) for item in obj]
+        return obj
+
+    def truncate_long_values(
+        _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
+    ) -> Mapping[str, Any]:
+        return cast(dict[str, Any], cut(event_dict))
+
+    return truncate_long_values
+
+
 def _drop_color_message_key(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     """Remove the color_message key that uvicorn adds."""
     event_dict.pop("color_message", None)
@@ -144,9 +221,13 @@ def setup_logging(
         json_format: If True, output logs as JSON (recommended for production).
         development: If True, use colored console output. Defaults to not json_format.
         log_file: Optional path to log file. If provided, logs will also be written to this file.
+
+    Every string in a record is cut to MCP_LOG_FIELD_LENGTH_LIMIT characters
+    (default ``LOG_FIELD_LENGTH_LIMIT``), read here, once.
     """
     if development is None:
         development = not json_format
+    field_limit = env_length_limit(LOG_FIELD_LENGTH_LIMIT_ENV) or LOG_FIELD_LENGTH_LIMIT
 
     # Shared processors for all log entries
     shared_processors: Sequence[Processor] = [
@@ -160,6 +241,7 @@ def setup_logging(
         _add_trace_context,
         _sanitize_sensitive_data,
         _redact_secret_values,
+        _truncate_long_values(field_limit),  # after redaction, never before
         _drop_color_message_key,
         structlog.processors.UnicodeDecoder(),
     ]

@@ -136,6 +136,27 @@ records, which carry caller identities. To export traces without them, set
 `config.yaml`. The environment variable wins over the file, and the default is
 `true`.
 
+## Length limits
+
+Hangar bounds how long a value it records can be. Each limit is a number of
+characters, and an environment variable changes it. Where several variables
+apply, the first one set wins:
+
+| Value | Default | Variables, first set wins |
+| --- | --- | --- |
+| Span attribute | 256 | `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT` |
+| Span event or link attribute, such as an exception's message | 256 | `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT` |
+| OTLP audit record attribute | 256 | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT` |
+| String in a structured-log record | 2048 | `MCP_LOG_FIELD_LENGTH_LIMIT` |
+| Free-text field of a domain event, such as `error_message` or `reasons` | 4096 | `MCP_EVENT_TEXT_LENGTH_LIMIT` |
+
+A cut value ends with `…[truncated N]`, where N is the number of characters
+removed, and the marker counts toward the limit. Span attributes are the
+exception: the OpenTelemetry SDK cuts them and adds no marker. Log records are
+cut after secrets are redacted. The span and audit limits apply only to the
+tracer and logger providers Hangar builds. A provider registered before Hangar
+starts keeps its own configuration.
+
 ## Cleanup
 
 ```bash

@@ -12,6 +12,15 @@ Configuration via environment variables:
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
     MCP_AUDIT_EXPORT_ENABLED: Export audit records over OTLP to an OTLP endpoint
         set explicitly (default: true). False turns audit export off, not tracing
+    MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT: Longest span attribute value, in characters
+        (default: 256). OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT, then
+        OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT, win when set
+    MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT: Longest OTLP audit attribute value (default:
+        256). OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT, then
+        OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT, win when set. Both apply only to the
+        providers Hangar builds, never to one registered before it
+    MCP_LOG_FIELD_LENGTH_LIMIT, MCP_EVENT_TEXT_LENGTH_LIMIT: see logging_config
+        and domain.events.base (defaults: 2048 and 4096)
     MCP_LANGFUSE_ENABLED: Enable Langfuse (default: false)
     LANGFUSE_PUBLIC_KEY: Langfuse public key
     LANGFUSE_SECRET_KEY: Langfuse secret key

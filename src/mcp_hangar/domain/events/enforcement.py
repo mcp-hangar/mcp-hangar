@@ -92,6 +92,7 @@ class EgressPolicyViolationObserved(DomainEvent):
         # consumer iterates `reasons` without a None check.
         if self.reasons is None:
             self.reasons = []
+        super().__post_init__()  # bounds `reasons`
 
 
 @dataclass
