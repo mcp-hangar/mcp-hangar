@@ -88,6 +88,7 @@ from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
+from .flat_call_log import logging_each_call, note_failure
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 
@@ -921,6 +922,7 @@ def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Ca
         try:
             refuse_if_session_suspended("flat_tool", mcp_ctx)
         except SessionSuspendedError as exc:
+            note_failure(exc.reason)
             return CallToolResult.model_validate({"content": [{"type": "text", "text": str(exc)}], "isError": True})
         return await call_tool(name, arguments, mcp_ctx)
 
@@ -987,6 +989,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         """
         return await _list_projected_tools(mcp_ctx, _management_tools)
 
+    # One log line per call, whatever its outcome (#1362). Outermost, so a
+    # suspended session's refusal is logged too.
+    @logging_each_call
     # A suspended session never reaches the body (GHSA-fhwh-fmq2-7m5c).
     @_refusing_suspended_sessions
     async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
@@ -1110,6 +1115,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         result = batch.results[0]
         if not result.success:
+            note_failure(result.error_type)  # the text below does not carry the code; the log line does
             # Surface enforcement failures as tool errors (isError=True),
             # not as unhandled exceptions, so the MCP envelope stays valid.
             return CallToolResult.model_validate(
