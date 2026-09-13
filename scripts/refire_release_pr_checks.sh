@@ -17,8 +17,13 @@ set -euo pipefail
 # Its own file so the recovery can be exercised without standing up a release:
 # `tests/ci/test_release_pr_checks_are_refired.py` runs it against a stub `gh`.
 #
+# The reopen is only as good as the credential it is made with. Pass the
+# release app's token as GH_TOKEN. A reopen by `github-actions[bot]` produced
+# runs with zero jobs and no check runs on 2.19.1 (#1377, #1379).
+#
 # Usage: refire_release_pr_checks.sh <branch>
-# Inputs: GH_TOKEN (gh CLI), GITHUB_REPOSITORY (defaults to the core repo).
+# Inputs: GH_TOKEN (gh CLI; the app token, not GITHUB_TOKEN), GITHUB_REPOSITORY
+# (defaults to the core repo).
 
 branch="${1:?branch is required}"
 repo="${GITHUB_REPOSITORY:-mcp-hangar/mcp-hangar}"
