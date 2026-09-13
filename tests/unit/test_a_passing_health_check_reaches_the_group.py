@@ -2,18 +2,32 @@
 
 The served path is proved in
 ``tests/integration/test_a_passing_health_check_returns_a_member_to_rotation.py``.
-These tests pin its two halves on their own. The saga reads a member's groups
-from the live mapping it was given, so it finds a group filled in after the saga
-was built, with nothing registered. ``report_success`` closes an open circuit,
-but only once ``min_healthy`` members are in rotation.
+These tests pin its parts on their own:
+
+- The saga reads a member's groups from the live mapping it was given, so it
+  finds a group filled in after the saga was built, with nothing registered.
+- A stop is not a failure, whichever of its two reasons it carries.
+- A failure is counted once. One failing health check that also degrades the
+  server counts once, and a failed start that degrades it counts once too.
+- ``report_success`` closes an open circuit, but only once ``min_healthy``
+  members are in rotation.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from mcp_hangar.application.sagas import GroupRebalanceSaga
-from mcp_hangar.domain.events import HealthCheckFailed, HealthCheckPassed
+from mcp_hangar.domain.events import (
+    DEGRADED_BY_HEALTH_CHECKS,
+    HealthCheckFailed,
+    HealthCheckPassed,
+    McpServerDegraded,
+    McpServerStopped,
+)
+from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.model.mcp_server_group import GroupCircuitClosed, McpServerGroup
-from mcp_hangar.domain.value_objects import GroupState, ProviderState
+from mcp_hangar.domain.value_objects import GroupState, McpServerState, ProviderState
 
 
 def _server(server_id: str) -> MagicMock:
@@ -86,6 +100,80 @@ class TestTheSagaReadsMembershipFromTheGroups:
 
         assert saga.handle(_passed("elsewhere")) == []
         assert group.get_member("a").in_rotation is False
+
+
+def _strict(member_ids: list[str], circuit_failure_threshold: int = 1) -> McpServerGroup:
+    """Members in rotation, and a group that reacts to the first counted failure."""
+    group = McpServerGroup(
+        group_id="pool",
+        auto_start=False,
+        unhealthy_threshold=1,
+        circuit_failure_threshold=circuit_failure_threshold,
+    )
+    for member_id in member_ids:
+        group.add_member(_server(member_id))
+        group.get_member(member_id).in_rotation = True
+    return group
+
+
+class TestAStopIsNotAFailure:
+    """The only two reasons `McpServerStopped` carries; the gateway or an operator chose both."""
+
+    @pytest.mark.parametrize("reason", ["idle", "shutdown"])
+    def test_a_stopped_member_stays_in_rotation_and_the_circuit_stays_closed(self, reason):
+        group = _strict(["a"])
+        saga = GroupRebalanceSaga(groups={"pool": group})
+
+        for _ in range(3):
+            saga.handle(McpServerStopped(mcp_server_id="a", reason=reason))
+
+        member = group.get_member("a")
+        assert member.in_rotation is True
+        assert member.consecutive_failures == 0
+        assert group.circuit_open is False
+
+
+class TestAFailureIsCountedOnce:
+    def test_one_failing_health_check_counts_once_even_when_it_degrades_the_server(self):
+        """At the degrade threshold one check emits HealthCheckFailed AND McpServerDegraded.
+
+        Driven through the real `McpServer.health_check()`, so the pairing is
+        the aggregate's, not an assumption of this test.
+        """
+        server = McpServer(mcp_server_id="a", mode="subprocess", command=["echo"])
+        server._client = MagicMock(call=Mock(side_effect=OSError("down")))
+        server._state = McpServerState.READY
+        # Four counted failures would open this circuit; three checks must not.
+        group = McpServerGroup(group_id="pool", auto_start=False, unhealthy_threshold=10, circuit_failure_threshold=4)
+        group.add_member(server)
+        saga = GroupRebalanceSaga(groups={"pool": group})
+
+        per_check = []
+        for _ in range(3):
+            server.health_check()
+            events = server.collect_events()
+            per_check.append(events)
+            for event in events:
+                saga.handle(event)
+
+        last = per_check[-1]
+        assert [type(e) for e in last] == [HealthCheckFailed, McpServerDegraded]
+        assert last[1].reason == DEGRADED_BY_HEALTH_CHECKS
+        assert group.get_member("a").consecutive_failures == 3
+        assert group.circuit_open is False
+
+    def test_a_failed_start_that_degrades_the_server_counts_once(self):
+        """No health check reported it, so the degrade is the group's only signal."""
+        group = _strict(["a"], circuit_failure_threshold=2)
+        saga = GroupRebalanceSaga(groups={"pool": group})
+
+        saga.handle(
+            McpServerDegraded(mcp_server_id="a", consecutive_failures=3, total_failures=3, reason="connection refused")
+        )
+
+        assert group.get_member("a").consecutive_failures == 1
+        assert group.get_member("a").in_rotation is False
+        assert group.circuit_open is False
 
 
 class TestARecoveredGroupClosesItsCircuit:

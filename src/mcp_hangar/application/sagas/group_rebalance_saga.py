@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ...domain.events import (
+    DEGRADED_BY_HEALTH_CHECKS,
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -135,11 +136,26 @@ class GroupRebalanceSaga(EventTriggeredSaga):
             if group:
                 group.report_success(mcp_server_id)
 
-        elif isinstance(event, McpServerStopped | McpServerDegraded):
-            reason = getattr(event, "reason", "unknown")
-            logger.info(f"Member {mcp_server_id} unavailable in group {group_id}: {reason}")
-            if group:
-                group.report_failure(mcp_server_id)
+        elif isinstance(event, McpServerStopped):
+            # Not a failure. A stop carries one of two reasons, and the gateway
+            # or an operator chose both: "idle" is the GC reaping an unused
+            # server, "shutdown" is every explicit stop (hangar_stop, reload,
+            # unload, delete, a group's stop_all, process exit). A crashed
+            # process emits no stop at all. Counted as a failure, one idle reap
+            # could take a cold member out of rotation, where nothing selects,
+            # health-checks or starts it again.
+            logger.info(f"Member {mcp_server_id} stopped in group {group_id}: {event.reason}")
+
+        elif isinstance(event, McpServerDegraded):
+            if event.reason == DEGRADED_BY_HEALTH_CHECKS:
+                # The check that degraded the server has already been reported
+                # as its own HealthCheckFailed; counting this too would count
+                # one failure twice.
+                logger.info(f"Member {mcp_server_id} degraded by health checks in group {group_id}")
+            else:
+                logger.info(f"Member {mcp_server_id} degraded in group {group_id}: {event.reason}")
+                if group:
+                    group.report_failure(mcp_server_id)
 
         elif isinstance(event, HealthCheckPassed):
             logger.debug(f"Health check passed for {mcp_server_id} in group {group_id}")
