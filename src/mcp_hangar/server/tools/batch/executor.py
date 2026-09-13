@@ -1576,8 +1576,8 @@ class BatchExecutor:
            which happens ONLY when config.relay_tasks_enabled is True): CAPTURE
            the request context into the CallResult and return it as a success.
            This worker performs NO store write -- per ADR-014 D4 the actual
-           register + TaskCreated emit runs on the MAIN LOOP at the hangar_call
-           seam, before the handle reaches the client.
+           register + TaskCreated emit runs on the MAIN LOOP at the relay seam
+           (relay_seam.py), before the handle reaches the client.
          - Kill-switch OFF (store absent): byte-identical to the ADR-008
            relay-only stance -- a clean TaskRelayNotSupported rejection, so the
            client never gets an untracked, unusable handle.
