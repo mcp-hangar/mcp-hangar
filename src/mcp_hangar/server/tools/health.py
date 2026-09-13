@@ -13,6 +13,7 @@ from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ...logging_config import get_logger
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper
+from .replica_view import observe_replica
 
 logger = get_logger(__name__)
 
@@ -161,6 +162,40 @@ def _process_metric_sample(sample: Any, result: dict[str, Any]) -> None:
     _process_error_metric(name, labels, value, result["errors"])
 
 
+def hangar_health() -> dict:
+    """This replica's server and group health, from the snapshot `hangar_status` reads.
+
+    Rendered from `observe_replica()` rather than a second read of the
+    repository. The second read skipped hot-loaded servers, so from a single
+    replica `hangar_health` and `hangar_status` could report different totals
+    (#1380).
+    """
+    ctx = get_context()
+    view = observe_replica()
+
+    group_state_counts: dict[str, int] = {}
+    for group in view.groups:
+        group_state_counts[group.state] = group_state_counts.get(group.state, 0) + 1
+
+    return {
+        "status": "healthy",
+        "mcp_servers": {
+            "total": view.total_servers,
+            "by_state": view.servers_by_state(),
+        },
+        "groups": {
+            "total": len(view.groups),
+            "by_state": group_state_counts,
+            "total_members": sum(g.total_count for g in view.groups),
+            "healthy_members": sum(g.healthy_count for g in view.groups),
+        },
+        "security": {
+            "rate_limiting": ctx.rate_limiter.get_stats(),
+        },
+        **view.scope_fields(),
+    }
+
+
 def register_health_tools(mcp: FastMCP) -> None:
     """Register health and metrics tools with MCP server."""
 
@@ -173,12 +208,17 @@ def register_health_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    def hangar_health() -> dict:
+    def _hangar_health() -> dict:
         """Get registry health status including security metrics.
 
         CHOOSE THIS when: quick health check, monitoring dashboard, security overview.
         CHOOSE hangar_metrics when: detailed per-mcp_server stats, tool call counts, Prometheus.
         CHOOSE hangar_status when: human-readable dashboard with visual indicators.
+
+        SCOPE: replica-local. The answer describes the replica that served this
+        call, named in replica.instance_id, not the whole fleet. Another replica
+        can answer differently at the same moment. Reads the same snapshot as
+        hangar_status, so the two tools agree when one replica answers both.
 
         Side effects: None (read-only).
 
@@ -190,52 +230,23 @@ def register_health_tools(mcp: FastMCP) -> None:
                 status: str,
                 mcp_servers: {total: int, by_state: {cold: int, ready: int, degraded: int, dead: int}},
                 groups: {total: int, by_state: object, total_members: int, healthy_members: int},
-                security: {rate_limiting: {active_buckets: int, config: object}}
+                security: {rate_limiting: {active_buckets: int, config: object}},
+                replica: {instance_id: str, uptime_seconds: float, uptime: str},
+                scope: "replica",
+                scope_note: str
             }
+            mcp_servers counts configured and hot-loaded servers on this replica.
 
         Example:
             hangar_health()
             # {"status": "healthy",
             #  "mcp_servers": {"total": 3, "by_state": {"ready": 2, "cold": 1}},
             #  "groups": {"total": 1, "by_state": {"ready": 1}, "total_members": 3, "healthy_members": 2},
-            #  "security": {"rate_limiting": {"active_buckets": 5, "config": {...}}}}
+            #  "security": {"rate_limiting": {"active_buckets": 5, "config": {...}}},
+            #  "replica": {"instance_id": "hangar-0-3fa81c2e", "uptime_seconds": 8100.0, "uptime": "2h 15m"},
+            #  "scope": "replica", "scope_note": "This describes what the replica named ..."}
         """
-        ctx = get_context()
-        rate_limit_stats = ctx.rate_limiter.get_stats()
-
-        # Get all mcp_servers via repository
-        all_mcp_servers = ctx.repository.get_all()
-        mcp_servers = list(all_mcp_servers.values())
-        state_counts: dict[str, int] = {}
-        for p in mcp_servers:
-            state = str(p.state)
-            state_counts[state] = state_counts.get(state, 0) + 1
-
-        group_state_counts: dict[str, int] = {}
-        total_group_members = 0
-        healthy_group_members = 0
-        for group in ctx.groups.values():
-            state = group.state.value
-            group_state_counts[state] = group_state_counts.get(state, 0) + 1
-            total_group_members += group.total_count
-            healthy_group_members += group.healthy_count
-
-        return {
-            "status": "healthy",
-            "mcp_servers": {
-                "total": len(mcp_servers),
-                "by_state": state_counts,
-            },
-            "groups": {
-                "total": len(ctx.groups),
-                "by_state": group_state_counts,
-                "total_members": total_group_members,
-                "healthy_members": healthy_group_members,
-            },
-            "security": {
-                "rate_limiting": rate_limit_stats,
-            },
-        }
+        return hangar_health()
 
     @mcp.tool(name="hangar_metrics")
     @mcp_tool_wrapper(

@@ -58,6 +58,10 @@ cp scripts/promote_upgrade_notes.py "$promoter"
 refire="${RUNNER_TEMP:-/tmp}/refire_release_pr_checks.sh"
 cp scripts/refire_release_pr_checks.sh "$refire"
 
+# And the push, for the same reason.
+pusher="${RUNNER_TEMP:-/tmp}/push_release_branch.sh"
+cp scripts/push_release_branch.sh "$pusher"
+
 git fetch --force origin "${branch}:refs/remotes/origin/${branch}"
 
 # Refuse to write onto a release branch that does not contain the commit this
@@ -136,12 +140,16 @@ git -c user.name="$COMMIT_NAME" \
     -c user.email="$COMMIT_EMAIL" \
     commit -m "chore(release): assemble changelog and upgrade notes for ${version}"
 
-# Push with an explicit credential rather than the one checkout persisted. A
-# push authenticated with the built-in GITHUB_TOKEN does not trigger workflows,
-# and this commit becomes the PR head -- required checks would then be MISSING
-# on it rather than red, which blocks the merge just as hard and looks like
-# nothing is wrong. The app token does trigger them.
-git push "https://x-access-token:${PUSH_TOKEN}@github.com/${REPO}.git" "HEAD:${branch}"
+# Push as the app, and make sure GitHub sees the app. A push authenticated with
+# the built-in GITHUB_TOKEN does not trigger workflows, and this commit becomes
+# the PR head, so required checks would be MISSING on it rather than red. That
+# blocks the merge just as hard and looks like nothing is wrong. The app token
+# does trigger them.
+#
+# Putting the token in the URL was not enough. The header checkout persisted
+# won, and every assembly push went out as `github-actions[bot]` (#1379). The
+# helper clears that header, and the workflow no longer persists one.
+GITHUB_REPOSITORY="$REPO" bash "$pusher" "$branch"
 
 # Recover on what is observable, not on a theory about why.
 #
@@ -160,6 +168,10 @@ git push "https://x-access-token:${PUSH_TOKEN}@github.com/${REPO}.git" "HEAD:${b
 # not which credential pushed, but whether the head ended up with any check
 # runs at all -- which is the thing that blocks the merge, and the thing that
 # is true whatever the underlying reason turns out to be (#1184).
+#
+# The underlying reason, found later: those runs belonged to
+# `github-actions[bot]` because the push did. Git sent checkout's persisted
+# GITHUB_TOKEN header instead of the app token in the URL (#1379).
 #
 # The grace period is for the ordinary case: a head that has just been pushed
 # has no checks for a few seconds either way.
@@ -180,16 +192,19 @@ checks=$(checks_on_head "$head_sha")
 
 if [ "$checks" = "0" ]; then
   echo "::warning::No check runs on ${head_sha}, so the release PR's required checks stay \"expected\" and the merge is refused. Re-firing them."
-  bash "${refire}" "$branch"
+  # Reopen as the app, not as GITHUB_TOKEN. A `reopened` event from
+  # `github-actions[bot]` behaves like its push: on 2.19.1 (#1377) the reopen
+  # produced ten more runs with zero jobs and still no check runs.
+  GH_TOKEN="$PUSH_TOKEN" bash "${refire}" "$branch"
   sleep "${CHECK_GRACE_S:-45}"
   checks=$(checks_on_head "$head_sha")
 fi
 
-# Said plainly, because the recovery has a ceiling: it reopens the PR with this
-# job's credential, and a run whose actor is `github-actions[bot]` is what was
-# producing no checks in the first place. When that is what happens, the
-# release needs a human -- and a human who is told exactly what to run gets it
-# done in a minute rather than an hour (#1184).
+# Said plainly, because the recovery has a ceiling. Without an app token,
+# PUSH_TOKEN falls back to GITHUB_TOKEN, and a run whose actor is
+# `github-actions[bot]` is what produced no checks in the first place. When
+# that happens, the release needs a human, and a human who is told exactly what
+# to run gets it done in a minute rather than an hour (#1184).
 if [ "$checks" = "0" ]; then
   echo "::error::The release PR still has no check runs, so it cannot be merged. Approve its pending runs, or reopen it, with an account that can:"
   echo "::error::  gh run list -R ${REPO} --branch ${branch} --json databaseId,name,conclusion --jq '.[]|select(.conclusion==\"action_required\")|.databaseId' | xargs -I{} gh api -X POST repos/${REPO}/actions/runs/{}/approve"
