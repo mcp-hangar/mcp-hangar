@@ -89,6 +89,7 @@ from ..domain.services.tool_access_resolver import get_tool_access_resolver, Pol
 from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import logging_each_call, note_failure
+from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 
@@ -559,10 +560,10 @@ def generate_projection(tenant_id: str | None) -> Projection:
       collision, as it was on every listing.
 
     These stay with serving, in `_list_projected_tools`: waiting out the
-    warm-up (#1231), counting ``PROJECTED_TOOLS`` and reporting an empty
-    projection (#887). Those measure what a client was handed, and an
-    inspection hands nothing to anyone. The management tools, the per-POST memo
-    and the cache-scope meta stay there too.
+    warm-up (#1231), measuring the listing (`projection_metrics`, #1369) and
+    reporting an empty projection (#887). Those measure what a client was
+    handed, and an inspection hands nothing to anyone. The management tools,
+    the per-POST memo and the cache-scope meta stay there too.
     """
     routes = _build_flat_map(tenant_id)
     tools = _build_mcp_tool_list(routes)
@@ -747,8 +748,8 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
         # catalogue, and that is the condition worth a line in the log.
         if not governed:
             _report_empty_projection(tenant_id)
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+        # Its size by kind and by upstream, and whether it changed (#1369).
+        observe_served_listing(projection, management, _member_to_group())
         # What this caller now holds, so a name that later leaves it can say so (#1368).
         remember_served(tool.name for tool in (*governed, *management))
     else:
@@ -1219,5 +1220,6 @@ def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
         return False
 
     register_flat_tool_handlers(mcp)
+    expose_change_count()
     logger.info("flat_tool_handlers_registered (topology_mode=front_door)")
     return True

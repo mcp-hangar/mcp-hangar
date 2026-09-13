@@ -4,16 +4,12 @@ The unit tests drive the two handlers with a stand-in request context. On this
 front door that shape has hidden fail-opens before: the identity is re-bound per
 request, in a task the ASGI wrapper does not own, and the SDK lists tools by
 itself before it dispatches a call (#1049). So everything here goes over the real
-streamable-HTTP transport:
+streamable-HTTP transport, through `_front_door_harness`:
 
-* The composition ``serve --http`` serves,
-  ``mcp_app_for_serving(build_serving_mcp_server())``, behind the authentication
-  layer it mounts (``create_auth_enforced_app``). Each tenant authenticates with
-  its own API key.
-* One real upstream: an in-process HTTP MCP server behind a real ``McpServer``.
-  It is started through the command bus, and its catalogue lands in the
-  projection registry through the ``McpServerStarted`` handler bootstrap
-  subscribes.
+* The composition ``serve --http`` serves, behind the authentication layer it
+  mounts. Each tenant authenticates with its own API key.
+* One real upstream, started through the command bus, whose catalogue lands in
+  the projection registry through the ``McpServerStarted`` handler.
 * The projection changes for real: a withdrawal through the registry, a policy
   edit through the resolver, and a fleet in which the tool does not exist at all.
 
@@ -22,240 +18,32 @@ Naming: neutral placeholders only (store, read_item, write_item, tenant:a, tenan
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import threading
-from types import SimpleNamespace
-from typing import Any, ClassVar
+from typing import Any
 
-import httpx
 import pytest
-from starlette.testclient import TestClient
 
-from mcp_hangar.application.read_models.tool_projection import (
-    get_tool_projection_registry,
-    reset_tool_projection_registry,
-)
-from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
+from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
+from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
-from mcp_hangar.fastmcp_server import catalogue_warmup, flat_tool_projection, served_tool_names
+from mcp_hangar.fastmcp_server import flat_tool_projection, served_tool_names
 from mcp_hangar.fastmcp_server.served_tool_names import ServedNames
+from tests.integration._front_door_harness import (
+    LEGACY as _LEGACY,
+    METHOD_NOT_FOUND,
+    SERVER,
+    TENANT_A,
+    TENANT_B,
+    front_door as _front_door,
+    jsonrpc as _jsonrpc,
+)
 
-# The SDK's DNS-rebinding protection wants a loopback Host with a port.
-_BASE_URL = "http://127.0.0.1:8000"
-_MODERN = "2026-07-28"
-_LEGACY = "2025-06-18"
-_ENVELOPE = {
-    "io.modelcontextprotocol/protocolVersion": _MODERN,
-    "io.modelcontextprotocol/clientInfo": {"name": "stale-name-probe", "version": "0"},
-    "io.modelcontextprotocol/clientCapabilities": {},
-}
-
-SERVER = "store"
-TENANT_A = "tenant:a"
-TENANT_B = "tenant:b"
-METHOD_NOT_FOUND = -32601
 REASON = {"reason": "projection_changed"}
 
 
 def _ordinary(name: str) -> dict[str, Any]:
     """The ``-32601`` every call to a name the caller cannot call has always had."""
     return {"code": METHOD_NOT_FOUND, "message": f"Tool '{name}' not found"}
-
-
-class _Upstream(BaseHTTPRequestHandler):
-    """A minimal JSON-answering MCP upstream that records the tools it is asked to call."""
-
-    tools: ClassVar[tuple[str, ...]] = ()
-    called: ClassVar[list[str]] = []
-
-    def log_message(self, format: str, *args: Any) -> None:
-        pass
-
-    def do_POST(self) -> None:  # noqa: N802 -- http.server's handler name
-        request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-        if "id" not in request:  # a notification
-            self._send(202, b"")
-            return
-        method = request.get("method")
-        params = request.get("params") or {}
-        if method == "tools/call":
-            self.called.append(params.get("name"))
-        definitions = [
-            {"name": name, "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}}
-            for name in self.tools
-        ]
-        answer = {
-            "initialize": {
-                "result": {
-                    "protocolVersion": _LEGACY,
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "upstream", "version": "0"},
-                }
-            },
-            "tools/list": {"result": {"tools": definitions}},
-            "tools/call": {"result": {"content": [{"type": "text", "text": f"did {params.get('name')}"}]}},
-        }.get(method, {"error": {"code": METHOD_NOT_FOUND, "message": f"Unknown method: {method}"}})
-        self._send(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], **answer}).encode())
-
-    def _send(self, status: int, body: bytes) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-def _jsonrpc(response: httpx.Response) -> dict[str, Any]:
-    """The JSON-RPC payload, from either framing (plain JSON or an SSE frame).
-
-    The status is not asserted here. The modern entry answers a JSON-RPC error
-    with the HTTP status the SDK maps its code to (404 for ``-32601``), and the
-    handshake era answers 200 on the SSE framing. Where the status is part of
-    what a caller could tell apart, the test compares it.
-    """
-    text = response.text.lstrip()
-    if text.startswith("{"):
-        return dict(json.loads(text))
-    for line in text.splitlines():
-        if line.startswith("data: "):
-            return dict(json.loads(line[len("data: ") :]))
-    raise AssertionError(f"neither JSON nor an SSE data frame: {text[:200]!r}")
-
-
-@dataclass
-class _FrontDoor:
-    client: TestClient
-    keys: dict[str, str]
-    upstream: type[_Upstream]
-
-    def post(
-        self, tenant: str, method: str, params: dict[str, Any], *, era: str = _MODERN, request_id: int = 1
-    ) -> httpx.Response:
-        headers = {
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            "MCP-Protocol-Version": era,
-            "X-API-Key": self.keys[tenant],
-        }
-        body_params = dict(params)
-        if era == _MODERN:
-            # Self-describing and SEP-2243 routed: the modern era has no handshake.
-            headers["Mcp-Method"] = method
-            if method == "tools/call":
-                headers["Mcp-Name"] = params["name"]
-            body_params["_meta"] = _ENVELOPE
-        body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": body_params}
-        return self.client.post("/mcp", headers=headers, content=json.dumps(body))
-
-    def names(self, tenant: str, *, era: str = _MODERN) -> list[str]:
-        """``tools/list`` as the client receives it."""
-        return sorted(
-            tool["name"] for tool in _jsonrpc(self.post(tenant, "tools/list", {}, era=era))["result"]["tools"]
-        )
-
-    def call(
-        self,
-        tenant: str,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        era: str = _MODERN,
-        request_id: int = 1,
-    ) -> httpx.Response:
-        params = {"name": name, "arguments": arguments or {}}
-        return self.post(tenant, "tools/call", params, era=era, request_id=request_id)
-
-    def error(self, tenant: str, name: str, *, era: str = _MODERN) -> dict[str, Any]:
-        payload = _jsonrpc(self.call(tenant, name, era=era))
-        assert "error" in payload, payload
-        return dict(payload["error"])
-
-    def result(self, tenant: str, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = _jsonrpc(self.call(tenant, name, arguments))
-        assert "result" in payload, payload
-        assert not payload["result"].get("isError"), payload
-        return dict(payload["result"])
-
-
-def _runtime(endpoint: str) -> Any:
-    """The fleet: one remote upstream, the two commands the invoke path sends, the projection handler."""
-    from mcp_hangar.application.commands import InvokeToolCommand, StartMcpServerCommand
-    from mcp_hangar.application.commands.handlers import InvokeToolHandler, StartMcpServerHandler
-    from mcp_hangar.application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
-    from mcp_hangar.bootstrap.runtime import create_runtime
-    from mcp_hangar.domain.contracts.event_bus import HandlerKind
-    from mcp_hangar.domain.events import McpServerStarted
-    from mcp_hangar.domain.model import McpServer
-    from mcp_hangar.infrastructure.command_bus import CommandBus
-    from mcp_hangar.server.context import init_context
-
-    bus = CommandBus()
-    runtime = create_runtime(command_bus=bus)
-    bus.register(StartMcpServerCommand, StartMcpServerHandler(runtime.repository, runtime.event_bus))
-    bus.register(InvokeToolCommand, InvokeToolHandler(runtime.repository, runtime.event_bus))
-    # Subscribed the way bootstrap subscribes it (`server/bootstrap/event_handlers.py`).
-    projection = ToolProjectionPopulationHandler(repository=runtime.repository)
-    runtime.event_bus.subscribe(McpServerStarted, projection.handle, kind=HandlerKind.LOCAL_VIEW)
-    runtime.repository.add(SERVER, McpServer(mcp_server_id=SERVER, mode="remote", endpoint=endpoint))
-    init_context(runtime)
-    bus.send(StartMcpServerCommand(mcp_server_id=SERVER))
-    return runtime
-
-
-@contextmanager
-def _front_door(tools: tuple[str, ...], policies: dict[str, tuple[str, ...]] | None = None) -> Iterator[_FrontDoor]:
-    """A served front door over one upstream exposing *tools*, each tenant with an API key.
-
-    *policies* maps a tenant to its allow-list on the upstream; a tenant without
-    one is allowed everything.
-    """
-    from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
-    from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
-    from mcp_hangar.server.api.middleware import create_auth_enforced_app
-    from mcp_hangar.server.bootstrap import build_serving_mcp_server
-    from mcp_hangar.server.context import reset_context
-    from mcp_hangar.server.lifecycle import mcp_app_for_serving
-
-    reset_tool_projection_registry()
-    reset_tool_access_resolver()
-    catalogue_warmup.reset()
-    resolver = get_tool_access_resolver()
-    resolver.set_topology_mode("front_door")
-    for tenant, allowed in (policies or {}).items():
-        resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
-
-    handler: type[_Upstream] = type("_ThisUpstream", (_Upstream,), {"tools": tools, "called": []})
-    upstream = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
-    runtime = None
-    try:
-        runtime = _runtime(f"http://127.0.0.1:{upstream.server_address[1]}/mcp")
-        discovered = sorted(projection.tool for projection in get_tool_projection_registry().all())
-        assert discovered == sorted(tools), f"the upstream's catalogue did not reach the registry: {discovered}"
-
-        store = InMemoryApiKeyStore()
-        keys = {
-            tenant: store.create_key(principal_id=f"agent-{label}", name=f"key-{label}", tenant_id=tenant)
-            for label, tenant in (("a", TENANT_A), ("b", TENANT_B))
-        }
-        auth = SimpleNamespace(authn_middleware=AuthenticationMiddleware([ApiKeyAuthenticator(store)]))
-        app = create_auth_enforced_app(mcp_app_for_serving(build_serving_mcp_server()), auth)
-        with TestClient(app, base_url=_BASE_URL) as client:
-            yield _FrontDoor(client, keys, handler)
-    finally:
-        if runtime is not None:
-            for server in runtime.repository.get_all().values():
-                server.shutdown()
-        upstream.shutdown()
-        upstream.server_close()
-        reset_context()
-        reset_tool_projection_registry()
-        reset_tool_access_resolver()
-        catalogue_warmup.reset()
 
 
 @pytest.fixture(autouse=True)

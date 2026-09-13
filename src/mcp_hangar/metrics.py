@@ -1080,6 +1080,40 @@ PROJECTED_TOOLS = Histogram(
     buckets=(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
 )
 
+# What the projected surface weighs and whether it moved (#1369). The diagnosis
+# that opened #1365 was "46 tools and 174 KB" held by a gateway whose client saw
+# none, and nothing on the server could say either number. All three are
+# written in one place, `projection_metrics.observe_served_listing`, on a
+# listing the client received and never on the SDK's pre-dispatch listing (#1049).
+#
+# No tenant label on any of them, for #895's reason: a public front door has
+# unbounded tenant cardinality. `mcp_server` is the upstream (a group reads as
+# its group id): a set the operator configures, as on every per-server metric.
+_SURFACE_BYTE_BUCKETS = (0, 1024, 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 4194304)
+
+PROJECTED_SURFACE_BYTES = Histogram(
+    name="mcp_hangar_projected_surface_bytes",
+    description="Bytes of tool definitions returned by a front-door tools/list, by kind",
+    labels=["kind"],  # governed (upstream) | management (hangar_*)
+    buckets=_SURFACE_BYTE_BUCKETS,
+)
+
+PROJECTED_UPSTREAM_BYTES = Histogram(
+    name="mcp_hangar_projected_upstream_bytes",
+    description="Bytes of tool definitions one upstream contributes to a front-door tools/list that includes it",
+    labels=["mcp_server"],
+    buckets=_SURFACE_BYTE_BUCKETS,
+)
+
+# A listing that served an identity a projection different from the one this
+# replica last served it: the event a `tools/list_changed` exists to announce.
+# A front door seeds it at zero when it installs its handlers, because a counter
+# that first appears at 1 reads as no increase to `increase()`.
+PROJECTION_CHANGES_TOTAL = Counter(
+    name="mcp_hangar_projection_changes",
+    description="Front-door tools/list responses whose projection differed from the one last served to the same caller",
+)
+
 # The SDK's Mcp-Param-* check is fail-open: a tools/list that cannot produce a
 # schema skips validation and the call still runs (#1053). Some of those
 # branches log; none of them were a metric. Reasons match the SDK skip arms
@@ -1318,6 +1352,10 @@ def _register_all_metrics():
         [
             EMPTY_PROJECTION_TOTAL,
             PROJECTED_TOOLS,
+            # Surface size, composition and churn (#1369).
+            PROJECTED_SURFACE_BYTES,
+            PROJECTED_UPSTREAM_BYTES,
+            PROJECTION_CHANGES_TOTAL,
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
             PROJECTION_WITHDRAWALS_TOTAL,
             RESOURCE_LINKS_EVICTED_TOTAL,
