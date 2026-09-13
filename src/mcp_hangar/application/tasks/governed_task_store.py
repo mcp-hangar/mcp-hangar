@@ -302,7 +302,8 @@ class GovernedTaskStore:
                         self._task_tools.pop(key, None)
                     raise
 
-    def mint_from_upstream(self, upstream: dict[str, Any]) -> Task:
+    @staticmethod
+    def mint_from_upstream(upstream: dict[str, Any]) -> Task:
         """Build a v2 :class:`Task` from an upstream task dict, verbatim + fail-closed.
 
         The canonical task id is resolved by precedence ``taskId`` > ``task_id`` >
@@ -311,6 +312,10 @@ class GovernedTaskStore:
         the v2 ``Task`` model requires (``status``, ``created_at``,
         ``last_updated_at``, ``ttl``) is genuinely absent, the upstream is treated as
         MALFORMED and ``ValueError`` is raised (fail closed).
+
+        Static because it reads no ledger state. The front door's flat call
+        builds its task result through this same parse (#1394), so the task id
+        its caller gets is the one the ledger is keyed on.
         """
         task_id = upstream.get("taskId") or upstream.get("task_id") or upstream.get("id")
         if not task_id:

@@ -45,7 +45,7 @@ class _CommandBus:
 
 def _runtime(fails: set[str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
-        repository=SimpleNamespace(get_all_ids=lambda: list(_SERVERS)),
+        repository=SimpleNamespace(get_all_ids=lambda: list(_SERVERS), get=lambda _mcp_server_id: None),
         command_bus=_CommandBus(fails or set()),
     )
 

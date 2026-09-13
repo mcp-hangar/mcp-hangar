@@ -74,6 +74,11 @@ def _get_tools_for_group(mcp_server: str) -> dict[str, Any]:
     if not selected:
         raise ValueError(f"no_healthy_members_in_group: {mcp_server}")
 
+    if selected.state.value == "dead":
+        # Listing tools is not a start. A call through the group restarts a
+        # crashed member, and that call respects its backoff (#1361).
+        return {"mcp_server": mcp_server, "group": True, "state": "dead", "tools": []}
+
     ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=selected.mcp_server_id))
     query = GetMcpServerToolsQuery(mcp_server_id=selected.mcp_server_id)
     tools = ctx.query_bus.execute(query)
@@ -137,6 +142,12 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
             "predefined": mcp_server_obj.tools_predefined,
             "tools": [t.to_dict() for t in filtered_tools],
         }
+
+    if mcp_server_obj.state.value == "dead":
+        # Listing tools is not a start, and must not revive a dead server inside
+        # its backoff (#1361). A deliberate start, or a call after the backoff,
+        # lists them again.
+        return {"mcp_server": mcp_server, "state": "dead", "predefined": mcp_server_obj.tools_predefined, "tools": []}
 
     # Start mcp_server and discover tools
     ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server))
@@ -343,6 +354,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
         SKIP THIS for normal use - hangar_call auto-starts mcp_servers.
 
         Side effects: Starts specified mcp_server processes. Groups are skipped.
+        Warming all skips dead mcp_servers; name one to start it.
 
         Args:
             mcp_servers: str - Comma-separated mcp_server IDs, or null to warm all
@@ -351,6 +363,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             {
                 warmed: list[str],
                 already_warm: list[str],
+                skipped_dead: list[str],
                 failed: list[{id: str, error: str}],
                 summary: str
             }
@@ -379,6 +392,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
         warmed = []
         already_warm = []
+        skipped_dead = []
         failed = []
 
         for mcp_server_id in mcp_server_ids:
@@ -392,8 +406,13 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
             try:
                 mcp_server_obj = ctx.get_mcp_server(mcp_server_id)
-                if mcp_server_obj and mcp_server_obj.state.value == "ready":
+                state = mcp_server_obj.state.value if mcp_server_obj else None
+                if state == "ready":
                     already_warm.append(mcp_server_id)
+                elif state == "dead" and not mcp_servers:
+                    # Warming everything is not a deliberate start of each
+                    # server, and only a deliberate start revives a dead one (#1361).
+                    skipped_dead.append(mcp_server_id)
                 else:
                     command = StartMcpServerCommand(mcp_server_id=mcp_server_id)
                     ctx.command_bus.send(command)
@@ -401,9 +420,13 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             except Exception as e:  # noqa: BLE001 -- fault-barrier: single mcp_server warm failure must not crash batch
                 failed.append({"id": mcp_server_id, "error": str(e)[:100]})
 
+        summary = f"Warmed {len(warmed)} mcp_servers, {len(already_warm)} already warm, {len(failed)} failed"
+        if skipped_dead:
+            summary += f", {len(skipped_dead)} dead skipped"
         return {
             "warmed": warmed,
             "already_warm": already_warm,
+            "skipped_dead": skipped_dead,
             "failed": failed,
-            "summary": f"Warmed {len(warmed)} mcp_servers, {len(already_warm)} already warm, {len(failed)} failed",
+            "summary": summary,
         }

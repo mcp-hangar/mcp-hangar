@@ -344,6 +344,8 @@ def hangar_status() -> dict:
         }
         if state == "cold":
             mcp_server_info["note"] = "Will start on first request"
+        elif state == "dead":
+            mcp_server_info["note"] = "Failed: hangar_start starts it again"
         mcp_servers_status.append(mcp_server_info)
 
     groups_status = [
