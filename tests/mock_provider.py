@@ -20,6 +20,99 @@ def _record_trace_carrier(method, params):
         record.write(json.dumps({"method": method, "traceparent": (meta or {}).get("traceparent")}) + "\n")
 
 
+def _tools_list_response(request_id):
+    """Answer ``tools/list``: the tools, or an error while ``MOCK_TOOLS_LIST_FAILS_WHILE`` names a file that exists.
+
+    A health check is a ``tools/list``, so a test fails and passes checks one
+    at a time by creating and removing the file
+    (tests/integration/_group_recovery_harness.py).
+    """
+    flag = os.environ.get("MOCK_TOOLS_LIST_FAILS_WHILE")
+    if flag and os.path.exists(flag):
+        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "tools/list failing"}}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {
+            "tools": [
+                {
+                    "name": "add",
+                    # Env-driven so a test can change what this
+                    # server serves between two runs -- which is
+                    # what schema drift is (tests/integration
+                    # test_pin_writes_and_detects_drift.py).
+                    "description": os.environ.get("MOCK_ADD_DESCRIPTION", "Add two numbers"),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                },
+                {
+                    "name": "subtract",
+                    "description": "Subtract two numbers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                },
+                {
+                    "name": "multiply",
+                    "description": "Multiply two numbers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                },
+                {
+                    "name": "divide",
+                    "description": "Divide two numbers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                },
+                {
+                    "name": "power",
+                    "description": "Raise to power",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "base": {"type": "number"},
+                            "exponent": {"type": "number"},
+                        },
+                        "required": ["base", "exponent"],
+                    },
+                },
+                {
+                    "name": "echo",
+                    "description": "Echo a message",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"message": {"type": "string"}},
+                        "required": ["message"],
+                    },
+                },
+            ]
+        },
+    }
+
+
 def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extending
     """Run a simple JSON-RPC server for testing."""
     while True:
@@ -44,87 +137,7 @@ def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extendin
                     },
                 }
             elif method == "tools/list":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "tools": [
-                            {
-                                "name": "add",
-                                # Env-driven so a test can change what this
-                                # server serves between two runs -- which is
-                                # what schema drift is (tests/integration
-                                # test_pin_writes_and_detects_drift.py).
-                                "description": os.environ.get("MOCK_ADD_DESCRIPTION", "Add two numbers"),
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "a": {"type": "number"},
-                                        "b": {"type": "number"},
-                                    },
-                                    "required": ["a", "b"],
-                                },
-                            },
-                            {
-                                "name": "subtract",
-                                "description": "Subtract two numbers",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "a": {"type": "number"},
-                                        "b": {"type": "number"},
-                                    },
-                                    "required": ["a", "b"],
-                                },
-                            },
-                            {
-                                "name": "multiply",
-                                "description": "Multiply two numbers",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "a": {"type": "number"},
-                                        "b": {"type": "number"},
-                                    },
-                                    "required": ["a", "b"],
-                                },
-                            },
-                            {
-                                "name": "divide",
-                                "description": "Divide two numbers",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "a": {"type": "number"},
-                                        "b": {"type": "number"},
-                                    },
-                                    "required": ["a", "b"],
-                                },
-                            },
-                            {
-                                "name": "power",
-                                "description": "Raise to power",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "base": {"type": "number"},
-                                        "exponent": {"type": "number"},
-                                    },
-                                    "required": ["base", "exponent"],
-                                },
-                            },
-                            {
-                                "name": "echo",
-                                "description": "Echo a message",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {"message": {"type": "string"}},
-                                    "required": ["message"],
-                                },
-                            },
-                        ]
-                    },
-                }
+                response = _tools_list_response(request_id)
             elif method == "tools/call":
                 tool_name = params.get("name")
                 arguments = params.get("arguments", {})
