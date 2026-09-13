@@ -11,7 +11,7 @@ from ...application.event_handlers import (
     get_alert_handler,
     get_audit_handler,
 )
-from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler
+from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler, remove_series_of_deregistered
 from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.event_handlers.cost_handler import CostAttributionEventHandler
@@ -60,6 +60,9 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     metrics_handler = MetricsEventHandler()
     runtime.event_bus.subscribe_to_all(metrics_handler.handle, kind=HandlerKind.EFFECT)
+    # Except a deleted server's gauges, which go on every replica: a projection,
+    # because the tailer hands a peer's deletion to projections only (#1361).
+    runtime.event_bus.subscribe(McpServerDeregistered, remove_series_of_deregistered, kind=HandlerKind.PROJECTION)
 
     alert_handler = get_alert_handler()
     runtime.event_bus.subscribe_to_all(alert_handler.handle, kind=HandlerKind.EFFECT)

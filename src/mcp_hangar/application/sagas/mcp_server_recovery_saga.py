@@ -9,7 +9,7 @@ from typing import Any
 from ...domain.events import DomainEvent, HealthCheckFailed, McpServerDegraded, McpServerStarted, McpServerStopped
 from ...application.ports.saga import EventTriggeredSaga, ISagaManager
 from ...logging_config import get_logger
-from ..commands import Command, StartMcpServerCommand, StopMcpServerCommand
+from ..commands import Command, GiveUpOnMcpServerCommand, StartMcpServerCommand
 
 logger = get_logger(__name__)
 
@@ -21,7 +21,9 @@ class McpServerRecoverySaga(EventTriggeredSaga):
     Recovery Strategy:
     1. When a mcp_server is degraded, schedule a retry
     2. Apply exponential backoff between retries
-    3. After max retries, give up and stop the mcp_server
+    3. After max retries, give up: the mcp_server goes DEAD (#1361). Restarts
+       still pending are cancelled, as they are when it starts or stops, so a
+       stale one never starts it again.
     4. Reset retry count when mcp_server starts successfully
 
     Configuration:
@@ -51,6 +53,10 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         # Track retry state per mcp_server
         # mcp_server_id -> {"retries": int, "last_attempt": float, "next_retry": float}
         self._retry_state: dict[str, dict] = {}
+
+        # Restarts scheduled per mcp_server, so giving up can cancel them. Not
+        # persisted: a timer does not survive the process that armed it.
+        self._pending_restarts: dict[str, list[str]] = {}
 
     @property
     def saga_type(self) -> str:
@@ -111,9 +117,11 @@ class McpServerRecoverySaga(EventTriggeredSaga):
 
         # Check if max retries exceeded
         if state["retries"] > self._max_retries:
-            logger.warning(f"McpServer {mcp_server_id} exceeded max retries ({self._max_retries}), stopping recovery")
-            # Stop the mcp_server permanently
-            return [StopMcpServerCommand(mcp_server_id=mcp_server_id, reason="max_retries_exceeded")]
+            logger.warning(f"McpServer {mcp_server_id} exceeded max retries ({self._max_retries}), giving up")
+            # A restart still waiting to fire would start the server again after
+            # this, and giving up means only a deliberate start or a call does.
+            self._cancel_pending_restarts(mcp_server_id)
+            return [GiveUpOnMcpServerCommand(mcp_server_id=mcp_server_id, reason="max_retries_exceeded")]
 
         # Calculate backoff
         backoff = self._calculate_backoff(state["retries"])
@@ -125,11 +133,17 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         )
 
         # Schedule the restart command to fire after the computed backoff delay.
-        self._saga_manager.schedule_command(
+        timer_id = self._saga_manager.schedule_command(
             StartMcpServerCommand(mcp_server_id=mcp_server_id),
             delay_s=backoff,
         )
+        self._pending_restarts.setdefault(mcp_server_id, []).append(timer_id)
         return []
+
+    def _cancel_pending_restarts(self, mcp_server_id: str) -> None:
+        """Cancel every restart scheduled for the server; one that already fired is a no-op."""
+        for timer_id in self._pending_restarts.pop(mcp_server_id, []):
+            self._saga_manager.cancel_scheduled_command(timer_id)
 
     def _handle_started(self, event: McpServerStarted) -> list[Command]:
         """
@@ -138,6 +152,9 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         Resets retry count on successful start.
         """
         mcp_server_id = event.mcp_server_id
+        # Recovered. A restart still waiting would fire on a server that may by
+        # then have gone cold or dead, and start it again.
+        self._cancel_pending_restarts(mcp_server_id)
 
         if mcp_server_id in self._retry_state:
             old_retries = self._retry_state[mcp_server_id]["retries"]
@@ -158,6 +175,8 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         Clears retry state for normally stopped mcp_servers.
         """
         mcp_server_id = event.mcp_server_id
+        # A restart scheduled before the stop would undo it.
+        self._cancel_pending_restarts(mcp_server_id)
 
         # Only clear state for intentional stops
         if event.reason in ("shutdown", "idle", "user_request", "detection_enforcement:block"):

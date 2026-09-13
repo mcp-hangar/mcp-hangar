@@ -219,14 +219,14 @@ class HealthTracker:
         Returns:
             Seconds until next health check. 0.0 means skip this mcp_server.
         """
-        if state in ("cold", "initializing"):
-            return 0.0  # Skip -- not started or starting
+        if state in ("cold", "initializing", "dead"):
+            # Skip -- not started, starting, or given up on. Health checks stay
+            # off while DEAD: only a deliberate start or a call revives it (#1361).
+            return 0.0
         if state == "ready":
             return normal_interval
         if state == "degraded":
             return self._calculate_backoff()
-        if state == "dead":
-            return 60.0  # Longer ceiling for dead mcp_servers
         return normal_interval  # Fallback
 
     def reset(self) -> None:

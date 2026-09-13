@@ -126,7 +126,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     if not is_front_door():
         return
 
-    warmed = failed = 0
+    warmed = failed = skipped = 0
 
     # A listing that arrives before this finishes would be answered with an
     # empty catalogue the client then caches forever (#1231). It waits instead,
@@ -134,6 +134,13 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     catalogue_warmup.warmup_started()
     try:
         for mcp_server_id in runtime.repository.get_all_ids():
+            server = runtime.repository.get(mcp_server_id)
+            if server is not None and server.state.value == "dead":
+                # Restored DEAD from the event log. A warm-up of everything is not
+                # a deliberate start of each server, and only a deliberate start
+                # revives a dead one (#1361).
+                skipped += 1
+                continue
             try:
                 runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
                 warmed += 1
@@ -145,7 +152,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
         # waiting out the full deadline for something that will never finish.
         catalogue_warmup.warmup_finished()
 
-    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
+    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed, skipped_dead=skipped)
 
 
 def mcp_app_for_serving(mcp_server: Any) -> Any:
@@ -206,6 +213,20 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
             stateless_http=True,
         )
     )
+
+
+def metrics_endpoint(request: Any) -> Any:
+    """``GET /metrics``: the Prometheus exposition ``serve --http`` answers with.
+
+    At module level so a test can scrape the gateway through the same endpoint
+    the served process mounts (#1369). A test that read the registry directly
+    could not tell whether the scrape carries the metric.
+    """
+    from starlette.responses import PlainTextResponse
+
+    from ..metrics import get_metrics
+
+    return PlainTextResponse(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -396,10 +417,9 @@ class ServerLifecycle:
         import time
 
         from starlette.applications import Starlette
-        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.responses import JSONResponse
         from starlette.routing import Route
 
-        from ..metrics import get_metrics
         from .bootstrap.composition import get_runtime
 
         _start_time = time.time()
@@ -426,13 +446,6 @@ class ServerLifecycle:
                     "startup_complete": _startup_complete,
                     "uptime_seconds": round(uptime, 2),
                 }
-            )
-
-        def metrics_endpoint(request):
-            """Prometheus metrics endpoint."""
-            return PlainTextResponse(
-                get_metrics(),
-                media_type="text/plain; version=0.0.4; charset=utf-8",
             )
 
         routes = [

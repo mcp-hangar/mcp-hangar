@@ -55,6 +55,10 @@ class McpServerStateChanged(DomainEvent):
     mcp_server_id: str
     old_state: str
     new_state: str
+    #: Why, when ``new_state`` is ``dead``: one of the ``DEAD_*`` constants in
+    #: ``domain.model.mcp_server``. None otherwise, and in streams written
+    #: before it existed (#1361).
+    dead_reason: str | None = None
 
 
 # Circuit Breaker Events

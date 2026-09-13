@@ -70,7 +70,36 @@ _MODERN_PROTOCOL_VERSION = "2026-07-28"
 _JSONRPC_METHOD_NOT_FOUND = -32601
 
 
-# Valid state transitions
+# Why a server is DEAD (#1361). Each means it failed and is not running, and
+# the health worker, the recovery saga and the GC leave it there. They differ
+# in what may start it again:
+#
+# - DEAD_GIVEN_UP: the recovery saga ran out of retries. A deliberate start
+#   revives it, and so does a call that names it once its backoff has passed.
+#   A group never routes a call to it.
+# - DEAD_CAPABILITY_BLOCKED: only a deliberate start revives it. A group never
+#   routes a call to it, and a call naming it is refused.
+# - DEAD_CRASHED, DEAD_START_FAILED: any call starts it again once its backoff
+#   has passed, including one a group routes to it.
+#
+# Deliberate starts, which revive any of them: hangar_start, the REST start and
+# StartMcpServerCommand; a group's start_all and add_member(auto_start);
+# hangar_warm naming the server; and a failover saga starting the backup it
+# was configured with. Bulk warm-ups -- the front door's at boot, hangar_warm()
+# with no names -- skip every DEAD server, and hangar_tools lists one without
+# starting it.
+DEAD_GIVEN_UP = "given_up"
+DEAD_CRASHED = "crashed"
+DEAD_START_FAILED = "start_failed"
+DEAD_CAPABILITY_BLOCKED = "capability_blocked"
+
+#: Why-dead reasons a group does not route a call to.
+DEAD_NOT_ROUTED_BY_GROUPS = frozenset({DEAD_GIVEN_UP, DEAD_CAPABILITY_BLOCKED})
+#: Why-dead reasons a call does not revive: only a deliberate start does.
+DEAD_NOT_REVIVED_BY_CALLS = frozenset({DEAD_CAPABILITY_BLOCKED})
+
+# Valid state transitions. DEAD -> INITIALIZING is the way out of DEAD, through
+# `ensure_ready()`.
 VALID_TRANSITIONS = {
     McpServerState.COLD: {McpServerState.INITIALIZING},
     McpServerState.INITIALIZING: {
@@ -83,7 +112,8 @@ VALID_TRANSITIONS = {
         McpServerState.DEAD,
         McpServerState.DEGRADED,
     },
-    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD},
+    # DEAD: the recovery saga ran out of retries (`give_up`).
+    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD, McpServerState.DEAD},
     McpServerState.DEAD: {McpServerState.INITIALIZING, McpServerState.DEGRADED},
 }
 
@@ -108,6 +138,13 @@ def _rpc_error_type(error: dict[str, Any]) -> str:
     """
     code = error.get("code")
     return str(code) if type(code) is int else OTHER_ERROR_TYPE
+
+
+def _start_refusal(reason: str, time_left: float) -> str:
+    """What `ensure_ready()` tells a caller it would not start the server for."""
+    if reason == "not_revived_by_calls":
+        return "a capability block is not revived by a call; start it explicitly"
+    return f"backoff not elapsed, retry in {time_left:.1f}s"
 
 
 class McpServer(AggregateRoot):
@@ -235,6 +272,8 @@ class McpServer(AggregateRoot):
 
         # State
         self._state = McpServerState.COLD
+        # Why it is DEAD, while it is: one of the DEAD_* constants.
+        self._dead_reason: str | None = None
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
         # Typed by the port rather than Any: the domain's whole use of a launched
@@ -443,6 +482,11 @@ class McpServer(AggregateRoot):
         return self._state
 
     @property
+    def dead_reason_snapshot(self) -> str | None:
+        """Why it is DEAD (a ``DEAD_*`` constant), or None when it is not; read as `state_snapshot` is."""
+        return self._dead_reason if self._state is McpServerState.DEAD else None
+
+    @property
     def health(self) -> HealthTracker:
         """Health tracker."""
         return self._health
@@ -549,7 +593,35 @@ class McpServer(AggregateRoot):
             )
         )
 
-    def _can_start(self) -> tuple:
+    def _mark_dead(self, reason: str) -> None:
+        """Move to DEAD from a failure path, and say why (must hold lock).
+
+        ``reason`` is one of the ``DEAD_*`` constants; the note above
+        `VALID_TRANSITIONS` says what each means and what leaves it.
+
+        Not `_transition_to`: these are failure paths, reached from whatever state
+        a concurrent stop left behind, and an invalid-transition error raised
+        inside one would replace the failure being handled. The event is the one
+        `_transition_to` records. The assignments this replaces recorded none, so
+        `mcp_hangar_mcp_server_state` kept the last value an event had set --
+        `ready` for a crashed process -- and never read `dead` (#1361).
+        """
+        if self._state == McpServerState.DEAD:
+            return
+        old_state = self._state
+        self._state = McpServerState.DEAD
+        self._dead_reason = reason
+        self._increment_version()
+        self._record_event(
+            McpServerStateChanged(
+                mcp_server_id=self.mcp_server_id,
+                old_state=str(old_state.value),
+                new_state=str(McpServerState.DEAD.value),
+                dead_reason=reason,
+            )
+        )
+
+    def _can_start(self, by_call: bool = False) -> tuple:
         """
         Check if mcp_server can be started (must hold lock).
 
@@ -559,18 +631,26 @@ class McpServer(AggregateRoot):
             if self._client and self._client.is_alive():
                 return True, "already_ready", 0
 
-        if self._state == McpServerState.DEGRADED:
-            if not self._health.can_retry():
-                time_left = self._health.time_until_retry()
-                return False, "backoff_not_elapsed", time_left
+        if by_call and self._state == McpServerState.DEAD and self._dead_reason in DEAD_NOT_REVIVED_BY_CALLS:
+            return False, "not_revived_by_calls", 0
+
+        # A call waits out a DEAD server's backoff as it does a DEGRADED one's;
+        # a deliberate start does not (#1361).
+        in_backoff = self._state == McpServerState.DEGRADED or (by_call and self._state == McpServerState.DEAD)
+        if in_backoff and not self._health.can_retry():
+            time_left = self._health.time_until_retry()
+            return False, "backoff_not_elapsed", time_left
 
         return True, "", 0
 
     # --- Business Operations ---
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self, *, by_call: bool = False) -> None:
         """
         Ensure mcp_server is in READY state, starting if necessary.
+
+        ``by_call``: a call is asking, not a deliberate start. A DEAD server then
+        waits out its backoff first, as a DEGRADED one always does (#1361).
 
         Thread-safe. Blocks until ready or raises exception.
 
@@ -592,9 +672,7 @@ class McpServer(AggregateRoot):
             if self._state == McpServerState.READY:
                 if self._client and self._client.is_alive():
                     return
-                # Client died
-                logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
-                self._state = McpServerState.DEAD
+                self._lost_connection()
 
             # Another thread is starting: become a waiter
             if self._state == McpServerState.INITIALIZING:
@@ -605,13 +683,9 @@ class McpServer(AggregateRoot):
                 McpServerState.DEGRADED,
             ):
                 # Check if we can start
-                can_start, reason, time_left = self._can_start()
+                can_start, reason, time_left = self._can_start(by_call)
                 if not can_start:
-                    raise CannotStartMcpServerError(
-                        self.mcp_server_id,
-                        f"backoff not elapsed, retry in {time_left:.1f}s",
-                        time_left,
-                    )
+                    raise CannotStartMcpServerError(self.mcp_server_id, _start_refusal(reason, time_left), time_left)
                 # We are the starter: transition and prepare event
                 self._transition_to(McpServerState.INITIALIZING)
                 self._ready_event = threading.Event()  # Fresh event for this attempt
@@ -1234,7 +1308,7 @@ class McpServer(AggregateRoot):
         )
 
         if enforcement == "block":
-            self._transition_to(McpServerState.DEAD)
+            self._mark_dead(DEAD_CAPABILITY_BLOCKED)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
@@ -1250,6 +1324,12 @@ class McpServer(AggregateRoot):
         self._health.record_failure()
 
         error_str = str(error) if error else "unknown error"
+
+        if self._state != McpServerState.INITIALIZING:
+            # Stopped while it was starting. The stop stands: reading DEAD here
+            # would page someone for an operator's own action.
+            logger.info(f"mcp_server_start_failed_after_stop: {self.mcp_server_id}, state={self._state.value}")
+            return
 
         # Determine new state
         if self._health.should_degrade():
@@ -1268,8 +1348,7 @@ class McpServer(AggregateRoot):
                 )
             )
         else:
-            self._state = McpServerState.DEAD
-            self._increment_version()
+            self._mark_dead(DEAD_START_FAILED)
 
         logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
@@ -1437,8 +1516,9 @@ class McpServer(AggregateRoot):
         self._enforce_l7_policy(tool_name, arguments, l7_approval_id, correlation_id, identity_context_dict)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
-        # state and signal every cold-start waiter.
-        self.ensure_ready()
+        # state and signal every cold-start waiter. A call, so a DEAD server
+        # waits out its backoff (#1361).
+        self.ensure_ready(by_call=True)
 
         # Lock cycle 1: Validation, check tool, maybe prepare refresh
         needs_refresh = False
@@ -1739,8 +1819,7 @@ class McpServer(AggregateRoot):
                 return False
 
             if not self._client or not self._client.is_alive():
-                self._state = McpServerState.DEAD
-                self._increment_version()
+                self._lost_connection()
                 return False
 
             # Copy client reference for I/O outside lock
@@ -1842,8 +1921,59 @@ class McpServer(AggregateRoot):
         """Stop the mcp_server. Alias for shutdown(). Thread-safe."""
         self.shutdown()
 
-    def _shutdown_internal(self, reason: str = "shutdown") -> None:
-        """Shutdown implementation (must hold lock)."""
+    def give_up(self, reason: str) -> bool:
+        """Stop trying: close a degraded server's connection and leave it DEAD.
+
+        What the recovery saga does when it runs out of retries (#1361). It used
+        to stop the server instead, which returned it to COLD -- the state of a
+        server nobody has called yet -- so an outage read as an idle server.
+
+        Only from DEGRADED, the state the saga gives up on. In any other state
+        the server moved on after the event the saga acted on -- a call started
+        it, an operator stopped it -- and that stands. DEAD is not terminal: a
+        deliberate start leaves it through `ensure_ready()`, and so does a call
+        naming it once its backoff has passed. A group does not route to it.
+
+        Thread-safe.
+
+        Returns:
+            Whether the server was given up on.
+        """
+        with self._lock:
+            if self._state != McpServerState.DEGRADED:
+                logger.info(
+                    "mcp_server_give_up_skipped",
+                    mcp_server_id=self.mcp_server_id,
+                    state=self._state.value,
+                    reason=reason,
+                )
+                return False
+            self._close_client()
+            # As a stop does: nothing should list the tools of a server that is
+            # not running. A start lists them again.
+            self._tools.clear()
+            self._meta.clear()
+            self._mark_dead(DEAD_GIVEN_UP)
+        logger.warning("mcp_server_given_up", mcp_server_id=self.mcp_server_id, reason=reason)
+        return True
+
+    def _lost_connection(self) -> None:
+        """READY, but with no live connection (must hold lock).
+
+        A connection that died is a crash: close what is left of it and go DEAD.
+        No connection at all is not: that is READY read back from the event log
+        after this process restarted, with nothing ever connected in it, and a
+        server that is simply not running is COLD.
+        """
+        if self._client is None:
+            self._transition_to(McpServerState.COLD)
+            return
+        logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
+        self._close_client()
+        self._mark_dead(DEAD_CRASHED)
+
+    def _close_client(self) -> None:
+        """Close the connection, if there is one (must hold lock)."""
         if self._client:
             try:
                 self._client.close()
@@ -1851,6 +1981,10 @@ class McpServer(AggregateRoot):
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
             self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+
+    def _shutdown_internal(self, reason: str = "shutdown") -> None:
+        """Shutdown implementation (must hold lock)."""
+        self._close_client()
 
         self._state = McpServerState.COLD
         self._increment_version()
@@ -2064,7 +2198,8 @@ class McpServer(AggregateRoot):
 
     def _replay_started(self, event: "McpServerStarted") -> None:
         self._state = McpServerState.READY
-        self._health.restore(consecutive_failures=0)
+        # A completed start is a success, as `_finalize_start` records it.
+        self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)
         self._last_used = event.occurred_at
 
     def _replay_stopped(self, event: "McpServerStopped") -> None:
@@ -2083,6 +2218,8 @@ class McpServer(AggregateRoot):
 
     def _replay_state_changed(self, event: "McpServerStateChanged") -> None:
         self._state = McpServerState(event.new_state)
+        # A stream written before the reason existed has none: not given up.
+        self._dead_reason = event.dead_reason if self._state is McpServerState.DEAD else None
 
     def _replay_tool_completed(self, event: "ToolInvocationCompleted") -> None:
         self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)

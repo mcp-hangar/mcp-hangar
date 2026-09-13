@@ -103,6 +103,28 @@ class Gauge:
         """Set gauge to current Unix timestamp."""
         self.set(time.time(), **labels)
 
+    def set_max(self, value: float, **labels) -> None:
+        """Set gauge to value unless it already holds a larger one.
+
+        For a timestamp written from events: two can be handled out of the order
+        they happened in, and the older one must not move the gauge back.
+        """
+        key = self._make_key(labels)
+        with self._lock:
+            self._values[key] = max(value, self._values.get(key, value))
+
+    def remove(self, **labels) -> None:
+        """Drop every series whose labels include ``labels``.
+
+        For a subject that no longer exists. A gauge left behind reads as a live
+        value forever: a deleted server stuck at `state == 4`.
+        """
+        with self._lock:
+            for key in list(self._values):
+                current = dict(zip(self.label_names, key, strict=False))
+                if all(current.get(name) == value for name, value in labels.items()):
+                    del self._values[key]
+
     def _make_key(self, labels: dict) -> tuple:
         return tuple(labels.get(label_name, "") for label_name in self.label_names)
 
@@ -497,6 +519,10 @@ PROVIDER_INFO = Gauge(
     labels=["mcp_server", "mode"],
 )
 
+# 0 is COLD: not running, and not failing -- never started, stopped, or reaped
+# for being idle. A server Hangar gave up on is 4 and stays 4 until an explicit
+# start or a call; health checks do not probe it (#1361). A server the recovery
+# saga gave up on used to read 0.
 PROVIDER_STATE_CURRENT = Gauge(
     name="mcp_hangar_mcp_server_state",
     description="Current mcp_server state (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead)",
@@ -518,6 +544,34 @@ PROVIDER_INITIALIZED = Gauge(
 PROVIDER_LAST_STATE_CHANGE_SECONDS = Gauge(
     name="mcp_hangar_mcp_server_last_state_change_timestamp_seconds",
     description="Unix timestamp of last mcp_server state change",
+    labels=["mcp_server"],
+)
+
+# When Hangar last saw the server working (#1359). Written from three events:
+# a passing health check, a completed start, a successful tool call. Nothing
+# clears it -- not going cold, not being given up on -- and it never moves back.
+# Absent until the first of the three.
+#
+# A cold server is not probed, so the value ages while it is cold, and the bare
+# `time() - ... > N` also fires for a server reaped for being idle more than N
+# ago. Leave cold servers out:
+#
+#   time() - mcp_hangar_mcp_server_last_healthy_timestamp_seconds > 900
+#     unless mcp_hangar_mcp_server_state == 0
+#
+# Default matching, on every label. `on(mcp_server)` drops `instance`, so with
+# more than one replica a server cold on one replica would hide it dead on
+# another.
+#
+# That catches a server given up on (4), one still being retried (3) and one
+# stuck starting (1). A server that was never healthy has no series: catch the
+# give-up itself with `mcp_hangar_mcp_server_state == 4`.
+PROVIDER_LAST_HEALTHY_SECONDS = Gauge(
+    name="mcp_hangar_mcp_server_last_healthy_timestamp_seconds",
+    description=(
+        "Unix timestamp of the last passing health check, completed start or successful tool call; "
+        "kept when the mcp_server goes cold or dead"
+    ),
     labels=["mcp_server"],
 )
 
@@ -1026,6 +1080,40 @@ PROJECTED_TOOLS = Histogram(
     buckets=(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
 )
 
+# What the projected surface weighs and whether it moved (#1369). The diagnosis
+# that opened #1365 was "46 tools and 174 KB" held by a gateway whose client saw
+# none, and nothing on the server could say either number. All three are
+# written in one place, `projection_metrics.observe_served_listing`, on a
+# listing the client received and never on the SDK's pre-dispatch listing (#1049).
+#
+# No tenant label on any of them, for #895's reason: a public front door has
+# unbounded tenant cardinality. `mcp_server` is the upstream (a group reads as
+# its group id): a set the operator configures, as on every per-server metric.
+_SURFACE_BYTE_BUCKETS = (0, 1024, 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 4194304)
+
+PROJECTED_SURFACE_BYTES = Histogram(
+    name="mcp_hangar_projected_surface_bytes",
+    description="Bytes of tool definitions returned by a front-door tools/list, by kind",
+    labels=["kind"],  # governed (upstream) | management (hangar_*)
+    buckets=_SURFACE_BYTE_BUCKETS,
+)
+
+PROJECTED_UPSTREAM_BYTES = Histogram(
+    name="mcp_hangar_projected_upstream_bytes",
+    description="Bytes of tool definitions one upstream contributes to a front-door tools/list that includes it",
+    labels=["mcp_server"],
+    buckets=_SURFACE_BYTE_BUCKETS,
+)
+
+# A listing that served an identity a projection different from the one this
+# replica last served it: the event a `tools/list_changed` exists to announce.
+# A front door seeds it at zero when it installs its handlers, because a counter
+# that first appears at 1 reads as no increase to `increase()`.
+PROJECTION_CHANGES_TOTAL = Counter(
+    name="mcp_hangar_projection_changes",
+    description="Front-door tools/list responses whose projection differed from the one last served to the same caller",
+)
+
 # The SDK's Mcp-Param-* check is fail-open: a tools/list that cannot produce a
 # schema skips validation and the call still runs (#1053). Some of those
 # branches log; none of them were a metric. Reasons match the SDK skip arms
@@ -1160,6 +1248,7 @@ def _register_all_metrics():
         PROVIDER_UP,
         PROVIDER_INITIALIZED,
         PROVIDER_LAST_STATE_CHANGE_SECONDS,
+        PROVIDER_LAST_HEALTHY_SECONDS,
         PROVIDER_STARTS_TOTAL,
         PROVIDER_STOPS_TOTAL,
         PROVIDER_COLD_START_SECONDS,
@@ -1263,6 +1352,10 @@ def _register_all_metrics():
         [
             EMPTY_PROJECTION_TOTAL,
             PROJECTED_TOOLS,
+            # Surface size, composition and churn (#1369).
+            PROJECTED_SURFACE_BYTES,
+            PROJECTED_UPSTREAM_BYTES,
+            PROJECTION_CHANGES_TOTAL,
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
             PROJECTION_WITHDRAWALS_TOTAL,
             RESOURCE_LINKS_EVICTED_TOTAL,
@@ -1344,14 +1437,54 @@ def observe_health_check(
     HEALTH_CHECK_CONSECUTIVE_FAILURES.set(consecutive_failures, mcp_server=mcp_server)
 
 
-def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess"):
-    """Update mcp_server state metrics."""
+def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess", *, record_change: bool = True):
+    """Update mcp_server state metrics.
+
+    ``record_change=False`` sets the state without claiming it changed now: a
+    state read back from the event log at boot changed before this process.
+    """
     state_map = {"cold": 0, "initializing": 1, "ready": 2, "degraded": 3, "dead": 4}
     PROVIDER_STATE_CURRENT.set(state_map.get(state, 0), mcp_server=mcp_server)
     PROVIDER_UP.set(1 if state == "ready" else 0, mcp_server=mcp_server)
     PROVIDER_INITIALIZED.set(0 if state == "cold" else 1, mcp_server=mcp_server)
     PROVIDER_INFO.set(1, mcp_server=mcp_server, mode=mode)
-    PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
+    if record_change:
+        PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
+
+
+def remove_mcp_server_series(mcp_server: str) -> None:
+    """Drop the lifecycle gauges of an mcp_server that was deleted, unloaded or reloaded away.
+
+    Left behind, they read as live forever: a removed dead server at `state == 4`
+    and an ever-older last-healthy time. Counters stay; `rate()` and
+    `increase()` already read a series that stops moving correctly.
+
+    An event about the server handled after this writes its series again. That
+    is accepted: every removal path publishes the server's own events before
+    the one that triggers this, so it takes an event published late by another
+    thread, and the series it leaves is the state that event reported.
+    """
+    for gauge in (
+        PROVIDER_INFO,
+        PROVIDER_STATE_CURRENT,
+        PROVIDER_UP,
+        PROVIDER_INITIALIZED,
+        PROVIDER_LAST_STATE_CHANGE_SECONDS,
+        PROVIDER_LAST_HEALTHY_SECONDS,
+        PROVIDER_COLD_START_IN_PROGRESS,
+        HEALTH_CHECK_CONSECUTIVE_FAILURES,
+        CONNECTIONS_ACTIVE,
+    ):
+        gauge.remove(mcp_server=mcp_server)
+
+
+def record_mcp_server_healthy(mcp_server: str, at: float) -> None:
+    """Record that the mcp_server was seen working at ``at`` (Unix seconds).
+
+    ``at`` is when it happened -- the event's ``occurred_at`` -- not when the
+    event was handled, and an older one never replaces a newer one.
+    """
+    PROVIDER_LAST_HEALTHY_SECONDS.set_max(at, mcp_server=mcp_server)
 
 
 def record_mcp_server_start(mcp_server: str, success: bool):

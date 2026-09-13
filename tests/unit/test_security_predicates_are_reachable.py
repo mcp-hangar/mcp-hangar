@@ -49,6 +49,9 @@ from tests.unit._security_predicates import (
     COMPLETION,
     FLAT_TOOL_CALL,
     FRONT_DOOR_MANAGEMENT_TOOL,
+    FRONT_DOOR_TASKS_CANCEL,
+    FRONT_DOOR_TASKS_GET,
+    FRONT_DOOR_TASKS_UPDATE,
     HANGAR_CALL,
     MANAGEMENT_TOOL,
     PREDICATES,
@@ -184,8 +187,13 @@ def _hangar_call(tool: str) -> dict[str, Any]:
 _TASKS = {"extensions": {EXTENSION_ID: {}}}
 _READ_URI = f"hangar://{_UPSTREAM}/doc://one"
 
-#: Sent before the egress probes, unrecorded: mints the task `tasks/*` act on.
-_MINT_TASK = _Probe("egress", "tools/call", _hangar_call("long_job"), name="hangar_call")
+#: Sent before each topology's probes, unrecorded: mints the task `tasks/*` act
+#: on. On the front door the flat call mints it, so the front door's `tasks/*`
+#: probes act on a task that path created (#1394).
+_MINT_TASK = {
+    "egress": _Probe("egress", "tools/call", _hangar_call("long_job"), name="hangar_call"),
+    "front_door": _Probe("front_door", "tools/call", {"name": "long_job", "arguments": {}}, name="long_job"),
+}
 
 #: One probe per served path, in the order they are sent. `tasks/cancel` is
 #: unconfirmed upstream, so the task survives it for `tasks/update`.
@@ -200,6 +208,13 @@ PROBES: dict[str, _Probe] = {
     FLAT_TOOL_CALL: _Probe("front_door", "tools/call", {"name": "add", "arguments": {"a": 1}}, name="add"),
     FRONT_DOOR_MANAGEMENT_TOOL: _Probe(
         "front_door", "tools/call", {"name": "hangar_list", "arguments": {}}, name="hangar_list"
+    ),
+    FRONT_DOOR_TASKS_GET: _Probe("front_door", "tasks/get", {"taskId": _TASK_ID}, name=_TASK_ID, capabilities=_TASKS),
+    FRONT_DOOR_TASKS_CANCEL: _Probe(
+        "front_door", "tasks/cancel", {"taskId": _TASK_ID}, name=_TASK_ID, capabilities=_TASKS
+    ),
+    FRONT_DOOR_TASKS_UPDATE: _Probe(
+        "front_door", "tasks/update", {"taskId": _TASK_ID, "inputResponses": {}}, name=_TASK_ID, capabilities=_TASKS
     ),
     PROMPTS_LIST: _Probe("front_door", "prompts/list", {}),
     PROMPTS_GET: _Probe("front_door", "prompts/get", {"name": "greet", "arguments": {}}, name="greet"),
@@ -431,9 +446,8 @@ def reached(tmp_path_factory: pytest.TempPathFactory) -> dict[str, _Outcome]:
         try:
             for topology in ("egress", "front_door"):
                 with _served(topology, upstream_url, tmp_path_factory.mktemp(topology)) as gateway:
-                    if topology == "egress":
-                        minted = gateway.send(_MINT_TASK)
-                        assert _served_ok(*minted), f"minting the task for tasks/* failed: {minted}"
+                    minted = gateway.send(_MINT_TASK[topology])
+                    assert _served_ok(*minted), f"minting the task for tasks/* failed on {topology}: {minted}"
                     for path, probe in PROBES.items():
                         if probe.topology != topology:
                             continue

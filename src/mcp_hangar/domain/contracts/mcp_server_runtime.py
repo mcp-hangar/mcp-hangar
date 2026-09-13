@@ -84,6 +84,10 @@ class SupportsMcpServerLifecycle(Protocol):
         """Stop mcp_server and release resources."""
         ...
 
+    def give_up(self, reason: str) -> bool:
+        """Stop trying: leave a degraded mcp_server DEAD. Returns whether it did."""
+        ...
+
 
 @runtime_checkable
 class SupportsToolInvocation(Protocol):

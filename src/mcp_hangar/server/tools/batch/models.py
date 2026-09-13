@@ -126,7 +126,8 @@ class CallResult:
     continuation_id: str | None = None  # For fetching full response when truncated
     # ADR-014 P3: set by a batch worker when the upstream returned a task handle
     # and the relay kill-switch is on. Carries the captured request context so the
-    # MAIN-LOOP seam (hangar_call) can govern the relay; None on every other path.
+    # MAIN-LOOP seam (relay_seam.py, run by hangar_call and the front door's flat
+    # call) can govern the relay; None on every other path.
     relay_capture: "RelayCapture | None" = None
 
 

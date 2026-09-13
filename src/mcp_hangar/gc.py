@@ -118,8 +118,11 @@ class BackgroundWorker:
                         # State-aware health check scheduling
                         state_str = normalize_state_to_str(mcp_server.state)
 
-                        # Skip mcp_servers that are not started or starting up
-                        if state_str in ("cold", "initializing"):
+                        # Skip mcp_servers that are not started, starting up, or
+                        # given up on. A DEAD server stays unprobed until a
+                        # deliberate start or a call revives it (#1361); probing
+                        # it here counted an "unhealthy" check that never ran.
+                        if state_str in ("cold", "initializing", "dead"):
                             continue
 
                         # Check per-mcp_server timing -- skip if not due yet

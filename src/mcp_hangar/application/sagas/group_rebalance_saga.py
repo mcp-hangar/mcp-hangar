@@ -21,6 +21,7 @@ from ...domain.events import (
     HealthCheckPassed,
     McpServerDegraded,
     McpServerStarted,
+    McpServerStateChanged,
     McpServerStopped,
 )
 from ...application.ports.saga import EventTriggeredSaga
@@ -73,6 +74,7 @@ class GroupRebalanceSaga(EventTriggeredSaga):
             McpServerStarted,
             McpServerStopped,
             McpServerDegraded,
+            McpServerStateChanged,
             HealthCheckPassed,
             HealthCheckFailed,
         ]
@@ -156,6 +158,15 @@ class GroupRebalanceSaga(EventTriggeredSaga):
                 logger.info(f"Member {mcp_server_id} degraded in group {group_id}: {event.reason}")
                 if group:
                     group.report_failure(mcp_server_id)
+
+        elif isinstance(event, McpServerStateChanged):
+            # Only the move to DEAD concerns the group: it keeps rotation and
+            # the group's own state true (#1361). A start brings a member back
+            # through McpServerStarted above.
+            if event.new_state == "dead":
+                logger.info(f"Member {mcp_server_id} dead in group {group_id}: {event.dead_reason}")
+                if group:
+                    group.report_member_dead(mcp_server_id)
 
         elif isinstance(event, HealthCheckPassed):
             logger.debug(f"Health check passed for {mcp_server_id} in group {group_id}")

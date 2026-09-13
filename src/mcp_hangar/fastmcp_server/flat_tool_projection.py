@@ -86,9 +86,10 @@ from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
-from ..tasks_wire import HEADER_MISMATCH
+from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import logging_each_call, note_failure
+from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 
@@ -559,10 +560,10 @@ def generate_projection(tenant_id: str | None) -> Projection:
       collision, as it was on every listing.
 
     These stay with serving, in `_list_projected_tools`: waiting out the
-    warm-up (#1231), counting ``PROJECTED_TOOLS`` and reporting an empty
-    projection (#887). Those measure what a client was handed, and an
-    inspection hands nothing to anyone. The management tools, the per-POST memo
-    and the cache-scope meta stay there too.
+    warm-up (#1231), measuring the listing (`projection_metrics`, #1369) and
+    reporting an empty projection (#887). Those measure what a client was
+    handed, and an inspection hands nothing to anyone. The management tools,
+    the per-POST memo and the cache-scope meta stay there too.
     """
     routes = _build_flat_map(tenant_id)
     tools = _build_mcp_tool_list(routes)
@@ -747,8 +748,8 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
         # catalogue, and that is the condition worth a line in the log.
         if not governed:
             _report_empty_projection(tenant_id)
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
-        prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+        # Its size by kind and by upstream, and whether it changed (#1369).
+        observe_served_listing(projection, management, _member_to_group())
         # What this caller now holds, so a name that later leaves it can say so (#1368).
         remember_served(tool.name for tool in (*governed, *management))
     else:
@@ -1010,6 +1011,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         listing used, so a tool that was shown is callable and one that was not
         is still `-32601`: not-shown and not-callable are the same decision.
 
+        A task the upstream answers with is governed as ``hangar_call`` governs
+        it, and the caller gets its SEP-2663 task result (#1394).
+
         Protocol errors:
         - Unknown flat name (absent from tenant's current list) → McpError
           with code METHOD_NOT_FOUND (-32601).
@@ -1025,6 +1029,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # impossible to import first in a fresh interpreter (#894).
         from ..server.tools.batch import BatchExecutor, CallSpec
         from ..server.tools.tool_permissions import management_tools_for
+        from .flat_call_tasks import govern_flat_call
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
@@ -1113,7 +1118,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         finally:
             progress_relay.unregister(upstream_token)
 
-        result = batch.results[0]
+        # A task the upstream created gets its owner recorded exactly as
+        # `hangar_call` records it, before the caller sees it (#1394).
+        result, created_task = govern_flat_call(batch.results)
         if not result.success:
             note_failure(result.error_type)  # the text below does not carry the code; the log line does
             # Surface enforcement failures as tool errors (isError=True),
@@ -1130,8 +1137,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # this gateway resolves and agrees with the catalogue (#889, #1025).
         project_result_uris(tenant_id, mcp_server_id, result.result)
 
-        # Success — return the raw result dict; the lowlevel handler wraps it.
-        return result.result if result.result is not None else {}
+        # Success — a governed task is answered with its SEP-2663 task result
+        # (#1394), anything else with the raw result dict the lowlevel handler wraps.
+        return created_task or (result.result if result.result is not None else {})
 
     # Register the handlers, replacing the defaults. SDK v1's lowlevel Server
     # exposes list_tools()/call_tool() registration decorators; SDK v2 dropped
@@ -1184,7 +1192,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         async def _call_v2_inner(params: Any, ctx: Any) -> Any:
             out = await _flat_call_tool(params.name, params.arguments or {}, ctx)
-            if isinstance(out, CallToolResult):  # error path already built one
+            # Built already: the error path's result, or a governed task's (#1394).
+            if isinstance(out, (CallToolResult, CreateTaskResult)):
                 return out
             # success path returned the raw backend result dict; wrap it.
             return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
@@ -1211,5 +1220,6 @@ def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
         return False
 
     register_flat_tool_handlers(mcp)
+    expose_change_count()
     logger.info("flat_tool_handlers_registered (topology_mode=front_door)")
     return True

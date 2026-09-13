@@ -154,6 +154,32 @@ class _UpdateTaskParams(RequestParams):
     input_responses: dict[str, Any]
 
 
+def task_wire_fields(snapshot: Any) -> dict[str, Any]:
+    """A ledger snapshot's task fields, under their SEP-2663 names.
+
+    The ledger still stores snapshots as the SEP-1686 ``mcp_types.Task``, so
+    this is the boundary where the two namings meet. It is a pure RENAME,
+    not a lossy hop: the fossil documents ``ttl`` as "retention duration ...
+    in milliseconds" and ``poll_interval`` as "Suggested polling interval in
+    milliseconds", which is exactly what ``ttlMs`` / ``pollIntervalMs`` mean.
+    Moving the ledger onto the vendored type is a separate change.
+
+    ``tasks/get`` serves these fields, and so does the task result a front
+    door's flat call answers with (#1394). A client reads one task the same way
+    from both.
+    """
+    data = snapshot.model_dump(by_alias=False)
+    return {
+        "task_id": data["task_id"],
+        "status": data["status"],
+        "status_message": data.get("status_message"),
+        "created_at": data["created_at"],
+        "last_updated_at": data["last_updated_at"],
+        "ttl_ms": data.get("ttl"),
+        "poll_interval_ms": data.get("poll_interval"),
+    }
+
+
 def _current_principal_id() -> str:
     """The current caller's principal id (user_id, else agent_id), else ``""``."""
     identity = get_identity_context()
@@ -391,12 +417,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
     ) -> Any:
         """Project the authorized snapshot into the SEP-2663 ``GetTaskResult``.
 
-        The ledger still stores snapshots as the SEP-1686 ``mcp_types.Task``, so
-        this is the boundary where the two namings meet. It is a pure RENAME,
-        not a lossy hop: the fossil documents ``ttl`` as "retention duration ...
-        in milliseconds" and ``poll_interval`` as "Suggested polling interval in
-        milliseconds", which is exactly what ``ttlMs`` / ``pollIntervalMs`` mean.
-        Moving the ledger onto the vendored type is a separate change.
+        The snapshot's fields are renamed by :func:`task_wire_fields`.
 
         ``upstream`` carries the raw upstream ``tasks/get`` result when there was
         one, so a task's outcome and its ``inputRequests`` reach the client
@@ -408,16 +429,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         if snapshot is None:
             raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
 
-        data = snapshot.model_dump(by_alias=False)
-        projected: dict[str, Any] = {
-            "task_id": data["task_id"],
-            "status": data["status"],
-            "status_message": data.get("status_message"),
-            "created_at": data["created_at"],
-            "last_updated_at": data["last_updated_at"],
-            "ttl_ms": data.get("ttl"),
-            "poll_interval_ms": data.get("poll_interval"),
-        }
+        projected = task_wire_fields(snapshot)
         if upstream:
             projected["result"] = upstream.get("result")
             projected["error"] = upstream.get("error")
