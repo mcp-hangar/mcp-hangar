@@ -150,8 +150,11 @@ def init_event_handlers(runtime: "Runtime") -> None:
         from ...application.event_handlers.fleet_projection import FleetProjection
 
         from ...infrastructure.async_bridge import BackgroundLoop
+        from .composition import close_at_shutdown
 
-        fleet_projection = FleetProjection(runtime.repository, config_repository, BackgroundLoop())
+        runner = BackgroundLoop()
+        close_at_shutdown(runner.close)
+        fleet_projection = FleetProjection(runtime.repository, config_repository, runner)
         runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         runtime.event_bus.subscribe(McpServerDeregistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # L7 policy changes have to reach every replica the same way (#991):

@@ -204,6 +204,9 @@ class SqliteBackend:
         """Release whatever was opened. Safe to call when nothing was."""
         import inspect
 
+        # One loop for every async close, stopped afterwards. It used to be a
+        # new one per adapter, each left running when shutdown finished (#1389).
+        shutdown_loop = _shutdown_loop()
         for name, adapter in self._cache.items():
             closer = getattr(adapter, "close", None)
             if not callable(closer):
@@ -214,7 +217,8 @@ class SqliteBackend:
                     # `Database.close` is async. Calling it and dropping the
                     # coroutine closed nothing and said so only as a
                     # RuntimeWarning, which nobody reads during shutdown.
-                    _shutdown_loop().run(result, 10.0)
+                    shutdown_loop.run(result, 10.0)
             except Exception as e:  # noqa: BLE001 -- shutdown must not fail on one stubborn handle
                 logger.warning("persistence_close_failed", concern=name, error=str(e))
+        shutdown_loop.close()
         self._cache.clear()
