@@ -333,8 +333,12 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     # Inject store into saga manager
     saga_manager._saga_state_store = saga_state_store
 
-    # 1. GroupRebalanceSaga (existing)
-    group_saga = GroupRebalanceSaga(groups=ctx.groups)
+    # 1. GroupRebalanceSaga. `GROUPS`, not `ctx.groups`: at this point in
+    # `bootstrap()` the context still holds the empty dict it was built with,
+    # and is pointed at `GROUPS` only at the end. The saga kept the empty one,
+    # found no group for any member, and so no passing health check ever put a
+    # member back in rotation (#1355).
+    group_saga = GroupRebalanceSaga(groups=GROUPS)
     ctx.group_rebalance_saga = group_saga
     set_group_rebalance_saga(group_saga)
     saga_manager.register_event_saga(group_saga)
