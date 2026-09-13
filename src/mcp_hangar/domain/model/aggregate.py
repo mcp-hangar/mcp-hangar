@@ -33,11 +33,23 @@ class AggregateRoot(ABC):
         Collect and clear pending domain events.
 
         This should be called after the aggregate is persisted to publish
-        events to the event bus. Returns a copy and clears internal list.
+        events to the event bus.
+
+        Drained one event at a time, not copied and then cleared. One thread
+        drains an aggregate while another is still recording on it -- the health
+        worker and a recovery saga's scheduled restart, for one -- and an event
+        appended between the copy and the clear was cleared without ever being
+        returned, so nothing published it (#1400). `list.pop` and `list.append`
+        are each atomic, and appends only go on the end, so an event recorded
+        mid-drain is returned now or by the next call. No lock: a bare one here
+        would sit outside the `TrackedLock` hierarchy.
         """
-        events = list(self._uncommitted_events)
-        self._uncommitted_events.clear()
-        return events
+        events: list[DomainEvent] = []
+        while True:
+            try:
+                events.append(self._uncommitted_events.pop(0))
+            except IndexError:
+                return events
 
     def has_uncommitted_events(self) -> bool:
         """Check if there are uncommitted events."""
