@@ -111,6 +111,20 @@ def test_the_assembler_recovers_on_missing_checks_not_on_a_token_guess() -> None
     assert "refire_release_pr_checks.sh" in assembler, "the assembler must ship the recovery to the runner"
 
 
+def test_the_assembler_reopens_as_the_app_not_as_github_token() -> None:
+    """The reopen is an event like the push, and its actor decides whether runs start.
+
+    On 2.19.1 (#1377) the recovery reopened the PR with the job's GITHUB_TOKEN,
+    and the ten runs that produced had zero jobs, like the push's (#1379).
+    """
+    assembler = (_SCRIPT.parent / "assemble_release_changelog.sh").read_text(encoding="utf-8")
+
+    calls = [line.strip() for line in assembler.splitlines() if "refire}" in line and not line.lstrip().startswith("#")]
+
+    assert calls, "the assembler runs the recovery"
+    assert all(call.startswith('GH_TOKEN="$PUSH_TOKEN" ') for call in calls), calls
+
+
 def test_it_says_what_a_human_must_run_when_recovery_is_not_enough() -> None:
     """Reopening uses this job's credential, which is the identity that was
     producing no checks. When the second attempt also comes back empty the run
