@@ -1,7 +1,8 @@
-"""Bootstrap Hangar, then drive a group through failure, recovery and idle reaping (#1355).
+"""Bootstrap Hangar, then drive a group through failure, recovery and idle reaping (#1355, #1390).
 
 Run as a script, in its own interpreter, by
-``test_a_passing_health_check_returns_a_member_to_rotation.py``:
+``test_a_passing_health_check_returns_a_member_to_rotation.py`` and
+``test_scattered_health_check_failures_do_not_open_a_group_circuit.py``:
 ``python _group_recovery_harness.py <mode> <out.json>``. Not collected by pytest.
 
 A separate process because ``bootstrap()`` fills process-global state -- the
@@ -26,6 +27,11 @@ Modes:
   check. The second is shut down, standing for an upstream that is still down.
 - ``idle``: two members with a one-second idle TTL, reaped by the GC worker and
   started again by the next call through the group, several times over.
+- ``scattered``: a one-member group whose health checks fail and pass in the
+  order ``SCATTERED`` gives. The upstream's ``tools/list``, which is what a
+  health check sends, fails while a flag file exists. The harness sets the flag
+  for the next check as it hears each one, so the order does not depend on
+  timing.
 """
 
 from __future__ import annotations
@@ -47,7 +53,7 @@ ENVELOPE = {
 }
 
 GROUP = "math-pool"
-MEMBERS = {"single": ["math-a"], "pair": ["math-a", "math-b"], "idle": ["math-a", "math-b"]}
+MEMBERS = {"single": ["math-a"], "pair": ["math-a", "math-b"], "idle": ["math-a", "math-b"], "scattered": ["math-a"]}
 #: The member whose upstream is healthy again by the time the worker runs.
 RECOVERING = "math-a"
 #: How long the health worker gets: a pass lands about a second after it starts.
@@ -57,18 +63,25 @@ CYCLES = 3
 #: Idle mode: how long one round of reaping may take. The TTL is a second and
 #: the GC runs every second, so a member is reaped within about two.
 REAP_DEADLINE_S = 8.0
+#: Scattered mode: the outcome of each health check, in order. Never more than
+#: two failures in a row until the last three, and six before them.
+SCATTERED = ("fail", "fail", "pass", "fail", "fail", "pass", "fail", "fail", "fail")
+#: Scattered mode: a check lands about every second.
+SCATTERED_DEADLINE_S = 30.0
 
 
-def _server(mode: str) -> dict[str, Any]:
+def _server(mode: str, flag: Path) -> dict[str, Any]:
     spec: dict[str, Any] = {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]}
     if mode == "idle":
         spec["idle_ttl_s"] = 1
+    if mode == "scattered":
+        spec["env"] = {"MOCK_TOOLS_LIST_FAILS_WHILE": str(flag)}
     return spec
 
 
-def _config(mode: str) -> dict[str, Any]:
+def _config(mode: str, flag: Path) -> dict[str, Any]:
     members = MEMBERS[mode]
-    servers: dict[str, Any] = {member: _server(mode) for member in members}
+    servers: dict[str, Any] = {member: _server(mode, flag) for member in members}
     if mode == "idle":
         servers[GROUP] = {
             "mode": "group",
@@ -82,15 +95,31 @@ def _config(mode: str) -> dict[str, Any]:
             "members": [{"id": member} for member in members],
         }
         return {"mcp_servers": servers}
+    if mode == "scattered":
+        servers[GROUP] = {
+            "mode": "group",
+            "strategy": "priority",
+            "min_healthy": 1,
+            # Only the circuit is under test: two failures in a row neither take
+            # the member out of rotation nor degrade the server. Three do both.
+            "health": {"unhealthy_threshold": 3, "healthy_threshold": 1},
+            "circuit_breaker": {"failure_threshold": 3, "reset_timeout_s": 3600},
+            "members": [{"id": RECOVERING, "priority": 1}],
+        }
+        return {"mcp_servers": servers}
     servers[GROUP] = {
         "mode": "group",
         "strategy": "priority",
         "min_healthy": 1,
         "health": {"unhealthy_threshold": 2, "healthy_threshold": 1},
-        # Opens on the last failure that drives the last member out, as it had
-        # in the live run. And it cannot close by time within this run, so a
-        # recovered group is not the reset timeout's doing.
-        "circuit_breaker": {"failure_threshold": 2 * len(members), "reset_timeout_s": 3600},
+        # Open once the last member is driven out, as it was in the live run.
+        # The circuit counts failures in a row (#1390), so this is one member's
+        # two. In pair mode it also opens when math-a goes out. math-b's start,
+        # reported to the group as a success, then closes it (min_healthy 1)
+        # and ends the run, and math-b's own two failures open it again. And it
+        # cannot close by time within this run, so a recovered group is not the
+        # reset timeout's doing.
+        "circuit_breaker": {"failure_threshold": 2, "reset_timeout_s": 3600},
         "members": [{"id": member, "priority": rank} for rank, member in enumerate(members, start=1)],
     }
     return {"mcp_servers": servers}
@@ -180,13 +209,48 @@ def _idle(context: Any, client: Any, report: dict[str, Any], stopped: list[list[
     worker.stop()
 
 
+def _steer(flag: Path, check: int) -> None:
+    """Make health check number ``check`` (from 0) fail or pass, as ``SCATTERED`` says."""
+    if check < len(SCATTERED) and SCATTERED[check] == "fail":
+        flag.touch()
+    else:
+        flag.unlink(missing_ok=True)
+
+
+def _after_check(passed: bool) -> dict[str, Any]:
+    """The group as one health check left it. The saga reported the check before this runs."""
+    from mcp_hangar.server.state import GROUPS
+
+    group = GROUPS[GROUP]
+    return {
+        "passed": passed,
+        "circuit_open": group.circuit_open,
+        "circuit_failures": group._circuit_breaker.failure_count,
+        "in_rotation": group.get_member(RECOVERING).in_rotation,
+    }
+
+
+def _scattered(context: Any, client: Any, report: dict[str, Any], checks: list[dict[str, Any]], flag: Path) -> None:
+    """Start the member with a call, then let the health worker run the checks ``SCATTERED`` orders."""
+    report["calls"]["before"] = _call(client, "add", {"a": 1, "b": 2})
+    _steer(flag, 0)
+    worker = _worker(context, "health_check")
+    worker.start()
+    deadline = time.monotonic() + SCATTERED_DEADLINE_S
+    while time.monotonic() < deadline and len(checks) < len(SCATTERED):
+        time.sleep(0.05)
+    worker.stop()
+    report["pattern"] = list(SCATTERED)
+    report["checks"] = list(checks)
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
     from starlette.testclient import TestClient
 
     from mcp_hangar.domain.contracts.event_bus import HandlerKind
-    from mcp_hangar.domain.events import DomainEvent, HealthCheckPassed, McpServerStopped
+    from mcp_hangar.domain.events import DomainEvent, HealthCheckFailed, HealthCheckPassed, McpServerStopped
     from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
     from mcp_hangar.server.bootstrap import bootstrap, workers
     from mcp_hangar.server.lifecycle import mcp_app_for_serving
@@ -203,16 +267,21 @@ def main(mode: str, out: Path) -> None:
 
     McpServerGroup.rebalance = counted_rebalance  # type: ignore[method-assign]
 
-    context = bootstrap(config_dict=_config(mode))
+    flag = out.parent / "tools-list-fails"
+    context = bootstrap(config_dict=_config(mode, flag))
 
     passed: dict[str, int] = {}
     stopped: list[list[str]] = []
+    checks: list[dict[str, Any]] = []
 
     def observe(event: DomainEvent) -> None:
         if isinstance(event, HealthCheckPassed):
             passed[event.mcp_server_id] = passed.get(event.mcp_server_id, 0) + 1
         elif isinstance(event, McpServerStopped):
             stopped.append([event.mcp_server_id, event.reason])
+        if mode == "scattered" and isinstance(event, (HealthCheckPassed, HealthCheckFailed)):
+            checks.append(_after_check(isinstance(event, HealthCheckPassed)))
+            _steer(flag, len(checks))
 
     # Watches only. Subscribed after the saga manager, so it hears an event
     # after the saga has.
@@ -222,6 +291,8 @@ def main(mode: str, out: Path) -> None:
     with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
         if mode == "idle":
             _idle(context, client, report, stopped)
+        elif mode == "scattered":
+            _scattered(context, client, report, checks, flag)
         else:
             _recover(context, client, report, mode, passed)
 

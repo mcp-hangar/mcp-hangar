@@ -88,7 +88,9 @@ from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
+from .flat_call_log import logging_each_call, note_failure
 from .resource_link_read_through import project_result_uris
+from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 
 logger = logging.getLogger(__name__)
 
@@ -747,6 +749,8 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
             _report_empty_projection(tenant_id)
         prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
         prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+        # What this caller now holds, so a name that later leaves it can say so (#1368).
+        remember_served(tool.name for tool in (*governed, *management))
     else:
         _observe_param_header_skips(mcp_ctx, governed, management)
 
@@ -801,6 +805,27 @@ async def _settled_flat_map(mcp_ctx: Any, tenant_id: str | None) -> Mapping[str,
     if await _catalogue_settled(tenant_id, not flat_map):
         flat_map = _build_flat_map(tenant_id)
     return flat_map
+
+
+def _not_found_error(name: str) -> Exception:
+    """The ``-32601`` for a name this caller cannot call (#1368).
+
+    Byte for byte the error every such call has always had, unless this
+    caller's last listing on this replica served *name*. Then its list is out of
+    date, and ``data`` says so with a constant reason. The code and the message
+    are the same either way, so a client that does not know the reason reads
+    today's error.
+
+    Whether *name* exists for anyone else is never consulted. A name another
+    tenant holds, a name policy denies this caller and a name that exists
+    nowhere get one answer, as #905 requires. See `served_tool_names`.
+
+    A function rather than a branch in the call handler, which is at the
+    complexity ceiling.
+    """
+    data = projection_changed_error_data() if was_served_to_caller(name) else None
+    error: Exception = make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found", data=data)
+    return error
 
 
 def _report_empty_projection(tenant_id: str | None) -> None:
@@ -897,6 +922,7 @@ def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Ca
         try:
             refuse_if_session_suspended("flat_tool", mcp_ctx)
         except SessionSuspendedError as exc:
+            note_failure(exc.reason)
             return CallToolResult.model_validate({"content": [{"type": "text", "text": str(exc)}], "isError": True})
         return await call_tool(name, arguments, mcp_ctx)
 
@@ -963,6 +989,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         """
         return await _list_projected_tools(mcp_ctx, _management_tools)
 
+    # One log line per call, whatever its outcome (#1362). Outermost, so a
+    # suspended session's refusal is logged too.
+    @logging_each_call
     # A suspended session never reaches the body (GHSA-fhwh-fmq2-7m5c).
     @_refusing_suspended_sessions
     async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
@@ -1040,8 +1069,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                 # wrapper reads the principal from; without it the tool would be
                 # refused as anonymous.
                 return await mcp.call_tool(name, arguments or {}, context=mcp_ctx)
-            # Unknown flat name → -32601 (method/tool not found).
-            raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
+            # Unknown flat name → -32601, carrying a staleness reason only when
+            # this caller's last listing served the name (#1368).
+            raise _not_found_error(name)
 
         mcp_server_id, tool_name = flat_map[name]
         # A group member dispatches through its GROUP so member selection stays
@@ -1085,6 +1115,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         result = batch.results[0]
         if not result.success:
+            note_failure(result.error_type)  # the text below does not carry the code; the log line does
             # Surface enforcement failures as tool errors (isError=True),
             # not as unhandled exceptions, so the MCP envelope stays valid.
             return CallToolResult.model_validate(

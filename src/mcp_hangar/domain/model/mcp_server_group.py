@@ -537,6 +537,11 @@ class McpServerGroup(AggregateRoot):
         """
         Report successful invocation for a member.
 
+        A success ends the run of failures the circuit counts, so
+        `circuit_failure_threshold` means failures in a row. An open circuit is
+        the exception: it closes only through `_maybe_close_circuit()`, once
+        `min_healthy` members are in rotation.
+
         Args:
             member_id: ID of the member that succeeded
         """
@@ -548,13 +553,38 @@ class McpServerGroup(AggregateRoot):
             member.consecutive_failures = 0
             member.consecutive_successes += 1
             self._maybe_add_to_rotation(member, member_id)
-            self._maybe_close_circuit()
+            if self._circuit_breaker.is_open:
+                self._maybe_close_circuit()
+            else:
+                self._end_failure_run()
+
+    def _end_failure_run(self) -> None:
+        """Reset the circuit's failure count on a success while it is not open.
+
+        The breaker resets it in `record_success()`, and until #1390 the group
+        never called that on a closed circuit. `report_failure()` counted every
+        failure and only `rebalance()` reset, so the threshold counted failures
+        over the life of the process: a group that saw one member failure a day
+        opened its circuit on day ten.
+
+        Not on an open circuit, which `record_success()` would close at once,
+        skipping the `min_healthy` rule in `_maybe_close_circuit()`.
+
+        HALF_OPEN goes the breaker's way too, and this success closes it. The
+        group never gets there by itself: the breaker half-opens only in
+        `allow_request()`, which the group does not call. The one way in is a
+        restored snapshot the group did not write, and there the group already
+        reports the circuit closed (`is_open` is False) and routes through it.
+        Left alone it would stay half-open for good, and one failure would open it.
+        """
+        self._circuit_breaker.record_success()
 
     def _maybe_close_circuit(self) -> None:
         """Close an open circuit once `min_healthy` members are in rotation.
 
         Nothing else closed it. The breaker leaves OPEN through
-        `allow_request()` or `record_success()`, and the group calls neither, so
+        `allow_request()` or `record_success()`, and the group called neither
+        on an open circuit, so
         a group whose circuit had opened reported `circuit_open: True` and
         `degraded` after its members were back, until someone ran
         `rebalance()` (#1355). A success, with enough members in rotation to
