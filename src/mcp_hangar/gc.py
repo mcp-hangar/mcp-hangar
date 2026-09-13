@@ -21,8 +21,12 @@ try:
 
     WATCHDOG_AVAILABLE = True
 except ImportError:
+    # Not logged here. This runs at import -- every CLI invocation, `--help` and
+    # `pin` included, imports it through `mcp_hangar.server` -- before any
+    # command has set up logging, so a line here printed at every level and no
+    # control could turn it down (#1236). `ConfigReloadWorker.start()` says it
+    # instead, when hot reload asks for watchdog and has to poll.
     WATCHDOG_AVAILABLE = False
-    logger.debug("watchdog package not installed, config file watching will use polling")
 
 
 class BackgroundWorker:
@@ -211,6 +215,7 @@ class ConfigReloadWorker:
         self.command_bus = command_bus
         self.interval_s = interval_s
         self.use_watchdog = use_watchdog and WATCHDOG_AVAILABLE
+        self._watchdog_requested = use_watchdog
 
         self.thread: threading.Thread | None = None
         self.running = False
@@ -239,6 +244,11 @@ class ConfigReloadWorker:
             return
 
         self.running = True
+
+        # Here rather than at import: only a hot reload that wanted watchdog has
+        # a reason to hear it is missing, and by now logging is configured.
+        if self._watchdog_requested and not WATCHDOG_AVAILABLE:
+            logger.debug("watchdog package not installed, config file watching will use polling")
 
         if self.use_watchdog:
             self._start_watchdog()
