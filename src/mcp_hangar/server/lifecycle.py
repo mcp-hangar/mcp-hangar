@@ -608,6 +608,11 @@ class ServerLifecycle:
         self._shutdown_requested = True
         logger.info("server_lifecycle_shutdown_start")
 
+        # First: a retry a saga scheduled would otherwise fire while the servers
+        # below are being stopped, and start one again (#1389). The context
+        # cancels once more after its workers stop, for any armed in between.
+        self._context.cancel_scheduled_commands()
+
         self._cleanup_runtime_mcp_servers()
 
         self._stop_discovery()

@@ -418,6 +418,9 @@ class MetricsSnapshotWorker:
         # which replica happened to be scheduled. Gated on the lease, and asked
         # per cycle rather than at startup.
         self._may_manage = may_manage or (lambda: True)
+        # Waited on between snapshots rather than slept through, so `stop()`
+        # ends the thread now and not up to a minute later (#1389).
+        self._stopped = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-metrics-snapshot")
 
     def start(self) -> None:
@@ -427,14 +430,15 @@ class MetricsSnapshotWorker:
         logger.info("metrics_snapshot_worker_started", interval_s=self.interval_s)
 
     def stop(self) -> None:
-        """Signal the worker to stop.  Does not block until completion."""
+        """Signal the worker to stop. Does not block, and its wait ends at once."""
         self.running = False
+        self._stopped.set()
         logger.info("metrics_snapshot_worker_stopped")
 
     def _loop(self) -> None:
         """Main worker loop."""
         while self.running:
-            time.sleep(self.interval_s)
+            self._stopped.wait(self.interval_s)
             if not self.running:
                 break
             if not self._may_manage():

@@ -13,6 +13,7 @@ from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
 from .components import register_auth_cqrs
+from .composition import close_at_shutdown
 from ..context import get_context
 from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
@@ -70,6 +71,7 @@ def _fleet_writer(runtime: "Runtime") -> Any:
     # The lease is asked per write rather than captured here: a tenure that has
     # ended between bootstrap and the write is exactly the case being fenced.
     writer = RepositoryFleetWriter(repository, lease_provider=_current_lease)
+    close_at_shutdown(writer.close)
     logger.info("fleet_writer_configured", repository=type(repository).__name__)
     return writer
 

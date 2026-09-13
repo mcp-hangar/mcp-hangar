@@ -283,6 +283,9 @@ class TestStartBackgroundWorkers:
                 workers = _create_background_workers()
                 for worker in workers:
                     worker.start()
+                # The metrics worker is not patched: a real thread (#1389).
+                for worker in workers:
+                    worker.stop()
 
                 # Should be called twice (GC and health check)
                 assert mock_worker_class.call_count == 2

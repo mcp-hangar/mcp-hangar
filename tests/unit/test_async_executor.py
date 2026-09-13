@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from mcp_hangar.infrastructure.async_executor import AsyncExecutor, submit_async
+from mcp_hangar.infrastructure.async_executor import async_executor, AsyncExecutor, submit_async
 
 
 class TestAsyncExecutor:
@@ -105,6 +105,11 @@ class TestAsyncExecutor:
 
 class TestSubmitAsyncFunction:
     """Tests for submit_async convenience function."""
+
+    def teardown_method(self) -> None:
+        # `submit_async` starts the process-wide pool, and nothing else stops it
+        # before exit (#1389).
+        async_executor.shutdown(wait=True)
 
     def test_submit_async_executes_coroutine(self):
         """Test that submit_async executes the coroutine."""

@@ -43,6 +43,7 @@ from ...fastmcp_server.resource_link_read_through import maybe_register_resource
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...fastmcp_server.subscription_relay import maybe_register_subscription_relay
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
+from ...infrastructure.saga_manager import get_saga_manager, SagaManager
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
 from ..config import _interpolate_env_vars, load_config, load_configuration
@@ -50,6 +51,7 @@ from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
 from .components import ServerComponents, get_auth_compat_exports, load_components
+from .composition import close_what_bootstrap_started
 
 from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
@@ -127,10 +129,25 @@ class ApplicationContext:
     approval_service: Any = None
     """Approval gate service (when approvals are configured)."""
 
+    saga_manager: SagaManager | None = None
+    """Saga manager whose scheduled commands shutdown cancels."""
+
     @property
     def mcp_servers(self):
         """Get mcp_servers mapping for easy access."""
         return self.runtime.repository
+
+    def cancel_scheduled_commands(self) -> None:
+        """Cancel every command a saga scheduled on a timer and has not sent.
+
+        Nothing called this before #1389, so a recovery retry armed before
+        shutdown could fire during it and start a server being stopped.
+        """
+        if self.saga_manager is None:
+            return
+        cancelled = self.saga_manager.cancel_all_scheduled_commands()
+        if cancelled:
+            logger.info("scheduled_commands_cancelled", count=cancelled)
 
     def shutdown(self) -> None:
         """Graceful shutdown of all components.
@@ -149,6 +166,10 @@ class ApplicationContext:
                     task=worker.task,
                     error=str(e),
                 )
+
+        # After the workers, whose health checks are what degrade a server and
+        # arm a retry; before the servers stop, so no retry restarts one.
+        self.cancel_scheduled_commands()
 
         # Save circuit breaker state for mcp_server groups before stopping
         if self.saga_state_store is not None:
@@ -170,6 +191,9 @@ class ApplicationContext:
 
         # Shutdown observability (tracing, Langfuse)
         shutdown_observability(self.observability_adapter)
+
+        # Last: the fleet writer's loop has to outlive every server's stop.
+        close_what_bootstrap_started()
 
         logger.info("application_context_shutdown_complete")
 
@@ -654,6 +678,7 @@ def bootstrap(
         saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
         approval_service=components.approval_service,
+        saga_manager=get_saga_manager(),
     )
 
     # Update application context for tools to access
