@@ -3,7 +3,7 @@
 import time
 from unittest.mock import MagicMock
 
-from mcp_hangar.application.commands import StartMcpServerCommand, StopMcpServerCommand
+from mcp_hangar.application.commands import GiveUpOnMcpServerCommand, StartMcpServerCommand, StopMcpServerCommand
 from mcp_hangar.application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga, McpServerFailoverSaga
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from mcp_hangar.domain.events import HealthCheckFailed, McpServerDegraded, McpServerStarted, McpServerStopped
@@ -64,7 +64,7 @@ class TestMcpServerRecoverySaga:
         assert saga.get_retry_state("p1")["retries"] == 3
 
     def test_handle_degraded_max_retries_exceeded(self):
-        """Test that max retries triggers stop command."""
+        """Max retries gives the server up: it goes dead, not cold (#1361)."""
         saga = McpServerRecoverySaga(max_retries=2, saga_manager=get_saga_manager())
 
         # First two retries
@@ -75,7 +75,7 @@ class TestMcpServerRecoverySaga:
         commands = saga.handle(McpServerDegraded("p1", 3, 3, "error"))
 
         assert len(commands) == 1
-        assert isinstance(commands[0], StopMcpServerCommand)
+        assert isinstance(commands[0], GiveUpOnMcpServerCommand)
         assert commands[0].reason == "max_retries_exceeded"
 
     def test_handle_started_resets_retry_count(self):

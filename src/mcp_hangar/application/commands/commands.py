@@ -73,6 +73,18 @@ class StopMcpServerCommand(Command):
         return self.mcp_server_id
 
 
+@dataclass(frozen=True)
+class GiveUpOnMcpServerCommand(Command):
+    """Command to stop trying to recover a mcp_server: it goes DEAD and stays there.
+
+    Sent by the recovery saga when it runs out of retries (#1361). Not a stop:
+    a stopped server is COLD, which reads exactly like one nobody has called.
+    """
+
+    mcp_server_id: str
+    reason: str
+
+
 @dataclass(frozen=True, init=False)
 class InvokeToolCommand(Command):
     """Command to invoke a tool on a mcp_server."""

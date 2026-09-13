@@ -332,6 +332,8 @@ class TestTheVerdictVocabulary:
     _NOT_REFUSALS = frozenset(
         {
             "CancellationError",
+            # A dead target a call may not start, as `CircuitBreakerOpen` is (#1361).
+            "CannotStartMcpServerError",
             "CircuitBreakerOpen",
             "McpServerNotFoundError",
             "McpServerStartError",

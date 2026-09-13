@@ -202,6 +202,9 @@ class TestConfigurationWinsOverTheSnapshot:
 
 def _runtime_with(backend, fleet, *, auto_recover: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
+        # The repository the recovery service restores into, as the runtime's is:
+        # a restored server's state is read back off it for its gauges (#1361).
+        repository=fleet,
         recovery_service=RecoveryService(
             database=None,
             mcp_server_repository=fleet,

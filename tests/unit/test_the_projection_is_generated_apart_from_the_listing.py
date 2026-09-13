@@ -62,7 +62,8 @@ class _Fleet:
 
     def __init__(self, catalogue: dict[str, list[str]]) -> None:
         self._servers = {
-            sid: SimpleNamespace(tools=ToolCatalog({t: _schema(t) for t in tools})) for sid, tools in catalogue.items()
+            sid: SimpleNamespace(tools=ToolCatalog({t: _schema(t) for t in tools}), state=SimpleNamespace(value="cold"))
+            for sid, tools in catalogue.items()
         }
         self.started: list[str] = []
         self.repository = self
