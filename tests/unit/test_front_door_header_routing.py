@@ -355,7 +355,6 @@ def _mock_member(mcp_server_id: str):
     mock.id = mcp_server_id
     mock.state = McpServerState.READY
     mock.state_snapshot = McpServerState.READY
-    mock.given_up_snapshot = False  # a MagicMock attribute is truthy: "given up" (#1361)
     mock.ensure_ready = MagicMock()
     mock.shutdown = MagicMock()
     mock.tools = []

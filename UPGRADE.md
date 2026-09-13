@@ -56,7 +56,8 @@ time to retry. Once the backoff has passed, the call starts it.
 | Why it died | A call through a group | A call naming it | A deliberate start |
 | --- | --- | --- | --- |
 | the recovery saga gave up on it | never | yes, after its backoff | yes |
-| its process crashed, its start failed, or a capability block | yes, after its backoff | yes, after its backoff | yes |
+| a capability block stopped it | never | never | yes |
+| its process crashed, or its start failed | yes, after its backoff | yes, after its backoff | yes |
 
 The deliberate starts are `hangar_start` on the server or on its group,
 `POST /api/mcp_servers/{id}/start`, `hangar_warm` naming the server, a group
@@ -72,12 +73,17 @@ Nothing else starts a dead server:
   when the server starts or stops.
 - The bulk warm-ups skip it: the front door's at boot, and `hangar_warm` with
   no names, which now lists it under `skipped_dead`.
+- `hangar_tools` lists a dead server, or a group's dead member, without
+  starting it.
 - The GC acts only on servers that are `ready`.
 
-A group does not count a dead member as healthy. A member Hangar gave up on
-leaves rotation, and a successful start puts it back, subject to the group's
-`healthy_threshold`. A member whose process crashed stays in rotation, so the
-next call through the group restarts it, as it always did.
+A group does not count a dead member as healthy. A member Hangar gave up on,
+or one a capability block stopped, leaves rotation, and a successful start puts
+it back, subject to the group's `healthy_threshold`. A member whose process
+crashed stays in rotation, so the next call through the group restarts it, as
+it always did. When that restart fails, or the call is refused inside the
+member's backoff, the call counts as the member's failure, so a member whose
+restart keeps failing leaves rotation and the group fails over.
 
 ### Other changes
 
@@ -86,10 +92,12 @@ next call through the group restarts it, as it always did.
   `reason="max_retries_exceeded"`.
 - `hangar_stop` on a dead server makes it `cold`.
 - A server that is deleted, unloaded or reloaded away loses its lifecycle
-  gauges, so a removed dead server stops reading `4`. Its counters stay.
-- With a durable event store, a server restored `dead` reads `4` from boot. A
-  server restored `ready`, with no connection in the new process, reads `cold`
-  after its first health check, not `dead`.
+  gauges, so a removed dead server stops reading `4`. A deletion removes them
+  on every replica. Its counters stay.
+- With a durable event store, a server restored `dead` or `degraded` reads so
+  from boot. A server restored `ready` has no connection in the new process:
+  it has no series until its first health check or call, which make it `cold`,
+  not `dead`.
 
 ## Upgrade to 2.19.1
 

@@ -46,12 +46,14 @@ from typing import Any
 import pytest
 
 HARNESS = Path(__file__).with_name("_dead_server_harness.py")
-MODES = ("single", "group")
+MODES = ("single", "group", "failover")
 
 # As `_dead_server_harness.py` names them.
 BY_START, BY_CALL = "svc-a", "svc-b"
 SERVERS = (BY_START, BY_CALL)
-MEMBER = "member-a"
+MEMBER, MEMBER_B = "member-a", "member-b"
+#: The group's default: counted failures before a member leaves rotation.
+UNHEALTHY_THRESHOLD = 2
 #: One failing health check degrades the server, then the one restart fails.
 DEGRADES_BEFORE_GIVING_UP = 2
 
@@ -88,6 +90,11 @@ def run(runs):
 @pytest.fixture
 def grouped(runs):
     return runs["group"]
+
+
+@pytest.fixture
+def failover(runs):
+    return runs["failover"]
 
 
 def _events_until_dead(run: dict[str, Any], server: str) -> list[list[Any]]:
@@ -240,3 +247,36 @@ def test_an_explicit_start_brings_a_given_up_member_back(grouped):
     after = grouped["after_start"]
     assert (_member(after)["in_rotation"], after["healthy_count"]) == (True, 1)
     assert _outcome(grouped["start_call"])["success"] is True, grouped["start_call"]
+
+
+# ----------------------------------------------------------------------------
+# Failover, every threshold at its default: a crashed member whose restart
+# keeps failing
+# ----------------------------------------------------------------------------
+
+
+def _members(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {m["id"]: m for m in status["members"]}
+
+
+def test_both_members_serve_before_anything_goes_wrong(failover):
+    assert failover["healthy"]["healthy_count"] == 2
+
+
+def test_the_failed_restarts_count_against_the_member_until_it_leaves_rotation(failover):
+    # A refused call to B used to count for nothing: B stayed in rotation and
+    # every other call through the group failed, all twenty of them.
+    outcomes = [_outcome(batch) for batch in failover["calls"]]
+    failed_at = [i for i, o in enumerate(outcomes) if not o["success"]]
+
+    assert len(failed_at) == UNHEALTHY_THRESHOLD, [o.get("error_type") for o in outcomes]
+    assert [outcomes[i]["error_type"] for i in failed_at] == ["McpServerStartError", "CircuitBreakerOpen"]
+    assert all(o["success"] for o in outcomes[max(failed_at) + 1 :]), "the group did not fail over"
+
+
+def test_the_group_fails_over_to_the_healthy_member(failover):
+    after = _members(failover["after"])
+
+    assert after[MEMBER_B]["in_rotation"] is False
+    assert after[MEMBER]["in_rotation"] is True
+    assert failover["after"]["healthy_count"] == 1

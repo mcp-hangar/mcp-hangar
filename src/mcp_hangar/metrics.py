@@ -1420,6 +1420,11 @@ def remove_mcp_server_series(mcp_server: str) -> None:
     Left behind, they read as live forever: a removed dead server at `state == 4`
     and an ever-older last-healthy time. Counters stay; `rate()` and
     `increase()` already read a series that stops moving correctly.
+
+    An event about the server handled after this writes its series again. That
+    is accepted: every removal path publishes the server's own events before
+    the one that triggers this, so it takes an event published late by another
+    thread, and the series it leaves is the state that event reported.
     """
     for gauge in (
         PROVIDER_INFO,

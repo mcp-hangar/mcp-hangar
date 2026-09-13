@@ -38,6 +38,7 @@ from ....application.read_models.tool_projection import get_tool_projection_regi
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
+from ....domain.model.mcp_server import DEAD_NOT_REVIVED_BY_CALLS
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
@@ -1376,28 +1377,54 @@ class BatchExecutor:
     def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
         """Circuit breaker / health degradation of the resolved target.
 
-        A DEAD target is judged by its backoff, not by its failure count. It
-        keeps the count that got it there until a start succeeds, so judged by
-        the count every call to it was refused -- and a call is one of the
-        things that revive a dead server (#1361). A call to a dead server
-        respects the server's backoff: once it has passed, the cold-start gate
-        starts it; until then the call is refused and told how long to wait.
+        A DEAD target is judged by why it died and by its backoff, not by its
+        failure count: see `_refuse_dead_target`.
+
+        A refusal of a group member counts as that member's failure, as a
+        failed invocation does. Otherwise a member whose restart keeps failing
+        stays in rotation and keeps drawing calls, and the group never fails
+        over (#1361).
         """
         if not p.mcp_server_obj:
             return None
-        health = getattr(p.mcp_server_obj, "health", None)
         if p.mcp_server_obj.state.value == "dead":
-            if health is None or health.can_retry():
-                return None
-            BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
-            return p.refuse(
-                f"Circuit breaker open (too many consecutive failures); retry in {health.time_until_retry():.1f}s",
-                "CircuitBreakerOpen",
-            )
+            return self._fail_group_member(p, self._refuse_dead_target(p))
+        health = getattr(p.mcp_server_obj, "health", None)
         if not (health is not None and health.should_degrade()):
             return None
         BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
-        return p.refuse("Circuit breaker open (too many consecutive failures)", "CircuitBreakerOpen")
+        refusal = p.refuse("Circuit breaker open (too many consecutive failures)", "CircuitBreakerOpen")
+        return self._fail_group_member(p, refusal)
+
+    def _refuse_dead_target(self, p: "_CallPipeline") -> CallResult | None:
+        """Refuse a call a DEAD target may not take now; None lets the call start it.
+
+        A capability block is not revived by a call: only a deliberate start
+        revives it. Any other dead target is judged by its backoff, not by the
+        failure count that got it there. Judged by the count, every call to it
+        was refused, and a call is one of the things that revive a dead server
+        (#1361). Inside the backoff the call is refused and told how long to
+        wait; after it, the cold-start gate starts the server.
+        """
+        if getattr(p.mcp_server_obj, "dead_reason_snapshot", None) in DEAD_NOT_REVIVED_BY_CALLS:
+            return p.refuse(
+                "A capability block is not revived by a call; start it explicitly", "CannotStartMcpServerError"
+            )
+        health = getattr(p.mcp_server_obj, "health", None)
+        if health is None or health.can_retry():
+            return None
+        BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
+        return p.refuse(
+            f"Circuit breaker open (too many consecutive failures); retry in {health.time_until_retry():.1f}s",
+            "CircuitBreakerOpen",
+        )
+
+    @staticmethod
+    def _fail_group_member(p: "_CallPipeline", refusal: CallResult | None) -> CallResult | None:
+        """Report a refused group member to its group, as a failed invocation is (#1361)."""
+        if refusal is not None and p.is_group and p.group_obj is not None:
+            p.group_obj.report_failure(p.target_server_id)
+        return refusal
 
     def _gate_validators(self, p: "_CallPipeline") -> CallResult | None:
         """Interceptor validators, fail-closed BEFORE prompting for approval.
@@ -1479,12 +1506,19 @@ class BatchExecutor:
     def _gate_cold_start(self, p: "_CallPipeline") -> CallResult | None:
         """Single-flight cold start of the resolved target.
 
-        A DEAD target starts here too. A call is one of the two things that
-        revive a server Hangar gave up on (#1361), and starting it here rather
-        than inside the invocation is what re-runs a deferred digest pin.
+        A DEAD target starts here too. A call is one of the things that revive
+        a dead server (#1361), and starting it here rather than inside the
+        invocation is what re-runs a deferred digest pin. It is judged again
+        first: the approval gate can hold a call for minutes after the
+        circuit-breaker gate let it through. A group member that is refused,
+        or fails to start, counts as that member's failure.
         """
         if not (p.mcp_server_obj and p.mcp_server_obj.state.value in ("cold", "dead")):
             return None
+        if p.mcp_server_obj.state.value == "dead":
+            refusal = self._refuse_dead_target(p)
+            if refusal is not None:
+                return self._fail_group_member(p, refusal)
         with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
             cs_span.set_attribute("mcp.server.id", p.target_server_id)
             try:
@@ -1496,7 +1530,7 @@ class BatchExecutor:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)
-                return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
+                return self._fail_group_member(p, p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError"))
         return None
 
     def _gate_deferred_digest_pin(self, p: "_CallPipeline") -> CallResult | None:

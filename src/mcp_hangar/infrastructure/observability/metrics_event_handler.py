@@ -118,8 +118,7 @@ class MetricsEventHandler:
         DigestMismatchInTask: "_handle_task_digest_drift",
         TaskConsentDecided: "_handle_task_consent_decided",
         CostReportGenerated: "_handle_cost_report",
-        McpServerDeregistered: "_handle_mcp_server_removed",
-        McpServerHotUnloaded: "_handle_mcp_server_removed",
+        McpServerHotUnloaded: "_handle_mcp_server_unloaded",
         ConfigurationReloaded: "_handle_configuration_reloaded",
     }
 
@@ -176,11 +175,11 @@ class MetricsEventHandler:
         prometheus_metrics.record_mcp_server_stop(event.mcp_server_id, reason=event.reason)
         prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "cold")
 
-    def _handle_mcp_server_removed(self, event: McpServerDeregistered | McpServerHotUnloaded) -> None:
-        """A deleted or unloaded server takes its lifecycle gauges with it (#1361).
+    def _handle_mcp_server_unloaded(self, event: McpServerHotUnloaded) -> None:
+        """An unloaded server takes its lifecycle gauges with it (#1361).
 
-        Left behind, they read as live forever: a removed dead server at
-        `state == 4`, and an ever older last-healthy time.
+        A hot-loaded server lives on one replica, so an effect is enough. A
+        deleted one does not: see `remove_series_of_deregistered`.
         """
         prometheus_metrics.remove_mcp_server_series(event.mcp_server_id)
 
@@ -354,3 +353,15 @@ class MetricsEventHandler:
         """Reset all metrics (mainly for testing)."""
         self._metrics.clear()
         self._started_at = time.time()
+
+
+def remove_series_of_deregistered(event: DomainEvent) -> None:
+    """Drop a deregistered server's lifecycle gauges, on every replica (#1361).
+
+    A projection, not one of the handler's effects. A server is deleted on one
+    replica, and every replica that has served it holds its gauges; the tailer
+    hands a peer's deletion to projections only. Left behind, the gauges read as
+    live forever: a deleted dead server at `state == 4`.
+    """
+    if isinstance(event, McpServerDeregistered):
+        prometheus_metrics.remove_mcp_server_series(event.mcp_server_id)

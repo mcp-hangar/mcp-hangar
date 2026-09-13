@@ -7,11 +7,13 @@ state change. All three now read `dead`, and `mcp_hangar_mcp_server_up` and
 `mcp_hangar_mcp_server_initialized` change with them.
 
 Why a server died decides what starts it again. A group never routes a call to
-a server Hangar gave up on; it restarts a member whose process crashed, as it
-always did. A call to any dead server waits out the server's backoff, and a
-deliberate start does not. Health checks, the recovery saga, the GC and the
-bulk warm-ups leave a dead server alone. A server that is deleted, unloaded or
-reloaded away loses its lifecycle gauges.
+a server Hangar gave up on or one a capability block stopped, and a call does
+not revive the second at all. A group still restarts a member whose process
+crashed, as it always did, and counts one it could not restart as failed, so
+it fails over. A call to a dead server waits out the server's backoff; a
+deliberate start does not. Health checks, the recovery saga, the GC, the bulk
+warm-ups and `hangar_tools` leave a dead server alone. A server that is
+deleted, unloaded or reloaded away loses its lifecycle gauges.
 
 New gauge `mcp_hangar_mcp_server_last_healthy_timestamp_seconds`: when Hangar
 last saw the server working (a passing health check, a completed start or a

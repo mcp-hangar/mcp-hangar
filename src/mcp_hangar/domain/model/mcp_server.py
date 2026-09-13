@@ -77,18 +77,26 @@ _JSONRPC_METHOD_NOT_FOUND = -32601
 # - DEAD_GIVEN_UP: the recovery saga ran out of retries. A deliberate start
 #   revives it, and so does a call that names it once its backoff has passed.
 #   A group never routes a call to it.
-# - DEAD_CRASHED, DEAD_START_FAILED, DEAD_CAPABILITY_BLOCKED: any call starts
-#   it again once its backoff has passed, including one a group routes to it.
+# - DEAD_CAPABILITY_BLOCKED: only a deliberate start revives it. A group never
+#   routes a call to it, and a call naming it is refused.
+# - DEAD_CRASHED, DEAD_START_FAILED: any call starts it again once its backoff
+#   has passed, including one a group routes to it.
 #
 # Deliberate starts, which revive any of them: hangar_start, the REST start and
 # StartMcpServerCommand; a group's start_all and add_member(auto_start);
 # hangar_warm naming the server; and a failover saga starting the backup it
 # was configured with. Bulk warm-ups -- the front door's at boot, hangar_warm()
-# with no names -- skip every DEAD server.
+# with no names -- skip every DEAD server, and hangar_tools lists one without
+# starting it.
 DEAD_GIVEN_UP = "given_up"
 DEAD_CRASHED = "crashed"
 DEAD_START_FAILED = "start_failed"
 DEAD_CAPABILITY_BLOCKED = "capability_blocked"
+
+#: Why-dead reasons a group does not route a call to.
+DEAD_NOT_ROUTED_BY_GROUPS = frozenset({DEAD_GIVEN_UP, DEAD_CAPABILITY_BLOCKED})
+#: Why-dead reasons a call does not revive: only a deliberate start does.
+DEAD_NOT_REVIVED_BY_CALLS = frozenset({DEAD_CAPABILITY_BLOCKED})
 
 # Valid state transitions. DEAD -> INITIALIZING is the way out of DEAD, through
 # `ensure_ready()`.
@@ -130,6 +138,13 @@ def _rpc_error_type(error: dict[str, Any]) -> str:
     """
     code = error.get("code")
     return str(code) if type(code) is int else OTHER_ERROR_TYPE
+
+
+def _start_refusal(reason: str, time_left: float) -> str:
+    """What `ensure_ready()` tells a caller it would not start the server for."""
+    if reason == "not_revived_by_calls":
+        return "a capability block is not revived by a call; start it explicitly"
+    return f"backoff not elapsed, retry in {time_left:.1f}s"
 
 
 class McpServer(AggregateRoot):
@@ -467,9 +482,9 @@ class McpServer(AggregateRoot):
         return self._state
 
     @property
-    def given_up_snapshot(self) -> bool:
-        """DEAD because the recovery saga ran out of retries, read as `state_snapshot` is (#1361)."""
-        return self._state is McpServerState.DEAD and self._dead_reason == DEAD_GIVEN_UP
+    def dead_reason_snapshot(self) -> str | None:
+        """Why it is DEAD (a ``DEAD_*`` constant), or None when it is not; read as `state_snapshot` is."""
+        return self._dead_reason if self._state is McpServerState.DEAD else None
 
     @property
     def health(self) -> HealthTracker:
@@ -616,6 +631,9 @@ class McpServer(AggregateRoot):
             if self._client and self._client.is_alive():
                 return True, "already_ready", 0
 
+        if by_call and self._state == McpServerState.DEAD and self._dead_reason in DEAD_NOT_REVIVED_BY_CALLS:
+            return False, "not_revived_by_calls", 0
+
         # A call waits out a DEAD server's backoff as it does a DEGRADED one's;
         # a deliberate start does not (#1361).
         in_backoff = self._state == McpServerState.DEGRADED or (by_call and self._state == McpServerState.DEAD)
@@ -667,11 +685,7 @@ class McpServer(AggregateRoot):
                 # Check if we can start
                 can_start, reason, time_left = self._can_start(by_call)
                 if not can_start:
-                    raise CannotStartMcpServerError(
-                        self.mcp_server_id,
-                        f"backoff not elapsed, retry in {time_left:.1f}s",
-                        time_left,
-                    )
+                    raise CannotStartMcpServerError(self.mcp_server_id, _start_refusal(reason, time_left), time_left)
                 # We are the starter: transition and prepare event
                 self._transition_to(McpServerState.INITIALIZING)
                 self._ready_event = threading.Event()  # Fresh event for this attempt

@@ -360,15 +360,17 @@ def _seed_lifecycle_metrics(runtime: Any, mcp_server_ids: list[str]) -> None:
 
     Replay changes state without publishing, so a server restored DEAD had no
     `mcp_hangar_mcp_server_state` series until something happened to it -- and
-    nothing does to a dead server. Only servers that are not COLD are seeded: a
-    cold one has no series before its first start in any other process either,
-    and seeding one would let an idle pool read as down.
+    nothing does to a dead server. Only DEAD and DEGRADED are seeded: the states
+    that say something failed. A restored READY has no process in this one, so
+    seeding it would read `up` 1 until a health check found out -- or for good,
+    with health checks off; it goes COLD on its first check or call instead. A
+    COLD one has no series before its first start in any other process either.
     """
     from ...metrics import record_mcp_server_healthy, update_mcp_server_state
 
     for mcp_server_id in mcp_server_ids:
         server = runtime.repository.get(mcp_server_id)
-        if server is None or server.state.value == "cold":
+        if server is None or server.state.value not in ("dead", "degraded"):
             continue
         update_mcp_server_state(mcp_server_id, server.state.value, mode=server.mode_str, record_change=False)
         last_success = server.health.last_success_at

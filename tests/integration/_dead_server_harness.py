@@ -40,6 +40,10 @@ Modes:
   requests: a crash, which a call through the group restarts. Then its upstream
   is broken until the saga gives up: the member leaves rotation and a call
   through the group is refused, until ``hangar_start`` brings it back.
+- ``failover``: a two-member group, every threshold at its default. Member B's
+  process is killed while its upstream is broken, so every restart fails; then
+  twenty calls go through the group. The failed restarts must count against B
+  until it leaves rotation, and the group must fail over to A.
 """
 
 from __future__ import annotations
@@ -64,8 +68,10 @@ ENVELOPE = {
 
 #: Single mode: one is revived by an explicit start, the other by a call.
 BY_START, BY_CALL = "svc-a", "svc-b"
-#: Group mode.
-GROUP, MEMBER = "pool", "member-a"
+#: Group and failover modes.
+GROUP, MEMBER, MEMBER_B = "pool", "member-a", "member-b"
+#: Failover mode: calls through the group once B is dead.
+FAILOVER_CALLS = 20
 #: The saga's first backoff and retry budget; see the module docstring.
 SAGA_BACKOFF_S = 2.5
 SAGA_MAX_RETRIES = 1
@@ -213,13 +219,20 @@ def _worker(context: Any, task: str) -> Any:
 
 def _config(mode: str, flags: dict[str, Path]) -> dict[str, Any]:
     servers: dict[str, Any] = {
-        server: {
-            "mode": "subprocess",
-            "command": [sys.executable, str(HERE), "upstream", str(flag)],
-            "max_consecutive_failures": 1,
-        }
+        server: {"mode": "subprocess", "command": [sys.executable, str(HERE), "upstream", str(flag)]}
         for server, flag in flags.items()
     }
+    if mode == "failover":
+        # Every threshold at its default: the case the other modes' settings hid.
+        servers[GROUP] = {
+            "mode": "group",
+            "strategy": "round_robin",
+            "min_healthy": 1,
+            "members": [{"id": MEMBER}, {"id": MEMBER_B}],
+        }
+        return {"mcp_servers": servers}
+    for spec in servers.values():
+        spec["max_consecutive_failures"] = 1
     if mode == "group":
         servers[GROUP] = {
             "mode": "group",
@@ -324,6 +337,21 @@ def _grouped(
     report["start_call"] = _call(client, GROUP)
 
 
+def _failover(
+    client: Any, repository: Any, flags: dict[str, Path], seen: list[list[Any]], report: dict[str, Any]
+) -> None:
+    report["healthy"] = _group(client)
+
+    # B's process dies, and its upstream will not come back: every restart fails.
+    flags[MEMBER_B].touch()
+    os.kill(int(Path(f"{flags[MEMBER_B]}.pid").read_text()), signal.SIGKILL)
+    _wait(lambda: _saw_dead(seen, MEMBER_B, "crashed"), 10)
+    report["crashed"] = _group(client)
+
+    report["calls"] = [_call(client, GROUP) for _ in range(FAILOVER_CALLS)]
+    report["after"] = _group(client)
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
@@ -344,7 +372,7 @@ def main(mode: str, out: Path) -> None:
     workers.HEALTH_CHECK_INTERVAL_SECONDS = 1
     workers.GC_WORKER_INTERVAL_SECONDS = 1
 
-    names = [MEMBER] if mode == "group" else [BY_START, BY_CALL]
+    names = {"group": [MEMBER], "failover": [MEMBER, MEMBER_B]}.get(mode, [BY_START, BY_CALL])
     flags = {server: out.parent / f"{server}.down" for server in names}
     context = bootstrap(config_dict=_config(mode, flags))
     recovery = get_saga_manager()._event_sagas["mcp_server_recovery"]
@@ -374,10 +402,8 @@ def main(mode: str, out: Path) -> None:
     with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
         health.start()
         gc.start()
-        if mode == "group":
-            _grouped(client, repository, flags, seen, report)
-        else:
-            _single(client, repository, flags, seen, report)
+        run = {"group": _grouped, "failover": _failover}.get(mode, _single)
+        run(client, repository, flags, seen, report)
 
     health.stop()
     gc.stop()

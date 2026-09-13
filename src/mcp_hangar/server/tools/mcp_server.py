@@ -74,6 +74,11 @@ def _get_tools_for_group(mcp_server: str) -> dict[str, Any]:
     if not selected:
         raise ValueError(f"no_healthy_members_in_group: {mcp_server}")
 
+    if selected.state.value == "dead":
+        # Listing tools is not a start. A call through the group restarts a
+        # crashed member, and that call respects its backoff (#1361).
+        return {"mcp_server": mcp_server, "group": True, "state": "dead", "tools": []}
+
     ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=selected.mcp_server_id))
     query = GetMcpServerToolsQuery(mcp_server_id=selected.mcp_server_id)
     tools = ctx.query_bus.execute(query)
@@ -137,6 +142,12 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
             "predefined": mcp_server_obj.tools_predefined,
             "tools": [t.to_dict() for t in filtered_tools],
         }
+
+    if mcp_server_obj.state.value == "dead":
+        # Listing tools is not a start, and must not revive a dead server inside
+        # its backoff (#1361). A deliberate start, or a call after the backoff,
+        # lists them again.
+        return {"mcp_server": mcp_server, "state": "dead", "predefined": mcp_server_obj.tools_predefined, "tools": []}
 
     # Start mcp_server and discover tools
     ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server))
