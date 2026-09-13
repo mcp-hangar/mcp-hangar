@@ -21,9 +21,9 @@ class McpServerRecoverySaga(EventTriggeredSaga):
     Recovery Strategy:
     1. When a mcp_server is degraded, schedule a retry
     2. Apply exponential backoff between retries
-    3. After max retries, give up: the mcp_server goes DEAD and stays there
-       until an explicit start or a call (#1361). Restarts still pending are
-       cancelled, so this saga does not start it again either.
+    3. After max retries, give up: the mcp_server goes DEAD (#1361). Restarts
+       still pending are cancelled, as they are when it starts or stops, so a
+       stale one never starts it again.
     4. Reset retry count when mcp_server starts successfully
 
     Configuration:
@@ -152,8 +152,9 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         Resets retry count on successful start.
         """
         mcp_server_id = event.mcp_server_id
-        # Recovered: what is still scheduled finds it ready and does nothing.
-        self._pending_restarts.pop(mcp_server_id, None)
+        # Recovered. A restart still waiting would fire on a server that may by
+        # then have gone cold or dead, and start it again.
+        self._cancel_pending_restarts(mcp_server_id)
 
         if mcp_server_id in self._retry_state:
             old_retries = self._retry_state[mcp_server_id]["retries"]
@@ -174,6 +175,8 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         Clears retry state for normally stopped mcp_servers.
         """
         mcp_server_id = event.mcp_server_id
+        # A restart scheduled before the stop would undo it.
+        self._cancel_pending_restarts(mcp_server_id)
 
         # Only clear state for intentional stops
         if event.reason in ("shutdown", "idle", "user_request", "detection_enforcement:block"):

@@ -113,6 +113,18 @@ class Gauge:
         with self._lock:
             self._values[key] = max(value, self._values.get(key, value))
 
+    def remove(self, **labels) -> None:
+        """Drop every series whose labels include ``labels``.
+
+        For a subject that no longer exists. A gauge left behind reads as a live
+        value forever: a deleted server stuck at `state == 4`.
+        """
+        with self._lock:
+            for key in list(self._values):
+                current = dict(zip(self.label_names, key, strict=False))
+                if all(current.get(name) == value for name, value in labels.items()):
+                    del self._values[key]
+
     def _make_key(self, labels: dict) -> tuple:
         return tuple(labels.get(label_name, "") for label_name in self.label_names)
 
@@ -545,7 +557,11 @@ PROVIDER_LAST_STATE_CHANGE_SECONDS = Gauge(
 # ago. Leave cold servers out:
 #
 #   time() - mcp_hangar_mcp_server_last_healthy_timestamp_seconds > 900
-#     unless on(mcp_server) mcp_hangar_mcp_server_state == 0
+#     unless mcp_hangar_mcp_server_state == 0
+#
+# Default matching, on every label. `on(mcp_server)` drops `instance`, so with
+# more than one replica a server cold on one replica would hide it dead on
+# another.
 #
 # That catches a server given up on (4), one still being retried (3) and one
 # stuck starting (1). A server that was never healthy has no series: catch the
@@ -1383,14 +1399,40 @@ def observe_health_check(
     HEALTH_CHECK_CONSECUTIVE_FAILURES.set(consecutive_failures, mcp_server=mcp_server)
 
 
-def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess"):
-    """Update mcp_server state metrics."""
+def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess", *, record_change: bool = True):
+    """Update mcp_server state metrics.
+
+    ``record_change=False`` sets the state without claiming it changed now: a
+    state read back from the event log at boot changed before this process.
+    """
     state_map = {"cold": 0, "initializing": 1, "ready": 2, "degraded": 3, "dead": 4}
     PROVIDER_STATE_CURRENT.set(state_map.get(state, 0), mcp_server=mcp_server)
     PROVIDER_UP.set(1 if state == "ready" else 0, mcp_server=mcp_server)
     PROVIDER_INITIALIZED.set(0 if state == "cold" else 1, mcp_server=mcp_server)
     PROVIDER_INFO.set(1, mcp_server=mcp_server, mode=mode)
-    PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
+    if record_change:
+        PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
+
+
+def remove_mcp_server_series(mcp_server: str) -> None:
+    """Drop the lifecycle gauges of an mcp_server that was deleted, unloaded or reloaded away.
+
+    Left behind, they read as live forever: a removed dead server at `state == 4`
+    and an ever-older last-healthy time. Counters stay; `rate()` and
+    `increase()` already read a series that stops moving correctly.
+    """
+    for gauge in (
+        PROVIDER_INFO,
+        PROVIDER_STATE_CURRENT,
+        PROVIDER_UP,
+        PROVIDER_INITIALIZED,
+        PROVIDER_LAST_STATE_CHANGE_SECONDS,
+        PROVIDER_LAST_HEALTHY_SECONDS,
+        PROVIDER_COLD_START_IN_PROGRESS,
+        HEALTH_CHECK_CONSECUTIVE_FAILURES,
+        CONNECTIONS_ACTIVE,
+    ):
+        gauge.remove(mcp_server=mcp_server)
 
 
 def record_mcp_server_healthy(mcp_server: str, at: float) -> None:

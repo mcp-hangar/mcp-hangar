@@ -351,4 +351,26 @@ def restore_persisted_fleet(runtime: Any) -> int:
 
     if restored:
         logger.info("fleet_restored", count=len(restored), mcp_server_ids=list(restored))
+        _seed_lifecycle_metrics(runtime, list(restored))
     return len(restored)
+
+
+def _seed_lifecycle_metrics(runtime: Any, mcp_server_ids: list[str]) -> None:
+    """Put the lifecycle state a restored server replayed onto its gauges (#1361).
+
+    Replay changes state without publishing, so a server restored DEAD had no
+    `mcp_hangar_mcp_server_state` series until something happened to it -- and
+    nothing does to a dead server. Only servers that are not COLD are seeded: a
+    cold one has no series before its first start in any other process either,
+    and seeding one would let an idle pool read as down.
+    """
+    from ...metrics import record_mcp_server_healthy, update_mcp_server_state
+
+    for mcp_server_id in mcp_server_ids:
+        server = runtime.repository.get(mcp_server_id)
+        if server is None or server.state.value == "cold":
+            continue
+        update_mcp_server_state(mcp_server_id, server.state.value, mode=server.mode_str, record_change=False)
+        last_success = server.health.last_success_at
+        if last_success is not None:
+            record_mcp_server_healthy(mcp_server_id, last_success)

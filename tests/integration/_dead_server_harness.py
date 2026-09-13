@@ -1,17 +1,15 @@
-"""Bootstrap Hangar, break two servers until the recovery saga gives up, then revive them (#1361, #1359).
+"""Bootstrap Hangar, break servers until the recovery saga gives up, then revive them (#1361, #1359).
 
 Run as a script, in its own interpreter, by
 ``test_a_given_up_server_reads_dead_on_the_served_path.py``:
-``python _dead_server_harness.py <out.json>``. Not collected by pytest. The same
-file is the upstream both servers run: ``python _dead_server_harness.py
-upstream <flag>`` serves MCP over stdio. While ``<flag>`` exists, a running one
-fails ``tools/list``, the call a health check makes, and a new one exits before
-it answers anything, so a start fails.
+``python _dead_server_harness.py <mode> <out.json>``. Not collected by pytest.
+The same file is the upstream every server runs: ``python _dead_server_harness.py
+upstream <flag>`` serves MCP over stdio and writes its pid to ``<flag>.pid``.
+While ``<flag>`` exists, a running one fails ``tools/list``, the call a health
+check makes, and a new one exits before it answers anything, so a start fails.
 
-Not a new one that stays up and fails ``tools/list``: such a start never ends.
-It blocks reading the live process's stderr for diagnostics, and the server
-sits in ``initializing`` with nothing to give up on. That is its own defect,
-reported with this change rather than worked around in it.
+Not a new one that stays up and fails ``tools/list``: a start like that is a
+separate defect, tracked separately, and would stall this harness.
 
 A separate process because ``bootstrap()`` fills process-global state -- the
 runtime, the saga manager, the metrics registry -- that a second bootstrap in
@@ -19,20 +17,29 @@ the same interpreter would inherit.
 
 What runs is production: ``bootstrap()`` with a config dict; the app
 ``serve --http`` serves, under starlette's ``TestClient``, for ``hangar_call``,
-``hangar_start`` and ``hangar_stop``; the health and GC workers ``bootstrap()``
-created, started the way ``ServerLifecycle.start`` starts them; and the
-recovery saga it registered, whose restarts go through the command bus to a
-real start of the upstream process. Metrics are read from ``get_metrics()``,
-the body ``/metrics`` returns. Nothing here publishes an event or sends a
-command by hand.
+``hangar_start``, ``hangar_stop`` and ``hangar_group_list``; the health and GC
+workers ``bootstrap()`` created, started the way ``ServerLifecycle.start`` starts
+them; and the sagas it registered. The recovery saga's restarts go through the
+command bus to a real start of the upstream process. Metrics are read from
+``get_metrics()``, the body ``/metrics`` returns. Nothing here publishes an
+event or sends a command by hand.
 
-Two things are changed, neither on the path under test. The workers'
-intervals, 60s and 30s in production, are lowered before ``bootstrap()`` reads
-them. And the saga's first backoff is 2.5s instead of 5s, so its three retries
-take about 17s. Not less: a restart the saga schedules before the server's own
-backoff has run out is refused, and nothing schedules another. With
-``max_consecutive_failures: 1`` that backoff is 2s, 4s and 8s after the first,
-second and third failure, against the saga's 2.5s, 5s and 10s.
+Three things are changed, none on the path under test. The workers' intervals,
+60s and 30s in production, are lowered before ``bootstrap()`` reads them. And
+the recovery saga gets one restart instead of three, after 2.5s instead of 5s.
+Not sooner: a restart the saga schedules before the server's own backoff has
+run out is refused, and nothing schedules another. With
+``max_consecutive_failures: 1`` that backoff is 2s after the first failure.
+
+Modes:
+
+- ``single``: two servers. Both are broken until the saga gives up. One is
+  revived by ``hangar_start``; the other is called inside its backoff, which is
+  refused, and again after it, which revives it.
+- ``group``: a one-member group. The member's process is killed between two
+  requests: a crash, which a call through the group restarts. Then its upstream
+  is broken until the saga gives up: the member leaves rotation and a call
+  through the group is refused, until ``hangar_start`` brings it back.
 """
 
 from __future__ import annotations
@@ -41,6 +48,7 @@ from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import time
 from typing import Any
@@ -54,14 +62,16 @@ ENVELOPE = {
     "io.modelcontextprotocol/clientCapabilities": {},
 }
 
-#: One is revived by an explicit start, the other by a call.
+#: Single mode: one is revived by an explicit start, the other by a call.
 BY_START, BY_CALL = "svc-a", "svc-b"
-SERVERS = (BY_START, BY_CALL)
-#: The saga's first backoff; see the module docstring.
+#: Group mode.
+GROUP, MEMBER = "pool", "member-a"
+#: The saga's first backoff and retry budget; see the module docstring.
 SAGA_BACKOFF_S = 2.5
-#: Three retries take 2.5 + 5 + 10s, plus the starts themselves.
-GIVE_UP_DEADLINE_S = 35.0
-#: How long the workers run with both servers dead, and with one cold.
+SAGA_MAX_RETRIES = 1
+#: A give-up takes one failed check, 2.5s, and one failed start.
+GIVE_UP_DEADLINE_S = 20.0
+#: How long the workers run with a server dead, or cold.
 QUIET_WINDOW_S = 3.0
 
 ADD = {
@@ -79,6 +89,7 @@ def upstream(flag: Path) -> None:
     """An MCP server over stdio that fails while ``flag`` exists; see the module docstring."""
     if flag.exists():
         sys.exit(1)
+    Path(f"{flag}.pid").write_text(str(os.getpid()))
     for line in sys.stdin:
         request = json.loads(line)
         if "id" not in request:
@@ -123,10 +134,15 @@ def _tool(client: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return json.loads(result["content"][0]["text"])
 
 
-def _call(client: Any, server: str) -> dict[str, Any]:
-    """``hangar_call`` add on one server; the batch result."""
-    call = {"mcp_server": server, "tool": "add", "arguments": {"a": 1, "b": 2}}
+def _call(client: Any, target: str) -> dict[str, Any]:
+    """``hangar_call`` add on a server or a group; the batch result."""
+    call = {"mcp_server": target, "tool": "add", "arguments": {"a": 1, "b": 2}}
     return _tool(client, "hangar_call", {"calls": [call]})
+
+
+def _group(client: Any) -> dict[str, Any]:
+    """The group as ``hangar_group_list`` reports it -- what the operator sees."""
+    return next(g for g in _tool(client, "hangar_group_list", {})["groups"] if g["group_id"] == GROUP)
 
 
 def _samples(name: str, server: str, **labels: str) -> list[float]:
@@ -169,11 +185,146 @@ def _wait(condition: Callable[[], bool], deadline_s: float) -> bool:
     return condition()
 
 
+def _saw_dead(seen: list[list[Any]], server: str, reason: str) -> bool:
+    """The watcher heard the server go dead for ``reason``.
+
+    Waited on rather than the aggregate's state, which flips before the event
+    is delivered: the watcher is subscribed after the metrics handler and the
+    sagas, so once it has the event, so have they.
+    """
+    return [server, "state", "dead", reason] in seen
+
+
+def _give_up_delivered(seen: list[list[Any]], server: str) -> bool:
+    """The publish that carried the give-up has finished.
+
+    The give-up is delivered inside the last degrade's publish -- the saga
+    answers that event with a nested one -- so the watcher hears `dead` and
+    then that degrade. Only then is everything it drove on the gauges.
+    """
+    events = [e[1:] for e in seen if e[0] == server]
+    marker = ["state", "dead", "given_up"]
+    return marker in events and any(e[0] == "degraded" for e in events[events.index(marker) :])
+
+
 def _worker(context: Any, task: str) -> Any:
     return next(w for w in context.background_workers if getattr(w, "task", None) == task)
 
 
-def main(out: Path) -> None:
+def _config(mode: str, flags: dict[str, Path]) -> dict[str, Any]:
+    servers: dict[str, Any] = {
+        server: {
+            "mode": "subprocess",
+            "command": [sys.executable, str(HERE), "upstream", str(flag)],
+            "max_consecutive_failures": 1,
+        }
+        for server, flag in flags.items()
+    }
+    if mode == "group":
+        servers[GROUP] = {
+            "mode": "group",
+            "strategy": "round_robin",
+            "min_healthy": 1,
+            # Failures never take the member out: only the give-up may, so the
+            # test can see that it did.
+            "health": {"unhealthy_threshold": 100, "healthy_threshold": 1},
+            "circuit_breaker": {"failure_threshold": 100, "reset_timeout_s": 3600},
+            "members": [{"id": MEMBER}],
+        }
+    return {"mcp_servers": servers}
+
+
+def _backoff_over(health: Any) -> bool:
+    """Past the server's backoff at its jitter ceiling, +10%.
+
+    Not `health.can_retry()`: it draws fresh jitter every time, so it can say
+    yes here and the executor's own draw say no a moment later.
+    """
+    ceiling = min(60.0, 2.0**health.consecutive_failures) * 1.1
+    return time.time() - (health.last_failure_at or 0.0) >= ceiling
+
+
+def _single(
+    client: Any, repository: Any, flags: dict[str, Path], seen: list[list[Any]], report: dict[str, Any]
+) -> None:
+    def snapshot() -> dict[str, Any]:
+        return {server: _snapshot(repository, server) for server in flags}
+
+    def events_since(mark: int) -> dict[str, list[list[Any]]]:
+        return {server: [e[1:] for e in seen[mark:] if e[0] == server] for server in flags}
+
+    # Both serve, and a health check sees both working.
+    report["first_calls"] = {server: _call(client, server) for server in flags}
+    _wait(lambda: all([server, "HealthCheckPassed", None] in seen for server in flags), 10)
+    report["healthy"] = snapshot()
+
+    # Both upstreams go bad. The next check fails and degrades them; from here
+    # no check can pass, so last-healthy is what it will stay.
+    for flag in flags.values():
+        flag.touch()
+    _wait(lambda: all(repository.get(server).state.value != "ready" for server in flags), 10)
+    report["broken"] = snapshot()
+
+    # The saga restarts each, the restart fails, and it gives up.
+    _wait(lambda: all(_give_up_delivered(seen, server) for server in flags), GIVE_UP_DEADLINE_S)
+    report["dead"] = snapshot()
+    report["dead_mark"] = len(seen)
+
+    # A call inside the server's backoff: refused, and nothing is started.
+    report["call_in_backoff"] = _call(client, BY_CALL)
+
+    # Dead, with the health and GC workers running.
+    mark = len(seen)
+    time.sleep(QUIET_WINDOW_S)
+    report["while_dead"] = {"snapshot": snapshot(), "events": events_since(mark)}
+
+    # The upstreams are back. One server is started, the other called once its
+    # backoff has run out.
+    for flag in flags.values():
+        flag.unlink()
+    report["revived"] = {BY_START: _tool(client, "hangar_start", {"mcp_server": BY_START})}
+    _wait(lambda: _backoff_over(repository.get(BY_CALL).health), GIVE_UP_DEADLINE_S)
+    report["revived"][BY_CALL] = _call(client, BY_CALL)
+    report["after_revival"] = snapshot()
+
+    # Stopped: cold, and not probed while it is.
+    report["stop"] = _tool(client, "hangar_stop", {"mcp_server": BY_START})
+    report["stopped"] = _snapshot(repository, BY_START)
+    time.sleep(QUIET_WINDOW_S)
+    report["still_cold"] = _snapshot(repository, BY_START)
+
+
+def _grouped(
+    client: Any, repository: Any, flags: dict[str, Path], seen: list[list[Any]], report: dict[str, Any]
+) -> None:
+    flag = flags[MEMBER]
+    member = repository.get(MEMBER)
+
+    report["first_call"] = _call(client, GROUP)
+    report["healthy"] = _group(client)
+
+    # The process dies between two requests: a crash.
+    os.kill(int(Path(f"{flag}.pid").read_text()), signal.SIGKILL)
+    _wait(lambda: _saw_dead(seen, MEMBER, "crashed"), 10)
+    report["crashed"] = _group(client)
+    report["crash_call"] = _call(client, GROUP)
+    report["after_crash_call"] = _group(client)
+
+    # Its upstream goes bad until the saga gives up.
+    flag.touch()
+    _wait(lambda: member.state.value != "ready", 10)
+    _wait(lambda: _give_up_delivered(seen, MEMBER), GIVE_UP_DEADLINE_S)
+    report["given_up"] = _group(client)
+    report["given_up_call"] = _call(client, GROUP)
+
+    # Back, and started on purpose.
+    flag.unlink()
+    report["start"] = _tool(client, "hangar_start", {"mcp_server": MEMBER})
+    report["after_start"] = _group(client)
+    report["start_call"] = _call(client, GROUP)
+
+
+def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
     from starlette.testclient import TestClient
@@ -193,28 +344,21 @@ def main(out: Path) -> None:
     workers.HEALTH_CHECK_INTERVAL_SECONDS = 1
     workers.GC_WORKER_INTERVAL_SECONDS = 1
 
-    flags = {server: out.parent / f"{server}.down" for server in SERVERS}
-    config = {
-        "mcp_servers": {
-            server: {
-                "mode": "subprocess",
-                "command": [sys.executable, str(HERE), "upstream", str(flags[server])],
-                "max_consecutive_failures": 1,
-            }
-            for server in SERVERS
-        }
-    }
-    context = bootstrap(config_dict=config)
-    get_saga_manager()._event_sagas["mcp_server_recovery"]._initial_backoff_s = SAGA_BACKOFF_S
+    names = [MEMBER] if mode == "group" else [BY_START, BY_CALL]
+    flags = {server: out.parent / f"{server}.down" for server in names}
+    context = bootstrap(config_dict=_config(mode, flags))
+    recovery = get_saga_manager()._event_sagas["mcp_server_recovery"]
+    recovery._initial_backoff_s = SAGA_BACKOFF_S
+    recovery._max_retries = SAGA_MAX_RETRIES
 
     seen: list[list[Any]] = []
 
     def observe(event: DomainEvent) -> None:
         server = getattr(event, "mcp_server_id", None)
-        if server not in SERVERS:
+        if server not in flags:
             return
         if isinstance(event, McpServerStateChanged):
-            seen.append([server, "state", event.new_state])
+            seen.append([server, "state", event.new_state, event.dead_reason])
         elif isinstance(event, McpServerDegraded):
             seen.append([server, "degraded", event.reason])
         elif isinstance(event, HealthCheckPassed | HealthCheckFailed):
@@ -226,53 +370,14 @@ def main(out: Path) -> None:
 
     repository = context.runtime.repository
     health, gc = _worker(context, "health_check"), _worker(context, "gc")
-
-    def snapshot() -> dict[str, Any]:
-        return {server: _snapshot(repository, server) for server in SERVERS}
-
-    def events_since(mark: int) -> dict[str, list[list[Any]]]:
-        return {server: [e[1:] for e in seen[mark:] if e[0] == server] for server in SERVERS}
-
     report: dict[str, Any] = {}
     with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
-        # Both serve, and a health check sees both working.
-        report["first_calls"] = {server: _call(client, server) for server in SERVERS}
         health.start()
         gc.start()
-        _wait(lambda: all([server, "HealthCheckPassed", None] in seen for server in SERVERS), 10)
-        report["healthy"] = snapshot()
-
-        # Both upstreams go bad. The next check fails and degrades them; from
-        # here no check can pass, so last-healthy is what it will stay.
-        for flag in flags.values():
-            flag.touch()
-        _wait(lambda: all(repository.get(server).state.value != "ready" for server in SERVERS), 10)
-        report["broken"] = snapshot()
-
-        # The saga retries, each restart fails, and it gives up.
-        _wait(lambda: all(repository.get(server).state.value == "dead" for server in SERVERS), GIVE_UP_DEADLINE_S)
-        report["dead"] = snapshot()
-
-        # Dead, with the health and GC workers running.
-        mark = len(seen)
-        report["dead_mark"] = mark
-        time.sleep(QUIET_WINDOW_S)
-        report["while_dead"] = {"snapshot": snapshot(), "events": events_since(mark)}
-
-        # The upstreams are back. One server is started, the other called.
-        for flag in flags.values():
-            flag.unlink()
-        report["revived"] = {
-            BY_START: _tool(client, "hangar_start", {"mcp_server": BY_START}),
-            BY_CALL: _call(client, BY_CALL),
-        }
-        report["after_revival"] = snapshot()
-
-        # Stopped: cold, and not probed while it is.
-        report["stop"] = _tool(client, "hangar_stop", {"mcp_server": BY_START})
-        report["stopped"] = _snapshot(repository, BY_START)
-        time.sleep(QUIET_WINDOW_S)
-        report["still_cold"] = _snapshot(repository, BY_START)
+        if mode == "group":
+            _grouped(client, repository, flags, seen, report)
+        else:
+            _single(client, repository, flags, seen, report)
 
     health.stop()
     gc.stop()
@@ -290,4 +395,4 @@ if __name__ == "__main__":
     if sys.argv[1] == "upstream":
         upstream(Path(sys.argv[2]))
     else:
-        main(Path(sys.argv[1]))
+        main(sys.argv[1], Path(sys.argv[2]))

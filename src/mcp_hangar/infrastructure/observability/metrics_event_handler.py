@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import time
 
 from mcp_hangar.domain.events import (
+    ConfigurationReloaded,
     CostReportGenerated,
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
@@ -20,6 +21,8 @@ from mcp_hangar.domain.events import (
     HealthCheckFailed,
     HealthCheckPassed,
     McpServerDegraded,
+    McpServerDeregistered,
+    McpServerHotUnloaded,
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
@@ -115,6 +118,9 @@ class MetricsEventHandler:
         DigestMismatchInTask: "_handle_task_digest_drift",
         TaskConsentDecided: "_handle_task_consent_decided",
         CostReportGenerated: "_handle_cost_report",
+        McpServerDeregistered: "_handle_mcp_server_removed",
+        McpServerHotUnloaded: "_handle_mcp_server_removed",
+        ConfigurationReloaded: "_handle_configuration_reloaded",
     }
 
     def handle(self, event: DomainEvent) -> None:
@@ -169,6 +175,20 @@ class MetricsEventHandler:
         # Update Prometheus metrics
         prometheus_metrics.record_mcp_server_stop(event.mcp_server_id, reason=event.reason)
         prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "cold")
+
+    def _handle_mcp_server_removed(self, event: McpServerDeregistered | McpServerHotUnloaded) -> None:
+        """A deleted or unloaded server takes its lifecycle gauges with it (#1361).
+
+        Left behind, they read as live forever: a removed dead server at
+        `state == 4`, and an ever older last-healthy time.
+        """
+        prometheus_metrics.remove_mcp_server_series(event.mcp_server_id)
+
+    def _handle_configuration_reloaded(self, event: ConfigurationReloaded) -> None:
+        """So does one a reload removed. One it replaced keeps its series: its new
+        aggregate may already have written to them."""
+        for mcp_server_id in event.mcp_servers_removed:
+            prometheus_metrics.remove_mcp_server_series(mcp_server_id)
 
     def _handle_state_changed(self, event: McpServerStateChanged) -> None:
         """Handle mcp_server state changed event."""

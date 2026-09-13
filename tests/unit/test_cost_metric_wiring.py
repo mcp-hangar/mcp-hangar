@@ -129,6 +129,8 @@ class TestTheDispatchTableStillMatchesSubclasses:
         ("ProviderStopped", "McpServerStopped"),
         ("ProviderStateChanged", "McpServerStateChanged"),
         ("ProviderDegraded", "McpServerDegraded"),
+        # A deregistered server's gauges are dropped (#1361).
+        ("ProviderDeregistered", "McpServerDeregistered"),
     ]
 
     def test_a_subclass_event_reaches_its_base_handler(self):

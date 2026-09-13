@@ -15,6 +15,7 @@ def create_mock_provider(mcp_server_id: str, state: ProviderState = ProviderStat
     mock.mcp_server_id = mcp_server_id
     mock.state = state
     mock.state_snapshot = state
+    mock.given_up_snapshot = False  # a MagicMock attribute is truthy: "given up" (#1361)
     mock.ensure_ready = MagicMock()
     mock.shutdown = MagicMock()
     mock.tools = []

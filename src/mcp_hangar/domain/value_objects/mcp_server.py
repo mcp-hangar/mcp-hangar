@@ -32,9 +32,9 @@ class McpServerState(Enum):
         INITIALIZING: McpServer is starting up, handshake in progress.
         READY: McpServer is running and accepting requests.
         DEGRADED: McpServer has failures but may recover after backoff.
-        DEAD: McpServer failed and Hangar stopped trying. Nothing automatic --
-            health checks, the recovery saga, the GC -- starts it again; an
-            explicit start or a call does.
+        DEAD: McpServer failed and is not running. Health checks, the recovery
+            saga and the GC leave it there. Why it died decides what starts it
+            again: see the DEAD_* reasons in ``domain.model.mcp_server``.
     """
 
     COLD = "cold"

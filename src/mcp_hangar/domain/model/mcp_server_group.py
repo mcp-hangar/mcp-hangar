@@ -290,9 +290,17 @@ class McpServerGroup(AggregateRoot):
 
     @property
     def healthy_count(self) -> int:
-        """Number of members currently in rotation."""
+        """Number of members in rotation that are not DEAD.
+
+        A member whose process crashed stays in rotation, so a call through the
+        group restarts it, but it is not healthy until it is back (#1361).
+        """
         with self._lock:
-            return sum(1 for m in self._members.values() if m.in_rotation)
+            return sum(
+                1
+                for m in self._members.values()
+                if m.in_rotation and m.mcp_server.state_snapshot is not McpServerState.DEAD
+            )
 
     @property
     def total_count(self) -> int:
@@ -490,10 +498,11 @@ class McpServerGroup(AggregateRoot):
         which is the breaker's real purpose. This prevents a primary eviction
         (which opens the group CB) from taking down an otherwise-healthy backup.
 
-        A DEAD member is never selected, in rotation or not. A call revives a
-        dead server, and a group choosing one would make the group the thing
-        that revives it -- when giving up means only a deliberate start does
-        (#1361). A COLD member is still selected: that is how a group starts one.
+        A member Hangar gave up on is never selected, in rotation or not. A group
+        choosing it would make the group the thing that revives it, and only a
+        deliberate start or a call naming it does (#1361). A member whose
+        process crashed is selected, as a COLD one is, and selecting it
+        restarts it.
 
         Returns:
             Selected mcp_server or None if no healthy members available.
@@ -531,8 +540,8 @@ class McpServerGroup(AggregateRoot):
 
     @staticmethod
     def _selectable(member: GroupMember) -> bool:
-        """In rotation and not DEAD. `state_snapshot`: the member's lock sits below this one's."""
-        return member.in_rotation and member.mcp_server.state_snapshot is not McpServerState.DEAD
+        """In rotation and not given up on. A snapshot: the member's lock sits below this one's."""
+        return member.in_rotation and not member.mcp_server.given_up_snapshot
 
     def _check_circuit_recovery(self) -> None:
         """Check if circuit just recovered and emit event."""
@@ -567,6 +576,8 @@ class McpServerGroup(AggregateRoot):
                 self._maybe_close_circuit()
             else:
                 self._end_failure_run()
+            # A crashed member back up counts as healthy again (#1361).
+            self._update_state()
 
     def _end_failure_run(self) -> None:
         """Reset the circuit's failure count on a success while it is not open.
@@ -648,6 +659,33 @@ class McpServerGroup(AggregateRoot):
 
             self._maybe_remove_from_rotation(member, member_id)
             self._maybe_open_circuit()
+            self._update_state()
+
+    def report_member_dead(self, member_id: str) -> None:
+        """A member went DEAD: keep rotation and group state true (#1361).
+
+        A member Hangar gave up on leaves rotation: only a deliberate start or a
+        call naming it revives it, and a call through the group is neither. A
+        start that succeeds brings it back, through `report_success`. A member
+        whose process crashed stays in rotation, so the next call through the
+        group selects and restarts it; `healthy_count` leaves it out meanwhile.
+        """
+        with self._lock:
+            member = self._members.get(member_id)
+            if not member:
+                return
+            if member.in_rotation and member.mcp_server.given_up_snapshot:
+                member.in_rotation = False
+                member.consecutive_successes = 0
+                self._record_event(
+                    GroupMemberHealthChanged(
+                        group_id=self.id,
+                        member_id=member_id,
+                        in_rotation=False,
+                        reason="given_up",
+                    )
+                )
+                logger.info(f"Member {member_id} removed from rotation: Hangar gave up on it")
             self._update_state()
 
     def _maybe_remove_from_rotation(self, member: GroupMember, member_id: str) -> None:

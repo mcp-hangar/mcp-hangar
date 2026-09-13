@@ -1376,16 +1376,25 @@ class BatchExecutor:
     def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
         """Circuit breaker / health degradation of the resolved target.
 
-        A DEAD target passes. Its failure count is what made Hangar give up on
-        it, and it keeps that count until a start succeeds, so this gate
-        refused every call to it -- and a call is one of the two things that
-        revive a dead server (#1361). The cold-start gate starts it.
+        A DEAD target is judged by its backoff, not by its failure count. It
+        keeps the count that got it there until a start succeeds, so judged by
+        the count every call to it was refused -- and a call is one of the
+        things that revive a dead server (#1361). A call to a dead server
+        respects the server's backoff: once it has passed, the cold-start gate
+        starts it; until then the call is refused and told how long to wait.
         """
         if not p.mcp_server_obj:
             return None
+        health = getattr(p.mcp_server_obj, "health", None)
         if p.mcp_server_obj.state.value == "dead":
-            return None
-        if not (hasattr(p.mcp_server_obj, "health") and p.mcp_server_obj.health.should_degrade()):
+            if health is None or health.can_retry():
+                return None
+            BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
+            return p.refuse(
+                f"Circuit breaker open (too many consecutive failures); retry in {health.time_until_retry():.1f}s",
+                "CircuitBreakerOpen",
+            )
+        if not (health is not None and health.should_degrade()):
             return None
         BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
         return p.refuse("Circuit breaker open (too many consecutive failures)", "CircuitBreakerOpen")

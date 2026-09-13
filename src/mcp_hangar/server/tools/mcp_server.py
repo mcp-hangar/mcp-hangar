@@ -343,6 +343,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
         SKIP THIS for normal use - hangar_call auto-starts mcp_servers.
 
         Side effects: Starts specified mcp_server processes. Groups are skipped.
+        Warming all skips dead mcp_servers; name one to start it.
 
         Args:
             mcp_servers: str - Comma-separated mcp_server IDs, or null to warm all
@@ -351,6 +352,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             {
                 warmed: list[str],
                 already_warm: list[str],
+                skipped_dead: list[str],
                 failed: list[{id: str, error: str}],
                 summary: str
             }
@@ -379,6 +381,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
         warmed = []
         already_warm = []
+        skipped_dead = []
         failed = []
 
         for mcp_server_id in mcp_server_ids:
@@ -392,8 +395,13 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
             try:
                 mcp_server_obj = ctx.get_mcp_server(mcp_server_id)
-                if mcp_server_obj and mcp_server_obj.state.value == "ready":
+                state = mcp_server_obj.state.value if mcp_server_obj else None
+                if state == "ready":
                     already_warm.append(mcp_server_id)
+                elif state == "dead" and not mcp_servers:
+                    # Warming everything is not a deliberate start of each
+                    # server, and only a deliberate start revives a dead one (#1361).
+                    skipped_dead.append(mcp_server_id)
                 else:
                     command = StartMcpServerCommand(mcp_server_id=mcp_server_id)
                     ctx.command_bus.send(command)
@@ -401,9 +409,13 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             except Exception as e:  # noqa: BLE001 -- fault-barrier: single mcp_server warm failure must not crash batch
                 failed.append({"id": mcp_server_id, "error": str(e)[:100]})
 
+        summary = f"Warmed {len(warmed)} mcp_servers, {len(already_warm)} already warm, {len(failed)} failed"
+        if skipped_dead:
+            summary += f", {len(skipped_dead)} dead skipped"
         return {
             "warmed": warmed,
             "already_warm": already_warm,
+            "skipped_dead": skipped_dead,
             "failed": failed,
-            "summary": f"Warmed {len(warmed)} mcp_servers, {len(already_warm)} already warm, {len(failed)} failed",
+            "summary": summary,
         }

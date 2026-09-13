@@ -1,31 +1,42 @@
 """On the wiring ``serve --http`` runs, a given-up server reads dead and keeps its last-healthy time (#1361, #1359).
 
-``_dead_server_harness.py`` runs once, in a fresh interpreter: the real
+``_dead_server_harness.py`` runs in a fresh interpreter per mode: the real
 ``bootstrap()``, the served MCP app, the health and GC workers ``bootstrap()``
-created and the recovery saga it registered. Two servers run a real upstream
-process that is made to fail ``tools/list``. A health check fails and degrades
-each one; the saga restarts it three times, each start fails, and the saga
-gives up. Then the upstreams come back: one server is revived by
-``hangar_start``, the other by ``hangar_call``.
+created and the sagas it registered, with real upstream processes that are
+broken on purpose.
+
+``single``: a health check fails and degrades a server, the saga restarts it,
+the start fails, and the saga gives up. A call inside the server's backoff is
+refused; ``hangar_start`` revives one server and a call after the backoff the
+other.
+
+``group``: a one-member group. The member's process is killed between two
+requests -- a crash -- and the next call through the group restarts it, as it
+always has. Then its upstream breaks until the saga gives up: the member leaves
+rotation, a call through the group is refused, and ``hangar_start`` brings it
+back.
 
 What this pins, and what a unit test with a mock bus cannot:
 
 - The give-up reaches ``mcp_hangar_mcp_server_state`` as 4 on the served path.
-  Before, it read 0: the saga's stop published ``McpServerStopped``, which the
-  metrics handler maps to ``cold``. The order matters too: the saga hears the
-  degrade after the metrics handler has set 3, and its nested give-up must be
-  what the gauge ends on.
-- The saga's own retries ran. The give-up is not a short cut around them.
+  The saga hears the degrade after the metrics handler has set 3, and its
+  nested give-up must be what the gauge ends on.
+- The saga's own retry ran. The give-up is not a short cut around it.
+- A call to a dead server respects the server's backoff: before it, the call
+  is refused and nothing starts.
 - ``mcp_hangar_mcp_server_last_healthy_timestamp_seconds`` is written on the
   served path, appears in the ``/metrics`` body, and keeps the last passing
   check's time through the give-up and through a stop. The live tier scrapes
   the same series over HTTP (``tests/live/test_t0_last_healthy.py``).
-- Nothing revives a dead server on its own. The workers run for three seconds
-  with both dead: no state change, no health check, no restart.
+- Nothing revives a dead server on its own: the workers run for three seconds
+  with it dead and nothing happens to it.
+- A group restarts a member that crashed, and does not route to one Hangar
+  gave up on.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import subprocess
@@ -35,25 +46,48 @@ from typing import Any
 import pytest
 
 HARNESS = Path(__file__).with_name("_dead_server_harness.py")
+MODES = ("single", "group")
 
 # As `_dead_server_harness.py` names them.
 BY_START, BY_CALL = "svc-a", "svc-b"
 SERVERS = (BY_START, BY_CALL)
-#: One failing health check degrades the server, then three restarts fail.
-DEGRADES_BEFORE_GIVING_UP = 4
+MEMBER = "member-a"
+#: One failing health check degrades the server, then the one restart fails.
+DEGRADES_BEFORE_GIVING_UP = 2
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    out = tmp_path_factory.mktemp("dead-server") / "run.json"
+def _run(mode: str, tmp: Path) -> dict[str, Any]:
+    out = tmp / mode / "run.json"
+    out.parent.mkdir()
     result = subprocess.run(
-        [sys.executable, str(HARNESS), str(out)],
+        [sys.executable, str(HARNESS), mode, str(out)],
         capture_output=True,
         text=True,
         timeout=55,
     )
-    assert result.returncode == 0 and out.exists(), f"harness exited {result.returncode}:\n{result.stderr[-4000:]}"
+    assert result.returncode == 0 and out.exists(), (
+        f"{mode}: harness exited {result.returncode}:\n{result.stderr[-4000:]}"
+    )
     return json.loads(out.read_text())
+
+
+@pytest.fixture(scope="module")
+def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any]]:
+    # Concurrently, under the 60s pytest-timeout the integration job applies.
+    tmp = tmp_path_factory.mktemp("dead-server")
+    with ThreadPoolExecutor(max_workers=len(MODES)) as pool:
+        pending = {mode: pool.submit(_run, mode, tmp) for mode in MODES}
+        return {mode: future.result() for mode, future in pending.items()}
+
+
+@pytest.fixture
+def run(runs):
+    return runs["single"]
+
+
+@pytest.fixture
+def grouped(runs):
+    return runs["group"]
 
 
 def _events_until_dead(run: dict[str, Any], server: str) -> list[list[Any]]:
@@ -64,6 +98,16 @@ def _events_until_dead(run: dict[str, Any], server: str) -> list[list[Any]]:
 def _outcome(batch: dict[str, Any]) -> dict[str, Any]:
     [result] = batch["results"]
     return result
+
+
+def _member(status: dict[str, Any]) -> dict[str, Any]:
+    [member] = status["members"]
+    return member
+
+
+# ----------------------------------------------------------------------------
+# A server on its own
+# ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("server", SERVERS)
@@ -78,8 +122,8 @@ def test_both_serve_and_are_seen_working(run, server):
 def test_the_saga_retries_then_gives_up(run, server):
     events = _events_until_dead(run, server)
     degraded_at = [i for i, e in enumerate(events) if e[0] == "degraded"]
-    [dead_at] = [i for i, e in enumerate(events) if e == ["state", "dead"]]
-    restarts = [i for i, e in enumerate(events) if e == ["state", "initializing"]][1:]  # after the first start
+    [dead_at] = [i for i, e in enumerate(events) if e == ["state", "dead", "given_up"]]
+    restarts = [i for i, e in enumerate(events) if e[:2] == ["state", "initializing"]][1:]  # after the first start
 
     assert len(degraded_at) == DEGRADES_BEFORE_GIVING_UP, events
     # Every restart comes before the give-up. The give-up itself is delivered
@@ -108,6 +152,13 @@ def test_its_last_healthy_time_survives_the_give_up(run, server):
     assert run["while_dead"]["snapshot"][server]["last_healthy"] == last
 
 
+def test_a_call_inside_its_backoff_is_refused(run):
+    refused = _outcome(run["call_in_backoff"])
+
+    assert (refused["success"], refused["error_type"]) == (False, "CircuitBreakerOpen"), refused
+    assert "retry in" in refused["error"]
+
+
 @pytest.mark.parametrize("server", SERVERS)
 def test_nothing_revives_it_on_its_own(run, server):
     during, before = run["while_dead"]["snapshot"][server], run["dead"][server]
@@ -125,7 +176,7 @@ def test_an_explicit_start_revives_it(run):
     assert after["last_healthy"] > run["broken"][BY_START]["last_healthy"]
 
 
-def test_a_call_revives_it(run):
+def test_a_call_after_its_backoff_revives_it(run):
     after = run["after_revival"][BY_CALL]
 
     assert _outcome(run["revived"][BY_CALL])["success"] is True, run["revived"][BY_CALL]
@@ -140,3 +191,52 @@ def test_its_last_healthy_time_survives_a_stop(run):
     assert stopped["last_healthy"] is not None
     assert stopped["last_healthy"] >= run["after_revival"][BY_START]["last_healthy"]
     assert later["last_healthy"] == stopped["last_healthy"], "moved while cold: nothing probes a cold server"
+
+
+# ----------------------------------------------------------------------------
+# A group member: crashed, then given up on
+# ----------------------------------------------------------------------------
+
+
+def test_the_group_serves_before_anything_goes_wrong(grouped):
+    assert _outcome(grouped["first_call"])["success"] is True, grouped["first_call"]
+    assert grouped["healthy"]["healthy_count"] == 1
+
+
+def test_a_crashed_member_stays_in_rotation_but_is_not_counted_healthy(grouped):
+    status = grouped["crashed"]
+
+    assert _member(status)["state"] == "dead"
+    assert _member(status)["in_rotation"] is True
+    assert status["healthy_count"] == 0, "a dead member counted as healthy"
+    assert ["state", "dead", "crashed"] in [e[1:] for e in grouped["events"] if e[0] == MEMBER]
+
+
+def test_a_call_through_the_group_restarts_a_crashed_member(grouped):
+    # As it did before `dead` was visible: the group selected the member and
+    # the call started it. Refusing it would leave a one-member group down
+    # until an operator acted.
+    assert _outcome(grouped["crash_call"])["success"] is True, grouped["crash_call"]
+    after = grouped["after_crash_call"]
+    assert (_member(after)["state"], after["healthy_count"]) == ("ready", 1)
+
+
+def test_a_given_up_member_leaves_rotation(grouped):
+    status = grouped["given_up"]
+
+    assert (_member(status)["state"], _member(status)["in_rotation"]) == ("dead", False)
+    assert status["healthy_count"] == 0
+    assert ["state", "dead", "given_up"] in [e[1:] for e in grouped["events"] if e[0] == MEMBER]
+
+
+def test_a_call_through_the_group_does_not_revive_a_given_up_member(grouped):
+    refused = _outcome(grouped["given_up_call"])
+
+    assert (refused["success"], refused["error_type"]) == (False, "NoAvailableMemberError"), refused
+
+
+def test_an_explicit_start_brings_a_given_up_member_back(grouped):
+    assert grouped["start"]["state"] == "ready", grouped["start"]
+    after = grouped["after_start"]
+    assert (_member(after)["in_rotation"], after["healthy_count"]) == (True, 1)
+    assert _outcome(grouped["start_call"])["success"] is True, grouped["start_call"]

@@ -39,7 +39,7 @@ from mcp_hangar.domain.events import (
     McpServerStopped,
     ToolInvocationCompleted,
 )
-from mcp_hangar.domain.exceptions import McpServerStartError
+from mcp_hangar.domain.exceptions import CannotStartMcpServerError, McpServerStartError
 from mcp_hangar.domain.model.health_tracker import HealthTracker
 from mcp_hangar.domain.model.mcp_server import VALID_TRANSITIONS, McpServer
 from mcp_hangar.domain.value_objects import McpServerState
@@ -264,14 +264,27 @@ class TestTheWayOut:
         assert len(fleet.upstreams) == 2, "a new connection, not the closed one"
         assert _scraped("mcp_hangar_mcp_server_state", fleet.sid) == 2.0
 
-    def test_a_call_revives_it(self):
+    def test_a_call_revives_it_once_its_backoff_has_passed(self):
         fleet = _Fleet()
         fleet.dead()
+        fleet.server.health._last_failure_at = time.time() - 120  # the backoff has run out
 
         result = fleet.server.invoke_tool("add", {"a": 1, "b": 2})
 
         assert result == {"content": [{"type": "text", "text": "3"}]}
         assert fleet.server.state is McpServerState.READY
+
+    def test_a_call_in_its_backoff_is_refused_and_starts_nothing(self):
+        # Otherwise every call restarts a server whose upstream is still broken.
+        fleet = _Fleet()
+        fleet.dead()
+        launched = len(fleet.upstreams)
+
+        with pytest.raises(CannotStartMcpServerError, match="backoff not elapsed"):
+            fleet.server.invoke_tool("add", {"a": 1, "b": 2})
+
+        assert fleet.server.state is DEAD
+        assert len(fleet.upstreams) == launched
 
     def test_a_health_check_does_not(self):
         fleet = _Fleet()
@@ -326,17 +339,32 @@ class TestTheRecoverySaga:
 
         assert [c.args[0] for c in manager.cancel_scheduled_command.call_args_list] == ["t1", "t2"]
 
-    def test_a_recovery_forgets_its_restarts(self):
+    def test_a_start_cancels_its_restarts(self):
+        # Left armed, t1 fires on a server that may have gone cold or dead since.
         manager = MagicMock()
         manager.schedule_command.side_effect = ["t1", "t2"]
         saga = McpServerRecoverySaga(max_retries=1, saga_manager=manager)
 
         saga.handle(McpServerDegraded("svc", 3, 3, "error"))
         saga.handle(McpServerStarted("svc", "subprocess", 1, 1.0))
+        cancelled_by_the_start = [c.args[0] for c in manager.cancel_scheduled_command.call_args_list]
         saga.handle(McpServerDegraded("svc", 3, 3, "error"))
         saga.handle(McpServerDegraded("svc", 4, 4, "error"))
 
-        assert [c.args[0] for c in manager.cancel_scheduled_command.call_args_list] == ["t2"]
+        assert cancelled_by_the_start == ["t1"]
+        assert [c.args[0] for c in manager.cancel_scheduled_command.call_args_list] == ["t1", "t2"]
+
+    @pytest.mark.parametrize("reason", ["shutdown", "idle", "user_request"])
+    def test_a_stop_cancels_its_restarts(self, reason):
+        # A restart scheduled before an operator's stop would undo it.
+        manager = MagicMock()
+        manager.schedule_command.side_effect = ["t1"]
+        saga = McpServerRecoverySaga(max_retries=3, saga_manager=manager)
+
+        saga.handle(McpServerDegraded("svc", 3, 3, "error"))
+        saga.handle(McpServerStopped("svc", reason))
+
+        assert [c.args[0] for c in manager.cancel_scheduled_command.call_args_list] == ["t1"]
 
 
 class TestAGroup:
@@ -465,7 +493,7 @@ class TestLastHealthy:
 # ----------------------------------------------------------------------------
 
 
-def _pipeline(ctx: Any, state: str, should_degrade: bool = False) -> Any:
+def _pipeline(ctx: Any, state: str, should_degrade: bool = False, can_retry: bool = True) -> Any:
     from types import SimpleNamespace
 
     from mcp_hangar.observability.tracing import get_tracer
@@ -487,7 +515,11 @@ def _pipeline(ctx: Any, state: str, should_degrade: bool = False) -> Any:
     )
     pipeline.mcp_server_obj = SimpleNamespace(
         state=SimpleNamespace(value=state),
-        health=SimpleNamespace(should_degrade=lambda: should_degrade),
+        health=SimpleNamespace(
+            should_degrade=lambda: should_degrade,
+            can_retry=lambda: can_retry,
+            time_until_retry=lambda: 0.0 if can_retry else 12.5,
+        ),
     )
     pipeline.target_server_id = "svc"
     return pipeline
@@ -505,12 +537,25 @@ def test_the_batch_starts_a_target_that_is_not_running(state):
     assert command == StartMcpServerCommand(mcp_server_id="svc")
 
 
-def test_the_batch_circuit_breaker_lets_a_call_through_to_a_dead_target():
+def test_the_batch_circuit_breaker_lets_a_call_through_to_a_dead_target_once_its_backoff_has_passed():
     # A dead server keeps the failure count that got it given up on, and this
-    # gate refused every call to it -- so a call could never revive it.
+    # gate refused every call to it by that count -- so no call could revive it.
     from mcp_hangar.server.tools.batch.executor import BatchExecutor
 
-    assert BatchExecutor()._gate_circuit_breaker(_pipeline(MagicMock(), "dead", should_degrade=True)) is None
+    pipeline = _pipeline(MagicMock(), "dead", should_degrade=True, can_retry=True)
+
+    assert BatchExecutor()._gate_circuit_breaker(pipeline) is None
+
+
+def test_the_batch_circuit_breaker_refuses_a_dead_target_in_its_backoff_and_says_how_long():
+    from mcp_hangar.server.tools.batch.executor import BatchExecutor
+
+    pipeline = _pipeline(MagicMock(), "dead", should_degrade=True, can_retry=False)
+
+    refusal = BatchExecutor()._gate_circuit_breaker(pipeline)
+
+    assert refusal is not None and refusal.error_type == "CircuitBreakerOpen"
+    assert "retry in 12.5s" in refusal.error
 
 
 def test_the_batch_circuit_breaker_still_refuses_a_degraded_target():
