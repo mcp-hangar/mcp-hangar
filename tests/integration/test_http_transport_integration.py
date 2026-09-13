@@ -154,6 +154,30 @@ def mock_mcp_server():
     server.shutdown()
 
 
+@pytest.fixture
+def remote_provider(mock_mcp_server):
+    """Build providers against the mock server, and shut every one down after the test.
+
+    A provider that reaches READY opens the standing GET stream (#882) on a
+    daemon thread, `mcp-get-stream-<host>`, that reconnects until its client is
+    closed. Left open, it outlives the test and the mock server and reconnects
+    to a refused port for the rest of the session, writing to stderr while the
+    interpreter exits (#1384). Requesting `mock_mcp_server` here orders the
+    teardown: these providers close before the server stops.
+    """
+    built: list[McpServer] = []
+
+    def build(mcp_server_id: str, **kwargs) -> McpServer:
+        provider = McpServer(mcp_server_id=mcp_server_id, mode="remote", endpoint=f"{mock_mcp_server}/mcp", **kwargs)
+        built.append(provider)
+        return provider
+
+    yield build
+
+    for provider in built:
+        provider.shutdown()
+
+
 class TestRemoteProviderConfiguration:
     """Test Provider configuration with remote mode."""
 
@@ -214,13 +238,9 @@ class TestRemoteProviderConfiguration:
 class TestRemoteProviderConnection:
     """Test actual connections to remote MCP providers."""
 
-    def test_connect_to_mock_server(self, mock_mcp_server):
+    def test_connect_to_mock_server(self, remote_provider):
         """Should connect and initialize with mock MCP server."""
-        provider = McpServer(
-            mcp_server_id="mock-remote",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
-        )
+        provider = remote_provider("mock-remote")
 
         # Ensure provider is ready (this triggers connection)
         provider.ensure_ready()
@@ -229,15 +249,13 @@ class TestRemoteProviderConnection:
         assert provider.has_tools
         assert provider.tools.has("echo")
 
-    def test_connect_with_bearer_auth(self, mock_mcp_server):
+    def test_connect_with_bearer_auth(self, remote_provider):
         """Should authenticate with bearer token."""
         MockMCPHandler.auth_required = "bearer"
         MockMCPHandler.expected_token = "test-bearer-token"
 
-        provider = McpServer(
-            mcp_server_id="bearer-auth-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
+        provider = remote_provider(
+            "bearer-auth-test",
             auth={
                 "type": "bearer",
                 "bearer_token": "test-bearer-token",
@@ -247,15 +265,13 @@ class TestRemoteProviderConnection:
         provider.ensure_ready()
         assert provider.state == McpServerState.READY
 
-    def test_connect_with_api_key_auth(self, mock_mcp_server):
+    def test_connect_with_api_key_auth(self, remote_provider):
         """Should authenticate with API key."""
         MockMCPHandler.auth_required = "api_key"
         MockMCPHandler.expected_token = "my-api-key"
 
-        provider = McpServer(
-            mcp_server_id="api-key-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
+        provider = remote_provider(
+            "api-key-test",
             auth={
                 "type": "api_key",
                 "api_key": "my-api-key",
@@ -265,15 +281,13 @@ class TestRemoteProviderConnection:
         provider.ensure_ready()
         assert provider.state == McpServerState.READY
 
-    def test_auth_failure_transitions_to_dead(self, mock_mcp_server):
+    def test_auth_failure_transitions_to_dead(self, remote_provider):
         """Should transition to DEAD on authentication failure."""
         MockMCPHandler.auth_required = "bearer"
         MockMCPHandler.expected_token = "correct-token"
 
-        provider = McpServer(
-            mcp_server_id="auth-fail-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
+        provider = remote_provider(
+            "auth-fail-test",
             auth={
                 "type": "bearer",
                 "bearer_token": "wrong-token",
@@ -290,13 +304,9 @@ class TestRemoteProviderConnection:
 class TestRemoteProviderToolInvocation:
     """Test tool invocation on remote providers."""
 
-    def test_invoke_tool_on_remote(self, mock_mcp_server):
+    def test_invoke_tool_on_remote(self, remote_provider):
         """Should invoke tools on remote provider."""
-        provider = McpServer(
-            mcp_server_id="tool-invoke-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
-        )
+        provider = remote_provider("tool-invoke-test")
 
         provider.ensure_ready()
 
@@ -309,29 +319,20 @@ class TestRemoteProviderToolInvocation:
 class TestRemoteProviderHealthCheck:
     """Test health checks for remote providers."""
 
-    def test_health_check_success(self, mock_mcp_server):
+    def test_health_check_success(self, remote_provider):
         """Should report healthy when remote is responsive."""
-        provider = McpServer(
-            mcp_server_id="health-check-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
-        )
+        provider = remote_provider("health-check-test")
 
         provider.ensure_ready()
 
         # Health should be tracked
         assert provider.health.consecutive_failures == 0
 
-    def test_health_degraded_on_failure(self, mock_mcp_server):
+    def test_health_degraded_on_failure(self, remote_provider):
         """Should degrade health on remote failures."""
         MockMCPHandler.should_fail = True
 
-        provider = McpServer(
-            mcp_server_id="health-fail-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
-            max_consecutive_failures=2,
-        )
+        provider = remote_provider("health-fail-test", max_consecutive_failures=2)
 
         # Multiple failures should degrade provider
         for _ in range(3):
@@ -364,14 +365,12 @@ class TestRemoteProviderTimeout:
 
         assert provider.state in (McpServerState.DEAD, McpServerState.DEGRADED)
 
-    def test_read_timeout(self, mock_mcp_server):
+    def test_read_timeout(self, remote_provider):
         """Should handle read timeout."""
         MockMCPHandler.response_delay = 5.0  # 5 second delay
 
-        provider = McpServer(
-            mcp_server_id="read-timeout-test",
-            mode="remote",
-            endpoint=f"{mock_mcp_server}/mcp",
+        provider = remote_provider(
+            "read-timeout-test",
             http={
                 "connect_timeout": 1.0,
                 "read_timeout": 0.5,  # Very short timeout
