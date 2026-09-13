@@ -89,6 +89,7 @@ from ..domain.services.tool_access_resolver import get_tool_access_resolver, Pol
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .resource_link_read_through import project_result_uris
+from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 
 logger = logging.getLogger(__name__)
 
@@ -747,6 +748,8 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
             _report_empty_projection(tenant_id)
         prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
         prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+        # What this caller now holds, so a name that later leaves it can say so (#1368).
+        remember_served(tool.name for tool in (*governed, *management))
     else:
         _observe_param_header_skips(mcp_ctx, governed, management)
 
@@ -801,6 +804,27 @@ async def _settled_flat_map(mcp_ctx: Any, tenant_id: str | None) -> Mapping[str,
     if await _catalogue_settled(tenant_id, not flat_map):
         flat_map = _build_flat_map(tenant_id)
     return flat_map
+
+
+def _not_found_error(name: str) -> Exception:
+    """The ``-32601`` for a name this caller cannot call (#1368).
+
+    Byte for byte the error every such call has always had, unless this
+    caller's last listing on this replica served *name*. Then its list is out of
+    date, and ``data`` says so with a constant reason. The code and the message
+    are the same either way, so a client that does not know the reason reads
+    today's error.
+
+    Whether *name* exists for anyone else is never consulted. A name another
+    tenant holds, a name policy denies this caller and a name that exists
+    nowhere get one answer, as #905 requires. See `served_tool_names`.
+
+    A function rather than a branch in the call handler, which is at the
+    complexity ceiling.
+    """
+    data = projection_changed_error_data() if was_served_to_caller(name) else None
+    error: Exception = make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found", data=data)
+    return error
 
 
 def _report_empty_projection(tenant_id: str | None) -> None:
@@ -1040,8 +1064,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                 # wrapper reads the principal from; without it the tool would be
                 # refused as anonymous.
                 return await mcp.call_tool(name, arguments or {}, context=mcp_ctx)
-            # Unknown flat name → -32601 (method/tool not found).
-            raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
+            # Unknown flat name → -32601, carrying a staleness reason only when
+            # this caller's last listing served the name (#1368).
+            raise _not_found_error(name)
 
         mcp_server_id, tool_name = flat_map[name]
         # A group member dispatches through its GROUP so member selection stays
