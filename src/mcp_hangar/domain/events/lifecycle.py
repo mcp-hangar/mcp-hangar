@@ -39,6 +39,15 @@ class McpServerDegraded(DomainEvent):
     reason: str
 
 
+DEGRADED_BY_HEALTH_CHECKS = "health_check_failures"
+"""The `McpServerDegraded.reason` of a server that failing health checks degraded.
+
+Named because two places must agree on it: `McpServer.health_check()` emits it
+in the same check as that check's `HealthCheckFailed`, and whoever counts
+failures must then count only one of the two.
+"""
+
+
 @dataclass
 class McpServerStateChanged(DomainEvent):
     """Published when mcp_server state transitions."""

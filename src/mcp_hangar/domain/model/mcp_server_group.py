@@ -548,6 +548,27 @@ class McpServerGroup(AggregateRoot):
             member.consecutive_failures = 0
             member.consecutive_successes += 1
             self._maybe_add_to_rotation(member, member_id)
+            self._maybe_close_circuit()
+
+    def _maybe_close_circuit(self) -> None:
+        """Close an open circuit once `min_healthy` members are in rotation.
+
+        Nothing else closed it. The breaker leaves OPEN through
+        `allow_request()` or `record_success()`, and the group calls neither, so
+        a group whose circuit had opened reported `circuit_open: True` and
+        `degraded` after its members were back, until someone ran
+        `rebalance()` (#1355). A success, with enough members in rotation to
+        call the group healthy, is what the breaker was waiting for.
+        """
+        if not self._circuit_breaker.is_open:
+            return
+        if self.healthy_count < self._min_healthy:
+            return
+
+        self._circuit_breaker.record_success()  # OPEN -> CLOSED
+        self._record_event(GroupCircuitClosed(group_id=self.id))
+        logger.info(f"Circuit breaker closed for group {self.id}: {self.healthy_count} member(s) in rotation")
+        self._update_state()
 
     def _maybe_add_to_rotation(self, member: GroupMember, member_id: str) -> None:
         """Add member back to rotation if healthy threshold reached."""
