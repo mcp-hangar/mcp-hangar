@@ -93,13 +93,13 @@ class TestBackgroundWorkerHealthCheckScheduling:
         next_check = worker._next_check_at.get("degraded-provider", 0.0)
         assert now < next_check, "Provider should be skipped when next_check_at is in the future"
 
-    def test_dead_provider_uses_longer_ceiling(self):
-        """BackgroundWorker checks DEAD providers at longer ceiling interval."""
+    def test_dead_provider_is_not_checked(self):
+        """A DEAD provider is not health-checked: only a deliberate start or a call revives it (#1361)."""
         tracker = HealthTracker()
         _make_provider(ProviderState.DEAD, tracker)
 
         interval = tracker.get_health_check_interval("dead")
-        assert interval == 60.0, "DEAD providers should use 60s ceiling"
+        assert interval == 0.0, "health checks stay off while DEAD"
 
     def test_tracks_per_provider_next_check_at(self):
         """BackgroundWorker tracks per-provider next_check_at timestamps."""

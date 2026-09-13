@@ -339,8 +339,8 @@ class SetL7PolicyHandler(CommandHandler):
 class DeleteMcpServerHandler(CommandHandler):
     """Handler for DeleteMcpServerCommand.
 
-    Stops a running mcp_server (if not COLD or DEAD), then removes it from the
-    repository and emits McpServerDeregistered.
+    Stops a mcp_server that is not COLD, then removes it from the repository
+    and emits McpServerDeregistered.
     Raises McpServerNotFoundError if the mcp_server does not exist.
     """
 
@@ -376,10 +376,10 @@ class DeleteMcpServerHandler(CommandHandler):
         """
         mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
-        # Stop mcp_server if it is in a running state (not COLD or DEAD).
-        # I/O (shutdown) is done outside the repository lock to respect
-        # the no-I/O-under-lock rule.
-        if mcp_server.state not in (McpServerState.COLD, McpServerState.DEAD):
+        # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
+        # may still hold its connection (#1361). I/O (shutdown) is done outside
+        # the repository lock to respect the no-I/O-under-lock rule.
+        if mcp_server.state is not McpServerState.COLD:
             mcp_server.shutdown()
             # Persist and publish any lifecycle events emitted by shutdown()
             self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
@@ -401,6 +401,8 @@ class DeleteMcpServerHandler(CommandHandler):
 
         self._repository.remove(command.mcp_server_id)
 
+        # After its last lifecycle events, above. The metrics handler drops the
+        # server's gauges on this one (#1361).
         self._event_bus.publish(
             McpServerDeregistered(
                 mcp_server_id=command.mcp_server_id,

@@ -2,6 +2,7 @@
 
 from .commands import (
     Command,
+    GiveUpOnMcpServerCommand,
     HealthCheckCommand,
     InvokeToolCommand,
     LoadMcpServerCommand,
@@ -27,6 +28,7 @@ __all__ = [
     "Command",
     "StartMcpServerCommand",
     "StopMcpServerCommand",
+    "GiveUpOnMcpServerCommand",
     "InvokeToolCommand",
     "HealthCheckCommand",
     "ShutdownIdleMcpServersCommand",
