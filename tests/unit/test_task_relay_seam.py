@@ -6,7 +6,8 @@ The batch executor no longer flatly rejects an upstream task handle. Under the
 * a ThreadPoolExecutor WORKER only DETECTS the upstream task result and CAPTURES
   the request context into ``CallResult.relay_capture`` -- it performs NO store
   write (ADR-014 D4: governance binds on the request path, never in a worker);
-* the MAIN-LOOP seam (``_govern_relayed_tasks`` in ``hangar_call``) runs the
+* the MAIN-LOOP seam (``govern_relayed_tasks``, run by ``hangar_call`` and the
+  front door's flat call) runs the
   atomic ``store.relay_and_govern`` -- register + ``TaskCreated`` emit -- BEFORE
   the handle reaches the client, binding the CAPTURED identity/pin.
 
@@ -30,8 +31,8 @@ from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, hangar_call
-from mcp_hangar.server.tools.batch import _govern_relayed_tasks
 from mcp_hangar.server.tools.batch.models import CallResult, RelayCapture
+from mcp_hangar.server.tools.batch.relay_seam import govern_relayed_tasks
 
 _SERVER = "server_a"
 _TOOL = "long_running_op"
@@ -223,10 +224,10 @@ def test_seam_governs_capture_and_emits_task_created() -> None:
     upstream_before = dict(capture.upstream)
     executed = [_result_with_capture(capture)]
 
-    with patch("mcp_hangar.server.tools.batch.get_context", return_value=_seam_ctx(store)):
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
         # A DIFFERENT live identity to prove the seam binds the CAPTURED one.
         with _bound(_identity("tenant-live", "mallory")):
-            _govern_relayed_tasks(executed)
+            govern_relayed_tasks(executed)
 
     r = executed[0]
     assert r.success is True
@@ -257,9 +258,9 @@ def test_seam_binds_captured_identity_not_live_contextvar() -> None:
     capture = _capture(identity=_identity("tenant-captured", "alice"))
     executed = [_result_with_capture(capture)]
 
-    with patch("mcp_hangar.server.tools.batch.get_context", return_value=_seam_ctx(store)):
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
         with _bound(_identity("tenant-OTHER", "bob")):  # live contextvar diverges
-            _govern_relayed_tasks(executed)
+            govern_relayed_tasks(executed)
 
     assert executed[0].success is True
     key = (_SERVER, "t1")
@@ -280,9 +281,9 @@ def test_seam_fail_closed_on_idless_upstream() -> None:
     )
     executed = [_result_with_capture(capture)]
 
-    with patch("mcp_hangar.server.tools.batch.get_context", return_value=_seam_ctx(store)):
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
         with _bound(_identity("tenant-a", "alice")):
-            _govern_relayed_tasks(executed)
+            govern_relayed_tasks(executed)
 
     r = executed[0]
     assert r.success is False
@@ -305,9 +306,9 @@ def test_seam_fail_closed_when_relay_and_govern_raises() -> None:
     with patch.object(store, "relay_and_govern", side_effect=_boom):
         capture = _capture(identity=_identity("tenant-a", "alice"))
         executed = [_result_with_capture(capture)]
-        with patch("mcp_hangar.server.tools.batch.get_context", return_value=_seam_ctx(store)):
+        with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
             with _bound(_identity("tenant-a", "alice")):
-                _govern_relayed_tasks(executed)
+                govern_relayed_tasks(executed)
 
     r = executed[0]
     assert r.success is False
@@ -323,8 +324,8 @@ def test_seam_falls_back_to_rejection_when_store_absent() -> None:
 
     ctx = Mock()
     ctx.governed_task_store = None
-    with patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx):
-        _govern_relayed_tasks(executed)
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=ctx):
+        govern_relayed_tasks(executed)
 
     r = executed[0]
     assert r.success is False
@@ -415,6 +416,7 @@ def test_hangar_call_governs_relay_before_returning_response() -> None:
         patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=ctx),
         patch("mcp_hangar.server.tools.batch.executor.GROUPS") as e_groups,
         patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
+        patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=ctx),
     ):
         v_groups.get.return_value = None
         e_groups.get.return_value = None

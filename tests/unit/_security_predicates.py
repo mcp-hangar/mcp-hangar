@@ -58,6 +58,11 @@ TASKS_CANCEL = "tasks/cancel"
 TASKS_UPDATE = "tasks/update"
 FLAT_TOOL_CALL = "front door tools/call"
 FRONT_DOOR_MANAGEMENT_TOOL = "front door hangar_* tool"
+# On a task the front door's flat tools/call created (#1394). The three
+# `tasks/*` paths above act on one `hangar_call` created.
+FRONT_DOOR_TASKS_GET = "front door tasks/get"
+FRONT_DOOR_TASKS_CANCEL = "front door tasks/cancel"
+FRONT_DOOR_TASKS_UPDATE = "front door tasks/update"
 PROMPTS_LIST = "front door prompts/list"
 PROMPTS_GET = "front door prompts/get"
 COMPLETION = "front door completion/complete"
@@ -65,7 +70,14 @@ RESOURCES_LIST = "front door resources/list"
 RESOURCE_TEMPLATES_LIST = "front door resources/templates/list"
 RESOURCES_READ = "front door resources/read"
 
-_TASK_PATHS = (TASKS_GET, TASKS_CANCEL, TASKS_UPDATE)
+_TASK_PATHS = (
+    TASKS_GET,
+    TASKS_CANCEL,
+    TASKS_UPDATE,
+    FRONT_DOOR_TASKS_GET,
+    FRONT_DOOR_TASKS_CANCEL,
+    FRONT_DOOR_TASKS_UPDATE,
+)
 _PROMPT_PATHS = (PROMPTS_LIST, PROMPTS_GET, COMPLETION)
 _RESOURCE_PATHS = (RESOURCES_LIST, RESOURCE_TEMPLATES_LIST, RESOURCES_READ)
 _INVOKE_PATHS = (HANGAR_CALL, FLAT_TOOL_CALL)
@@ -182,7 +194,8 @@ PREDICATES: tuple[Predicate, ...] = (
     # selectors are decided by `evaluate_headers`.
     Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),
     Predicate(evaluate_headers, paths=_each(_INVOKE_PATHS)),
-    # Task ownership, asked before a relayed task is read or touched.
+    # Task ownership, asked before a relayed task is read or touched, whichever
+    # path created the task: `hangar_call` or the front door's flat call (#1394).
     Predicate(GovernedTaskStore.authorize, paths=_each(_TASK_PATHS)),
     # The ui:// guard (SEP-1865): the allowlist decision every resource
     # surface makes, and the consent enforcement a read makes.

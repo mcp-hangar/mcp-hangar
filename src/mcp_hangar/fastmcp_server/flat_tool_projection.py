@@ -86,7 +86,7 @@ from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
-from ..tasks_wire import HEADER_MISMATCH
+from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import logging_each_call, note_failure
 from .resource_link_read_through import project_result_uris
@@ -1010,6 +1010,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         listing used, so a tool that was shown is callable and one that was not
         is still `-32601`: not-shown and not-callable are the same decision.
 
+        A task the upstream answers with is governed as ``hangar_call`` governs
+        it, and the caller gets its SEP-2663 task result (#1394).
+
         Protocol errors:
         - Unknown flat name (absent from tenant's current list) → McpError
           with code METHOD_NOT_FOUND (-32601).
@@ -1025,6 +1028,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # impossible to import first in a fresh interpreter (#894).
         from ..server.tools.batch import BatchExecutor, CallSpec
         from ..server.tools.tool_permissions import management_tools_for
+        from .flat_call_tasks import govern_flat_call
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
@@ -1113,7 +1117,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         finally:
             progress_relay.unregister(upstream_token)
 
-        result = batch.results[0]
+        # A task the upstream created gets its owner recorded exactly as
+        # `hangar_call` records it, before the caller sees it (#1394).
+        result, created_task = govern_flat_call(batch.results)
         if not result.success:
             note_failure(result.error_type)  # the text below does not carry the code; the log line does
             # Surface enforcement failures as tool errors (isError=True),
@@ -1130,8 +1136,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # this gateway resolves and agrees with the catalogue (#889, #1025).
         project_result_uris(tenant_id, mcp_server_id, result.result)
 
-        # Success — return the raw result dict; the lowlevel handler wraps it.
-        return result.result if result.result is not None else {}
+        # Success — a governed task is answered with its SEP-2663 task result
+        # (#1394), anything else with the raw result dict the lowlevel handler wraps.
+        return created_task or (result.result if result.result is not None else {})
 
     # Register the handlers, replacing the defaults. SDK v1's lowlevel Server
     # exposes list_tools()/call_tool() registration decorators; SDK v2 dropped
@@ -1184,7 +1191,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         async def _call_v2_inner(params: Any, ctx: Any) -> Any:
             out = await _flat_call_tool(params.name, params.arguments or {}, ctx)
-            if isinstance(out, CallToolResult):  # error path already built one
+            # Built already: the error path's result, or a governed task's (#1394).
+            if isinstance(out, (CallToolResult, CreateTaskResult)):
                 return out
             # success path returned the raw backend result dict; wrap it.
             return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
