@@ -4,8 +4,6 @@ Uses ApplicationContext for dependency injection (DIP).
 Separates commands (write) from queries (read) following CQRS.
 """
 
-import time
-
 from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.commands import (
@@ -26,9 +24,11 @@ from ...domain.exceptions import (
 )
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
+from .replica_view import observe_replica
 
-# Server start time for uptime calculation
-_server_start_time: float = time.time()
+#: The dashboard's version of `scope_note`, shorter because it sits above a
+#: frame rather than in a field an operator reads on its own.
+_DASHBOARD_SCOPE_LINE = "This replica's own view, not the fleet. Other replicas can differ."
 
 
 def hangar_list(state_filter: str | None = None) -> dict:
@@ -278,12 +278,18 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    def hangar_status() -> dict:
-        """Get human-readable status dashboard of the registry.
+    def _hangar_status() -> dict:
+        """Get a human-readable status dashboard of the replica that answers.
 
         CHOOSE THIS when: you need to display status to user or quick health overview.
         CHOOSE hangar_list when: you need exact values for processing or filtering.
         CHOOSE hangar_health when: you need system health with security metrics.
+
+        SCOPE: replica-local. With more than one replica, this is what the
+        replica named in replica.instance_id knows, not the fleet. Two calls can
+        reach two replicas and disagree without anything having changed. Uptime
+        is that replica's process uptime. Reads the same snapshot as
+        hangar_health, so the two agree when one replica answers both.
 
         Side effects: None (read-only).
 
@@ -296,8 +302,13 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                 groups: [{id: str, indicator: str, state: str, healthy_members: int, total_members: int}],
                 runtime_mcp_servers: [{id: str, indicator: str, state: str, source: str, verified: bool}],
                 summary: {healthy_mcp_servers: int, total_mcp_servers: int, uptime: str, uptime_seconds: float},
+                replica: {instance_id: str, uptime_seconds: float, uptime: str},
+                scope: "replica",
+                scope_note: str,
                 formatted: str
             }
+            summary.uptime and summary.uptime_seconds are the answering replica's
+            uptime, the same values as replica.uptime and replica.uptime_seconds.
             Indicator values: [READY], [COLD], [STARTING], [DEGRADED], [DEAD]
 
         Example:
@@ -305,99 +316,85 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             # {"mcp_servers": [{"id": "math", "indicator": "[READY]", "state": "ready", "mode": "subprocess"}],
             #  "groups": [], "runtime_mcp_servers": [],
             #  "summary": {"healthy_mcp_servers": 1, "total_mcp_servers": 1, "uptime": "2h 15m"},
-            #  "formatted": "...ASCII dashboard..."}
+            #  "replica": {"instance_id": "hangar-0-3fa81c2e", "uptime_seconds": 8100.0, "uptime": "2h 15m"},
+            #  "scope": "replica", "scope_note": "This describes what the replica named ...",
+            #  "formatted": "...ASCII dashboard naming the replica..."}
         """
-        ctx = get_context()
+        return hangar_status()
 
-        # Get all mcp_servers
-        query = ListMcpServersQuery(state_filter=None)
-        summaries = ctx.query_bus.execute(query)
 
-        # Format mcp_servers with status indicators
-        mcp_servers_status = []
-        healthy_count = 0
-        total_count = len(summaries)
+def hangar_status() -> dict:
+    """Status of the servers and groups on the replica that answers.
 
-        for summary in summaries:
-            state = summary.state
-            indicator = _get_status_indicator(state)
+    Rendered from `observe_replica()`, the snapshot `hangar_health` also reads,
+    and scoped to the replica by name: two replicas answer with two different
+    `replica.instance_id` values, so their answers cannot be read as two moments
+    of one fleet (#1380).
+    """
+    view = observe_replica()
 
-            mcp_server_info = {
-                "id": summary.mcp_server_id,
-                "indicator": indicator,
-                "state": state,
-                "mode": summary.mode,
-            }
-
-            # Add additional context based on state
-            if state == "ready":
-                healthy_count += 1
-                if hasattr(summary, "last_used_ago_s"):
-                    mcp_server_info["last_used"] = _format_time_ago(summary.last_used_ago_s)
-            elif state == "cold":
-                mcp_server_info["note"] = "Will start on first request"
-            elif state == "degraded":
-                if hasattr(summary, "consecutive_failures"):
-                    mcp_server_info["consecutive_failures"] = summary.consecutive_failures
-
-            mcp_servers_status.append(mcp_server_info)
-
-        # Get groups
-        groups_status = []
-        for group_id, group in ctx.groups.items():
-            group_info = {
-                "id": group_id,
-                "indicator": _get_status_indicator(group.state.value),
-                "state": group.state.value,
-                "healthy_members": group.healthy_count,
-                "total_members": group.total_count,
-            }
-            groups_status.append(group_info)
-
-        # Get runtime (hot-loaded) mcp_servers
-        from ..state import get_runtime_mcp_servers
-
-        runtime_store = get_runtime_mcp_servers()
-        runtime_status = []
-        runtime_healthy = 0
-        for mcp_server, metadata in runtime_store.list_all():
-            state = mcp_server.state.value if hasattr(mcp_server, "state") else "unknown"
-            indicator = _get_status_indicator(state)
-            if state == "ready":
-                runtime_healthy += 1
-                healthy_count += 1
-
-            runtime_info = {
-                "id": str(mcp_server.mcp_server_id),
-                "indicator": indicator,
-                "state": state,
-                "source": metadata.source,
-                "verified": metadata.verified,
-                "hot_loaded": True,
-            }
-            runtime_status.append(runtime_info)
-            total_count += 1
-
-        # Calculate uptime
-        uptime_s = time.time() - _server_start_time
-        uptime_formatted = _format_uptime(uptime_s)
-
-        return {
-            "mcp_servers": mcp_servers_status,
-            "runtime_mcp_servers": runtime_status,
-            "groups": groups_status,
-            "summary": {
-                "healthy_mcp_servers": healthy_count,
-                "total_mcp_servers": total_count,
-                "runtime_mcp_servers": len(runtime_status),
-                "runtime_healthy": runtime_healthy,
-                "uptime": uptime_formatted,
-                "uptime_seconds": round(uptime_s, 1),
-            },
-            "formatted": _format_status_dashboard(
-                mcp_servers_status + runtime_status, groups_status, healthy_count, total_count, uptime_formatted
-            ),
+    mcp_servers_status = []
+    for summary in view.configured:
+        state = summary.state
+        mcp_server_info: dict = {
+            "id": summary.mcp_server_id,
+            "indicator": _get_status_indicator(state),
+            "state": state,
+            "mode": summary.mode,
         }
+        if state == "cold":
+            mcp_server_info["note"] = "Will start on first request"
+        mcp_servers_status.append(mcp_server_info)
+
+    groups_status = [
+        {
+            "id": group.group_id,
+            "indicator": _get_status_indicator(group.state),
+            "state": group.state,
+            "healthy_members": group.healthy_count,
+            "total_members": group.total_count,
+        }
+        for group in view.groups
+    ]
+
+    runtime_status = [
+        {
+            "id": server.mcp_server_id,
+            "indicator": _get_status_indicator(server.state),
+            "state": server.state,
+            "source": server.metadata.source,
+            "verified": server.metadata.verified,
+            "hot_loaded": True,
+        }
+        for server in view.hot_loaded
+    ]
+
+    healthy_count = view.ready_servers
+    total_count = view.total_servers
+    replica = view.replica_block()
+
+    return {
+        "mcp_servers": mcp_servers_status,
+        "runtime_mcp_servers": runtime_status,
+        "groups": groups_status,
+        "summary": {
+            "healthy_mcp_servers": healthy_count,
+            "total_mcp_servers": total_count,
+            "runtime_mcp_servers": len(runtime_status),
+            "runtime_healthy": sum(1 for s in view.hot_loaded if s.state == "ready"),
+            "uptime": replica["uptime"],
+            "uptime_seconds": replica["uptime_seconds"],
+        },
+        **view.scope_fields(),
+        "formatted": _format_status_dashboard(
+            mcp_servers_status + runtime_status,
+            groups_status,
+            healthy_count,
+            total_count,
+            replica["uptime"],
+            view.instance_id,
+        ),
+    }
 
 
 def _get_status_indicator(state: str) -> str:
@@ -413,36 +410,26 @@ def _get_status_indicator(state: str) -> str:
     return indicators.get(state.lower(), "[?]")
 
 
-def _format_time_ago(seconds: float) -> str:
-    """Format seconds as human-readable 'time ago' string."""
-    if seconds < 60:
-        return f"{int(seconds)}s ago"
-    elif seconds < 3600:
-        return f"{int(seconds / 60)}m ago"
-    else:
-        return f"{int(seconds / 3600)}h ago"
-
-
-def _format_uptime(seconds: float) -> str:
-    """Format uptime as human-readable string."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
-
-
 def _format_status_dashboard(
     mcp_servers: list,
     groups: list,
     healthy: int,
     total: int,
     uptime: str,
+    instance_id: str,
 ) -> str:
-    """Format status as ASCII dashboard."""
+    """Format status as ASCII dashboard, headed by the replica it describes.
+
+    The replica's name and scope go above the frame rather than inside it: an
+    instance id is a pod name plus a suffix and can be longer than a row, and
+    it must not be truncated, because the suffix is what tells two replicas
+    apart.
+    """
     lines = [
+        f"Answered by replica: {instance_id}",
+        _DASHBOARD_SCOPE_LINE,
         "╭─────────────────────────────────────────────────╮",
-        "│ MCP-Hangar Status                               │",
+        "│ MCP-Hangar Status (this replica)".ljust(50) + "│",
         "├─────────────────────────────────────────────────┤",
     ]
 
@@ -470,7 +457,7 @@ def _format_status_dashboard(
 
     lines.append("├─────────────────────────────────────────────────┤")
     lines.append(f"│ Health: {healthy}/{total} mcp_servers healthy".ljust(50) + "│")
-    lines.append(f"│ Uptime: {uptime}".ljust(50) + "│")
+    lines.append(f"│ Replica uptime: {uptime}".ljust(50) + "│")
     lines.append("╰─────────────────────────────────────────────────╯")
 
     return "\n".join(lines)
