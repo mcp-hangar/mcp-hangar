@@ -208,6 +208,20 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
     )
 
 
+def metrics_endpoint(request: Any) -> Any:
+    """``GET /metrics``: the Prometheus exposition ``serve --http`` answers with.
+
+    At module level so a test can scrape the gateway through the same endpoint
+    the served process mounts (#1369). A test that read the registry directly
+    could not tell whether the scrape carries the metric.
+    """
+    from starlette.responses import PlainTextResponse
+
+    from ..metrics import get_metrics
+
+    return PlainTextResponse(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 def _is_loopback_host(host: str) -> bool:
     """Return whether a bind host resolves to loopback-only."""
     normalized_host = host.strip().lower()
@@ -396,10 +410,9 @@ class ServerLifecycle:
         import time
 
         from starlette.applications import Starlette
-        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.responses import JSONResponse
         from starlette.routing import Route
 
-        from ..metrics import get_metrics
         from .bootstrap.composition import get_runtime
 
         _start_time = time.time()
@@ -426,13 +439,6 @@ class ServerLifecycle:
                     "startup_complete": _startup_complete,
                     "uptime_seconds": round(uptime, 2),
                 }
-            )
-
-        def metrics_endpoint(request):
-            """Prometheus metrics endpoint."""
-            return PlainTextResponse(
-                get_metrics(),
-                media_type="text/plain; version=0.0.4; charset=utf-8",
             )
 
         routes = [
