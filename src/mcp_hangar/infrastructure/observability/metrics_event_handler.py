@@ -161,6 +161,8 @@ class MetricsEventHandler:
         # Update Prometheus metrics
         prometheus_metrics.record_mcp_server_start(event.mcp_server_id, success=True)
         prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "ready", mode=event.mode)
+        # A completed start is a handshake and a tools/list that answered.
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_mcp_server_stopped(self, event: McpServerStopped) -> None:
         """Handle mcp_server stopped event."""
@@ -193,6 +195,7 @@ class MetricsEventHandler:
             duration=duration_s,
             success=True,
         )
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_tool_failed(self, event: ToolInvocationFailed) -> None:
         """Handle tool invocation failed event."""
@@ -222,6 +225,7 @@ class MetricsEventHandler:
             healthy=True,
             consecutive_failures=0,
         )
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_health_failed(self, event: HealthCheckFailed) -> None:
         """Handle health check failed event."""

@@ -1,5 +1,57 @@
 # Upgrading MCP Hangar
 
+## Next — a server Hangar gives up on reads `dead`, not `cold`
+
+When the recovery saga runs out of retries, the server now goes to `dead` and
+stays there. Before, giving up was a stop, so the server went to `cold`: the
+state of a server nobody has called yet. Two other failures already reached
+`dead` but published no state change, so the gauge kept its last value. A
+crashed process read `ready`, and a start that failed below
+`max_consecutive_failures` read `initializing`. All three now read `dead`.
+
+This affects anything that reads `mcp_hangar_mcp_server_state`, and anything
+that reads a server's `state` from `hangar_list`, `hangar_status` or
+`GET /api/mcp_servers`.
+
+| Server | `mcp_hangar_mcp_server_state` before | now |
+| --- | --- | --- |
+| the recovery saga gave up on it | `0` (cold) | `4` (dead) |
+| its process crashed | `2` (ready), until something called it | `4` |
+| its start failed, below `max_consecutive_failures` | `1` (initializing) | `4` |
+| never started, stopped, or reaped for being idle | `0` | `0` |
+
+**An alert on `mcp_hangar_mcp_server_state == 0` no longer fires for a server
+Hangar gave up on.** `0` now means only that the server is not running and is
+not failing. Use one of these instead:
+
+- `mcp_hangar_mcp_server_state == 4` fires when Hangar gives up on a server.
+- The new gauge `mcp_hangar_mcp_server_last_healthy_timestamp_seconds` holds
+  when Hangar last saw the server working: a passing health check, a completed
+  start or a successful tool call. It is kept when the server goes cold or dead.
+
+```promql
+time() - mcp_hangar_mcp_server_last_healthy_timestamp_seconds > 900
+  unless on(mcp_server) mcp_hangar_mcp_server_state == 0
+```
+
+Keep the `unless`. A cold server is not probed, so without it the rule also
+fires for every server reaped for being idle more than 15 minutes ago. A server
+that was never healthy has no series, so pair the rule with `state == 4`.
+
+`dead` is not terminal. `hangar_start`, `POST /api/mcp_servers/{id}/start` and
+a call to one of the server's tools each start it again. Nothing else does:
+
+- The health worker does not check a dead server. It used to, every 60s, and
+  counted `mcp_hangar_health_checks_total{result="unhealthy"}` for a check that
+  sent nothing, so that series stops moving while a server is dead.
+- A group does not route a call to a dead member. `hangar_start` on the group
+  starts its dead members.
+- The recovery saga cancels the restarts it still had scheduled.
+- A give-up no longer also counts
+  `mcp_hangar_mcp_server_stops_total{reason="shutdown"}`. It still counts
+  `reason="max_retries_exceeded"`.
+- `hangar_stop` on a dead server makes it `cold`.
+
 ## Upgrade to 2.19.1
 
 ### a suspended session is refused

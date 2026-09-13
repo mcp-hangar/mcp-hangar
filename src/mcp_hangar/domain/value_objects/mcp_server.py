@@ -24,15 +24,17 @@ class McpServerState(Enum):
         - COLD -> INITIALIZING (on start)
         - INITIALIZING -> READY (on success) | DEAD (on failure) | DEGRADED (on max failures)
         - READY -> COLD (on shutdown) | DEAD (on client death) | DEGRADED (on health failures)
-        - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown)
-        - DEAD -> INITIALIZING (on retry) | DEGRADED (on max failures)
+        - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown) | DEAD (recovery gave up)
+        - DEAD -> INITIALIZING (on an explicit start or a call) | DEGRADED (on max failures)
 
     Attributes:
         COLD: McpServer is not running, no resources allocated.
         INITIALIZING: McpServer is starting up, handshake in progress.
         READY: McpServer is running and accepting requests.
         DEGRADED: McpServer has failures but may recover after backoff.
-        DEAD: McpServer has failed fatally and requires manual intervention or retry.
+        DEAD: McpServer failed and Hangar stopped trying. Nothing automatic --
+            health checks, the recovery saga, the GC -- starts it again; an
+            explicit start or a call does.
     """
 
     COLD = "cold"

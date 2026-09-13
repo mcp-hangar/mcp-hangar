@@ -490,13 +490,18 @@ class McpServerGroup(AggregateRoot):
         which is the breaker's real purpose. This prevents a primary eviction
         (which opens the group CB) from taking down an otherwise-healthy backup.
 
+        A DEAD member is never selected, in rotation or not. A call revives a
+        dead server, and a group choosing one would make the group the thing
+        that revives it -- when giving up means only a deliberate start does
+        (#1361). A COLD member is still selected: that is how a group starts one.
+
         Returns:
             Selected mcp_server or None if no healthy members available.
         """
         with self._lock:
             self._check_circuit_recovery()
 
-            available = [m for m in self._members.values() if m.in_rotation]
+            available = [m for m in self._members.values() if self._selectable(m)]
             if not available:
                 # No member remains in rotation: honor the group circuit
                 # breaker and reject rather than hammer a genuinely-down group.
@@ -507,7 +512,7 @@ class McpServerGroup(AggregateRoot):
                 target_id = self._canary.resolve(tenant_id)
                 if target_id is not None:
                     target = self._members.get(target_id)
-                    if target is not None and target.in_rotation:
+                    if target is not None and self._selectable(target):
                         target.last_selected_at = time.time()
                         return target.mcp_server
                     logger.warning(
@@ -523,6 +528,11 @@ class McpServerGroup(AggregateRoot):
                 return selected.mcp_server
 
             return None
+
+    @staticmethod
+    def _selectable(member: GroupMember) -> bool:
+        """In rotation and not DEAD. `state_snapshot`: the member's lock sits below this one's."""
+        return member.in_rotation and member.mcp_server.state_snapshot is not McpServerState.DEAD
 
     def _check_circuit_recovery(self) -> None:
         """Check if circuit just recovered and emit event."""

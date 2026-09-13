@@ -1374,8 +1374,16 @@ class BatchExecutor:
         return self._enforce_digest_pin(p, p.projection, p.pin)
 
     def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
-        """Circuit breaker / health degradation of the resolved target."""
+        """Circuit breaker / health degradation of the resolved target.
+
+        A DEAD target passes. Its failure count is what made Hangar give up on
+        it, and it keeps that count until a start succeeds, so this gate
+        refused every call to it -- and a call is one of the two things that
+        revive a dead server (#1361). The cold-start gate starts it.
+        """
         if not p.mcp_server_obj:
+            return None
+        if p.mcp_server_obj.state.value == "dead":
             return None
         if not (hasattr(p.mcp_server_obj, "health") and p.mcp_server_obj.health.should_degrade()):
             return None
@@ -1460,8 +1468,13 @@ class BatchExecutor:
         return "unavailable" if l7_rule is not None else "not_required"
 
     def _gate_cold_start(self, p: "_CallPipeline") -> CallResult | None:
-        """Single-flight cold start of the resolved target."""
-        if not (p.mcp_server_obj and p.mcp_server_obj.state.value == "cold"):
+        """Single-flight cold start of the resolved target.
+
+        A DEAD target starts here too. A call is one of the two things that
+        revive a server Hangar gave up on (#1361), and starting it here rather
+        than inside the invocation is what re-runs a deferred digest pin.
+        """
+        if not (p.mcp_server_obj and p.mcp_server_obj.state.value in ("cold", "dead")):
             return None
         with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
             cs_span.set_attribute("mcp.server.id", p.target_server_id)

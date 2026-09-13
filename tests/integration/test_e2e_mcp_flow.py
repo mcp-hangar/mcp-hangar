@@ -1145,8 +1145,8 @@ class TestRecoverySaga:
         assert state is not None
         assert state["retries"] == 0
 
-    def test_saga_stops_server_after_max_retries(self):
-        from mcp_hangar.application.commands import StopMcpServerCommand
+    def test_saga_gives_the_server_up_after_max_retries(self):
+        from mcp_hangar.application.commands import GiveUpOnMcpServerCommand
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
         saga = McpServerRecoverySaga(max_retries=2, initial_backoff_s=0.1, saga_manager=get_saga_manager())
@@ -1161,7 +1161,7 @@ class TestRecoverySaga:
         commands = saga.handle(degraded_event)
 
         assert len(commands) == 1
-        assert isinstance(commands[0], StopMcpServerCommand)
+        assert isinstance(commands[0], GiveUpOnMcpServerCommand)
         assert commands[0].mcp_server_id == "saga-max"
         assert commands[0].reason == "max_retries_exceeded"
 

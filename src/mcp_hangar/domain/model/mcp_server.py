@@ -70,7 +70,12 @@ _MODERN_PROTOCOL_VERSION = "2026-07-28"
 _JSONRPC_METHOD_NOT_FOUND = -32601
 
 
-# Valid state transitions
+# Valid state transitions.
+#
+# DEAD has one meaning: the server failed and nothing automatic will start it
+# again -- not the health worker, not the recovery saga, not the GC. Only a
+# deliberate action does: an explicit start or a call, both through
+# `ensure_ready()`, which is the DEAD -> INITIALIZING edge (#1361).
 VALID_TRANSITIONS = {
     McpServerState.COLD: {McpServerState.INITIALIZING},
     McpServerState.INITIALIZING: {
@@ -83,7 +88,8 @@ VALID_TRANSITIONS = {
         McpServerState.DEAD,
         McpServerState.DEGRADED,
     },
-    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD},
+    # DEAD: the recovery saga ran out of retries (`give_up`).
+    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD, McpServerState.DEAD},
     McpServerState.DEAD: {McpServerState.INITIALIZING, McpServerState.DEGRADED},
 }
 
@@ -549,6 +555,33 @@ class McpServer(AggregateRoot):
             )
         )
 
+    def _mark_dead(self) -> None:
+        """Move to DEAD from a failure path, and say so (must hold lock).
+
+        A crashed process, a failed start below the degrade threshold and a
+        server the recovery saga gave up on all land here; see the note on
+        `VALID_TRANSITIONS` for what DEAD means and what leaves it.
+
+        Not `_transition_to`: these are failure paths, reached from whatever state
+        a concurrent stop left behind, and an invalid-transition error raised
+        inside one would replace the failure being handled. The event is the one
+        `_transition_to` records. The assignments this replaces recorded none, so
+        `mcp_hangar_mcp_server_state` kept the last value an event had set --
+        `ready` for a crashed process -- and never read `dead` (#1361).
+        """
+        if self._state == McpServerState.DEAD:
+            return
+        old_state = self._state
+        self._state = McpServerState.DEAD
+        self._increment_version()
+        self._record_event(
+            McpServerStateChanged(
+                mcp_server_id=self.mcp_server_id,
+                old_state=str(old_state.value),
+                new_state=str(McpServerState.DEAD.value),
+            )
+        )
+
     def _can_start(self) -> tuple:
         """
         Check if mcp_server can be started (must hold lock).
@@ -594,7 +627,7 @@ class McpServer(AggregateRoot):
                     return
                 # Client died
                 logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
-                self._state = McpServerState.DEAD
+                self._mark_dead()
 
             # Another thread is starting: become a waiter
             if self._state == McpServerState.INITIALIZING:
@@ -1268,8 +1301,7 @@ class McpServer(AggregateRoot):
                 )
             )
         else:
-            self._state = McpServerState.DEAD
-            self._increment_version()
+            self._mark_dead()
 
         logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
@@ -1739,8 +1771,7 @@ class McpServer(AggregateRoot):
                 return False
 
             if not self._client or not self._client.is_alive():
-                self._state = McpServerState.DEAD
-                self._increment_version()
+                self._mark_dead()
                 return False
 
             # Copy client reference for I/O outside lock
@@ -1842,8 +1873,39 @@ class McpServer(AggregateRoot):
         """Stop the mcp_server. Alias for shutdown(). Thread-safe."""
         self.shutdown()
 
-    def _shutdown_internal(self, reason: str = "shutdown") -> None:
-        """Shutdown implementation (must hold lock)."""
+    def give_up(self, reason: str) -> bool:
+        """Stop trying: close a degraded server's connection and leave it DEAD.
+
+        What the recovery saga does when it runs out of retries (#1361). It used
+        to stop the server instead, which returned it to COLD -- the state of a
+        server nobody has called yet -- so an outage read as an idle server.
+
+        Only from DEGRADED, the state the saga gives up on. In any other state
+        the server moved on after the event the saga acted on -- a call started
+        it, an operator stopped it -- and that stands. DEAD is not terminal: an
+        explicit start or a call leaves it through `ensure_ready()`.
+
+        Thread-safe.
+
+        Returns:
+            Whether the server was given up on.
+        """
+        with self._lock:
+            if self._state != McpServerState.DEGRADED:
+                logger.info(
+                    "mcp_server_give_up_skipped",
+                    mcp_server_id=self.mcp_server_id,
+                    state=self._state.value,
+                    reason=reason,
+                )
+                return False
+            self._close_client()
+            self._mark_dead()
+        logger.warning("mcp_server_given_up", mcp_server_id=self.mcp_server_id, reason=reason)
+        return True
+
+    def _close_client(self) -> None:
+        """Close the connection, if there is one (must hold lock)."""
         if self._client:
             try:
                 self._client.close()
@@ -1851,6 +1913,10 @@ class McpServer(AggregateRoot):
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
             self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+
+    def _shutdown_internal(self, reason: str = "shutdown") -> None:
+        """Shutdown implementation (must hold lock)."""
+        self._close_client()
 
         self._state = McpServerState.COLD
         self._increment_version()
