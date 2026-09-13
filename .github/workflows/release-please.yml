@@ -34,9 +34,18 @@ jobs:
       # below reads the squash commit that ADDED each fragment (that is where
       # the PR number comes from) and the newest tag (the compare link). Both
       # are invisible at fetch-depth 1.
+      #
+      # No persisted credential. Checkout otherwise leaves GITHUB_TOKEN in git's
+      # config as an Authorization header. Git sends that header in preference
+      # to the app token the assembly step puts in its push URL, so every
+      # assembly push was attributed to `github-actions[bot]` and started no
+      # checks (#1379). Nothing here needs it: release-please writes through the
+      # API, and the repository is public, so the assembler's fetch needs no
+      # credential.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:

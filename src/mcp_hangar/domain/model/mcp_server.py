@@ -17,6 +17,7 @@ from ..contracts.launcher import TransportClient
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
+    DEGRADED_BY_HEALTH_CHECKS,
     CapabilityViolationDetected,
     DomainEvent,
     EgressPolicyEnforced,
@@ -1792,7 +1793,7 @@ class McpServer(AggregateRoot):
                             mcp_server_id=self.mcp_server_id,
                             consecutive_failures=self._health.consecutive_failures,
                             total_failures=self._health.total_failures,
-                            reason="health_check_failures",
+                            reason=DEGRADED_BY_HEALTH_CHECKS,
                         )
                     )
 
