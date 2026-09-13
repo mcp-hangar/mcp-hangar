@@ -192,6 +192,33 @@ class TestModernInvokePathIsServed:
         assert response.json()["error"]["code"] == HEADER_MISMATCH
 
 
+class TestStatusToolsNameTheirReplica:
+    """Over the served transport, both status tools say which replica answered (#1380).
+
+    The unit tests call the functions; this checks the fields survive the tool
+    wrapper and the wire, and that neither tool needs the query handlers that
+    only a full ``bootstrap()`` registers.
+    """
+
+    @pytest.mark.parametrize("tool", ["hangar_status", "hangar_health"])
+    def test_the_answer_is_scoped_to_this_replica(self, client, tool):
+        from mcp_hangar.domain.events import current_instance_id
+
+        response = client.post(
+            "/mcp",
+            headers=_modern_headers("tools/call", name=tool),
+            content=_modern_body("tools/call", {"name": tool, "arguments": {}}),
+        )
+
+        assert response.status_code == 200, response.text
+        result = _jsonrpc(response.text)["result"]
+        assert not result.get("isError"), result
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["scope"] == "replica"
+        assert payload["replica"]["instance_id"] == current_instance_id()
+        assert "uptime_seconds" in payload["replica"]
+
+
 class TestOneServerIdentity:
     """``initialize`` and ``server/discover`` must not report different servers."""
 
