@@ -4,4 +4,4 @@ answering `tools/list`. It returns a comparable `Projection` value: the identity
 it was generated for, its routes and its tool definitions. That gives "did the
 projection change?" a precise answer. Generating one registers, warms, starts
 and counts nothing, and it does not wait on the boot warm-up. `tools/list`
-serves what it returns, so nothing a client sees changes
+serves what it returns, so nothing a client sees changes.
