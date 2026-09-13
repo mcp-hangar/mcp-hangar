@@ -38,8 +38,9 @@ from structlog.types import Processor
 # is `PrintLoggerFactory()`, which writes to **stdout** -- and on the stdio
 # transport stdout is the JSON-RPC stream, so a single line emitted before
 # `setup_logging()` runs corrupts the session and the client dies on a parse
-# error. That is not hypothetical: `gc.py` logs "watchdog package not installed"
-# at import time, i.e. while bootstrap is still importing modules (#563).
+# error. That is not hypothetical: `gc.py` logged "watchdog package not installed"
+# at import time, i.e. while bootstrap was still importing modules (#563; the
+# line itself is gone since #1236, the window is not).
 #
 # Configuring this at import of *this* module closes the window for every logger
 # in the package, since `get_logger` lives here and cannot be reached without
