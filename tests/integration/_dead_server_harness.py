@@ -24,6 +24,11 @@ command bus to a real start of the upstream process. Metrics are read from
 ``get_metrics()``, the body ``/metrics`` returns. Nothing here publishes an
 event or sends a command by hand.
 
+What a command drove is read only once its events have reached a watcher
+subscribed after the metrics handler and the sagas. The health and GC workers
+publish whatever a server has pending, so a command can return before its own
+events are delivered, and reading at once would read the state before it.
+
 Three things are changed, none on the path under test. The workers' intervals,
 60s and 30s in production, are lowered before ``bootstrap()`` reads them. And
 the recovery saga gets one restart instead of three, after 2.5s instead of 5s.
@@ -213,6 +218,19 @@ def _give_up_delivered(seen: list[list[Any]], server: str) -> bool:
     return marker in events and any(e[0] == "degraded" for e in events[events.index(marker) :])
 
 
+def _delivered_since(seen: list[list[Any]], mark: int, *entries: list[Any]) -> bool:
+    """Every one of ``entries`` reached the watcher after position ``mark``.
+
+    For a command whose events another thread may be delivering. The health and
+    GC workers publish whatever a server has pending, so a command can return
+    before the events it recorded reach the metrics handler: read straight away,
+    the gauge still says what it said before. Waited on as `_saw_dead` is: the
+    watcher is subscribed after the metrics handler and the sagas.
+    """
+    since = seen[mark:]
+    return all(entry in since for entry in entries)
+
+
 def _worker(context: Any, task: str) -> Any:
     return next(w for w in context.background_workers if getattr(w, "task", None) == task)
 
@@ -295,13 +313,17 @@ def _single(
     # backoff has run out.
     for flag in flags.values():
         flag.unlink()
+    revived_at = len(seen)
     report["revived"] = {BY_START: _tool(client, "hangar_start", {"mcp_server": BY_START})}
     _wait(lambda: _backoff_over(repository.get(BY_CALL).health), GIVE_UP_DEADLINE_S)
     report["revived"][BY_CALL] = _call(client, BY_CALL)
+    _wait(lambda: _delivered_since(seen, revived_at, *([server, "started", None] for server in flags)), 10)
     report["after_revival"] = snapshot()
 
     # Stopped: cold, and not probed while it is.
+    stopped_at = len(seen)
     report["stop"] = _tool(client, "hangar_stop", {"mcp_server": BY_START})
+    _wait(lambda: _delivered_since(seen, stopped_at, [BY_START, "stopped", "shutdown"]), 10)
     report["stopped"] = _snapshot(repository, BY_START)
     time.sleep(QUIET_WINDOW_S)
     report["still_cold"] = _snapshot(repository, BY_START)
@@ -332,7 +354,11 @@ def _grouped(
 
     # Back, and started on purpose.
     flag.unlink()
+    started_at = len(seen)
     report["start"] = _tool(client, "hangar_start", {"mcp_server": MEMBER})
+    # The group puts the member back on McpServerStarted, which a worker may be
+    # the thread delivering.
+    _wait(lambda: _delivered_since(seen, started_at, [MEMBER, "started", None]), 10)
     report["after_start"] = _group(client)
     report["start_call"] = _call(client, GROUP)
 
@@ -363,7 +389,9 @@ def main(mode: str, out: Path) -> None:
         HealthCheckFailed,
         HealthCheckPassed,
         McpServerDegraded,
+        McpServerStarted,
         McpServerStateChanged,
+        McpServerStopped,
     )
     from mcp_hangar.infrastructure.saga_manager import get_saga_manager
     from mcp_hangar.server.bootstrap import bootstrap, workers
@@ -387,6 +415,10 @@ def main(mode: str, out: Path) -> None:
             return
         if isinstance(event, McpServerStateChanged):
             seen.append([server, "state", event.new_state, event.dead_reason])
+        elif isinstance(event, McpServerStarted):
+            seen.append([server, "started", None])
+        elif isinstance(event, McpServerStopped):
+            seen.append([server, "stopped", event.reason])
         elif isinstance(event, McpServerDegraded):
             seen.append([server, "degraded", event.reason])
         elif isinstance(event, HealthCheckPassed | HealthCheckFailed):
