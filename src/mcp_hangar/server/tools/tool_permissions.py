@@ -40,7 +40,8 @@ requires, so no role migration is needed and no permission is invented:
   quarantining is ``discovery:approve``.
 * the continuation tools take ``tool:invoke``. They hand back the truncated tail
   of a tool result, so whoever may invoke a tool may read the rest of what it
-  returned.
+  returned. Only the rest of what it returned *them*: a continuation answers
+  only the tenant and principal whose call produced it.
 
 Tenant-scoped grants
 --------------------
@@ -105,9 +106,11 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
 #: These two are the invoke path, not the control plane (see
 #: ``INVOKE_PATH_TOOLS``). A tenant-scoped ``tool:invoke`` is how a tenant's
 #: agents call tools -- ``hangar_call`` accepts one -- and these return the rest
-#: of a result that call truncated. They do not filter by tenant. What confines
-#: them is the continuation id: a uuid4 batch id plus 32 random bits, handed
-#: back in the truncated result to the caller that made the call.
+#: of a result that call truncated. What confines them is the cache, not the
+#: id. Each continuation records the tenant and principal whose call produced
+#: it, and any other caller is answered exactly as for an id that does not
+#: exist. So a grant held within a tenant reaches only
+#: that caller's own continuations, even when an id leaks.
 TENANT_SCOPED_GRANT_TOOLS: frozenset[str] = frozenset({"hangar_fetch_continuation", "hangar_delete_continuation"})
 
 #: Tools that authorize themselves and must NOT be gated by the table.

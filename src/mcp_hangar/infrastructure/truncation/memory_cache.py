@@ -2,6 +2,10 @@
 
 Thread-safe cache implementation for storing full responses
 when truncation occurs, allowing clients to retrieve complete content.
+
+Each entry keeps the owner it was stored for, and answers no one else.
+Entries live in this process only, so a continuation is
+fetchable on the replica that truncated the result.
 """
 
 from collections import OrderedDict
@@ -12,6 +16,7 @@ import time
 from typing import Any
 
 from ...domain.contracts.response_cache import CacheRetrievalResult, IResponseCache
+from ...domain.value_objects.truncation import ContinuationOwner, continuation_log_ref
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,17 +24,19 @@ logger = get_logger(__name__)
 
 @dataclass
 class CacheEntry:
-    """Cache entry with value, serialized form, and expiration.
+    """Cache entry with value, serialized form, expiration and owner.
 
     Attributes:
         value: The original response data.
         serialized: JSON-serialized string of the value.
         expires_at: Unix timestamp when this entry expires.
+        owner: The caller the entry was stored for; the only one it answers.
     """
 
     value: Any
     serialized: str
     expires_at: float
+    owner: ContinuationOwner
 
 
 class MemoryResponseCache(IResponseCache):
@@ -39,6 +46,7 @@ class MemoryResponseCache(IResponseCache):
     - LRU eviction when capacity is reached
     - TTL-based expiration
     - Offset/limit pagination for large responses
+    - Entries answering only the owner they were stored for
 
     Attributes:
         max_entries: Maximum number of entries in the cache.
@@ -79,13 +87,14 @@ class MemoryResponseCache(IResponseCache):
         """Get the default TTL in seconds."""
         return self._default_ttl_s
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int, *, owner: ContinuationOwner) -> bool:
         """Store a full response in the cache.
 
         Args:
             continuation_id: Unique identifier for this cached response.
             full_response: The complete response data to cache.
             ttl_s: Time-to-live in seconds (uses default if <= 0).
+            owner: The caller the entry is stored for.
         """
         if ttl_s <= 0:
             ttl_s = self._default_ttl_s
@@ -95,7 +104,7 @@ class MemoryResponseCache(IResponseCache):
         except (TypeError, ValueError) as e:
             logger.warning(
                 "cache_store_serialization_failed",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 error=str(e),
             )
             return False
@@ -108,28 +117,58 @@ class MemoryResponseCache(IResponseCache):
             # Evict LRU entries if at capacity
             while len(self._cache) >= self._max_entries:
                 evicted_key, _ = self._cache.popitem(last=False)
-                logger.debug("cache_entry_evicted", continuation_id=evicted_key)
+                logger.debug("cache_entry_evicted", continuation_ref=continuation_log_ref(evicted_key))
 
             # Add new entry
             self._cache[continuation_id] = CacheEntry(
                 value=full_response,
                 serialized=serialized,
                 expires_at=time.time() + ttl_s,
+                owner=owner,
             )
 
             logger.debug(
                 "cache_entry_stored",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 size_bytes=len(serialized),
                 ttl_s=ttl_s,
             )
             return True
+
+    def _owned_entry(self, continuation_id: str, owner: ContinuationOwner, op: str) -> CacheEntry | None:
+        """The live entry under *continuation_id* if *owner* stored it, else None.
+
+        A missing, an expired and another owner's entry all come back None, so
+        the caller cannot tell them apart. Must be called with the lock held.
+        """
+        entry = self._cache.get(continuation_id)
+        if entry is None:
+            return None
+
+        if time.time() > entry.expires_at:
+            del self._cache[continuation_id]
+            logger.debug("cache_entry_expired", continuation_ref=continuation_log_ref(continuation_id))
+            return None
+
+        if not entry.owner.admits(owner):
+            logger.warning(
+                "continuation_owner_mismatch",
+                op=op,
+                continuation_ref=continuation_log_ref(continuation_id),
+                owner_tenant=entry.owner.tenant_id,
+                caller_tenant=owner.tenant_id,
+            )
+            return None
+
+        return entry
 
     def retrieve(
         self,
         continuation_id: str,
         offset: int = 0,
         limit: int | None = None,
+        *,
+        owner: ContinuationOwner,
     ) -> CacheRetrievalResult:
         """Retrieve a cached response.
 
@@ -137,20 +176,17 @@ class MemoryResponseCache(IResponseCache):
             continuation_id: The continuation ID to look up.
             offset: Byte offset to start reading from.
             limit: Maximum bytes to return (None for all remaining).
+            owner: The caller asking. Another owner's entry is not found.
 
         Returns:
             CacheRetrievalResult with the response data or not-found status.
         """
         with self._lock:
-            entry = self._cache.get(continuation_id)
+            # Another owner's entry is answered before the LRU touch below, so
+            # a caller who is not the owner cannot keep an entry alive either.
+            entry = self._owned_entry(continuation_id, owner, "retrieve")
 
             if entry is None:
-                return CacheRetrievalResult(found=False)
-
-            # Check expiration
-            if time.time() > entry.expires_at:
-                del self._cache[continuation_id]
-                logger.debug("cache_entry_expired", continuation_id=continuation_id)
                 return CacheRetrievalResult(found=False)
 
             # Move to end of LRU order
@@ -196,21 +232,22 @@ class MemoryResponseCache(IResponseCache):
                 complete=complete,
             )
 
-    def delete(self, continuation_id: str) -> bool:
+    def delete(self, continuation_id: str, *, owner: ContinuationOwner) -> bool:
         """Delete a cached response.
 
         Args:
             continuation_id: The continuation ID to delete.
+            owner: The caller asking. Another owner's entry is left in place.
 
         Returns:
             True if the entry was deleted, False if it didn't exist.
         """
         with self._lock:
-            if continuation_id in self._cache:
-                del self._cache[continuation_id]
-                logger.debug("cache_entry_deleted", continuation_id=continuation_id)
-                return True
-            return False
+            if self._owned_entry(continuation_id, owner, "delete") is None:
+                return False
+            del self._cache[continuation_id]
+            logger.debug("cache_entry_deleted", continuation_ref=continuation_log_ref(continuation_id))
+            return True
 
     def clear_expired(self) -> int:
         """Remove all expired entries from the cache.

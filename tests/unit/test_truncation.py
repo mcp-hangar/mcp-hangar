@@ -7,11 +7,15 @@ import time
 import pytest
 
 from mcp_hangar.domain.contracts.response_cache import NullResponseCache
-from mcp_hangar.domain.value_objects.truncation import ContinuationId, TruncationConfig
+from mcp_hangar.domain.value_objects.truncation import ContinuationId, ContinuationOwner, TruncationConfig
 from mcp_hangar.infrastructure.truncation import memory_cache as memory_cache_module
 from mcp_hangar.infrastructure.truncation.manager import TruncationManager
 from mcp_hangar.infrastructure.truncation.memory_cache import MemoryResponseCache
 from mcp_hangar.server.tools.batch.models import CallResult
+
+#: Every cache operation names its caller. These tests are
+#: about storage, paging and expiry, so they all act as one caller.
+_OWNER = ContinuationOwner(tenant_id="t1", principal_id="svc:agent")
 
 
 def _clock_past_the_ttl(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
@@ -136,20 +140,20 @@ class TestNullResponseCache:
     def test_store_is_noop(self):
         """Test store does nothing."""
         cache = NullResponseCache()
-        cache.store("id", {"data": "test"}, 300)
+        cache.store("id", {"data": "test"}, 300, owner=_OWNER)
         # No exception, no effect
 
     def test_retrieve_returns_not_found(self):
         """Test retrieve always returns not found."""
         cache = NullResponseCache()
-        cache.store("id", {"data": "test"}, 300)
-        result = cache.retrieve("id")
+        cache.store("id", {"data": "test"}, 300, owner=_OWNER)
+        result = cache.retrieve("id", owner=_OWNER)
         assert result.found is False
 
     def test_delete_returns_false(self):
         """Test delete always returns False."""
         cache = NullResponseCache()
-        assert cache.delete("any_id") is False
+        assert cache.delete("any_id", owner=_OWNER) is False
 
     def test_clear_expired_returns_zero(self):
         """Test clear_expired always returns 0."""
@@ -187,9 +191,9 @@ class TestMemoryResponseCache:
         """Test basic store and retrieve."""
         cache = MemoryResponseCache()
         data = {"key": "value", "nested": {"a": 1}}
-        cache.store("cont_test_0_abc", data, 300)
+        cache.store("cont_test_0_abc", data, 300, owner=_OWNER)
 
-        result = cache.retrieve("cont_test_0_abc")
+        result = cache.retrieve("cont_test_0_abc", owner=_OWNER)
         assert result.found is True
         assert result.data == data
         assert result.complete is True
@@ -198,17 +202,17 @@ class TestMemoryResponseCache:
     def test_retrieve_nonexistent(self):
         """Test retrieve returns not found for nonexistent ID."""
         cache = MemoryResponseCache()
-        result = cache.retrieve("nonexistent")
+        result = cache.retrieve("nonexistent", owner=_OWNER)
         assert result.found is False
 
     def test_retrieve_with_offset_limit(self):
         """Test retrieve with offset and limit for pagination."""
         cache = MemoryResponseCache()
         data = {"large": "x" * 1000}
-        cache.store("cont_test_0_abc", data, 300)
+        cache.store("cont_test_0_abc", data, 300, owner=_OWNER)
 
         # Get first 500 bytes
-        result = cache.retrieve("cont_test_0_abc", offset=0, limit=500)
+        result = cache.retrieve("cont_test_0_abc", offset=0, limit=500, owner=_OWNER)
         assert result.found is True
         assert result.offset == 0
         assert result.has_more is True
@@ -217,9 +221,9 @@ class TestMemoryResponseCache:
     def test_retrieve_offset_past_end(self):
         """Test retrieve with offset past content."""
         cache = MemoryResponseCache()
-        cache.store("cont_test_0_abc", {"small": "data"}, 300)
+        cache.store("cont_test_0_abc", {"small": "data"}, 300, owner=_OWNER)
 
-        result = cache.retrieve("cont_test_0_abc", offset=10000)
+        result = cache.retrieve("cont_test_0_abc", offset=10000, owner=_OWNER)
         assert result.found is True
         assert result.data is None
         assert result.complete is True
@@ -227,58 +231,58 @@ class TestMemoryResponseCache:
     def test_delete(self):
         """Test delete removes entry."""
         cache = MemoryResponseCache()
-        cache.store("cont_test_0_abc", {"data": 1}, 300)
-        assert cache.delete("cont_test_0_abc") is True
-        assert cache.retrieve("cont_test_0_abc").found is False
+        cache.store("cont_test_0_abc", {"data": 1}, 300, owner=_OWNER)
+        assert cache.delete("cont_test_0_abc", owner=_OWNER) is True
+        assert cache.retrieve("cont_test_0_abc", owner=_OWNER).found is False
 
     def test_delete_nonexistent(self):
         """Test delete returns False for nonexistent."""
         cache = MemoryResponseCache()
-        assert cache.delete("nonexistent") is False
+        assert cache.delete("nonexistent", owner=_OWNER) is False
 
     def test_ttl_expiration(self, monkeypatch: pytest.MonkeyPatch):
         """Test entries expire after TTL."""
         cache = MemoryResponseCache(default_ttl_s=1)
-        cache.store("cont_test_0_abc", {"data": 1}, 1)
-        assert cache.retrieve("cont_test_0_abc").found is True
+        cache.store("cont_test_0_abc", {"data": 1}, 1, owner=_OWNER)
+        assert cache.retrieve("cont_test_0_abc", owner=_OWNER).found is True
         _clock_past_the_ttl(monkeypatch, 1.1)
-        assert cache.retrieve("cont_test_0_abc").found is False
+        assert cache.retrieve("cont_test_0_abc", owner=_OWNER).found is False
 
     def test_lru_eviction(self):
         """Test LRU eviction when cache is full."""
         cache = MemoryResponseCache(max_entries=3)
-        cache.store("cont_1", {"d": 1}, 300)
-        cache.store("cont_2", {"d": 2}, 300)
-        cache.store("cont_3", {"d": 3}, 300)
+        cache.store("cont_1", {"d": 1}, 300, owner=_OWNER)
+        cache.store("cont_2", {"d": 2}, 300, owner=_OWNER)
+        cache.store("cont_3", {"d": 3}, 300, owner=_OWNER)
 
         # Access cont_1 to make it recently used
-        cache.retrieve("cont_1")
+        cache.retrieve("cont_1", owner=_OWNER)
 
         # Add new entry, should evict cont_2 (oldest)
-        cache.store("cont_4", {"d": 4}, 300)
+        cache.store("cont_4", {"d": 4}, 300, owner=_OWNER)
 
-        assert cache.retrieve("cont_1").found is True
-        assert cache.retrieve("cont_2").found is False  # Evicted
-        assert cache.retrieve("cont_3").found is True
-        assert cache.retrieve("cont_4").found is True
+        assert cache.retrieve("cont_1", owner=_OWNER).found is True
+        assert cache.retrieve("cont_2", owner=_OWNER).found is False  # Evicted
+        assert cache.retrieve("cont_3", owner=_OWNER).found is True
+        assert cache.retrieve("cont_4", owner=_OWNER).found is True
 
     def test_clear_expired(self, monkeypatch: pytest.MonkeyPatch):
         """Test clear_expired removes expired entries."""
         cache = MemoryResponseCache(default_ttl_s=1)
-        cache.store("cont_1", {"d": 1}, 1)
-        cache.store("cont_2", {"d": 2}, 1)
+        cache.store("cont_1", {"d": 1}, 1, owner=_OWNER)
+        cache.store("cont_2", {"d": 2}, 1, owner=_OWNER)
         _clock_past_the_ttl(monkeypatch, 1.1)
-        cache.store("cont_3", {"d": 3}, 300)
+        cache.store("cont_3", {"d": 3}, 300, owner=_OWNER)
 
         cleared = cache.clear_expired()
         assert cleared == 2
-        assert cache.retrieve("cont_3").found is True
+        assert cache.retrieve("cont_3", owner=_OWNER).found is True
 
     def test_clear(self):
         """Test clear removes all entries."""
         cache = MemoryResponseCache()
-        cache.store("cont_1", {"d": 1}, 300)
-        cache.store("cont_2", {"d": 2}, 300)
+        cache.store("cont_1", {"d": 1}, 300, owner=_OWNER)
+        cache.store("cont_2", {"d": 2}, 300, owner=_OWNER)
         cleared = cache.clear()
         assert cleared == 2
         assert cache.size() == 0
@@ -291,7 +295,7 @@ class TestMemoryResponseCache:
         def writer(start: int):
             try:
                 for i in range(50):
-                    cache.store(f"cont_{start}_{i}", {"v": i}, 300)
+                    cache.store(f"cont_{start}_{i}", {"v": i}, 300, owner=_OWNER)
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
@@ -299,7 +303,7 @@ class TestMemoryResponseCache:
             try:
                 for _ in range(50):
                     for i in range(10):
-                        cache.retrieve(f"cont_0_{i}")
+                        cache.retrieve(f"cont_0_{i}", owner=_OWNER)
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
@@ -351,7 +355,7 @@ class TestTruncationManager:
         manager = TruncationManager(config, cache)
 
         results = [self.create_result(0, {"large": "x" * 10000})]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed == results
         assert processed[0].truncated is False
@@ -364,7 +368,7 @@ class TestTruncationManager:
             self.create_result(0, {"small": "data"}),
             self.create_result(1, {"also": "small"}),
         ]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert len(processed) == 2
         assert processed[0].truncated is False
@@ -380,7 +384,7 @@ class TestTruncationManager:
             self.create_result(0, {"data": "x" * 300}),
             self.create_result(1, {"data": "y" * 300}),
         ]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         # At least one should be truncated
         truncated_count = sum(1 for r in processed if r.truncated)
@@ -400,13 +404,13 @@ class TestTruncationManager:
 
         original_data = {"data": "x" * 200}
         results = [self.create_result(0, original_data)]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed[0].truncated is True
         cont_id = processed[0].continuation_id
 
         # Verify cached
-        cached = manager.cache.retrieve(cont_id)
+        cached = manager.cache.retrieve(cont_id, owner=_OWNER)
         assert cached.found is True
         assert cached.data == original_data
 
@@ -419,7 +423,7 @@ class TestTruncationManager:
             self.create_result(0, {"data": "x" * 600}),
             self.create_result(1, {"data": "y" * 200}),
         ]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         # Larger response should get larger budget
         if processed[0].truncated and processed[1].truncated:
@@ -443,7 +447,7 @@ class TestTruncationManager:
                 },
             )
         ]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed[0].truncated is True
         # Result should still be valid JSON
@@ -457,7 +461,7 @@ class TestTruncationManager:
         manager = self.create_manager(max_batch_size_bytes=200, min_per_response_bytes=50)
 
         results = [self.create_result(0, {"items": ["item" + str(i) for i in range(100)]})]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         if processed[0].truncated:
             result = processed[0].result
@@ -471,7 +475,7 @@ class TestTruncationManager:
     def test_empty_batch(self):
         """Test process_batch handles empty batch."""
         manager = self.create_manager()
-        processed = manager.process_batch("batch1", [])
+        processed = manager.process_batch("batch1", [], owner=_OWNER)
         assert processed == []
 
     def test_none_results_unchanged(self):
@@ -489,7 +493,7 @@ class TestTruncationManager:
                 elapsed_ms=50.0,
             )
         ]
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed[0].result is None
         assert processed[0].truncated is False
@@ -623,13 +627,13 @@ class TestSetexProbe:
         client = self._client(setex_ok=True)
         cache = self._cache(client)
         assert client.setex.called and client.delete.called
-        assert cache.store("cont_x_0_abc", {"a": 1}, 60) is True
+        assert cache.store("cont_x_0_abc", {"a": 1}, 60, owner=_OWNER) is True
 
     def test_a_failed_store_returns_false(self):
         client = self._client(setex_ok=True)
         cache = self._cache(client)
         client.setex.side_effect = Exception("connection reset")
-        assert cache.store("cont_x_0_abc", {"a": 1}, 60) is False
+        assert cache.store("cont_x_0_abc", {"a": 1}, 60, owner=_OWNER) is False
 
 
 class TestNoContinuationWithoutStore:
@@ -643,7 +647,7 @@ class TestNoContinuationWithoutStore:
         big = {"data": "x" * 1000}
         results = [CallResult(index=0, call_id="c0", success=True, result=big, elapsed_ms=1.0)]
 
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed[0].truncated is True
         assert processed[0].continuation_id is None
@@ -654,7 +658,7 @@ class TestNoContinuationWithoutStore:
         big = {"data": "x" * 1000}
         results = [CallResult(index=0, call_id="c0", success=True, result=big, elapsed_ms=1.0)]
 
-        processed = manager.process_batch("batch1", results)
+        processed = manager.process_batch("batch1", results, owner=_OWNER)
 
         assert processed[0].truncated is True
         assert processed[0].continuation_id is not None

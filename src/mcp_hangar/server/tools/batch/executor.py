@@ -34,6 +34,7 @@ from ....domain.events import (
     ToolWithdrawnRejected,
 )
 from ....context import bind_routing_headers, get_identity_context
+from ....domain.value_objects.truncation import ContinuationOwner
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
@@ -472,7 +473,12 @@ class BatchExecutor:
         if truncation_manager is None:
             return results
 
-        return truncation_manager.process_batch(batch_id, results)
+        # Each continuation is cached for the caller this batch runs for, and
+        # answers no one else. This runs on the calling
+        # thread, under the identity hangar_call bound for the batch, and the
+        # continuation tools read the caller the same way.
+        owner = ContinuationOwner.of(get_identity_context())
+        return truncation_manager.process_batch(batch_id, results, owner=owner)
 
     def _l7_approval_rule(self, call: CallSpec, ctx: Any) -> str | None:
         """The L7 (MCPEgressPolicy) requireApproval verdict for this call.
