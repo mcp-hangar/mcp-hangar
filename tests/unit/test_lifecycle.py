@@ -160,6 +160,21 @@ class TestServerLifecycle:
             # shutdown on context should only be called once
             assert mock_shutdown.call_count == 1
 
+    def test_the_lease_is_released_only_after_the_context_has_shut_down(self, mock_context):
+        """A peer takes over once everything this instance ran under the lease has stopped."""
+        order: list[str] = []
+        keeper = MagicMock()
+        keeper.stop.side_effect = lambda: order.append("lease released")
+        lifecycle = ServerLifecycle(mock_context)
+
+        with (
+            patch.object(mock_context, "shutdown", side_effect=lambda: order.append("context shut down")),
+            patch("mcp_hangar.server.lifecycle.get_lease_keeper", return_value=keeper),
+        ):
+            lifecycle.shutdown()
+
+        assert order == ["context shut down", "lease released"]
+
     def test_run_stdio(self, mock_context):
         """run_stdio() should call mcp_server.run()."""
         lifecycle = ServerLifecycle(mock_context)

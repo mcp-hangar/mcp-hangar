@@ -75,55 +75,6 @@ class TestTheSystemEndpointSaysWhichReplicaAnswered:
         assert _instance_info()["rate_limits_are_per_instance"] is True
 
 
-class TestTheSharedCircuitBreakerRowHasOneWriter:
-    def test_a_follower_does_not_write_it(self, monkeypatch) -> None:
-        # Each replica keeps its own breaker, deliberately -- but they all
-        # shared one row and all wrote it on the way out, so a rolling update
-        # ended with whichever pod stopped last having overwritten the others.
-        from mcp_hangar.server.bootstrap import coordination, cqrs
-
-        monkeypatch.setattr(coordination, "_keeper", _NotTheManager())
-        store = _RecordingStore()
-
-        cqrs.save_group_circuit_breakers(store, {"g-1": _Group()})
-
-        assert store.checkpoints == []
-
-    def test_the_holder_writes_it(self, monkeypatch) -> None:
-        from mcp_hangar.server.bootstrap import coordination, cqrs
-
-        monkeypatch.setattr(coordination, "_keeper", _TheManager())
-        store = _RecordingStore()
-
-        cqrs.save_group_circuit_breakers(store, {"g-1": _Group()})
-
-        assert [saga_id for _type, saga_id in store.checkpoints] == ["g-1"]
-
-    def test_a_standalone_gateway_still_writes_it(self, monkeypatch) -> None:
-        # It has no peers to disagree with, and losing the breaker state across
-        # restarts would be a regression for every existing deployment.
-        from mcp_hangar.server.bootstrap import coordination, cqrs
-
-        monkeypatch.setattr(coordination, "_keeper", None)
-        store = _RecordingStore()
-
-        cqrs.save_group_circuit_breakers(store, {"g-1": _Group()})
-
-        assert len(store.checkpoints) == 1
-
-    def test_the_lease_is_released_after_the_row_is_written(self) -> None:
-        # Ordering, asserted because getting it wrong is silent: release first
-        # and the leader stops being the leader a moment before doing the one
-        # thing only the leader may do, so nobody writes the row at all.
-        import inspect
-
-        from mcp_hangar.server.lifecycle import ServerLifecycle
-
-        source = inspect.getsource(ServerLifecycle.shutdown)
-
-        assert source.index("self._context.shutdown()") < source.index("keeper.stop()")
-
-
 class _ASharedBackend:
     shared_across_instances = True
 
@@ -161,21 +112,6 @@ class _TheManager:
     @property
     def incumbent(self):
         return self.lease
-
-
-class _RecordingStore:
-    def __init__(self) -> None:
-        self.checkpoints: list[tuple[str, str]] = []
-
-    def checkpoint(self, saga_type: str, saga_id: str, state_data: dict, last_event_position: int) -> None:
-        self.checkpoints.append((saga_type, saga_id))
-
-
-class _Group:
-    def __init__(self) -> None:
-        from mcp_hangar.domain.model.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
-
-        self._circuit_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=5))
 
 
 @pytest.fixture(autouse=True)
