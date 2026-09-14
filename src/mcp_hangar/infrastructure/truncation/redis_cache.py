@@ -2,18 +2,54 @@
 
 Provides response caching using Redis for environments where
 multiple instances need to share the truncation cache.
+
+Each value carries the owner it was stored for, and answers no one else.
+See :data:`_OWNER_PREFIX` for the stored form.
 """
 
 import json
 from typing import Any, cast
 
 from ...domain.contracts.response_cache import CacheRetrievalResult, IResponseCache
+from ...domain.value_objects.truncation import ContinuationOwner, continuation_log_ref
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # Key prefix for all truncation cache entries
 KEY_PREFIX = "mcp:cont:"
+
+#: Marks a value that carries its owner. Such a value is
+#: this prefix, the owner as one line of JSON, a newline, and then the payload
+#: exactly as it was stored before owners were recorded. ``json.dumps`` never
+#: starts its output with ``h`` or emits a raw newline, so the header cannot
+#: run into the payload, and a bare payload written by an older replica cannot
+#: be mistaken for a value with an owner.
+_OWNER_PREFIX = "hangar-continuation-owner:"
+
+
+def _encode(owner: ContinuationOwner, serialized: str) -> str:
+    """The stored form of *serialized* for *owner*."""
+    return _OWNER_PREFIX + json.dumps(owner.to_dict(), separators=(",", ":")) + "\n" + serialized
+
+
+def _decode(stored: str) -> tuple[ContinuationOwner, str] | None:
+    """Split a stored value into its owner and payload, or None if it is malformed.
+
+    A value without the prefix was written before owners were recorded: the
+    bare payload. It is read as the anonymous owner's. An auth-off gateway
+    keeps serving it across the upgrade, no authenticated caller can read it,
+    and it expires within ``cache_ttl_s`` like any other entry.
+    """
+    if not stored.startswith(_OWNER_PREFIX):
+        return ContinuationOwner(), stored
+    header, newline, payload = stored[len(_OWNER_PREFIX) :].partition("\n")
+    if not newline:
+        return None
+    try:
+        return ContinuationOwner.from_dict(json.loads(header)), payload
+    except ValueError:  # json.JSONDecodeError is a ValueError
+        return None
 
 
 class RedisResponseCache(IResponseCache):
@@ -23,6 +59,7 @@ class RedisResponseCache(IResponseCache):
     - Automatic TTL via Redis SETEX
     - Atomic operations
     - Offset/limit pagination for large responses
+    - Values answering only the owner they were stored for
 
     Requires redis package: pip install redis
 
@@ -81,13 +118,15 @@ class RedisResponseCache(IResponseCache):
         """Create the Redis key for a continuation ID."""
         return f"{KEY_PREFIX}{continuation_id}"
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int, *, owner: ContinuationOwner) -> bool:
         """Store a full response in Redis.
 
         Args:
             continuation_id: Unique identifier for this cached response.
             full_response: The complete response data to cache.
             ttl_s: Time-to-live in seconds.
+            owner: The caller the value is stored for. It is stored with the
+                payload, in the same key, under the same TTL.
 
         Returns:
             Whether the payload is retrievable under ``continuation_id`` --
@@ -102,7 +141,7 @@ class RedisResponseCache(IResponseCache):
         except (TypeError, ValueError) as e:
             logger.warning(
                 "redis_cache_store_serialization_failed",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 error=str(e),
             )
             return False
@@ -110,10 +149,10 @@ class RedisResponseCache(IResponseCache):
         key = self._make_key(continuation_id)
 
         try:
-            self._client.setex(key, ttl_s, serialized)
+            self._client.setex(key, ttl_s, _encode(owner, serialized))
             logger.debug(
                 "redis_cache_entry_stored",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 size_bytes=len(serialized),
                 ttl_s=ttl_s,
             )
@@ -121,16 +160,52 @@ class RedisResponseCache(IResponseCache):
         except Exception as e:  # noqa: BLE001 -- infra-boundary: store failure must not mint a continuation_id
             logger.error(
                 "redis_cache_store_failed",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 error=str(e),
             )
             return False
+
+    def _owned_payload(self, continuation_id: str, owner: ContinuationOwner, op: str) -> str | None:
+        """The payload under *continuation_id* if *owner* stored it, else None.
+
+        A missing key, a Redis failure, a malformed value and another owner's
+        value all come back None, so the caller cannot tell them apart.
+        """
+        ref = continuation_log_ref(continuation_id)
+        try:
+            stored = self._client.get(self._make_key(continuation_id))
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
+            logger.error("redis_cache_retrieve_failed", op=op, continuation_ref=ref, error=str(e))
+            return None
+
+        if stored is None:
+            return None
+
+        decoded = _decode(stored)
+        if decoded is None:
+            logger.warning("redis_cache_entry_malformed", op=op, continuation_ref=ref)
+            return None
+
+        entry_owner, payload = decoded
+        if not entry_owner.admits(owner):
+            logger.warning(
+                "continuation_owner_mismatch",
+                op=op,
+                continuation_ref=ref,
+                owner_tenant=entry_owner.tenant_id,
+                caller_tenant=owner.tenant_id,
+            )
+            return None
+
+        return payload
 
     def retrieve(
         self,
         continuation_id: str,
         offset: int = 0,
         limit: int | None = None,
+        *,
+        owner: ContinuationOwner,
     ) -> CacheRetrievalResult:
         """Retrieve a cached response from Redis.
 
@@ -138,22 +213,12 @@ class RedisResponseCache(IResponseCache):
             continuation_id: The continuation ID to look up.
             offset: Byte offset to start reading from.
             limit: Maximum bytes to return (None for all remaining).
+            owner: The caller asking. Another owner's value is not found.
 
         Returns:
             CacheRetrievalResult with the response data or not-found status.
         """
-        key = self._make_key(continuation_id)
-
-        try:
-            serialized = self._client.get(key)
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
-            logger.error(
-                "redis_cache_retrieve_failed",
-                continuation_id=continuation_id,
-                error=str(e),
-            )
-            return CacheRetrievalResult(found=False)
-
+        serialized = self._owned_payload(continuation_id, owner, "retrieve")
         if serialized is None:
             return CacheRetrievalResult(found=False)
 
@@ -200,26 +265,33 @@ class RedisResponseCache(IResponseCache):
             complete=complete,
         )
 
-    def delete(self, continuation_id: str) -> bool:
+    def delete(self, continuation_id: str, *, owner: ContinuationOwner) -> bool:
         """Delete a cached response from Redis.
+
+        The owner is read before the key is deleted. Ids are never reused for
+        another owner, so nothing can change hands between the two commands.
 
         Args:
             continuation_id: The continuation ID to delete.
+            owner: The caller asking. Another owner's value is left in place.
 
         Returns:
             True if the entry was deleted, False if it didn't exist.
         """
+        if self._owned_payload(continuation_id, owner, "delete") is None:
+            return False
+
         key = self._make_key(continuation_id)
 
         try:
             deleted = self._client.delete(key)
             if deleted:
-                logger.debug("redis_cache_entry_deleted", continuation_id=continuation_id)
+                logger.debug("redis_cache_entry_deleted", continuation_ref=continuation_log_ref(continuation_id))
             return cast(bool, deleted > 0)
         except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error(
                 "redis_cache_delete_failed",
-                continuation_id=continuation_id,
+                continuation_ref=continuation_log_ref(continuation_id),
                 error=str(e),
             )
             return False

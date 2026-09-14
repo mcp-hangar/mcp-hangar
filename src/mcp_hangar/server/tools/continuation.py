@@ -1,12 +1,21 @@
-"""Continuation tool for retrieving full responses from truncated results.
+"""Continuation tools for retrieving full responses from truncated results.
 
-Provides the hangar_fetch_continuation MCP tool that allows clients
-to retrieve the complete content when a batch response was truncated.
+Provides the hangar_fetch_continuation and hangar_delete_continuation MCP tools,
+which let a client read, or free, the rest of a batch response that was
+truncated.
+
+A continuation answers only the caller whose ``hangar_call`` produced it: the
+same tenant and principal. Anyone else holding the id gets exactly the answer
+for an id that does not exist. With auth off neither
+side has an identity, so both are the anonymous owner and the tools work as
+before. No log line here carries the id's random suffix.
 """
 
 from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.mcp.tooling import mcp_tool_wrapper
+from ...context import get_identity_context
+from ...domain.value_objects.truncation import ContinuationOwner, continuation_log_ref
 from ...logging_config import get_logger
 from ..bootstrap.truncation import get_response_cache
 from ..validation import check_rate_limit, tool_error_mapper
@@ -16,6 +25,16 @@ logger = get_logger(__name__)
 # Default and maximum limits for retrieval
 DEFAULT_LIMIT = 500_000  # 500KB default
 MAX_LIMIT = 2_000_000  # 2MB max per retrieval
+
+
+def _caller() -> ContinuationOwner:
+    """The caller asking, in the form its continuation was stored under.
+
+    Read inside the tool body, after the wrapper has bound the request's
+    identity. That is the identity ``hangar_call`` bound when the result was
+    truncated, so the same caller compares equal.
+    """
+    return ContinuationOwner.of(get_identity_context())
 
 
 def register_continuation_tools(mcp: FastMCP) -> None:
@@ -42,6 +61,8 @@ def register_continuation_tools(mcp: FastMCP) -> None:
         CHOOSE THIS when: hangar_call returned truncated result with continuation_id.
         CHOOSE hangar_delete_continuation when: done with data and want to free memory.
         SKIP THIS when: result was not truncated (no continuation_id in response).
+
+        Only the caller whose hangar_call produced the continuation can fetch it.
 
         Side effects: None (read-only cache access).
 
@@ -85,12 +106,14 @@ def register_continuation_tools(mcp: FastMCP) -> None:
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
+        ref = continuation_log_ref(continuation_id)
+
         if limit <= 0:
             limit = DEFAULT_LIMIT
         elif limit > MAX_LIMIT:
             logger.warning(
                 "continuation_limit_exceeded",
-                continuation_id=continuation_id,
+                continuation_ref=ref,
                 requested_limit=limit,
                 max_limit=MAX_LIMIT,
             )
@@ -100,19 +123,21 @@ def register_continuation_tools(mcp: FastMCP) -> None:
         if cache is None:
             logger.warning(
                 "continuation_cache_not_available",
-                continuation_id=continuation_id,
+                continuation_ref=ref,
             )
             return {
                 "found": False,
                 "error": "Truncation cache not available (truncation may be disabled)",
             }
 
-        result = cache.retrieve(continuation_id, offset=offset, limit=limit)
+        # Another caller's continuation comes back not found, and gets the same
+        # answer as a missing one: nothing here may tell it the id exists.
+        result = cache.retrieve(continuation_id, offset=offset, limit=limit, owner=_caller())
 
         if not result.found:
             logger.debug(
                 "continuation_not_found",
-                continuation_id=continuation_id,
+                continuation_ref=ref,
             )
             return {
                 "found": False,
@@ -121,7 +146,7 @@ def register_continuation_tools(mcp: FastMCP) -> None:
 
         logger.debug(
             "continuation_retrieved",
-            continuation_id=continuation_id,
+            continuation_ref=ref,
             offset=offset,
             limit=limit,
             total_size=result.total_size_bytes,
@@ -149,6 +174,8 @@ def register_continuation_tools(mcp: FastMCP) -> None:
 
         CHOOSE THIS when: done with continuation data and want to free memory now.
         SKIP THIS for normal use - cached entries auto-expire based on TTL.
+
+        Only the caller whose hangar_call produced the continuation can delete it.
 
         Side effects: Removes the cached response from memory.
 
@@ -181,11 +208,12 @@ def register_continuation_tools(mcp: FastMCP) -> None:
                 "error": "Truncation cache not available",
             }
 
-        deleted = cache.delete(continuation_id)
+        # Another caller's continuation is left in place and answered as missing.
+        deleted = cache.delete(continuation_id, owner=_caller())
 
         logger.debug(
             "continuation_delete_requested",
-            continuation_id=continuation_id,
+            continuation_ref=continuation_log_ref(continuation_id),
             deleted=deleted,
         )
 

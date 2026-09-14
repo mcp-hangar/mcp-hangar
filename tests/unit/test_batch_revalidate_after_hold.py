@@ -73,6 +73,10 @@ def _ctx(*, revalidate_returns=None, revalidate_raises=None, with_gate=True):
 
 def _revalidate(executor, *, call=None, resolver=None, ctx=None, pin=None, projection="unset", enforce=None):
     proj_registry = Mock()
+    if projection not in ("unset", None):
+        # The re-check also asks whether the tool was withdrawn during the hold.
+        # A projection a test hands in is not withdrawn.
+        projection.is_withdrawn_for.return_value = False
     proj_registry.resolve.return_value = None if projection == "unset" else projection
     return executor._revalidate_after_hold(
         call=call or _call(),

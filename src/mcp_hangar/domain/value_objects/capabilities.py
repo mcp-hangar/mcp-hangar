@@ -258,6 +258,10 @@ class McpServerCapabilities:
             "alert" -- log and emit event, allow the mcp_server to continue.
             "block" -- deny the violating action and emit event.
             "quarantine" -- block the mcp_server from serving new requests.
+                For tools outside ``expected_tools``, block and quarantine
+                refuse alike: the server goes DEAD, no call starts it again,
+                and a deliberate start checks its tools again. Quarantine also
+                records ``McpServerCapabilityQuarantined``.
     """
 
     network: NetworkCapabilities = field(default_factory=NetworkCapabilities)

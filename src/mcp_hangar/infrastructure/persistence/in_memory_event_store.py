@@ -49,7 +49,10 @@ class InMemoryEventStore(IEventStore):
         self._streams: dict[str, Stream] = {}
         self._all_events: list[StoredEvent] = []
         self._snapshots: dict[str, dict[str, Any]] = {}
-        self._lock = threading.Lock()
+        # Re-entrant because `append_at_end` holds it while calling `append`,
+        # which takes it again. Holding it across both keeps the version read and
+        # the write one step.
+        self._lock = threading.RLock()
         self._global_position = 0
 
         logger.info("in_memory_event_store_initialized")
@@ -97,6 +100,20 @@ class InMemoryEventStore(IEventStore):
             )
 
             return stream.version
+
+    def append_at_end(self, stream_id: str, events: list[DomainEvent]) -> int:
+        """Append after whatever the stream holds, under the lock every writer takes.
+
+        The version is read and the batch appended within one hold of
+        `self._lock`, which `append` takes too. No other writer can move the
+        stream in between, so a batch that claimed no version cannot conflict.
+        The lock is re-entrant so that this can go
+        through `append` rather than beside it.
+        """
+        if not events:
+            return self.get_stream_version(stream_id)
+        with self._lock:
+            return self.append(stream_id, events, self.get_stream_version(stream_id))
 
     def read_stream(
         self,

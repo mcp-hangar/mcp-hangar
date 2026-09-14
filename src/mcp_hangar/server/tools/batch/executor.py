@@ -34,6 +34,7 @@ from ....domain.events import (
     ToolWithdrawnRejected,
 )
 from ....context import bind_routing_headers, get_identity_context
+from ....domain.value_objects.truncation import ContinuationOwner
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
@@ -180,6 +181,41 @@ def _close_approval_loops() -> None:
 _UNRESOLVED = object()
 
 
+def _groups_owning(server_id: str) -> tuple[str, ...]:
+    """The ids of every group *server_id* is a member of.
+
+    A group member is in the server repository like any other server, so a
+    caller can name it directly instead of naming its group. The call still
+    goes to that member, but the member is governed by each group that owns
+    it, on top of its own policy. With several owners, deny wins: a member of
+    two groups is refused a tool either group denies, withdraws or pins.
+
+    Read from the ``GROUPS`` that ``_gate_resolve_target`` resolves a group
+    id against. The front door's ``_member_to_group`` keeps one group per
+    member, so it cannot express a member of two groups.
+    """
+    return tuple(group_id for group_id, group in list(GROUPS.items()) if any(m.id == server_id for m in group.members))
+
+
+def _withdrawn_in_scope(
+    proj_registry: Any, projection: Any, tool: str, tenant_id: str | None, owning_groups: tuple[str, ...]
+) -> bool:
+    """Whether *tool* is withdrawn for *tenant_id* on this call (#231).
+
+    *projection* is the tool's projection as the call resolved it. It already
+    folds in every withdrawal declared on the id the call named, or on the
+    member a group selected. ``None`` means the catalogue does not know the
+    tool, and that does not block. A member named directly is also withdrawn
+    by a withdrawal on any group that owns it.
+
+    The withdrawal gate and the re-check after an approval hold both ask this,
+    so they cannot ask different questions.
+    """
+    if projection is not None and projection.is_withdrawn_for(tenant_id):
+        return True
+    return any(proj_registry.is_withdrawn(group_id, tool, tenant_id=tenant_id) for group_id in owning_groups)
+
+
 @dataclass
 class _CallPipeline:
     """Mutable state threaded through the gates of a single batch call.
@@ -209,8 +245,15 @@ class _CallPipeline:
     is_group: bool = False
     group_obj: Any = None
     target_server_id: str = ""
+    #: Set by _gate_resolve_target: the groups a server named directly is a
+    #: member of. Empty for a call that names a group,
+    #: and for a server that is in no group.
+    owning_groups: tuple[str, ...] = ()
     #: Set by _gate_digest_pin.
     pin: Any = None
+    #: Set by _gate_digest_pin: ``(group id, pin)`` for each group of a member
+    #: named directly that pins this tool.
+    group_pins: tuple[tuple[str, Any], ...] = ()
     _projection: Any = _UNRESOLVED
     #: True when a pin exists but the catalogue was not there to check it
     #: against; the cold start populates it and the gate re-runs (#601).
@@ -258,6 +301,37 @@ class _CallPipeline:
         """
         self._projection = _UNRESOLVED
         return self.projection
+
+    def pins(self) -> list[tuple[str, Any]]:
+        """Every pin this call must match, each with the id whose enforcement mode applies.
+
+        The groups' pins come first and the call's own pin last. When every pin
+        matches, the digest bound to the request is then the call's own, as it
+        was before group pins were added.
+        """
+        own = [(self.call.mcp_server, self.pin)] if self.pin is not None else []
+        return [*self.group_pins, *own]
+
+    def policy_scopes(self) -> list[tuple[str, str | None, str | None]]:
+        """Every ``(server id, group id, member server id)`` this call's policy is resolved under.
+
+        - A call naming a group has one scope: the group, plus the member
+          ``_gate_resolve_target`` selected. The member's policy is keyed by
+          its SERVER id (#1164).
+        - A call naming a server has its own scope. When the server is a group
+          member, there is also one scope per owning group, asked as a call
+          naming that group and routed to this member is asked.
+
+        The access gate, the approval gate and the re-check after a hold ask
+        these same scopes, each with the caller's tenant. The approval gate
+        used to ask only the named server, with no tenant.
+        """
+        if self.is_group:
+            return [(self.call.mcp_server, self.call.mcp_server, self.target_server_id or None)]
+        return [
+            (self.call.mcp_server, None, None),
+            *((group_id, group_id, self.call.mcp_server) for group_id in self.owning_groups),
+        ]
 
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
@@ -399,7 +473,12 @@ class BatchExecutor:
         if truncation_manager is None:
             return results
 
-        return truncation_manager.process_batch(batch_id, results)
+        # Each continuation is cached for the caller this batch runs for, and
+        # answers no one else. This runs on the calling
+        # thread, under the identity hangar_call bound for the batch, and the
+        # continuation tools read the caller the same way.
+        owner = ContinuationOwner.of(get_identity_context())
+        return truncation_manager.process_batch(batch_id, results, owner=owner)
 
     def _l7_approval_rule(self, call: CallSpec, ctx: Any) -> str | None:
         """The L7 (MCPEgressPolicy) requireApproval verdict for this call.
@@ -435,24 +514,47 @@ class BatchExecutor:
         call: CallSpec,
         resolver: Any,
         ctx: Any,
+        *,
+        tenant_id: str | None = None,
+        scopes: list[tuple[str, str | None, str | None]] | None = None,
     ) -> CallResult | None:
         """Check if the tool requires approval and block until resolved.
 
         Returns None if no approval is needed (continue execution).
         Returns a CallResult if the tool was denied or timed out.
+
+        Args:
+            tenant_id: The caller's tenant. Its own approval list applies. In
+                front_door, a resolve without it is the fail-closed
+                missing-identity branch, which answers deny-all and so never
+                asks for approval (#1039).
+            scopes: The ``(server, group, member server)`` scopes the access
+                gate asked, from ``_CallPipeline.policy_scopes``. The default
+                is the named server alone.
         """
         # Cleared per call: worker threads are reused across calls, so a stale
         # id from the previous call in this thread must never be revalidated
         # against the current one.
         _approval_loop_local.approval_id = None
 
-        # Get effective policy for this mcp_server (or fallback to _global)
-        policy = resolver.resolve_effective_policy(call.mcp_server)
-        if policy.is_unrestricted():
-            # Check global policy fallback
-            policy = resolver.resolve_effective_policy("_global")
+        # The approval lists of every scope the access gate asked, each with
+        # the caller's tenant. A tool on any of them needs approval, and the
+        # first scope that asks supplies the timeout and channel. Before this,
+        # only the named server's list was read. A group's list and a tenant's
+        # list never held a call, and in front_door no list did.
+        #
+        # There is no `_global` second lookup: `_compute_effective_policy`
+        # merges `_global` into every scope it resolves.
+        policy: Any = None
+        for server_id, group_id, member_server_id in scopes or [(call.mcp_server, None, None)]:
+            scoped = resolver.resolve_effective_policy(
+                server_id, group_id, tenant_id, member_server_id=member_server_id
+            )
+            if not scoped.is_unrestricted() and scoped.requires_approval(call.tool):
+                policy = scoped
+                break
 
-        needs_mrtr_approval = (not policy.is_unrestricted()) and policy.requires_approval(call.tool)
+        needs_mrtr_approval = policy is not None
 
         # The L7 egress policy is the second, independent source of "ask a
         # human" (#921): before this, its requireApproval verdict failed
@@ -561,6 +663,7 @@ class BatchExecutor:
         *,
         group_id: str | None = None,
         target_server_id: str = "",
+        owning_groups: tuple[str, ...] = (),
     ) -> CallResult | None:
         """Re-check, after an approval hold, everything decided before it.
 
@@ -575,6 +678,9 @@ class BatchExecutor:
                 during the hold did not refuse the approved call.
             target_server_id: The member a group selected, for the projection
                 and pin re-resolve (#1040).
+            owning_groups: The groups of a member named directly, which
+                ``_gate_tool_access`` also asked. A deny
+                added to one of them during the hold refuses the approved call.
         """
 
         def _refuse(reason: str, code: str) -> CallResult:
@@ -630,19 +736,42 @@ class BatchExecutor:
             )
             if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
                 return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
+            # The groups of a member named directly, asked exactly as the gate
+            # before the hold asked them.
+            for owner in owning_groups:
+                owner_policy = resolver.resolve_effective_policy(
+                    owner, owner, caller_tenant_id, member_server_id=call.mcp_server
+                )
+                if not owner_policy.is_unrestricted() and not owner_policy.is_tool_allowed(call.tool):
+                    return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
         except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
             return _refuse(f"policy could not be re-resolved: {exc}", "ApprovalRevalidationError")
 
+        # The catalogue as it is now. The withdrawal and pin re-checks both read it.
+        projection = proj_registry.resolve(call.mcp_server, call.tool, caller_tenant_id)
+        if projection is None and target_server_id and target_server_id != call.mcp_server:
+            projection = proj_registry.resolve(target_server_id, call.tool, caller_tenant_id)
+
+        # Withdrawal, re-checked with the scopes `_gate_withdrawal` uses and
+        # refused with the outcome it gives. A tool withdrawn while the call
+        # waited for a human used to run once approved, although this re-check
+        # was documented to cover it.
+        if _withdrawn_in_scope(proj_registry, projection, call.tool, caller_tenant_id, owning_groups):
+            logger.warning(
+                "approval_revalidation_failed",
+                approval_id=approval_id,
+                mcp_server=call.mcp_server,
+                tool=call.tool,
+                reason="tool withdrawn during the hold",
+            )
+            return self._withdrawn_refusal(call, ctx, caller_tenant_id, 0.0)
+
         # The pinned tool digest, re-verified against the catalogue as it is
         # now. The pre-gate check spoke for a schema that may since have moved.
-        if pin is not None:
-            projection = proj_registry.resolve(call.mcp_server, call.tool, caller_tenant_id)
-            if projection is None and target_server_id and target_server_id != call.mcp_server:
-                projection = proj_registry.resolve(target_server_id, call.tool, caller_tenant_id)
-            if projection is not None:
-                rejection: CallResult | None = enforce_digest_pin(projection, pin)
-                if rejection is not None:
-                    return rejection
+        if pin is not None and projection is not None:
+            rejection: CallResult | None = enforce_digest_pin(projection, pin)
+            if rejection is not None:
+                return rejection
 
         return None
 
@@ -1209,10 +1338,16 @@ class BatchExecutor:
         is set) so the rest of the pipeline -- cold-start, circuit breaker,
         dispatch -- targets a real backend. Policy, withdrawal and digest-pin
         checks below still key on the logical group id.
+
+        A server named directly is dispatched to as itself and never through a
+        group's selection. When it is a group member, its groups are recorded,
+        and the policy, withdrawal and pin gates below apply theirs too. Before
+        that, naming a member bypassed its group.
         """
         p.mcp_server_obj = p.ctx.get_mcp_server(p.call.mcp_server)
         p.target_server_id = p.call.mcp_server
         if p.mcp_server_obj:
+            p.owning_groups = _groups_owning(p.call.mcp_server)
             return None
 
         p.group_obj = GROUPS.get(p.call.mcp_server)
@@ -1225,6 +1360,8 @@ class BatchExecutor:
             p.target_server_id = selected_member.id.value
         elif not p.ctx.mcp_server_exists(p.call.mcp_server):
             return p.refuse(f"McpServer '{p.call.mcp_server}' not found", "McpServerNotFoundError")
+        else:
+            p.owning_groups = _groups_owning(p.call.mcp_server)
         return None
 
     def _gate_tool_access(self, p: "_CallPipeline") -> CallResult | None:
@@ -1235,24 +1372,21 @@ class BatchExecutor:
             policy_span.set_attribute("policy.is_group", p.is_group)
             if p.is_group:
                 p.group_obj = GROUPS.get(p.call.mcp_server)
-                # Group policy AND the policy of the member `_gate_resolve_target`
-                # just selected. The member half is keyed by the member SERVER id,
-                # so passing only the tenant resolved to group-level alone and a
-                # member deny_list never reached the verdict (#1164).
-                allowed = p.resolver.is_tool_allowed(
-                    mcp_server_id=p.call.mcp_server,
+            # Every scope `policy_scopes` names, each with the caller's tenant.
+            # For a group: the group, and the policy of the member
+            # `_gate_resolve_target` selected, keyed by its SERVER id (#1164).
+            # For a server: its own policy, plus each group that owns it when
+            # it is a member named directly. Deny wins.
+            allowed = all(
+                p.resolver.is_tool_allowed(
+                    mcp_server_id=server_id,
                     tool_name=p.call.tool,
-                    group_id=p.call.mcp_server,
+                    group_id=group_id,
                     member_id=p.caller_tenant_id,
-                    member_server_id=p.target_server_id or None,
+                    member_server_id=member_server_id,
                 )
-            else:
-                # For standalone mcp_servers: server->member merge when tenant is known
-                allowed = p.resolver.is_tool_allowed(
-                    mcp_server_id=p.call.mcp_server,
-                    tool_name=p.call.tool,
-                    member_id=p.caller_tenant_id,
-                )
+                for server_id, group_id, member_server_id in p.policy_scopes()
+            )
             policy_span.set_attribute("policy.allowed", allowed)
 
         if allowed:
@@ -1262,6 +1396,7 @@ class BatchExecutor:
             mcp_server_id=p.call.mcp_server,
             tool=p.call.tool,
             reason="tool_not_in_access_policy",
+            owning_groups=list(p.owning_groups),
         )
         TOOL_ACCESS_DENIED_TOTAL.inc(mcp_server=p.call.mcp_server, tool=p.call.tool, reason="tool_not_in_access_policy")
         return p.refuse("Tool not available for this mcp_server", "ToolAccessDeniedError")
@@ -1274,24 +1409,57 @@ class BatchExecutor:
         -32601 is #232. Semantics: projection is None -> registry unpopulated ->
         do NOT block (safe default). Only an explicit is_withdrawn_for() == True
         causes rejection.
-        """
-        projection = p.projection
-        if projection is None or not projection.is_withdrawn_for(p.caller_tenant_id):
-            return None
-        logger.info(
-            "tool_withdrawn_rejected",
-            mcp_server_id=p.call.mcp_server,
-            tool=p.call.tool,
-            tenant_id=p.caller_tenant_id,
-        )
-        p.ctx.event_bus.publish(
-            ToolWithdrawnRejected(tenant_id=p.caller_tenant_id, mcp_server=p.call.mcp_server, tool=p.call.tool)
-        )
-        return p.refuse(f"Tool '{p.call.tool}' is withdrawn for this tenant", "ToolWithdrawnError")
 
-    def _enforce_digest_pin(self, p: "_CallPipeline", projection: Any, pin: Any) -> CallResult | None:
-        """Validate *projection* against the tenant's *pin*; a CallResult means reject."""
-        enforcement = p.proj_registry.digest_enforcement(p.call.mcp_server)
+        A group member named directly is also refused a tool withdrawn on any
+        group that owns it, for every tenant or for this caller's. This mirrors
+        the front door's ``_withdrawal_scopes``, which asks under the member id
+        and its group, and is fail-closed. Before this, a withdrawal declared on
+        a group did not hold against a call naming a member of that group.
+        """
+        if not _withdrawn_in_scope(p.proj_registry, p.projection, p.call.tool, p.caller_tenant_id, p.owning_groups):
+            return None
+        return self._withdrawn_refusal(p.call, p.ctx, p.caller_tenant_id, p.elapsed_ms())
+
+    def _withdrawn_refusal(self, call: CallSpec, ctx: Any, tenant_id: str | None, elapsed_ms: float) -> CallResult:
+        """The refusal of a withdrawn tool, logged and published.
+
+        The withdrawal gate and the re-check after an approval hold give this
+        same outcome.
+        """
+        logger.info("tool_withdrawn_rejected", mcp_server_id=call.mcp_server, tool=call.tool, tenant_id=tenant_id)
+        ctx.event_bus.publish(ToolWithdrawnRejected(tenant_id=tenant_id, mcp_server=call.mcp_server, tool=call.tool))
+        return CallResult(
+            index=call.index,
+            call_id=call.call_id,
+            success=False,
+            error=f"Tool '{call.tool}' is withdrawn for this tenant",
+            error_type="ToolWithdrawnError",
+            elapsed_ms=elapsed_ms,
+        )
+
+    def _enforce_digest_pins(self, p: "_CallPipeline", projection: Any) -> CallResult | None:
+        """Validate *projection* against every pin in ``p.pins()``. The first refusal wins.
+
+        Usually that is a single pin, the call's own. A call naming a group
+        member also carries each pin its groups declare for the tool. Each pin
+        is enforced in the mode set on the id that declared it, as a call
+        naming that group would enforce it.
+        """
+        for scope, pin in p.pins():
+            refusal = self._enforce_digest_pin(p, projection, pin, enforcement_scope=scope)
+            if refusal is not None:
+                return refusal
+        return None
+
+    def _enforce_digest_pin(
+        self, p: "_CallPipeline", projection: Any, pin: Any, *, enforcement_scope: str | None = None
+    ) -> CallResult | None:
+        """Validate *projection* against the tenant's *pin*; a CallResult means reject.
+
+        *enforcement_scope* is the id whose ``digest_enforcement`` mode applies.
+        It defaults to the id the call named.
+        """
+        enforcement = p.proj_registry.digest_enforcement(enforcement_scope or p.call.mcp_server)
         try:
             digest_result = DigestValidator(
                 DigestPolicy(
@@ -1367,12 +1535,20 @@ class BatchExecutor:
             # tool served through a group was never validated against its pin,
             # in either topology and with no listing filter behind it.
             p.pin = p.proj_registry.resolve_pin(p.target_server_id, p.call.tool, p.caller_tenant_id)
-        if p.pin is None:
+        # A group member named directly: the pins its groups declare apply as
+        # well. Before this, a pin on the group did not hold against a call
+        # naming its member.
+        p.group_pins = tuple(
+            (group_id, pin)
+            for group_id in p.owning_groups
+            if (pin := p.proj_registry.resolve_pin(group_id, p.call.tool, p.caller_tenant_id)) is not None
+        )
+        if not p.pins():
             return None
         if p.projection is None:
             p.digest_pin_deferred = True
             return None
-        return self._enforce_digest_pin(p, p.projection, p.pin)
+        return self._enforce_digest_pins(p, p.projection)
 
     def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
         """Circuit breaker / health degradation of the resolved target.
@@ -1448,7 +1624,9 @@ class BatchExecutor:
         with p.tracer.start_as_current_span("approval_gate.check") as approval_span:
             approval_span.set_attribute("mcp.server.id", p.call.mcp_server)
             approval_span.set_attribute("gen_ai.tool.name", p.call.tool)
-            approval_result = self._check_approval_gate(p.call, p.resolver, p.ctx)
+            approval_result = self._check_approval_gate(
+                p.call, p.resolver, p.ctx, tenant_id=p.caller_tenant_id, scopes=p.policy_scopes()
+            )
             if approval_result is not None:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
                 approval_result.elapsed_ms = p.elapsed_ms()
@@ -1463,17 +1641,22 @@ class BatchExecutor:
             # held call to dispatch on the superseded decision.
             granted_id = getattr(_approval_loop_local, "approval_id", None)
             if granted_id is not None:
+                # Any pin stands for "there is something to re-verify". The
+                # callback re-verifies all of them, the group pins of a member
+                # named directly included.
+                pins = p.pins()
                 refusal = self._revalidate_after_hold(
                     p.call,
                     p.resolver,
                     p.ctx,
                     granted_id,
-                    p.pin,
+                    pins[-1][1] if pins else None,
                     p.proj_registry,
                     p.caller_tenant_id,
-                    lambda projection, pin: self._enforce_digest_pin(p, projection, pin),
+                    lambda projection, _pin: self._enforce_digest_pins(p, projection),
                     group_id=p.call.mcp_server if p.is_group else None,
                     target_server_id=p.target_server_id,
+                    owning_groups=p.owning_groups,
                 )
                 if refusal is not None:
                     approval_span.set_attribute("approval.result", "revalidation_failed")
@@ -1546,8 +1729,8 @@ class BatchExecutor:
             return None
         late_projection = p.reresolve_projection()
         if late_projection is not None:
-            return self._enforce_digest_pin(p, late_projection, p.pin)
-        if p.proj_registry.digest_enforcement(p.call.mcp_server) != DigestEnforcement.BLOCK:
+            return self._enforce_digest_pins(p, late_projection)
+        if all(p.proj_registry.digest_enforcement(scope) != DigestEnforcement.BLOCK for scope, _pin in p.pins()):
             return None
         logger.info(
             "tool_digest_pin_unresolvable",

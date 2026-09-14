@@ -414,7 +414,7 @@ reserved_without_producer = [
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
   "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
-  "McpServerApproved", "McpServerCapabilityQuarantineReleased", "McpServerCapabilityQuarantined",
+  "McpServerApproved", "McpServerCapabilityQuarantineReleased",
   "PolicyPushRejected", ]
 # DiscoveryCycleCompleted and DiscoverySourceHealthChanged stay unemitted on
 # purpose rather than for lack of a caller: at the default 30s refresh a cycle

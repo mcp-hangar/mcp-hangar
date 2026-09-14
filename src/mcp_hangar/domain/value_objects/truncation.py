@@ -3,11 +3,14 @@
 Contains:
 - TruncationConfig - configuration for batch response truncation
 - ContinuationId - identifier for retrieving full response content
+- ContinuationOwner - the caller a continuation answers to
 """
 
 from dataclasses import dataclass
 from typing import Any
 import uuid
+
+from .identity import IdentityContext
 
 
 @dataclass(frozen=True)
@@ -122,4 +125,76 @@ class ContinuationId:
         return self.value
 
     def __repr__(self) -> str:
-        return f"ContinuationId('{self.value}')"
+        # The random suffix is what keeps an id unguessable, so a repr that
+        # reaches a log or a traceback must not carry it.
+        return f"ContinuationId('{continuation_log_ref(self.value)}')"
+
+
+def continuation_log_ref(continuation_id: str) -> str:
+    """Name a continuation in a log line without its random suffix.
+
+    A generated id is ``cont_{batch_id}_{call_index}_{uuid8}``. This returns
+    ``cont_{batch_id}_{call_index}``, which is what correlation needs: the batch
+    id is logged by ``batch_completed`` already. The suffix is dropped rather
+    than hashed. With the batch id and call index known, a hash of 32 random
+    bits can be reversed by trying them all.
+
+    A caller-supplied string that does not have that shape is cut the same way,
+    at its last underscore.
+    """
+    head, sep, _suffix = continuation_id.rpartition("_")
+    return head if sep and head else "cont_?"
+
+
+@dataclass(frozen=True)
+class ContinuationOwner:
+    """Who may read back a truncated result: the caller whose call produced it.
+
+    A continuation used to be cached under its id alone, so
+    anyone who held the id could fetch or delete it. The cache now stores this
+    owner with the payload and answers any other caller exactly as it answers
+    an id it does not hold.
+
+    ``tenant_id`` and ``principal_id`` come from the caller's identity context.
+    Both ``None`` is the anonymous owner: a call made with no identity, which is
+    auth off, or stdio with no declared principal. An anonymous entry is
+    fetchable by an anonymous caller, as before, and by no authenticated one.
+
+    The match is exact on both fields. Neither a caller with no tenant nor
+    another principal in the same tenant is the owner.
+    """
+
+    tenant_id: str | None = None
+    principal_id: str | None = None
+
+    @classmethod
+    def of(cls, identity: IdentityContext | None) -> "ContinuationOwner":
+        """The owner a call made under *identity* records, and the caller it is compared with."""
+        caller = identity.caller if identity is not None else None
+        if caller is None:
+            return cls()
+        # The same principal key the task-ownership registry records (TaskOwner).
+        return cls(tenant_id=caller.tenant_id or None, principal_id=caller.user_id or caller.agent_id or None)
+
+    def admits(self, caller: "ContinuationOwner") -> bool:
+        """Whether *caller* may read or delete what this owner stored."""
+        return self == caller
+
+    def to_dict(self) -> dict[str, str | None]:
+        """The stored form, for a backend that serializes the owner (Redis)."""
+        return {"tenant_id": self.tenant_id, "principal_id": self.principal_id}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "ContinuationOwner":
+        """Read back what :meth:`to_dict` wrote.
+
+        Raises:
+            ValueError: If *data* is not that shape. A backend answers such an
+                entry as not found rather than guess whose it is.
+        """
+        if not isinstance(data, dict) or set(data) != {"tenant_id", "principal_id"}:
+            raise ValueError("continuation owner must be an object with tenant_id and principal_id")
+        tenant_id, principal_id = data["tenant_id"], data["principal_id"]
+        if not all(value is None or isinstance(value, str) for value in (tenant_id, principal_id)):
+            raise ValueError("continuation owner fields must be strings or null")
+        return cls(tenant_id=tenant_id or None, principal_id=principal_id or None)
