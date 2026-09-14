@@ -23,6 +23,7 @@ from ..application.ports.config_loader import IConfigLoader
 from ..logging_config import get_logger
 
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
+from .bootstrap.group_circuit_metric import observe_group_circuit
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
 
@@ -826,6 +827,8 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
             )
 
     GROUPS[group_id] = group
+    # After the group is in GROUPS, which the gauge's writer checks (#1357).
+    observe_group_circuit(group)
     logger.info(
         "group_loaded",
         group_id=group_id,
