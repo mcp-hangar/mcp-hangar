@@ -1,5 +1,48 @@
 # Upgrading MCP Hangar
 
+## Next — a config dict gets every setting it passes
+
+This affects code that calls `bootstrap(config_dict=...)` directly, such as
+embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
+a file and are unchanged. `Hangar.from_builder()` passes a dict and is covered
+at the end of this section.
+
+A dict is now applied the same way as the same document in a file. Before, the
+dict path dropped these settings without logging anything:
+
+- `tool_access.mode`, so a dict that asked for `front_door` came up in `egress`
+- `interceptors.validators`, so no parameter validator ran
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A dict now gets all of them. If a harness passed one of these and relied on it
+being ignored, remove it from the dict.
+
+The schema check now runs on a dict too. An unknown or removed key logs
+`unknown_config_key`, and under `HANGAR_CONFIG_STRICT=1` the boot refuses, as it
+does for a file.
+
+Four more cases used to be accepted without a word:
+
+| A dict that | Before | Now |
+| --- | --- | --- |
+| is passed while `MCP_CONFIG` or `./config.yaml` exists | was laid over that file: the file's topology, validators and `ui://` allow list applied, and the dict replaced the file's other sections | is the whole configuration, and no file is read |
+| has no `mcp_servers` section | booted the built-in example server | is refused, as a file is, unless `discovery.enabled` is true |
+| enables `config_reload` | built a reload watcher with no file, which did nothing | is refused: set `config_reload.enabled: false`, or pass a file |
+| is passed together with `config_path` | ran the dict, while reload watched the file | is refused |
+
+Relative paths in a dict resolve against the working directory, as they do in a
+file.
+
+`Hangar.from_builder()` no longer passes its own `max_concurrency` to the
+gateway, which never read it. It still sizes the facade's thread pool. A builder
+that calls `enable_discovery()`, or adds a server with `mode="remote"` and
+`url=...`, produces keys the gateway does not read. Those settings were never
+applied. They now log `unknown_config_key`, and under strict mode the boot
+refuses.
+
 ## Next — a server Hangar gives up on reads `dead`, not `cold`
 
 When the recovery saga runs out of retries, the server now goes to `dead`.

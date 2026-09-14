@@ -99,9 +99,13 @@ class TestBootstrapSelectsTheBackendFirst:
 
         import mcp_hangar.server.bootstrap  # noqa: F401
 
-        source = inspect.getsource(sys.modules["mcp_hangar.server.bootstrap"].bootstrap)
+        # Both reads, the file and the dict, live in the helper `bootstrap()`
+        # calls first (#1415).
+        package = sys.modules["mcp_hangar.server.bootstrap"]
+        source = inspect.getsource(package._read_configuration)
 
         assert source.count("load_servers=False") == 2
+        assert "_read_configuration(config_path, config_dict)" in inspect.getsource(package.bootstrap)
 
 
 class TestTheEffectThatWasLost:
