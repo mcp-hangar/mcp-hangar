@@ -302,7 +302,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             #  "idle_time": 12.5, "meta": {}}
 
             hangar_details("llm-group")
-            # {"group_id": "llm-group", "state": "ready", "strategy": "round_robin",
+            # {"group_id": "llm-group", "state": "healthy", "strategy": "round_robin",
             #  "healthy_count": 2, "total_members": 3, "members": [...]}
 
             hangar_details("unknown")
