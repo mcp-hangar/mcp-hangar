@@ -350,6 +350,47 @@ class TestTheSchemaCheck:
         assert str(from_dict.value).splitlines()[0] == "Invalid configuration in config_dict:"
         assert str(from_dict.value).splitlines()[1:] == str(from_file.value).splitlines()[1:]
 
+    #: `tool_access.rules` was in the schema and never read (#1422). It is named
+    #: as removed, on a dict as on a file.
+    RULES: dict[str, Any] = {
+        "mcp_servers": {SERVER: _server()},
+        "config_reload": {"enabled": False},
+        "tool_access": {"mode": "front_door", "rules": [{"deny": ["divide"]}]},
+    }
+    NEVER_READ = "tool_access.rules was never read and was removed"
+
+    def test_tool_access_rules_is_named_alike_on_both_paths(self, boot, tmp_path) -> None:
+        with capture_logs() as logs:
+            boot(config_path=_write(tmp_path, self.RULES))
+        from_file = [entry["detail"] for entry in logs if entry["event"] == "unknown_config_key"]
+
+        with capture_logs() as logs:
+            boot(config_dict=self.RULES)
+        from_dict = [entry["detail"] for entry in logs if entry["event"] == "unknown_config_key"]
+
+        assert len(from_dict) == 1 and from_dict[0].startswith(self.NEVER_READ)
+        assert from_dict == from_file
+        # The mode beside it still applies.
+        assert get_tool_access_resolver().topology_mode == "front_door"
+
+    def test_strict_mode_refuses_tool_access_rules_on_both_paths(self, boot, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("HANGAR_CONFIG_STRICT", "1")
+
+        with pytest.raises(ConfigSchemaError, match=self.NEVER_READ):
+            boot(config_path=_write(tmp_path, self.RULES))
+        with pytest.raises(ConfigSchemaError, match=self.NEVER_READ):
+            boot(config_dict=self.RULES)
+
+    def test_tool_access_without_rules_is_clean_on_a_dict(self, boot, monkeypatch) -> None:
+        monkeypatch.setenv("HANGAR_CONFIG_STRICT", "1")
+        tool_access = {key: value for key, value in self.RULES["tool_access"].items() if key != "rules"}
+
+        with capture_logs() as logs:
+            boot(config_dict={**self.RULES, "tool_access": tool_access})
+
+        assert [entry for entry in logs if entry["event"] == "unknown_config_key"] == []
+        assert get_tool_access_resolver().topology_mode == "front_door"
+
     def test_a_config_with_no_servers_is_refused_on_both_paths(self, boot, tmp_path) -> None:
         config = {"tool_access": {"mode": "front_door"}}
 

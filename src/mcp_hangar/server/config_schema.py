@@ -142,7 +142,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
     "startup_checks": frozenset({"enforce"}),
-    "tool_access": frozenset({"mode", "rules"}),
+    # `mode`, read by `config._init_topology_mode_from_config`. `rules` was
+    # listed here too and never read (#1422): see `_REMOVED_SECTION_KEYS`.
+    "tool_access": frozenset({"mode"}),
     "truncation": None,  # TruncationConfig.from_dict owns these
     # `tenants` (ADR-024, #1048), read by `config._init_ui_resources_from_config`.
     # Shipped in 2.13.1 without an entry here, so `HANGAR_CONFIG_STRICT=1` --
@@ -187,6 +189,33 @@ def _group_reset_timeouts(spec: dict[str, Any]) -> list[str]:
     return found
 
 
+# Section key -> why it was removed, for keys a section once accepted. Named for
+# the same reason as the group reset timeout above: whoever wrote the key meant
+# it, so the message says why it is gone. Strict mode and `config check` still
+# refuse it, as they refuse any key nothing reads.
+_REMOVED_SECTION_KEYS: dict[str, dict[str, str]] = {
+    "tool_access": {
+        # In the schema since it was written (#984), with no reader behind it:
+        # a `rules:` block validated, even under strict mode, and did nothing.
+        "rules": (
+            "was never read and was removed: the schema accepted it, but it never restricted a tool "
+            "(#1422). Tool access is set by the `tools:` allow and deny lists of a server, a group or "
+            "a group member, and `tool_access.mode` still selects the topology. Delete the key."
+        ),
+    },
+}
+
+
+def _section_problems(name: str, section: Any, allowed: frozenset[str]) -> list[str]:
+    removed = _REMOVED_SECTION_KEYS.get(name, {})
+    if not isinstance(section, dict):
+        return _unknown(name, section, allowed)
+
+    named = [f"{name}.{key} {removed[key]}" for key in sorted(removed) if key in section]
+    rest = {key: value for key, value in section.items() if key not in removed}
+    return named + _unknown(name, rest, allowed)
+
+
 def _server_spec_problems(server_id: str, spec: Any) -> list[str]:
     where = f"mcp_servers.{server_id}"
     if not isinstance(spec, dict) or spec.get("mode") != "group":
@@ -208,7 +237,7 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     for name, allowed in SECTIONS.items():
         if allowed is None or name not in config:
             continue
-        problems += _unknown(f"{name}", config[name], allowed)
+        problems += _section_problems(name, config[name], allowed)
 
     servers = config.get("mcp_servers")
     if isinstance(servers, dict):
