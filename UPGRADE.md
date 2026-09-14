@@ -122,7 +122,9 @@ mcp_servers:
 
 A config that still sets it loads, and logs `unknown_config_key` naming the
 group and the key. `HANGAR_CONFIG_STRICT=1` and `mcp-hangar config check`
-refuse it, as they refuse any key nothing reads. The flat spelling
+refuse it, as they refuse any key nothing reads: under strict mode a gateway
+whose config still sets it does not start, so delete the key before
+upgrading. The flat spelling
 `circuit_reset_timeout_s` is reported the same way. In Python,
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
