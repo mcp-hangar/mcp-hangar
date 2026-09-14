@@ -259,7 +259,7 @@ def _config(mode: str, flags: dict[str, Path]) -> dict[str, Any]:
             # Failures never take the member out: only the give-up may, so the
             # test can see that it did.
             "health": {"unhealthy_threshold": 100, "healthy_threshold": 1},
-            "circuit_breaker": {"failure_threshold": 100, "reset_timeout_s": 3600},
+            "circuit_breaker": {"failure_threshold": 100},
             "members": [{"id": MEMBER}],
         }
     return {"mcp_servers": servers}

@@ -179,7 +179,6 @@ class McpServerGroup(AggregateRoot):
         unhealthy_threshold: int = 2,
         healthy_threshold: int = 1,
         circuit_failure_threshold: int = 10,
-        circuit_reset_timeout_s: float = 60.0,
         description: str | None = None,
     ):
         """
@@ -192,8 +191,7 @@ class McpServerGroup(AggregateRoot):
             auto_start: Automatically start members when added
             unhealthy_threshold: Failures before removing from rotation
             healthy_threshold: Successes before adding back to rotation
-            circuit_failure_threshold: Failures before circuit opens
-            circuit_reset_timeout_s: Time before circuit resets
+            circuit_failure_threshold: Failures in a row before circuit opens
             description: Human-readable description
         """
         super().__init__()
@@ -218,13 +216,14 @@ class McpServerGroup(AggregateRoot):
         # Told whether the circuit is open, after every transition (#1357).
         self._circuit_listener: Callable[[bool], None] | None = None
 
-        # Circuit breaker (extracted for SRP)
-        self._circuit_breaker = CircuitBreaker(
-            CircuitBreakerConfig(
-                failure_threshold=circuit_failure_threshold,
-                reset_timeout_s=circuit_reset_timeout_s,
-            )
-        )
+        # Circuit breaker (extracted for SRP). No reset timeout: the breaker's
+        # default is left in place and never read. The breaker consults it only
+        # in `allow_request()`, which the group does not call, so an open group
+        # circuit never half-opens on a timer. It closes through
+        # `_maybe_close_circuit()` once `min_healthy` members are back in
+        # rotation. A group option for the timeout was accepted and ignored
+        # until #1398 removed it.
+        self._circuit_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=circuit_failure_threshold))
         self._circuit_breaker._on_state_change = self._on_circuit_breaker_state_change
 
         # Threading
