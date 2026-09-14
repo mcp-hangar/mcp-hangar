@@ -33,6 +33,59 @@ from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 logger = get_logger(__name__)
 
 
+def start_discovery_loop(orchestrator: Any) -> tuple[asyncio.AbstractEventLoop, threading.Thread]:
+    """Start *orchestrator* on its own long-lived event loop, in its own thread.
+
+    The orchestrator's cycle is a task on the loop it starts on, so that loop
+    has to outlive the call that starts it: not a transport's loop, and not a
+    `run_until_complete` that returns. `ServerLifecycle` and the `Hangar`
+    facade both run discovery this way.
+
+    Args:
+        orchestrator: The `DiscoveryOrchestrator` bootstrap built.
+
+    Returns:
+        The loop and the thread running it, for `stop_discovery_loop`.
+
+    Raises:
+        Exception: Whatever `orchestrator.start()` raised; the loop is stopped
+            and its thread joined first.
+    """
+    loop = asyncio.new_event_loop()
+
+    def run_loop() -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+        loop.close()
+
+    thread = threading.Thread(target=run_loop, name="mcp-hangar-discovery", daemon=True)
+    thread.start()
+    try:
+        asyncio.run_coroutine_threadsafe(orchestrator.start(), loop).result()
+    except Exception:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        raise
+
+    logger.info("discovery_started", sources_count=orchestrator.get_stats()["sources_count"])
+    return loop, thread
+
+
+def stop_discovery_loop(orchestrator: Any, loop: asyncio.AbstractEventLoop, thread: threading.Thread) -> None:
+    """Await *orchestrator*'s cleanup on *loop*, then stop the loop and join *thread*.
+
+    A failed cleanup is logged and the loop is stopped anyway: shutdown has to
+    finish, and a retained loop kept the process alive after it returned.
+    """
+    try:
+        asyncio.run_coroutine_threadsafe(orchestrator.stop(), loop).result()
+    except Exception as e:  # noqa: BLE001 -- shutdown must continue after discovery cleanup failure
+        logger.warning("discovery_orchestrator_stop_failed", error=str(e))
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+
+
 def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     """Return the ``/health/ready`` body and HTTP status.
 
@@ -324,31 +377,7 @@ class ServerLifecycle:
         if orchestrator is None:
             return
 
-        ready = threading.Event()
-
-        def run_loop() -> None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._discovery_loop = loop
-            ready.set()
-            loop.run_forever()
-            loop.close()
-
-        self._discovery_thread = threading.Thread(target=run_loop, name="mcp-hangar-discovery", daemon=True)
-        self._discovery_thread.start()
-        ready.wait()
-
-        assert self._discovery_loop is not None
-        try:
-            asyncio.run_coroutine_threadsafe(orchestrator.start(), self._discovery_loop).result()
-        except Exception:
-            self._discovery_loop.call_soon_threadsafe(self._discovery_loop.stop)
-            self._discovery_thread.join()
-            self._discovery_loop = None
-            self._discovery_thread = None
-            raise
-
-        logger.info("discovery_started", sources_count=orchestrator.get_stats()["sources_count"])
+        self._discovery_loop, self._discovery_thread = start_discovery_loop(orchestrator)
 
     def run_stdio(self) -> None:
         """Run MCP server in stdio mode. Blocks until exit.
@@ -646,12 +675,8 @@ class ServerLifecycle:
             return
 
         try:
-            asyncio.run_coroutine_threadsafe(orchestrator.stop(), loop).result()
-        except Exception as e:  # noqa: BLE001 -- shutdown must continue after discovery cleanup failure
-            logger.warning("discovery_orchestrator_stop_failed", error=str(e))
+            stop_discovery_loop(orchestrator, loop, thread)
         finally:
-            loop.call_soon_threadsafe(loop.stop)
-            thread.join()
             self._discovery_loop = None
             self._discovery_thread = None
 
