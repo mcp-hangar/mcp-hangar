@@ -616,12 +616,10 @@ class McpServerGroup(AggregateRoot):
         Not on an open circuit, which `record_success()` would close at once,
         skipping the `min_healthy` rule in `_maybe_close_circuit()`.
 
-        HALF_OPEN goes the breaker's way too, and this success closes it. The
-        group never gets there by itself: the breaker half-opens only in
-        `allow_request()`, which the group does not call. The one way in is a
-        restored snapshot the group did not write, and there the group already
-        reports the circuit closed (`is_open` is False) and routes through it.
-        Left alone it would stay half-open for good, and one failure would open it.
+        HALF_OPEN goes the breaker's way too, and this success would close it.
+        The group never gets there: the breaker half-opens only in
+        `allow_request()`, which the group does not call, and no saved breaker
+        is restored into a group at startup (#1388).
         """
         self._circuit_breaker.record_success()
 
