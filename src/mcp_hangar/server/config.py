@@ -153,12 +153,34 @@ def _kept_or_built(mcp_server_id: str, spec_dict: dict[str, Any], built: McpServ
     and shutdown, and the next call started a second one (#1424). Only the
     object built from this very spec, and still the running one, is kept;
     anything else is replaced, and the reload stops what it replaces.
+
+    Still the running one means as configured, too. The REST update endpoint
+    rewrites a running server's `env`, `description` and intervals in place,
+    and a restart applies the file over such an edit; so does a reload. A
+    server whose configurable fields no longer read as the file builds them is
+    replaced by one built from the file.
     """
     previous = _BUILT_FROM.get(mcp_server_id)
     if previous is None or previous[0] != spec_dict:
         return built
     running = _mcp_server_repository().get(mcp_server_id)
-    return running if running is previous[1] else built
+    if running is not previous[1] or _runtime_editable(running) != _runtime_editable(built):
+        return built
+    return running
+
+
+def _runtime_editable(server: McpServer) -> tuple[Any, ...]:
+    """What `McpServer.update_config` can rewrite on a running server, as it reads now.
+
+    Read off the aggregate rather than `to_config_dict()`, which redacts `env`:
+    a REST edit of a secret would compare equal.
+    """
+    return (
+        server._description,
+        dict(server._env or {}),
+        server._idle_ttl.seconds,
+        server._health_check_interval.seconds,
+    )
 
 
 def _tap_store() -> Any:

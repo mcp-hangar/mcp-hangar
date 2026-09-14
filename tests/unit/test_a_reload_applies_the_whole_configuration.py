@@ -472,6 +472,68 @@ class TestAnUnchangedServerIsKept:
         shutdown.assert_called_once()
         assert get_runtime().repository.get(SERVER) is not before
 
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"env": {"TOKEN": "from-rest"}},
+            {"description": "edited at runtime"},
+            {"idle_ttl_s": 999},
+            {"health_check_interval_s": 17},
+        ],
+        ids=["env", "description", "idle_ttl_s", "health_check_interval_s"],
+    )
+    def test_a_rest_edit_is_undone_by_a_reload_as_by_a_restart(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch, edit: dict[str, Any]
+    ) -> None:
+        """The file text is unchanged, but the running server no longer reads as the file builds it.
+
+        Keeping it kept the REST edit while the reload reported the server as
+        updated, and a restart applies the file.
+        """
+        spec = _server(env={"TOKEN": "from-file"}, description="from file", **RESOURCES)
+        gateway.boot(_config(servers={SERVER: spec}))
+        before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
+        before.update_config(**edit)  # what the REST update endpoint does to the running server
+
+        result = gateway.reload(_config(servers={SERVER: spec}))
+
+        after = get_runtime().repository.get(SERVER)
+        assert result["mcp_servers_updated"] == [SERVER]
+        shutdown.assert_called_once()
+        assert after is not before
+        assert (after._env, after._description) == ({"TOKEN": "from-file"}, "from file")
+
+    def test_the_replacement_starts_with_the_files_env(self, gateway: _Gateway) -> None:
+        """The process a reload starts after a REST edit of `env` runs with the file's value.
+
+        The mock upstream names its `add` tool after `MOCK_ADD_DESCRIPTION`, so
+        the listed tool says which environment the process was started with.
+        """
+        spec = {
+            "mode": "subprocess",
+            "command": [sys.executable, str(MOCK_PROVIDER)],
+            "env": {"MOCK_ADD_DESCRIPTION": "from the file"},
+            **RESOURCES,
+        }
+        gateway.boot(_config(servers={SERVER: spec}))
+        repository = get_runtime().repository
+        before = repository.get(SERVER)
+        after = None
+        try:
+            before.ensure_ready()
+            before.update_config(env={"MOCK_ADD_DESCRIPTION": "from REST"})
+
+            gateway.reload(_config(servers={SERVER: spec}))
+
+            after = repository.get(SERVER)
+            assert after is not before
+            after.ensure_ready()
+            assert after.get_tools_dict()["add"].description == "from the file"
+        finally:
+            for server in (before, after):
+                if server is not None:
+                    server.shutdown()
+
 
 DENY_Z = ToolAccessPolicy(deny_list=("z",))
 
