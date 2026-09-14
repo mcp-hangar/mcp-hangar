@@ -31,10 +31,11 @@ events are delivered, and reading at once would read the state before it.
 
 Three things are changed, none on the path under test. The workers' intervals,
 60s and 30s in production, are lowered before ``bootstrap()`` reads them. And
-the recovery saga gets one restart instead of three, after 2.5s instead of 5s.
-Not sooner: a restart the saga schedules before the server's own backoff has
-run out is refused, and nothing schedules another. With
-``max_consecutive_failures: 1`` that backoff is 2s after the first failure.
+outside ``defaults`` mode the recovery saga gets one restart instead of three,
+after 2.5s instead of 5s, which is past the server's own backoff: 2s after the
+first failure with ``max_consecutive_failures: 1``. So in those modes the
+restart runs at once. A restart the saga schedules inside that backoff is
+refused and scheduled again (#1401); ``defaults`` mode shows that.
 
 Modes:
 
@@ -49,6 +50,15 @@ Modes:
   process is killed while its upstream is broken, so every restart fails; then
   twenty calls go through the group. The failed restarts must count against B
   until it leaves rotation, and the group must fail over to A.
+- ``defaults``: one server, every health and saga setting at its default but
+  the saga's budget; run by
+  ``test_the_saga_restarts_a_degraded_server_with_default_settings.py``. Its
+  upstream breaks and stays broken. The saga's restarts, 5s then 10s after a
+  degrade, come before the server's backoff runs out, about 8s then 16s, so
+  the server refuses each first. The harness records what every
+  ``StartMcpServerCommand`` came to through a command-bus middleware that only
+  watches. ``max_retries`` is 2, not 3: a third restart waits out a 32s
+  backoff, and the whole run would outlast the job's 60s timeout.
 """
 
 from __future__ import annotations
@@ -84,6 +94,12 @@ SAGA_MAX_RETRIES = 1
 GIVE_UP_DEADLINE_S = 20.0
 #: How long the workers run with a server dead, or cold.
 QUIET_WINDOW_S = 3.0
+#: Defaults mode: the server, and the one saga setting it lowers.
+DEFAULTS = "svc-d"
+DEFAULTS_MAX_RETRIES = 2
+#: Three failing checks, then restarts that each wait out the server's backoff:
+#: at most 8.8s after the degrade, then 17.6s after the first failed restart.
+DEFAULTS_GIVE_UP_DEADLINE_S = 40.0
 
 ADD = {
     "name": "add",
@@ -240,6 +256,8 @@ def _config(mode: str, flags: dict[str, Path]) -> dict[str, Any]:
         server: {"mode": "subprocess", "command": [sys.executable, str(HERE), "upstream", str(flag)]}
         for server, flag in flags.items()
     }
+    if mode == "defaults":
+        return {"mcp_servers": servers}  # three failed checks degrade it, the default
     if mode == "failover":
         # Every threshold at its default: the case the other modes' settings hid.
         servers[GROUP] = {
@@ -378,6 +396,50 @@ def _failover(
     report["after"] = _group(client)
 
 
+def _defaults(
+    client: Any, repository: Any, flags: dict[str, Path], seen: list[list[Any]], report: dict[str, Any]
+) -> None:
+    report["first_call"] = _call(client, DEFAULTS)
+    _wait(lambda: [DEFAULTS, "HealthCheckPassed", None] in seen, 10)
+
+    # Broken for good. Three checks fail and degrade it; the saga restarts it
+    # until its budget is spent, and gives up.
+    flags[DEFAULTS].touch()
+    report["broken_mark"] = len(seen)
+    _wait(lambda: _give_up_delivered(seen, DEFAULTS), DEFAULTS_GIVE_UP_DEADLINE_S)
+    report["dead"] = _snapshot(repository, DEFAULTS)
+    report["dead_mark"] = len(seen)
+
+    # Nothing the saga left armed starts it after the give-up.
+    time.sleep(QUIET_WINDOW_S)
+    report["after_quiet"] = _snapshot(repository, DEFAULTS)
+
+
+def _watch_starts(command_bus: Any, flags: dict[str, Path], timeline: list[list[Any]]) -> None:
+    """Record what every ``StartMcpServerCommand`` for a harness server came to. Watches only."""
+    from mcp_hangar.application.commands import StartMcpServerCommand
+    from mcp_hangar.domain.exceptions import CannotStartMcpServerError
+    from mcp_hangar.infrastructure.command_bus import CommandBusMiddleware
+
+    class Starts(CommandBusMiddleware):
+        def __call__(self, command: Any, next_handler: Callable[[Any], Any]) -> Any:
+            if not isinstance(command, StartMcpServerCommand) or command.mcp_server_id not in flags:
+                return next_handler(command)
+            at = time.monotonic()
+            try:
+                result = next_handler(command)
+            except CannotStartMcpServerError:
+                timeline.append([command.mcp_server_id, "refused", at])
+                raise
+            except Exception:
+                timeline.append([command.mcp_server_id, "failed", at])
+                raise
+            timeline.append([command.mcp_server_id, "started", at])
+            return result
+
+    command_bus.add_middleware(Starts())
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
@@ -400,14 +462,20 @@ def main(mode: str, out: Path) -> None:
     workers.HEALTH_CHECK_INTERVAL_SECONDS = 1
     workers.GC_WORKER_INTERVAL_SECONDS = 1
 
-    names = {"group": [MEMBER], "failover": [MEMBER, MEMBER_B]}.get(mode, [BY_START, BY_CALL])
+    names = {"group": [MEMBER], "failover": [MEMBER, MEMBER_B], "defaults": [DEFAULTS]}.get(mode, [BY_START, BY_CALL])
     flags = {server: out.parent / f"{server}.down" for server in names}
     context = bootstrap(config_dict=_config(mode, flags))
     recovery = get_saga_manager()._event_sagas["mcp_server_recovery"]
-    recovery._initial_backoff_s = SAGA_BACKOFF_S
-    recovery._max_retries = SAGA_MAX_RETRIES
+    if mode == "defaults":
+        recovery._max_retries = DEFAULTS_MAX_RETRIES
+    else:
+        recovery._initial_backoff_s = SAGA_BACKOFF_S
+        recovery._max_retries = SAGA_MAX_RETRIES
 
     seen: list[list[Any]] = []
+    # When each degrade, give-up and start command happened, on one clock.
+    timeline: list[list[Any]] = []
+    _watch_starts(context.runtime.command_bus, flags, timeline)
 
     def observe(event: DomainEvent) -> None:
         server = getattr(event, "mcp_server_id", None)
@@ -415,12 +483,15 @@ def main(mode: str, out: Path) -> None:
             return
         if isinstance(event, McpServerStateChanged):
             seen.append([server, "state", event.new_state, event.dead_reason])
+            if event.dead_reason == "given_up":
+                timeline.append([server, "given_up", time.monotonic()])
         elif isinstance(event, McpServerStarted):
             seen.append([server, "started", None])
         elif isinstance(event, McpServerStopped):
             seen.append([server, "stopped", event.reason])
         elif isinstance(event, McpServerDegraded):
             seen.append([server, "degraded", event.reason])
+            timeline.append([server, "degraded", time.monotonic()])
         elif isinstance(event, HealthCheckPassed | HealthCheckFailed):
             seen.append([server, type(event).__name__, None])
 
@@ -434,12 +505,13 @@ def main(mode: str, out: Path) -> None:
     with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
         health.start()
         gc.start()
-        run = {"group": _grouped, "failover": _failover}.get(mode, _single)
+        run = {"group": _grouped, "failover": _failover, "defaults": _defaults}.get(mode, _single)
         run(client, repository, flags, seen, report)
 
     health.stop()
     gc.stop()
     report["events"] = seen
+    report["timeline"] = timeline
     for server in repository.get_all().values():
         server.shutdown()
     out.write_text(json.dumps(report))
