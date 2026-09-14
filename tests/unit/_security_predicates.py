@@ -42,7 +42,7 @@ from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_request_if_session_suspended
 from mcp_hangar.server.tools.batch import _authorize_calls
-from mcp_hangar.server.tools.batch.executor import BatchExecutor
+from mcp_hangar.server.tools.batch.executor import BatchExecutor, _CallPipeline, _withdrawn_in_scope
 from mcp_hangar.server.tools.tool_permissions import authorize_tool
 
 SRC = Path(mcp_hangar.__file__).resolve().parent
@@ -188,7 +188,15 @@ PREDICATES: tuple[Predicate, ...] = (
         paths={FLAT_TOOL_CALL: "tool", **_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
     ),
     Predicate(ToolProjection.is_withdrawn_for, paths=_each(_INVOKE_PATHS)),
-    # The executor's digest-pin and approval gates.
+    # The scope the executor's gates ask under: every scope a call's policy is
+    # resolved under, and every scope a withdrawal can hold in. The front
+    # door's flat call dispatches through the same executor, so both run there.
+    Predicate(_CallPipeline.policy_scopes, paths=_each(_INVOKE_PATHS)),
+    Predicate(_withdrawn_in_scope, paths=_each(_INVOKE_PATHS)),
+    # The executor's digest-pin and approval gates. `_enforce_digest_pins`
+    # applies every pin a call must match, a member's group pins included,
+    # and `_enforce_digest_pin` checks one of them.
+    Predicate(BatchExecutor._enforce_digest_pins, paths=_each(_INVOKE_PATHS)),
     Predicate(BatchExecutor._enforce_digest_pin, paths=_each(_INVOKE_PATHS)),
     Predicate(BatchExecutor._check_approval_gate, paths=_each(_INVOKE_PATHS)),
     # The configured interceptors (#1425). The probes configure one
@@ -202,6 +210,13 @@ PREDICATES: tuple[Predicate, ...] = (
     # selectors are decided by `evaluate_headers`.
     Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),
     Predicate(evaluate_headers, paths=_each(_INVOKE_PATHS)),
+    # The check made wherever the server's client is handed out -- the invoke
+    # path and the relay every task, prompt and resource request makes: the
+    # server is READY, and no refusing capability mode refuses its catalogue.
+    Predicate(
+        McpServer._check_serving,
+        paths=_each(_INVOKE_PATHS + _TASK_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS),
+    ),
     # Task ownership, asked before a relayed task is read or touched, whichever
     # path created the task: `hangar_call` or the front door's flat call (#1394).
     Predicate(GovernedTaskStore.authorize, paths=_each(_TASK_PATHS)),

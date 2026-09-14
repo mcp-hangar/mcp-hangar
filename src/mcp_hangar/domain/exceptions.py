@@ -132,6 +132,35 @@ class McpServerStartError(McpServerError):
         return "\n".join(lines)
 
 
+class CapabilityBlockedError(McpServerStartError):
+    """A server with ``enforcement_mode`` block or quarantine serves a tool outside its ``expected_tools``.
+
+    The start that finds it fails with this error, and the server goes DEAD for
+    a capability block: no call starts it again and no group routes to it, and
+    a deliberate start checks its tools again. A ``McpServerStartError``, so
+    everything that handles a failed start handles this one the same way.
+
+    The message names no tool. The names are the upstream's text, and the caller
+    who is refused is not the operator who has to act on them. They are in the
+    ``CapabilityViolationDetected`` event and the ``capability_drift_detected``
+    warning.
+    """
+
+    def __init__(self, mcp_server_id: str, enforcement_mode: str = "block"):
+        super().__init__(
+            mcp_server_id=mcp_server_id,
+            reason=(
+                "capability_violation: it serves tools that are not in its declared expected_tools, "
+                f"and its enforcement_mode is {enforcement_mode}"
+            ),
+            suggestion=(
+                "fix the upstream or its capabilities.tools.expected_tools, then start the server "
+                "explicitly; a start checks its tools again"
+            ),
+        )
+        self.enforcement_mode = enforcement_mode
+
+
 class McpServerDegradedError(McpServerError):
     """Raised when a mcp_server is in degraded state and cannot accept requests."""
 

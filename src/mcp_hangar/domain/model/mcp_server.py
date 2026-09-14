@@ -20,6 +20,7 @@ from ..events import (
     DEGRADED_BY_HEALTH_CHECKS,
     CapabilityViolationDetected,
     DomainEvent,
+    McpServerCapabilityQuarantined,
     EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
@@ -36,10 +37,12 @@ from ..events import (
 )
 from ..exceptions import (
     CannotStartMcpServerError,
+    CapabilityBlockedError,
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
     McpServerNotHereError,
+    McpServerNotReadyError,
     McpServerStartError,
     ToolInvocationError,
     ToolNotFoundError,
@@ -69,6 +72,12 @@ _MODERN_PROTOCOL_VERSION = "2026-07-28"
 # is stateless, skip the handshake" rather than a startup failure.
 _JSONRPC_METHOD_NOT_FOUND = -32601
 
+#: The enforcement modes that refuse a server serving a tool outside its
+#: `expected_tools`: it serves nothing, and goes DEAD for a capability block
+#: (`DEAD_CAPABILITY_BLOCKED`). `quarantine` is documented to stop a server
+#: serving new requests, and does.
+_REFUSING_MODES = frozenset({"block", "quarantine"})
+
 
 # Why a server is DEAD (#1361). Each means it failed and is not running, and
 # the health worker, the recovery saga and the GC leave it there. They differ
@@ -77,8 +86,10 @@ _JSONRPC_METHOD_NOT_FOUND = -32601
 # - DEAD_GIVEN_UP: the recovery saga ran out of retries. A deliberate start
 #   revives it, and so does a call that names it once its backoff has passed.
 #   A group never routes a call to it.
-# - DEAD_CAPABILITY_BLOCKED: only a deliberate start revives it. A group never
-#   routes a call to it, and a call naming it is refused.
+# - DEAD_CAPABILITY_BLOCKED: block or quarantine mode found a tool outside its
+#   `expected_tools`. Only a deliberate start revives it, and that start checks
+#   the tools again. A group never routes a call to it, and a call naming it is
+#   refused.
 # - DEAD_CRASHED, DEAD_START_FAILED: any call starts it again once its backoff
 #   has passed, including one a group routes to it.
 #
@@ -726,6 +737,7 @@ class McpServer(AggregateRoot):
         start_time = time.time()
         cold_start_time = self._begin_cold_start_tracking()
         client = None  # Track client for diagnostics on failure
+        kept = False  # Whether `_finalize_start` took the client over
 
         try:
             # I/O outside lock: subprocess launch and MCP handshake
@@ -734,7 +746,9 @@ class McpServer(AggregateRoot):
 
             # Reacquire lock to finalize state
             with self._lock:
+                self._refuse_capability_drift()
                 self._finalize_start(client, start_time)
+                kept = True
                 self._end_cold_start_tracking(cold_start_time, success=True)
                 self._ready_event.set()  # Wake waiters: success
 
@@ -758,7 +772,7 @@ class McpServer(AggregateRoot):
             raise
         except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in McpServerStartError for callers
             # Collect diagnostics from client if available
-            diagnostics = self._collect_startup_diagnostics(client) if client else {}
+            diagnostics = self._startup_diagnostics(client)
 
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
@@ -774,6 +788,36 @@ class McpServer(AggregateRoot):
                 self._ready_event.set()  # Wake waiters: failure
 
             raise start_error from e
+        finally:
+            # Every way out but success, handled above or not.
+            if not kept:
+                self._discard_failed_client(client)
+
+    def _discard_failed_client(self, client: Any) -> None:
+        """Close the client a start launched and did not keep.
+
+        Unless ``_finalize_start`` took it over, that client is not
+        ``self._client``, and ``_handle_start_failure`` does not close it: the
+        upstream process it launched would go on running with no owner, with a
+        stdio reader thread waiting on it. ``_start`` calls this from its
+        ``finally``, so it runs on every failure path, outside the lock and after
+        the waiters are woken, because closing waits for the process to exit, up
+        to five seconds before it is killed.
+
+        It leaves the connection gauge alone. ``_handle_start_failure`` resets
+        that before the waiters are woken; resetting it here, after them, could
+        overwrite what a start one of them began has set.
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: cleanup must not mask the start error
+            logger.warning(
+                "failed_start_client_close_error",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__name__),
+            )
 
     def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
@@ -803,19 +847,61 @@ class McpServer(AggregateRoot):
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
-        # stdio transports start unlabeled; tag them so their message metrics
-        # carry this server's ID (HTTP clients are labeled at construction).
-        if getattr(client, "mcp_server_id", "unset") is None:
-            client.mcp_server_id = str(self.mcp_server_id)
+        try:
+            # stdio transports start unlabeled; tag them so their message metrics
+            # carry this server's ID (HTTP clients are labeled at construction).
+            if getattr(client, "mcp_server_id", "unset") is None:
+                client.mcp_server_id = str(self.mcp_server_id)
 
-        # Start live stderr-reader thread if a log buffer is configured and the
-        # client has a process with a stderr pipe (subprocess/docker/container modes).
-        if self._log_buffer is not None:
-            self._start_stderr_reader(client)
+            # Start live stderr-reader thread if a log buffer is configured and the
+            # client has a process with a stderr pipe (subprocess/docker/container modes).
+            if self._log_buffer is not None:
+                self._start_stderr_reader(client)
 
-        self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+        except BaseException:
+            # Launched but not yet returned, so `_start` has no client to close.
+            self._discard_failed_client(client)
+            raise
 
         return client
+
+    def _close_quietly(self, client: TransportClient | None) -> None:
+        """Close a client and never raise.
+
+        ``close()`` is idempotent by contract. A failure is logged by type and
+        dropped, so it cannot fail a start that has otherwise succeeded. Safe
+        under this server's lock, as ``_shutdown_internal`` already closes: a
+        client's own locks rank below it (STDIO_CLIENT, HTTP_CLIENT).
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed close must not mask the start error
+            logger.warning(
+                "mcp_server_client_close_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+
+    def _startup_diagnostics(self, client: Any) -> dict[str, Any]:
+        """Diagnostics for a failed start, or none if collecting them fails.
+
+        A failure here must not replace the start error, nor skip what follows
+        it: recording the failure, waking every waiter, closing the client.
+        """
+        if client is None:
+            return {}
+        try:
+            return self._collect_startup_diagnostics(client)
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: diagnostics must not mask the start error
+            logger.warning(
+                "mcp_server_start_diagnostics_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+            return {}
 
     def _start_stderr_reader(self, client: Any) -> None:
         """Spawn a daemon thread that reads stderr lines into the log buffer.
@@ -1029,7 +1115,7 @@ class McpServer(AggregateRoot):
             self._log_client_error(client, error_msg)
 
             # Collect full diagnostics for user-friendly error
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"MCP initialization failed: {error_msg}",
@@ -1074,7 +1160,7 @@ class McpServer(AggregateRoot):
         tools_resp = client.call("tools/list", {})
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"Failed to list tools: {error_msg}",
@@ -1212,23 +1298,12 @@ class McpServer(AggregateRoot):
         except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
-        # Try to capture stderr (may already be captured by StdioClient)
+        # Only the stderr the stdio client captured. The process's pipe is never
+        # read here: read() returns only at EOF, and an upstream that answered
+        # with an error is usually still running, so the start would never fail.
         last_stderr = getattr(client, "_last_stderr", None)
         if last_stderr:
             logger.error(f"mcp_server_stderr: {last_stderr}")
-            return
-
-        # Fallback: try to read stderr directly
-        stderr = getattr(proc, "stderr", None)
-        if stderr:
-            try:
-                err_bytes = stderr.read()
-                if err_bytes:
-                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
-                    if err_text:
-                        logger.error(f"mcp_server_stderr: {err_text}")
-            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
-                pass
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
         """Collect diagnostic information from a failed client/process.
@@ -1239,6 +1314,11 @@ class McpServer(AggregateRoot):
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
         """Finalize successful mcp_server start."""
+        # A server can still hold a client here: one that health checks
+        # degraded keeps its connection open. Assigning over it leaked that
+        # client on every restart.
+        if self._client is not client:
+            self._close_quietly(self._client)
         self._client = client
         self._meta = {
             "init_result": {},
@@ -1261,31 +1341,37 @@ class McpServer(AggregateRoot):
 
         logger.info(f"mcp_server_started: {self.mcp_server_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
-        # Runtime capability drift check -- after READY, before lock release
+        # The mode that serves anyway (alert) records drift here, after READY,
+        # as it always has. The refusing modes refused it before the start
+        # kept anything (`_refuse_capability_drift`).
         self._verify_capability_drift()
 
-    def _verify_capability_drift(self) -> None:
-        """Check runtime tools against declared expected_tools.
+    def _verify_capability_drift(self) -> bool:
+        """Check runtime tools against declared expected_tools (must hold lock).
 
         Only flags undeclared runtime tools (tools present at runtime but NOT
         in expected_tools). Missing expected tools are not violations per
         CONTEXT.md decisions.
 
-        Called inside _finalize_start() after READY transition, under lock.
-        Records events via _record_event() (no I/O -- just appends to list).
-        In block mode, transitions to DEAD immediately.
+        Records a ``CapabilityViolationDetected`` event (no I/O -- just appends
+        to the list) and logs a warning. Changes no state: acting on the answer
+        is the caller's job.
+
+        Returns:
+            Whether the enforcement mode refuses the drift found: block and
+            quarantine do, alert does not.
         """
         if self._capabilities is None:
-            return
+            return False
         expected = set(self._capabilities.tools.expected_tools)
         if not expected:
-            return  # No expected_tools declared -- skip check
+            return False  # No expected_tools declared -- skip check
 
         actual = set(self._tools.list_names())
         undeclared = actual - expected
 
         if not undeclared:
-            return
+            return False
 
         violation_detail = f"Undeclared runtime tools: {sorted(undeclared)}"
         enforcement = self._capabilities.enforcement_mode
@@ -1307,8 +1393,75 @@ class McpServer(AggregateRoot):
             enforcement_mode=enforcement,
         )
 
-        if enforcement == "block":
-            self._mark_dead(DEAD_CAPABILITY_BLOCKED)
+        return enforcement in _REFUSING_MODES
+
+    def _drift_refused_by(self) -> str | None:
+        """The refusing mode that refuses the catalogue as it stands, or None (must hold lock).
+
+        Only the refusing modes (block, quarantine) are checked, so alert
+        records no more violations than it did. A violation is recorded when
+        this answers a mode.
+        """
+        if self._capabilities is None or self._capabilities.enforcement_mode not in _REFUSING_MODES:
+            return None
+        return self._capabilities.enforcement_mode if self._verify_capability_drift() else None
+
+    def _refuse_capability_drift(self) -> None:
+        """Fail a start whose upstream serves a tool a refusing mode refuses (must hold lock).
+
+        ``_start`` asks before ``_finalize_start``: before the client is kept,
+        READY is entered or ``McpServerStarted`` is recorded. The check used to
+        run after all three, so the call that started the server went on to
+        invoke its tool on a client left open. ``_handle_start_failure`` then
+        marks the server DEAD for a capability block, and ``_start`` closes the
+        client.
+        """
+        mode = self._drift_refused_by()
+        if mode is not None:
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
+
+    def _block_for_drift(self, mode: str) -> None:
+        """Stop serving for drift a refusing mode refuses (must hold lock).
+
+        Closes the connection the server holds, if any: the live one when drift
+        turns up in a catalogue refreshed after the start. A start's own client
+        is not held yet, and ``_start`` closes it. Then marks the server DEAD for
+        a capability block (``DEAD_CAPABILITY_BLOCKED``): no call starts it
+        again and no group routes to it, and a deliberate start checks its tools
+        again. Quarantine also records ``McpServerCapabilityQuarantined``.
+
+        A capability block never degrades, so the recovery saga, which acts on
+        ``McpServerDegraded``, never retries it.
+        """
+        if mode == "quarantine":
+            self._record_event(
+                McpServerCapabilityQuarantined(
+                    mcp_server_id=self.mcp_server_id,
+                    reason="capability_violation: serves tools that are not in its declared expected_tools",
+                )
+            )
+        self._close_client()
+        self._mark_dead(DEAD_CAPABILITY_BLOCKED)
+
+    def _check_serving(self) -> None:
+        """Refuse unless this server may be handed a request now (must hold lock).
+
+        For every path that takes ``self._client`` to send an upstream request.
+        ``ensure_ready()`` returning is not enough. The state can change between
+        it and this lock. The catalogue can also gain a tool after the start's
+        check, from a refresh or ``tools/list_changed``, and in block or
+        quarantine mode that blocks the whole server, as the start would have.
+
+        Raises:
+            CapabilityBlockedError: The catalogue drifted, and a refusing mode refuses it.
+            McpServerNotReadyError: The server is not READY with a client.
+        """
+        if self._state != McpServerState.READY or self._client is None:
+            raise McpServerNotReadyError(self.mcp_server_id, self._state.value)
+        mode = self._drift_refused_by()
+        if mode is not None:
+            self._block_for_drift(mode)
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
@@ -1319,7 +1472,10 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
-            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+        # Unconditionally, and before the waiters are woken: the attempt's own
+        # client is closed only after them (`_discard_failed_client`), and none
+        # of this server's connections is active once a start has failed.
+        self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
@@ -1332,7 +1488,11 @@ class McpServer(AggregateRoot):
             return
 
         # Determine new state
-        if self._health.should_degrade():
+        if isinstance(error, CapabilityBlockedError):
+            # Not a failure a retry after backoff could clear, so it never
+            # degrades: DEAD for a capability block, which no call revives.
+            self._block_for_drift(error.enforcement_mode)
+        elif self._health.should_degrade():
             # Use direct assignment to avoid transition validation issues
             self._state = McpServerState.DEGRADED
             self._increment_version()
@@ -1525,6 +1685,7 @@ class McpServer(AggregateRoot):
         tool_found = False
         client = None
         with self._lock:
+            self._check_serving()
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:
@@ -1571,6 +1732,10 @@ class McpServer(AggregateRoot):
                 if refresh_error is None and refresh_result and "result" in refresh_result:
                     tool_list = refresh_result.get("result", {}).get("tools", [])
                     self._tools.update_from_list(tool_list)
+
+                # Again: the state may have moved during the refresh, and the
+                # refreshed catalogue has not been checked.
+                self._check_serving()
 
                 if not self._tools.has(tool_name):
                     raise ToolNotFoundError(self.mcp_server_id, tool_name)
@@ -1761,8 +1926,17 @@ class McpServer(AggregateRoot):
                 (relay-unavailable), or if the transport call fails.
         """
         # Copy the live client under the lock; do NOT cold-start. Mirrors the
-        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock.
+        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock,
+        # including its check that the server may be handed a request at all.
         with self._lock:
+            try:
+                self._check_serving()
+            except (CapabilityBlockedError, McpServerNotReadyError) as e:
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"relay unavailable: {e}",
+                    {"method": method},
+                ) from e
             client = self._client
             if client is None or not client.is_alive():
                 raise ToolInvocationError(
