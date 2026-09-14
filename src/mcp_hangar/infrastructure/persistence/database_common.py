@@ -87,14 +87,33 @@ class IConnectionFactory(Protocol):
 class SQLiteConnectionFactory:
     """Thread-safe SQLite connection factory.
 
-    Uses thread-local storage to provide one connection per thread.
-    For in-memory databases, uses a single persistent connection.
+    A file-backed database gets one connection per thread, from thread-local
+    storage. No other thread touches that connection, so it needs no lock.
+
+    An in-memory database gets one connection for the factory's whole life,
+    because each new connection to `:memory:` is a new, empty database. Every
+    thread therefore shares it, and `get_connection()` holds `self._lock` for as
+    long as a caller has it. Two reasons, and either alone is enough:
+
+    * One `sqlite3.Connection` is not safe to drive from two threads at once.
+      From Python 3.12 the connection's statement cache can hand the same
+      prepared statement to two threads running the same SQL, and one resets it
+      under the other: the reader gets `InterfaceError: bad parameter or other
+      API misuse`, a short row, or `NULL` where a value was stored.
+    * A connection has a single transaction. A read on another thread would run
+      inside a write's open transaction and see rows not yet committed, and its
+      `commit()` would commit that write halfway through.
+
+    The lock is re-entrant, so a caller that opens a second `get_connection()`
+    block on the same thread, while its first is open, does not deadlock.
     """
 
     def __init__(self, config: SQLiteConfig):
         self._config = config
         self._local = threading.local()
-        self._lock = threading.Lock()
+        # Held for the whole `with get_connection()` body on the shared
+        # in-memory connection, and by `close()`. Unused in file-backed mode.
+        self._lock = threading.RLock()
 
         # For in-memory database, keep a persistent connection
         self._persistent_conn: sqlite3.Connection | None = None
@@ -124,11 +143,19 @@ class SQLiteConnectionFactory:
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Get a database connection for the current thread.
 
+        For an in-memory database this is the one shared connection, and the
+        caller holds `self._lock` until its `with` block ends. Everything done
+        on the connection -- execute, fetch, commit -- must happen inside that
+        block: fetch every row there, and never keep a cursor to read later,
+        because by then another thread may be using the connection.
+
         Yields:
             sqlite3.Connection configured for use.
         """
-        if self._persistent_conn is not None:
-            yield self._persistent_conn
+        conn = self._persistent_conn
+        if conn is not None:
+            with self._lock:
+                yield conn
             return
 
         if not hasattr(self._local, "connection") or self._local.connection is None:
@@ -137,14 +164,19 @@ class SQLiteConnectionFactory:
         yield self._local.connection
 
     def close(self) -> None:
-        """Close all connections."""
-        if self._persistent_conn:
-            try:
-                self._persistent_conn.commit()
-            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup on close
-                pass
-            self._persistent_conn.close()
-            self._persistent_conn = None
+        """Close all connections.
+
+        The shared in-memory connection is closed under `self._lock`, so it
+        waits for a caller still inside `get_connection()`.
+        """
+        with self._lock:
+            if self._persistent_conn:
+                try:
+                    self._persistent_conn.commit()
+                except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup on close
+                    pass
+                self._persistent_conn.close()
+                self._persistent_conn = None
 
         if hasattr(self._local, "connection") and self._local.connection:
             try:
