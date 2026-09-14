@@ -726,6 +726,7 @@ class McpServer(AggregateRoot):
         start_time = time.time()
         cold_start_time = self._begin_cold_start_tracking()
         client = None  # Track client for diagnostics on failure
+        kept = False  # Whether `_finalize_start` took the client over
 
         try:
             # I/O outside lock: subprocess launch and MCP handshake
@@ -735,6 +736,7 @@ class McpServer(AggregateRoot):
             # Reacquire lock to finalize state
             with self._lock:
                 self._finalize_start(client, start_time)
+                kept = True
                 self._end_cold_start_tracking(cold_start_time, success=True)
                 self._ready_event.set()  # Wake waiters: success
 
@@ -774,6 +776,36 @@ class McpServer(AggregateRoot):
                 self._ready_event.set()  # Wake waiters: failure
 
             raise start_error from e
+        finally:
+            # Every way out but success, handled above or not.
+            if not kept:
+                self._discard_failed_client(client)
+
+    def _discard_failed_client(self, client: Any) -> None:
+        """Close the client a start launched and did not keep.
+
+        Unless ``_finalize_start`` took it over, that client is not
+        ``self._client``, and ``_handle_start_failure`` does not close it: the
+        upstream process it launched would go on running with no owner, with a
+        stdio reader thread waiting on it. ``_start`` calls this from its
+        ``finally``, so it runs on every failure path, outside the lock and after
+        the waiters are woken, because closing waits for the process to exit, up
+        to five seconds before it is killed.
+
+        It leaves the connection gauge alone. ``_handle_start_failure`` resets
+        that before the waiters are woken; resetting it here, after them, could
+        overwrite what a start one of them began has set.
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: cleanup must not mask the start error
+            logger.warning(
+                "failed_start_client_close_error",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__name__),
+            )
 
     def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
@@ -1212,23 +1244,12 @@ class McpServer(AggregateRoot):
         except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
-        # Try to capture stderr (may already be captured by StdioClient)
+        # Only the stderr the stdio client captured. The process's pipe is never
+        # read here: read() returns only at EOF, and an upstream that answered
+        # with an error is usually still running, so the start would never fail.
         last_stderr = getattr(client, "_last_stderr", None)
         if last_stderr:
             logger.error(f"mcp_server_stderr: {last_stderr}")
-            return
-
-        # Fallback: try to read stderr directly
-        stderr = getattr(proc, "stderr", None)
-        if stderr:
-            try:
-                err_bytes = stderr.read()
-                if err_bytes:
-                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
-                    if err_text:
-                        logger.error(f"mcp_server_stderr: {err_text}")
-            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
-                pass
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
         """Collect diagnostic information from a failed client/process.
@@ -1319,7 +1340,10 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
-            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+        # Unconditionally, and before the waiters are woken: the attempt's own
+        # client is closed only after them (`_discard_failed_client`), and none
+        # of this server's connections is active once a start has failed.
+        self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 

@@ -129,22 +129,14 @@ def collect_startup_diagnostics(client: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics collection must not mask original error
         pass
 
-    # Get stderr - prefer already captured by StdioClient
+    # Stderr is only what the stdio client captured when the process's stdout
+    # reached EOF, which it does before it fails the pending calls. The process's
+    # pipe is never read here: read() returns only at EOF, and a process that
+    # is still running gives none, so this thread would wait for as long as the
+    # upstream lived, and the start it is diagnosing would never fail.
     last_stderr = getattr(client, "_last_stderr", None)
     if last_stderr:
         diagnostics["stderr"] = last_stderr
-    else:
-        # Fallback: try to read stderr directly
-        stderr = getattr(proc, "stderr", None)
-        if stderr:
-            try:
-                err_bytes = stderr.read()
-                if err_bytes:
-                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
-                    if err_text:
-                        diagnostics["stderr"] = err_text
-            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics collection must not mask original error
-                pass
 
     # Generate suggestion based on error patterns
     diagnostics["suggestion"] = get_suggestion_for_error(

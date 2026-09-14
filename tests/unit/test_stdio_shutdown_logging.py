@@ -7,8 +7,17 @@ produced a spurious error, inflating the error stream / log-based alerting.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
+
+
+def _exited_stderr(content: bytes):
+    """The stderr pipe of a process that has exited: its content, then EOF."""
+    read_end, write_end = os.pipe()
+    os.write(write_end, content)
+    os.close(write_end)
+    return os.fdopen(read_end, "r")
 
 
 def _client(*, closed: bool, exit_code: int, stderr: bytes = b""):
@@ -18,8 +27,7 @@ def _client(*, closed: bool, exit_code: int, stderr: bytes = b""):
     popen.pid = 999
     popen.stdin = MagicMock()
     popen.stdout = MagicMock()
-    popen.stderr = MagicMock()
-    popen.stderr.read.return_value = stderr
+    popen.stderr = _exited_stderr(stderr)
     popen.poll.return_value = exit_code
     with patch("mcp_hangar.stdio_client.threading.Thread"):
         c = StdioClient(popen)
