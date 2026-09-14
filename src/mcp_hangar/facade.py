@@ -80,7 +80,9 @@ FACADE_MAX_CONCURRENCY = 100
 #: The builder options each mode's server reads. The builder used to write any
 #: option into any spec, so `url=` on a subprocess server or `env=` on a remote
 #: one was stored and never read. Group is absent: a group needs members, which
-#: this builder cannot declare.
+#: this builder cannot declare. A docker or container server's `command` is the
+#: container command: `_load_mcp_server_config` passes it as `container_command`
+#: and the container launcher runs it.
 _OPTIONS_READ_BY_MODE: dict[McpServerMode, frozenset[str]] = {
     McpServerMode.SUBPROCESS: frozenset({"command", "env"}),
     McpServerMode.DOCKER: frozenset({"image", "command", "env"}),
@@ -88,10 +90,13 @@ _OPTIONS_READ_BY_MODE: dict[McpServerMode, frozenset[str]] = {
     McpServerMode.REMOTE: frozenset({"url"}),
 }
 
-#: The option a mode cannot start without.
+#: The option a mode cannot start without. Container mode needs an image as
+#: docker does: the config value object does not check it, and the launcher
+#: only refuses a missing image at start, long after `build()` returned.
 _OPTION_REQUIRED_BY_MODE: dict[McpServerMode, str] = {
     McpServerMode.SUBPROCESS: "command",
     McpServerMode.DOCKER: "image",
+    McpServerMode.CONTAINER: "image",
     McpServerMode.REMOTE: "url",
 }
 
@@ -540,9 +545,10 @@ class Hangar:
         Stops all mcp_servers and background workers.
         Called automatically when using async context manager.
         """
-        if not self._started:
-            return
-
+        # Not gated on `_started`: a `start()` that raised leaves the thread
+        # pool running, and only this releases it. The context is shut down
+        # once -- `ApplicationContext.shutdown()` has no guard of its own -- so
+        # it is dropped here, and a failed start drops it after shutting it down.
         if self._context:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(self._executor, self._stop_discovery)
@@ -550,6 +556,7 @@ class Hangar:
                 self._executor,
                 self._context.shutdown,
             )
+            self._context = None
 
         self._executor.shutdown(wait=False)
         self._started = False
@@ -581,9 +588,12 @@ class Hangar:
             self._discovery = start_discovery_loop(orchestrator)
         except Exception:
             # A caller whose `start()` raised does not call `stop()`, so the
-            # context bootstrap just built would be left running.
+            # context bootstrap just built would be left running. Dropped once
+            # shut down: `ApplicationContext.shutdown()` has no guard against a
+            # second call.
             assert self._context is not None
-            self._context.shutdown()
+            context, self._context = self._context, None
+            context.shutdown()
             raise
 
     def _stop_discovery(self) -> None:

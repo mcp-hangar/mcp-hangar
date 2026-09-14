@@ -3,6 +3,8 @@
 import asyncio
 import importlib
 import inspect
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -20,6 +22,7 @@ from mcp_hangar.facade import (
     ProviderInfo,
     SyncHangar,
 )
+from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import prepare_config
 
 #: The package, not the `bootstrap` function `mcp_hangar.server` re-exports under the same name.
@@ -137,6 +140,11 @@ class TestHangarConfig:
         """Should raise ConfigurationError for docker without image."""
         with pytest.raises(ConfigurationError, match="image is required"):
             HangarConfig().add_mcp_server("fetch", mode="docker")
+
+    def test_container_without_image_is_refused_at_build(self):
+        """The launcher refused a missing image only at start; the builder refuses it up front."""
+        with pytest.raises(ConfigurationError, match="image is required for container mode"):
+            HangarConfig().add_mcp_server("fetch", mode="container", command=["serve"])
 
     def test_remote_without_url_raises_error(self):
         """Should raise ConfigurationError for remote without URL."""
@@ -364,6 +372,35 @@ class TestTheBuilderWritesOnlyKeysTheGatewayReads:
         assert prepared["discovery"]["enabled"] is True
         assert [source["type"] for source in prepared["discovery"]["sources"]] == ["docker", "kubernetes", "filesystem"]
 
+    @pytest.mark.parametrize("mode", ["docker", "container"])
+    def test_a_container_server_command_reaches_the_launcher(self, mode, monkeypatch):
+        """`command` is in docker's and container's read set because the launcher runs it.
+
+        The config value object sets `command=None` in docker mode, but that is
+        not the path a spec takes: `_load_mcp_server_config` passes the spec's
+        `command` as `container_command`, and `_create_client` hands it to the
+        container launcher as `command`. Traced here from the builder's spec to
+        the `launch()` call.
+        """
+
+        class Launched(Exception):
+            pass
+
+        builder = HangarConfig().add_mcp_server("boxed", mode=mode, image="img:1", command=["serve", "--stdio"])
+        added: dict[str, Any] = {}
+        repository = SimpleNamespace(add=lambda server_id, server: added.update({server_id: server}))
+        monkeypatch.setattr(server_config, "_mcp_server_repository", lambda: repository)
+        server_config._load_mcp_server_config("boxed", builder.to_dict()["mcp_servers"]["boxed"])
+
+        launcher = MagicMock()
+        launcher.launch.side_effect = Launched
+        with patch("mcp_hangar.infrastructure.launchers.get_launcher", return_value=launcher), pytest.raises(Launched):
+            added["boxed"]._create_client()
+
+        launched = launcher.launch.call_args.kwargs
+        assert launched["command"] == ["serve", "--stdio"]
+        assert launched["image"] == "img:1"
+
     def test_the_old_remote_key_fails_the_build(self, monkeypatch):
         """With `url` no longer mapped to `endpoint`, the build names the key."""
         monkeypatch.setattr(facade, "_SPEC_KEY_FOR_OPTION", {})
@@ -539,6 +576,8 @@ class TestHangarRunsDiscovery:
             await hangar.start()
             assert hangar._discovery is not None
             await hangar.stop()
+            # A second stop does not shut the context down again.
+            await hangar.stop()
 
         assert len(loops) == 2
         assert loops[0] is loops[1]
@@ -567,7 +606,12 @@ class TestHangarRunsDiscovery:
             await hangar.start()
 
         assert hangar._started is False
+        assert hangar._context is None
+        # A caller that stops anyway does not shut the context down a second
+        # time, and the stop releases the thread pool the failed start used.
+        await hangar.stop()
         context.shutdown.assert_called_once()
+        assert hangar._executor._shutdown is True
 
 
 class TestHangarNotStarted:

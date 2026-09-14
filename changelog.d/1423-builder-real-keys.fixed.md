@@ -17,6 +17,7 @@ and the gateway never read:
   type
 - `enable_discovery()` with no source
 - `mode="group"`
+- `mode="container"` without `image`, which the launcher refused only at start
 - an option the server's mode does not read
 - `set_intervals()`
 

@@ -32,6 +32,7 @@ stored and never applied:
 | `enable_discovery(filesystem=[a, b])` | The gateway keeps one source per type, so the second directory replaced the first. Pass one directory. |
 | `enable_discovery()` with no source | It enabled nothing. |
 | `add_mcp_server(..., mode="group")` | The builder cannot declare a group's members. Declare the group in a config file. |
+| `add_mcp_server(..., mode="container")` without `image=` | The launcher refused it only when the server started. Pass the image. |
 | An option the mode does not read, such as `url=` on a subprocess server, or `env=` or `command=` on a remote one | The gateway ignored it. Remove the option. |
 | `set_intervals(...)` | No configuration key sets the GC or health-check interval, so the value was never applied. Remove the call. |
 
