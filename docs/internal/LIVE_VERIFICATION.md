@@ -30,7 +30,7 @@ MCP, REST, or the CLI. So most "stable" claims are proven *in-process*, not
 
 | Tier | Scope | Prerequisite |
 |------|-------|--------------|
-| T0 | single process + stub backend (`examples/provider_math`) | `mcp-hangar` on PATH |
+| T0 | single process + stub backend (`examples/provider_math`) | this checkout installed in the interpreter running pytest |
 | T1 | multi-backend / groups | Docker + compose |
 | T2 | auth / IdP | Keycloak (`examples/auth-keycloak`) |
 | T3 | trace and audit export to an OTLP receiver | `grpcio` + the `opentelemetry` extra (in-process receiver) |

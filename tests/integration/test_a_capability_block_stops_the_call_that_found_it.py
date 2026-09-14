@@ -26,12 +26,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 from typing import Any
 
 import pytest
+
+from tests._hangar_executable import hangar_executable
 
 HARNESS = Path(__file__).with_name("_capability_block_harness.py")
 PROVIDER = Path(__file__).resolve().parents[1] / "undeclared_tool_provider.py"
@@ -121,20 +122,6 @@ def test_alert_mode_still_serves_the_undeclared_tool(runs: dict[str, dict[str, A
     assert "McpServerStarted" in run["events"], run
     assert "McpServerCapabilityQuarantined" not in run["events"], run
 
-
-def _hangar_binary() -> str | None:
-    """The console script that belongs to the interpreter running the tests.
-
-    As in test_a_client_over_stdio_gets_a_verdict.py: PATH alone misses a venv's
-    own ``bin/`` when the suite runs as ``.venv/bin/python -m pytest``.
-    """
-    beside = Path(sys.executable).parent / ("mcp-hangar.exe" if sys.platform == "win32" else "mcp-hangar")
-    if beside.is_file():
-        return str(beside)
-    return shutil.which("mcp-hangar")
-
-
-HANGAR = _hangar_binary()
 
 # The driver runs in its own process: the SDK's stdio client owns the lifetime of
 # the gateway subprocess, and the upstream processes are that gateway's
@@ -229,7 +216,6 @@ auth:
 """
 
 
-@pytest.mark.skipif(HANGAR is None, reason="the `mcp-hangar` console script is not installed for this interpreter")
 @pytest.mark.parametrize("mode", REFUSING)
 def test_a_front_door_flat_call_is_refused_the_same_way(tmp_path: Path, mode: str):
     record = tmp_path / "upstream.jsonl"
@@ -239,7 +225,7 @@ def test_a_front_door_flat_call_is_refused_the_same_way(tmp_path: Path, mode: st
     driver.write_text(DRIVER)
 
     result = subprocess.run(
-        [sys.executable, str(driver), str(HANGAR), str(config), str(record)],
+        [sys.executable, str(driver), hangar_executable(), str(config), str(record)],
         capture_output=True,
         text=True,
         # Under the 60s pytest-timeout the CI job applies, so a hung gateway

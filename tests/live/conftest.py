@@ -3,9 +3,12 @@
 These drive a *running* hangar the way a real client would -- over the shipped
 CLI, HTTP surface, and MCP protocol -- rather than via internal Python APIs.
 Everything here is opt-in: a fixture that cannot meet its prerequisites
-(missing `mcp-hangar` on PATH, Docker/compose, Keycloak, a free port, or a
-startup timeout) calls ``pytest.skip`` rather than failing, so the suite is
-safe to run anywhere. See ``tests/live/README.md`` and the tier markers
+(Docker/compose, Keycloak, a free port, or a startup timeout) calls
+``pytest.skip`` rather than failing, so the suite is safe to run anywhere. The
+`mcp-hangar` executable is the exception: it is the console script of the
+interpreter running pytest, never the first one on PATH, and a missing one, or
+one that does not import this checkout, fails the test
+(``tests/_hangar_executable.py``, #1416). See ``tests/live/README.md`` and the tier markers
 (``live``/``t0``/``t1``/``t2``) registered in ``pyproject.toml``; ``t3`` is
 registered below, with the only tier that uses it.
 """
@@ -26,6 +29,7 @@ import time
 import httpx
 import pytest
 
+from tests._hangar_executable import hangar_executable
 from tests.live import _group_support as gs
 
 # Opt-in gate: live verification only runs when explicitly requested, so a normal
@@ -75,13 +79,6 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def _hangar_bin() -> str:
-    binary = shutil.which("mcp-hangar")
-    if binary is None:
-        pytest.skip("`mcp-hangar` not on PATH (run under `uv run`); live harness unavailable")
-    return binary
-
-
 @dataclass
 class RunningHangar:
     """A live `serve --http` process: its URL, the process, and its output file."""
@@ -95,21 +92,18 @@ class RunningHangar:
 
 
 @contextmanager
-def running_hangar(
-    workdir: Path, config_text: str, env: dict[str, str] | None = None, binary: str | None = None
-) -> Iterator[RunningHangar]:
+def running_hangar(workdir: Path, config_text: str, env: dict[str, str] | None = None) -> Iterator[RunningHangar]:
     """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
     config into ``workdir``, binds a free loopback port, polls ``/health/live``
     until healthy, then yields and tears the process down on exit. ``env``, when
-    given, is the process's whole environment. ``binary``, when given, is the
-    executable to run instead of the one on PATH. Output goes to a file, not a
-    pipe nobody reads, so a chatty server cannot block on a full pipe. Skips
-    cleanly (never fails) if the binary is missing or the server does not
-    become healthy within the startup budget.
+    given, is the process's whole environment. Output goes to a file, not a pipe
+    nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
+    (never fails) if the server does not become healthy within the startup
+    budget; fails if the executable is missing or is not this checkout's.
     """
-    binary = binary or _hangar_bin()
+    binary = hangar_executable()
 
     config_path = workdir / "config.yaml"
     config_path.write_text(config_text)
@@ -169,8 +163,8 @@ def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
 def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """Start `mcp-hangar serve --http` on loopback and yield its base URL.
 
-    Skips cleanly if the binary is missing or the server does not become healthy
-    within the startup budget. Loopback binding needs no auth.
+    Skips cleanly if the server does not become healthy within the startup
+    budget. Loopback binding needs no auth.
     """
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
@@ -365,10 +359,10 @@ def hangar_oidc_wrong_audience(keycloak_base_url: str, tmp_path_factory: pytest.
 def live_group_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[gs.GroupHarness]:
     """Start hangar with a 2-member group + canary policy; yield a GroupHarness.
 
-    Skips cleanly if the binary or identity stub is missing, the server does not
-    become healthy, or the group never warms a member within the startup budget.
+    Skips cleanly if the identity stub is missing, the server does not become
+    healthy, or the group never warms a member within the startup budget.
     """
-    binary = _hangar_bin()
+    binary = hangar_executable()
     if not gs.IDENTITY_SERVER.exists():
         pytest.skip(f"identity stub backend not found at {gs.IDENTITY_SERVER}")
 

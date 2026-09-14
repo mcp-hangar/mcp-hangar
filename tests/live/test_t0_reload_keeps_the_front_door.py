@@ -6,7 +6,8 @@ no tools and was answered ``-32601`` -- until any reload, even of an unchanged
 file, after which it listed every tool and its calls were served.
 
 Black-box, against the ``mcp-hangar`` this checkout installs (the one next to
-the running interpreter, so it is this working tree's code), over real
+the running interpreter, checked to import this working tree's code by
+``tests/_hangar_executable.py``), over real
 streamable HTTP. Auth is on, anonymous is refused, and the keys are seeded with
 the shipped ``SQLiteApiKeyStore``. Each trigger reloads the same file:
 ``POST /api/config/reload``, SIGHUP, and the config file watcher. A file that
@@ -79,14 +80,6 @@ mcp_servers:
     command: ["{python}", "{server}"]
     idle_ttl_s: 600
 """
-
-
-def _hangar_executable() -> str:
-    """The `mcp-hangar` installed next to this interpreter: this working tree's."""
-    binary = Path(sys.executable).parent / "mcp-hangar"
-    if not binary.exists():
-        pytest.skip(f"no mcp-hangar next to {sys.executable}")
-    return str(binary)
 
 
 def _seed_keys(auth_db: Path) -> dict[str, str]:
@@ -168,11 +161,10 @@ class _Gateway:
 def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Gateway]:
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
-    binary = _hangar_executable()
     workdir = tmp_path_factory.mktemp("reload_front_door")
     keys = _seed_keys(workdir / "auth.db")
     text = _CONFIG.format(mode="front_door", auth_db=workdir / "auth.db", python=sys.executable, server=_MATH_SERVER)
-    with running_hangar(workdir, text, binary=binary) as hangar:
+    with running_hangar(workdir, text) as hangar:
         gw = _Gateway(hangar, keys, workdir / "config.yaml", text)
         deadline = time.monotonic() + 40
         while TOOL not in gw.tools("tenant"):
