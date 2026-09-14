@@ -121,7 +121,7 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "coordination": frozenset({"lease_ttl_s", "renew_deadline_s", "renew_interval_s"}),
     "discovery": frozenset({"auto_register", "enabled", "refresh_interval_s", "security", "sources"}),
     "event_store": frozenset({"allow_memory_fallback", "driver", "enabled", "path"}),
-    "execution": frozenset({"default_mcp_server_concurrency", "max_concurrency"}),
+    "execution": frozenset({"default_mcp_server_concurrency", "max_concurrency", "tenant_limits"}),
     # `param_validation.required` (ADR-025). Global to the front door: the
     # condition is a property of the request, not of one upstream.
     "headers": frozenset({"param_validation"}),

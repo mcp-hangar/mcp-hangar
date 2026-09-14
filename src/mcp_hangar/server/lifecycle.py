@@ -77,7 +77,13 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
             "durable": durability.durable,
             "detail": durability.detail,
         }
-    return body, (200 if event_store_ok else 503)
+    from .catalogue_readiness import missing_servers
+
+    missing = missing_servers()
+    if missing:
+        body["status"] = "unhealthy"
+        body["catalogue_missing"] = missing
+    return body, (200 if event_store_ok and not missing else 503)
 
 
 def warm_the_front_door_catalogue(runtime: Any) -> None:
@@ -235,6 +241,7 @@ class ServerLifecycle:
         self._context = context
         self._running = False
         self._shutdown_requested = False
+        self._catalogue_stop = threading.Event()
         self._discovery_loop: asyncio.AbstractEventLoop | None = None
         self._discovery_thread: threading.Thread | None = None
 
@@ -295,6 +302,15 @@ class ServerLifecycle:
             name="mcp-hangar-front-door-warmup",
             daemon=True,
         ).start()
+        from .catalogue_readiness import reconcile_catalogue, required_servers
+
+        if required_servers():
+            threading.Thread(
+                target=reconcile_catalogue,
+                args=(self._context.runtime, self._catalogue_stop),
+                name="mcp-hangar-catalogue-reconciler",
+                daemon=True,
+            ).start()
 
     def _start_discovery(self) -> None:
         """Start discovery on a dedicated long-lived event loop."""
@@ -541,6 +557,7 @@ class ServerLifecycle:
             host=host,
             port=port,
             log_config=None,  # Disable uvicorn's default logging
+            timeout_graceful_shutdown=90,
             access_log=False,  # Disable access logs (we'll handle them via structlog if needed)
             # Off, so the peer the app sees is the peer that connected.
             # uvicorn's default rewrote a loopback peer (or any in
@@ -592,6 +609,7 @@ class ServerLifecycle:
             return
 
         self._shutdown_requested = True
+        self._catalogue_stop.set()
         logger.info("server_lifecycle_shutdown_start")
 
         self._cleanup_runtime_mcp_servers()

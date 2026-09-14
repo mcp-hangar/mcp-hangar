@@ -1058,14 +1058,29 @@ class BatchExecutor:
             span.set_attribute("mcp.server.id", call.mcp_server)
             span.set_attribute("gen_ai.tool.name", call.tool)
             span.set_attribute("batch.call.id", call.call_id)
-            result = self._execute_call_inner(
-                call,
-                cancel_event,
-                global_timeout,
-                batch_start_time,
-                ctx,
-                call_start,
-            )
+            from .tenant_admission import get_tenant_admission, TenantQuotaExceeded
+
+            identity = get_identity_context()
+            tenant = identity.caller.tenant_id if identity is not None else None
+            try:
+                with get_tenant_admission().acquire(tenant):
+                    result = self._execute_call_inner(
+                        call,
+                        cancel_event,
+                        global_timeout,
+                        batch_start_time,
+                        ctx,
+                        call_start,
+                    )
+            except TenantQuotaExceeded as exc:
+                result = CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=str(exc),
+                    error_type="TenantQuotaExceeded",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
             # The inner call handles failures as data (CallResult), so the span
             # never sees an exception. Mark it ERROR explicitly so failing tool
             # calls are filterable as error traces instead of looking successful.

@@ -1032,7 +1032,10 @@ def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     Args:
         full_config: Full configuration dictionary.
     """
+    from .tools.batch.tenant_admission import configure_tenant_admission
+
     execution_config = full_config.get("execution", {})
+    configure_tenant_admission(execution_config.get("tenant_limits", {}))
 
     global_limit_raw = execution_config.get("max_concurrency")
     if global_limit_raw is not None:
