@@ -1,5 +1,46 @@
 # Upgrading MCP Hangar
 
+## Next — remote servers and discovery from the builder take effect
+
+This affects code that builds its configuration with `HangarConfig` and runs it
+with `Hangar.from_builder()`. Code that calls `Hangar.from_config()` on a file
+that enables discovery is affected by the `Hangar.start()` change below.
+
+Two builder features wrote keys the gateway does not read, so neither was ever
+applied. Both now take effect:
+
+- `add_mcp_server(..., mode="remote", url=...)` writes the address as
+  `endpoint`, the key the gateway reads. A remote server now boots with its
+  address and answers calls. The argument is still called `url=`.
+- `enable_discovery(...)` writes `discovery: {enabled: true, sources: [...]}`,
+  one `additive` source per requested type. Additive sources add the servers
+  they find and never remove one.
+
+`Hangar.start()` now runs discovery when the configuration enables it, and
+`Hangar.stop()` stops it. `bootstrap()` builds the discovery sources and starts
+nothing, and only `mcp-hangar serve` used to start them. So under the facade, a
+`discovery` section built its sources and never ran them, whether it came from
+the builder or from a file. If you enabled discovery and relied on it doing
+nothing, remove the call or the section: discovery now registers the servers its
+sources report.
+
+The builder now raises `ConfigurationError` on these calls. Each used to be
+stored and never applied:
+
+| Call | Why |
+| --- | --- |
+| `enable_discovery(filesystem=[a, b])` | The gateway keeps one source per type, so the second directory replaced the first. Pass one directory. |
+| `enable_discovery()` with no source | It enabled nothing. |
+| `add_mcp_server(..., mode="group")` | The builder cannot declare a group's members. Declare the group in a config file. |
+| An option the mode does not read, such as `url=` on a subprocess server, or `env=` or `command=` on a remote one | The gateway ignored it. Remove the option. |
+| `set_intervals(...)` | No configuration key sets the GC or health-check interval, so the value was never applied. Remove the call. |
+
+`build()` now checks the configuration against the gateway's schema, and raises
+on a key the gateway does not read. `to_dict()` no longer includes
+`max_concurrency`, which sizes the facade's thread pool and is not a gateway
+setting. `HangarConfigData` no longer has `gc_interval_s` or
+`health_check_interval_s`.
+
 ## Next — a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
@@ -38,10 +79,10 @@ file.
 
 `Hangar.from_builder()` no longer passes its own `max_concurrency` to the
 gateway, which never read it. It still sizes the facade's thread pool. A builder
-that calls `enable_discovery()`, or adds a server with `mode="remote"` and
-`url=...`, produces keys the gateway does not read. Those settings were never
-applied. They now log `unknown_config_key`, and under strict mode the boot
-refuses.
+that called `enable_discovery()`, or added a server with `mode="remote"` and
+`url=...`, produced keys the gateway does not read, so those settings were never
+applied. The builder now writes the keys the gateway reads: see the section
+above.
 
 ## Next — a server Hangar gives up on reads `dead`, not `cold`
 
