@@ -32,6 +32,7 @@ from typing import Any
 import mcp_hangar
 from mcp_hangar.application.read_models.tool_projection import ToolProjection, ToolProjectionRegistry
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
+from mcp_hangar.application.validators.payload_size import PayloadSizeValidator
 from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import evaluate_headers
@@ -190,6 +191,13 @@ PREDICATES: tuple[Predicate, ...] = (
     # The executor's digest-pin and approval gates.
     Predicate(BatchExecutor._enforce_digest_pin, paths=_each(_INVOKE_PATHS)),
     Predicate(BatchExecutor._check_approval_gate, paths=_each(_INVOKE_PATHS)),
+    # The configured interceptors (#1425). The probes configure one
+    # `payload_size` validator, with a cap no probe reaches. The validator is
+    # what is watched, not `BatchExecutor._check_validators` or the pipeline
+    # that calls it: those run on an empty pipeline too, so a path that
+    # dispatched through an executor built without the configured validators
+    # would still pass. The front door's flat call did exactly that.
+    Predicate(PayloadSizeValidator.validate, paths=_each(_INVOKE_PATHS)),
     # The L7 egress policy, enforced by the aggregate. Its Mcp-Param-* header
     # selectors are decided by `evaluate_headers`.
     Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),

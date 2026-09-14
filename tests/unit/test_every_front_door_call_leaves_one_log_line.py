@@ -150,7 +150,7 @@ def front_door(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     )
     resolver.set_standalone_member_policy(_SERVER, _TENANT, ToolAccessPolicy(deny_list=(_DENIED_BY_POLICY,)))
 
-    monkeypatch.setattr("mcp_hangar.server.tools.batch.BatchExecutor", _Upstream)
+    monkeypatch.setattr("mcp_hangar.server.tools.batch._executor", _Upstream())
     monkeypatch.setattr("mcp_hangar.server.tools.tool_permissions.management_tools_for", lambda _ctx: frozenset())
     get_session_suspension_registry().clear()
 
