@@ -202,6 +202,13 @@ PREDICATES: tuple[Predicate, ...] = (
     # selectors are decided by `evaluate_headers`.
     Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),
     Predicate(evaluate_headers, paths=_each(_INVOKE_PATHS)),
+    # The check made wherever the server's client is handed out -- the invoke
+    # path and the relay every task, prompt and resource request makes: the
+    # server is READY, and no refusing capability mode refuses its catalogue.
+    Predicate(
+        McpServer._check_serving,
+        paths=_each(_INVOKE_PATHS + _TASK_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS),
+    ),
     # Task ownership, asked before a relayed task is read or touched, whichever
     # path created the task: `hangar_call` or the front door's flat call (#1394).
     Predicate(GovernedTaskStore.authorize, paths=_each(_TASK_PATHS)),

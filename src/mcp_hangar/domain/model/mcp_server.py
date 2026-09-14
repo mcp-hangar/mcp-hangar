@@ -20,6 +20,7 @@ from ..events import (
     DEGRADED_BY_HEALTH_CHECKS,
     CapabilityViolationDetected,
     DomainEvent,
+    McpServerCapabilityQuarantined,
     EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
@@ -36,10 +37,12 @@ from ..events import (
 )
 from ..exceptions import (
     CannotStartMcpServerError,
+    CapabilityBlockedError,
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
     McpServerNotHereError,
+    McpServerNotReadyError,
     McpServerStartError,
     ToolInvocationError,
     ToolNotFoundError,
@@ -69,6 +72,12 @@ _MODERN_PROTOCOL_VERSION = "2026-07-28"
 # is stateless, skip the handshake" rather than a startup failure.
 _JSONRPC_METHOD_NOT_FOUND = -32601
 
+#: The enforcement modes that refuse a server serving a tool outside its
+#: `expected_tools`: it serves nothing, and goes DEAD for a capability block
+#: (`DEAD_CAPABILITY_BLOCKED`). `quarantine` is documented to stop a server
+#: serving new requests, and does.
+_REFUSING_MODES = frozenset({"block", "quarantine"})
+
 
 # Why a server is DEAD (#1361). Each means it failed and is not running, and
 # the health worker, the recovery saga and the GC leave it there. They differ
@@ -77,8 +86,10 @@ _JSONRPC_METHOD_NOT_FOUND = -32601
 # - DEAD_GIVEN_UP: the recovery saga ran out of retries. A deliberate start
 #   revives it, and so does a call that names it once its backoff has passed.
 #   A group never routes a call to it.
-# - DEAD_CAPABILITY_BLOCKED: only a deliberate start revives it. A group never
-#   routes a call to it, and a call naming it is refused.
+# - DEAD_CAPABILITY_BLOCKED: block or quarantine mode found a tool outside its
+#   `expected_tools`. Only a deliberate start revives it, and that start checks
+#   the tools again. A group never routes a call to it, and a call naming it is
+#   refused.
 # - DEAD_CRASHED, DEAD_START_FAILED: any call starts it again once its backoff
 #   has passed, including one a group routes to it.
 #
@@ -735,6 +746,7 @@ class McpServer(AggregateRoot):
 
             # Reacquire lock to finalize state
             with self._lock:
+                self._refuse_capability_drift()
                 self._finalize_start(client, start_time)
                 kept = True
                 self._end_cold_start_tracking(cold_start_time, success=True)
@@ -1329,31 +1341,37 @@ class McpServer(AggregateRoot):
 
         logger.info(f"mcp_server_started: {self.mcp_server_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
-        # Runtime capability drift check -- after READY, before lock release
+        # The mode that serves anyway (alert) records drift here, after READY,
+        # as it always has. The refusing modes refused it before the start
+        # kept anything (`_refuse_capability_drift`).
         self._verify_capability_drift()
 
-    def _verify_capability_drift(self) -> None:
-        """Check runtime tools against declared expected_tools.
+    def _verify_capability_drift(self) -> bool:
+        """Check runtime tools against declared expected_tools (must hold lock).
 
         Only flags undeclared runtime tools (tools present at runtime but NOT
         in expected_tools). Missing expected tools are not violations per
         CONTEXT.md decisions.
 
-        Called inside _finalize_start() after READY transition, under lock.
-        Records events via _record_event() (no I/O -- just appends to list).
-        In block mode, transitions to DEAD immediately.
+        Records a ``CapabilityViolationDetected`` event (no I/O -- just appends
+        to the list) and logs a warning. Changes no state: acting on the answer
+        is the caller's job.
+
+        Returns:
+            Whether the enforcement mode refuses the drift found: block and
+            quarantine do, alert does not.
         """
         if self._capabilities is None:
-            return
+            return False
         expected = set(self._capabilities.tools.expected_tools)
         if not expected:
-            return  # No expected_tools declared -- skip check
+            return False  # No expected_tools declared -- skip check
 
         actual = set(self._tools.list_names())
         undeclared = actual - expected
 
         if not undeclared:
-            return
+            return False
 
         violation_detail = f"Undeclared runtime tools: {sorted(undeclared)}"
         enforcement = self._capabilities.enforcement_mode
@@ -1375,8 +1393,75 @@ class McpServer(AggregateRoot):
             enforcement_mode=enforcement,
         )
 
-        if enforcement == "block":
-            self._mark_dead(DEAD_CAPABILITY_BLOCKED)
+        return enforcement in _REFUSING_MODES
+
+    def _drift_refused_by(self) -> str | None:
+        """The refusing mode that refuses the catalogue as it stands, or None (must hold lock).
+
+        Only the refusing modes (block, quarantine) are checked, so alert
+        records no more violations than it did. A violation is recorded when
+        this answers a mode.
+        """
+        if self._capabilities is None or self._capabilities.enforcement_mode not in _REFUSING_MODES:
+            return None
+        return self._capabilities.enforcement_mode if self._verify_capability_drift() else None
+
+    def _refuse_capability_drift(self) -> None:
+        """Fail a start whose upstream serves a tool a refusing mode refuses (must hold lock).
+
+        ``_start`` asks before ``_finalize_start``: before the client is kept,
+        READY is entered or ``McpServerStarted`` is recorded. The check used to
+        run after all three, so the call that started the server went on to
+        invoke its tool on a client left open. ``_handle_start_failure`` then
+        marks the server DEAD for a capability block, and ``_start`` closes the
+        client.
+        """
+        mode = self._drift_refused_by()
+        if mode is not None:
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
+
+    def _block_for_drift(self, mode: str) -> None:
+        """Stop serving for drift a refusing mode refuses (must hold lock).
+
+        Closes the connection the server holds, if any: the live one when drift
+        turns up in a catalogue refreshed after the start. A start's own client
+        is not held yet, and ``_start`` closes it. Then marks the server DEAD for
+        a capability block (``DEAD_CAPABILITY_BLOCKED``): no call starts it
+        again and no group routes to it, and a deliberate start checks its tools
+        again. Quarantine also records ``McpServerCapabilityQuarantined``.
+
+        A capability block never degrades, so the recovery saga, which acts on
+        ``McpServerDegraded``, never retries it.
+        """
+        if mode == "quarantine":
+            self._record_event(
+                McpServerCapabilityQuarantined(
+                    mcp_server_id=self.mcp_server_id,
+                    reason="capability_violation: serves tools that are not in its declared expected_tools",
+                )
+            )
+        self._close_client()
+        self._mark_dead(DEAD_CAPABILITY_BLOCKED)
+
+    def _check_serving(self) -> None:
+        """Refuse unless this server may be handed a request now (must hold lock).
+
+        For every path that takes ``self._client`` to send an upstream request.
+        ``ensure_ready()`` returning is not enough. The state can change between
+        it and this lock. The catalogue can also gain a tool after the start's
+        check, from a refresh or ``tools/list_changed``, and in block or
+        quarantine mode that blocks the whole server, as the start would have.
+
+        Raises:
+            CapabilityBlockedError: The catalogue drifted, and a refusing mode refuses it.
+            McpServerNotReadyError: The server is not READY with a client.
+        """
+        if self._state != McpServerState.READY or self._client is None:
+            raise McpServerNotReadyError(self.mcp_server_id, self._state.value)
+        mode = self._drift_refused_by()
+        if mode is not None:
+            self._block_for_drift(mode)
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
@@ -1403,7 +1488,11 @@ class McpServer(AggregateRoot):
             return
 
         # Determine new state
-        if self._health.should_degrade():
+        if isinstance(error, CapabilityBlockedError):
+            # Not a failure a retry after backoff could clear, so it never
+            # degrades: DEAD for a capability block, which no call revives.
+            self._block_for_drift(error.enforcement_mode)
+        elif self._health.should_degrade():
             # Use direct assignment to avoid transition validation issues
             self._state = McpServerState.DEGRADED
             self._increment_version()
@@ -1596,6 +1685,7 @@ class McpServer(AggregateRoot):
         tool_found = False
         client = None
         with self._lock:
+            self._check_serving()
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:
@@ -1642,6 +1732,10 @@ class McpServer(AggregateRoot):
                 if refresh_error is None and refresh_result and "result" in refresh_result:
                     tool_list = refresh_result.get("result", {}).get("tools", [])
                     self._tools.update_from_list(tool_list)
+
+                # Again: the state may have moved during the refresh, and the
+                # refreshed catalogue has not been checked.
+                self._check_serving()
 
                 if not self._tools.has(tool_name):
                     raise ToolNotFoundError(self.mcp_server_id, tool_name)
@@ -1832,8 +1926,17 @@ class McpServer(AggregateRoot):
                 (relay-unavailable), or if the transport call fails.
         """
         # Copy the live client under the lock; do NOT cold-start. Mirrors the
-        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock.
+        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock,
+        # including its check that the server may be handed a request at all.
         with self._lock:
+            try:
+                self._check_serving()
+            except (CapabilityBlockedError, McpServerNotReadyError) as e:
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"relay unavailable: {e}",
+                    {"method": method},
+                ) from e
             client = self._client
             if client is None or not client.is_alive():
                 raise ToolInvocationError(
