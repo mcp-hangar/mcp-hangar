@@ -4,6 +4,7 @@ Sagas coordinate long-running business processes that span multiple aggregates
 or services. They react to domain events and emit commands.
 """
 
+from collections.abc import Callable
 import threading
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -63,6 +64,8 @@ class SagaManager(ISagaManager):
 
         # Pending scheduled commands: timer_id -> threading.Timer
         self._pending_timers: dict[str, threading.Timer] = {}
+        # Bumped by cancel_all_scheduled_commands; see `_follow_up`.
+        self._cancel_epoch = 0
 
         # Lock hierarchy level: SAGA_MANAGER (40)
         # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
@@ -92,7 +95,13 @@ class SagaManager(ISagaManager):
                 found = False
         return found
 
-    def schedule_command(self, command: "Command", delay_s: float) -> str:
+    def schedule_command(
+        self,
+        command: "Command",
+        delay_s: float,
+        *,
+        on_failure: "Callable[[Exception], list[Command]] | None" = None,
+    ) -> str:
         """
         Schedule a command to be sent after a delay.
 
@@ -107,11 +116,15 @@ class SagaManager(ISagaManager):
         Args:
             command: The command to dispatch after the delay.
             delay_s: Delay in seconds before the command is sent.
+            on_failure: Called with the exception if sending the command
+                raises; see ``_follow_up``. Without it a failure is only
+                logged, and whoever scheduled the command never hears of it.
 
         Returns:
             A unique timer ID that can be passed to ``cancel_scheduled_command``.
         """
         timer_id = str(uuid.uuid4())
+        epoch = 0
 
         def _fire() -> None:
             with self._lock:
@@ -130,12 +143,15 @@ class SagaManager(ISagaManager):
                     command=type(command).__name__,
                     error=str(e),
                 )
+                if on_failure is not None:
+                    self._follow_up(timer_id, command, on_failure, e, epoch)
 
         timer = threading.Timer(delay_s, _fire)
         timer.daemon = True
 
         with self._lock:
             self._pending_timers[timer_id] = timer
+            epoch = self._cancel_epoch
 
         timer.start()
         logger.debug(
@@ -145,6 +161,44 @@ class SagaManager(ISagaManager):
             delay_s=delay_s,
         )
         return timer_id
+
+    def _follow_up(
+        self,
+        timer_id: str,
+        command: "Command",
+        on_failure: "Callable[[Exception], list[Command]]",
+        error: Exception,
+        epoch: int,
+    ) -> None:
+        """Run a failed scheduled command's ``on_failure``, then send what it returns.
+
+        The hook runs under the lock, and ``cancel_all_scheduled_commands``
+        takes the same lock. So a cancel either comes first, and the hook is
+        skipped because ``epoch`` is stale, or it waits until whatever the hook
+        scheduled is registered, and cancels that too. Shutdown's cancel
+        therefore also stops the follow-up of a command that was firing when it
+        ran (#1389). The hook must only decide and schedule; the commands it
+        returns are sent after the lock is released.
+        """
+        with self._lock:
+            if epoch != self._cancel_epoch:
+                logger.info("scheduled_command_follow_up_cancelled", timer_id=timer_id, command=type(command).__name__)
+                return
+            try:
+                follow_ups = on_failure(error)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: a failing hook must not crash the timer thread
+                logger.error(
+                    "scheduled_command_follow_up_failed",
+                    timer_id=timer_id,
+                    command=type(command).__name__,
+                    error=str(e),
+                )
+                return
+        for follow_up in follow_ups:
+            try:
+                self._command_bus.send(follow_up)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one failed follow-up must not stop the next
+                logger.error("scheduled_command_follow_up_failed", command=type(follow_up).__name__, error=str(e))
 
     def cancel_scheduled_command(self, timer_id: str) -> bool:
         """
@@ -174,6 +228,9 @@ class SagaManager(ISagaManager):
         with self._lock:
             timers = list(self._pending_timers.values())
             self._pending_timers.clear()
+            # A timer already firing is no longer in the registry; this stops
+            # what its failure would schedule next (see `_follow_up`).
+            self._cancel_epoch += 1
         for timer in timers:
             timer.cancel()
         logger.debug("all_scheduled_commands_cancelled", count=len(timers))
