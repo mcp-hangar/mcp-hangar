@@ -33,8 +33,10 @@ requires, so no role migration is needed and no permission is invented:
   were standing in for; those are legacy vocabulary and stay deleted rather than
   wired up.
 * ``hangar_reload_config`` takes ``config:reload``, admin-only, because reload
-  re-applies every governance input -- tool-access policies, digest pins,
-  topology mode -- and launches servers.
+  re-applies the configuration file's governance -- tool-access policies,
+  withdrawals, digest pins, ``header_exposure``, validators, the ``ui://`` allow
+  list -- and launches servers. It keeps the topology mode, and refuses a file
+  that changes it (#1424).
 * the discovery tools split the way the discovery routes do: reads are
   ``discovery:read``, a scan is ``discovery:trigger``, and approving or
   quarantining is ``discovery:approve``.

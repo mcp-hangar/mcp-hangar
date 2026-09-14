@@ -174,7 +174,7 @@ APPLIED: dict[str, Any] = {
 
 def _reset_process_settings() -> None:
     """Put back what the configuration sets process-wide, so a boot cannot inherit it."""
-    get_tool_access_resolver().clear_all()
+    get_tool_access_resolver().reset()
     batch.configure_interceptors(None)
     set_param_validation_required(False)
     resource_link_read_through.set_max_links_per_tenant(resource_link_read_through.DEFAULT_MAX_LINKS_PER_TENANT)

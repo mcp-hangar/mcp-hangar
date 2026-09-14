@@ -126,5 +126,18 @@ def get_header_exposure_policy(scope_id: str) -> HeaderExposurePolicy | None:
 
 
 def clear_header_exposure_policies() -> None:
-    """Drop every registered block. Called before a config reload."""
+    """Drop every registered block."""
     _POLICIES.clear()
+
+
+def adopt_header_exposure_policies(policies: dict[str, HeaderExposurePolicy], *, replace: bool) -> None:
+    """Take a configuration's blocks in one step (#1424).
+
+    One rebinding, so a concurrent read sees the previous blocks or the new ones,
+    never the empty overlay a reload used to leave between clearing it and
+    registering it again. With *replace*, which is what a reload asks for,
+    deleting a block from the file restores the tools it withheld; without it,
+    which is what a first load does, the blocks are added to what is there.
+    """
+    global _POLICIES
+    _POLICIES = dict(policies) if replace else {**_POLICIES, **policies}

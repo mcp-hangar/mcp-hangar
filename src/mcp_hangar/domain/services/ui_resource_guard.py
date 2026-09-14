@@ -138,6 +138,17 @@ class UiResourceGuard:
         """
         self._consent_gate = consent_gate
 
+    def replace_policies(self, policies: dict[str, UiResourcePolicy]) -> None:
+        """Replace the per-tenant policies, and keep the consent gate (#1424).
+
+        The file's ``ui_resources`` block is read at startup and again on every
+        reload. Building a new guard for it would drop the consent gate
+        bootstrap attached, and every allowlisted resource would then be denied
+        for want of anyone to ask. One assignment, so a concurrent decision sees
+        the previous policies or the new ones.
+        """
+        self._policies = dict(policies)
+
     def policy_for(self, tenant_id: str | None) -> UiResourcePolicy:
         """Return the effective policy for ``tenant_id`` (fail-closed default).
 

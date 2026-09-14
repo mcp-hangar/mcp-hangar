@@ -19,16 +19,15 @@ tools on that server, and nothing about prompts on another -- the same
 always had, applied per kind rather than reinvented for the new ones.
 """
 
+from collections.abc import Mapping
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 from ...logging_config import should_log_now
+from ..exceptions import ConfigurationError
 from ..model.tool_catalog import ToolSchema
 from ..value_objects import ToolAccessPolicy
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +44,39 @@ logger = logging.getLogger(__name__)
 TopologyMode = Literal["egress", "front_door"]
 _DEFAULT_MODE: TopologyMode = "egress"
 
+
+def configured_topology_mode(config: Mapping[str, Any]) -> TopologyMode:
+    """The topology a configuration asks for in ``tool_access.mode``.
+
+    Startup applies what this returns, and a reload compares it with the
+    running mode: the front-door tool surface is built at boot, so a reload
+    refuses a mode it cannot follow rather than applying half of it.
+
+    An ABSENT key still means "egress": a deployment that never opted in must
+    not be silently switched to the fail-closed topology by an upgrade.
+
+    An UNRECOGNISED value is a hard error. An operator who wrote
+    ``mode: front-door`` (hyphen) or ``mode: frontdoor`` was configuring this
+    deliberately, and quietly resolving their typo to ``egress`` hands them the
+    permissive topology while their config file says otherwise -- a warning in
+    the log is not a fair trade for that.
+
+    Raises:
+        ConfigurationError: If tool_access.mode is present but not a valid mode.
+    """
+    tool_access_config = config.get("tool_access", {})
+    raw_mode = tool_access_config.get("mode") if isinstance(tool_access_config, dict) else None
+
+    if raw_mode is None:
+        return _DEFAULT_MODE
+    if raw_mode in ("egress", "front_door"):
+        return cast(TopologyMode, raw_mode)
+    raise ConfigurationError(
+        f"Invalid tool_access.mode {raw_mode!r}. Valid values are 'egress' and 'front_door'; "
+        "omit the key entirely to keep the default 'egress' topology."
+    )
+
+
 # What a policy governs. A policy is keyed `(scope target, kind)`; the default
 # everywhere is "tool", which is what every pre-#1028 registration meant.
 PolicyKind = Literal["tool", "prompt", "resource"]
@@ -58,6 +90,11 @@ _DENY_ALL_POLICY: ToolAccessPolicy = ToolAccessPolicy(deny_list=("*",))
 def _scope_label(scope: str, kind: str) -> str:
     """Describe a registered scope, naming the kind only when it is not tool."""
     return scope if kind == DEFAULT_KIND else f"{scope}[{kind}]"
+
+
+#: The policy tables, by the name provenance is tracked under. Each maps a key
+#: to a ToolAccessPolicy; the key shape differs per table (see ``__init__``).
+_POLICY_TABLES = ("mcp_server", "group", "member", "standalone_member")
 
 
 def _scope_covers(scope_key: str, prefix: str) -> bool:
@@ -105,10 +142,29 @@ class ToolAccessResolver:
         # Maps (mcp_server_id, tenant_id, kind) -> ToolAccessPolicy for standalone server→member merge
         self._standalone_member_policies: dict[tuple[str, str, str], ToolAccessPolicy] = {}
 
+        # Which entries the configuration file put there, per table, as opposed
+        # to a runtime caller: the REST policy endpoint, its replay at boot, the
+        # agent's `_global` policy, or `hangar_load`. A reload replaces the
+        # file's entries and keeps the rest (`adopt_config_policies`). Every
+        # public setter is a runtime write and takes its key out of here, so an
+        # entry the file set and a runtime caller then overwrote is the
+        # caller's. Kind-independent member mappings are tracked the same way.
+        self._config_keys: dict[str, set[tuple[str, ...]]] = {table: set() for table in _POLICY_TABLES}
+        self._config_mapping_keys: set[tuple[str, str]] = set()
+
         # Topology mode controls what happens when caller has no identity
         # (member_id is None and no group context).
         # See module-level TopologyMode for semantics.
         self._topology_mode: TopologyMode = _DEFAULT_MODE
+
+    def _tables(self) -> dict[str, dict[Any, ToolAccessPolicy]]:
+        """The policy tables by provenance name. Lock must be held."""
+        return {
+            "mcp_server": self._mcp_server_policies,
+            "group": self._group_policies,
+            "member": self._member_policies,
+            "standalone_member": self._standalone_member_policies,
+        }
 
     def set_mcp_server_policy(
         self, mcp_server_id: str, policy: ToolAccessPolicy, *, kind: PolicyKind = DEFAULT_KIND
@@ -126,6 +182,7 @@ class ToolAccessResolver:
                 self._mcp_server_policies.pop((mcp_server_id, kind), None)
             else:
                 self._mcp_server_policies[(mcp_server_id, kind)] = policy
+            self._config_keys["mcp_server"].discard((mcp_server_id, kind))
             # Invalidate cache for this mcp_server
             self._invalidate_mcp_server_cache(mcp_server_id)
 
@@ -172,6 +229,7 @@ class ToolAccessResolver:
                 self._group_policies.pop((group_id, kind), None)
             else:
                 self._group_policies[(group_id, kind)] = policy
+            self._config_keys["group"].discard((group_id, kind))
             # Invalidate cache for all members in this group
             self._invalidate_group_cache(group_id)
 
@@ -200,9 +258,11 @@ class ToolAccessResolver:
                 self._member_policies.pop(key, None)
             else:
                 self._member_policies[key] = policy
+            self._config_keys["member"].discard(key)
 
             if resolved_mcp_server_id:
                 self._member_mcp_server_mapping[(group_id, member_id)] = resolved_mcp_server_id
+                self._config_mapping_keys.discard((group_id, member_id))
 
             # Invalidate cache for this member, every tenant it was resolved for.
             self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=kind)
@@ -229,6 +289,7 @@ class ToolAccessResolver:
                 self._standalone_member_policies.pop(key, None)
             else:
                 self._standalone_member_policies[key] = policy
+            self._config_keys["standalone_member"].discard(key)
             # Invalidate cache for this (server, member) pair. Also every group
             # scope: the group branch merges this tenant policy too (#1164), so
             # a group-scoped entry resolved for this tenant is now stale.
@@ -315,8 +376,10 @@ class ToolAccessResolver:
         with self._lock:
             for key in [k for k in self._mcp_server_policies if k[0] == mcp_server_id]:
                 self._mcp_server_policies.pop(key, None)
+                self._config_keys["mcp_server"].discard(key)
             for member_key in [k for k in self._standalone_member_policies if k[0] == mcp_server_id]:
                 self._standalone_member_policies.pop(member_key, None)
+                self._config_keys["standalone_member"].discard(member_key)
             # Already drops every `mcp_server:<id>:member:` entry too.
             self._invalidate_mcp_server_cache(mcp_server_id)
 
@@ -337,6 +400,7 @@ class ToolAccessResolver:
         with self._lock:
             for key in [k for k in self._group_policies if k[0] == group_id]:
                 self._group_policies.pop(key, None)
+                self._config_keys["group"].discard(key)
             self._invalidate_group_cache(group_id)
 
     def remove_member_policy(self, group_id: str, member_id: str) -> None:
@@ -353,8 +417,10 @@ class ToolAccessResolver:
         with self._lock:
             for key in [k for k in self._member_policies if k[:2] == (group_id, member_id)]:
                 self._member_policies.pop(key, None)
+                self._config_keys["member"].discard(key)
                 self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=cast(PolicyKind, key[2]))
             self._member_mcp_server_mapping.pop((group_id, member_id), None)
+            self._config_mapping_keys.discard((group_id, member_id))
 
     def resolve_effective_policy(
         self,
@@ -707,9 +773,12 @@ class ToolAccessResolver:
             }
 
     def clear_all(self) -> None:
-        """Clear all policies, caches, and topology mode (resets to default).
+        """Clear every policy and the cache. The topology mode is kept.
 
-        Useful for testing or complete config reload.
+        It used to reset the mode too, and the reload handler called it: every
+        reload quietly turned a `front_door` gateway into an `egress` one, while
+        the tool surface built at boot still looked like a front door (#1424).
+        The mode is a boot decision; :meth:`reset` is the full reset.
         """
         with self._lock:
             self._policy_cache.clear()
@@ -718,7 +787,58 @@ class ToolAccessResolver:
             self._member_policies.clear()
             self._member_mcp_server_mapping.clear()
             self._standalone_member_policies.clear()
+            for keys in self._config_keys.values():
+                keys.clear()
+            self._config_mapping_keys.clear()
+
+    def reset(self) -> None:
+        """Put the resolver back as it was built: no policies, and the default mode."""
+        with self._lock:
+            self.clear_all()
             self._topology_mode = _DEFAULT_MODE
+
+    def adopt_config_policies(self, staged: "ToolAccessResolver", *, replace: bool) -> None:
+        """Take the policies a configuration registered on *staged*, in one step.
+
+        The configuration registers its policies on a fresh resolver, and they
+        are taken from it here under this resolver's lock. A concurrent resolve
+        therefore sees the previous set or the new one, never the empty set a
+        reload used to leave between clearing everything and registering it
+        again (#1424).
+
+        With *replace*, which is what a reload asks for, an entry the previous
+        configuration set and this one does not is removed, so deleting a policy
+        from the file lifts it. An entry a runtime caller set -- the REST policy
+        endpoint, its replay at boot, the agent's `_global` policy, `hangar_load`
+        -- is kept, unless *staged* defines the same scope: then the file's
+        policy replaces it. Without *replace*, the file's entries are added to
+        what is there, which is what a first load does.
+
+        The topology mode is not taken from *staged*. It is set at startup, and
+        a reload refuses a configuration that changes it.
+        """
+        with staged._lock:
+            incoming = {table: dict(entries) for table, entries in staged._tables().items()}
+            incoming_mapping = dict(staged._member_mcp_server_mapping)
+        with self._lock:
+            live_tables = self._tables()
+            for table, entries in incoming.items():
+                live = live_tables[table]
+                if replace:
+                    for key in self._config_keys[table] - set(entries):
+                        live.pop(key, None)
+                    self._config_keys[table] = set(entries)
+                else:
+                    self._config_keys[table] |= set(entries)
+                live.update(entries)
+            if replace:
+                for mapping_key in self._config_mapping_keys - set(incoming_mapping):
+                    self._member_mcp_server_mapping.pop(mapping_key, None)
+                self._config_mapping_keys = set(incoming_mapping)
+            else:
+                self._config_mapping_keys |= set(incoming_mapping)
+            self._member_mcp_server_mapping.update(incoming_mapping)
+            self._policy_cache.clear()
 
 
 # Global singleton instance
@@ -764,5 +884,5 @@ def reset_tool_access_resolver() -> None:
     global _resolver
     with _resolver_lock:
         if _resolver is not None:
-            _resolver.clear_all()
+            _resolver.reset()
         _resolver = None

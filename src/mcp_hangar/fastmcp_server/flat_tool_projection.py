@@ -698,8 +698,8 @@ def _param_validation_skipped(mcp_ctx: Any) -> bool:
 
 #: Whether a call whose ``Mcp-Param-*`` headers could not be validated is
 #: refused rather than served (``headers.param_validation.required``, ADR-025
-#: Decision 2). Off by default and read once at config load, like
-#: ``tool_access.mode``: the front door is built from the config file at boot.
+#: Decision 2). Off by default; read at config load and again on every reload
+#: (#1424).
 _param_validation_required = False
 
 

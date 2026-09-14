@@ -1,5 +1,65 @@
 # Upgrading MCP Hangar
 
+## Next — a reload applies the whole configuration, and keeps the topology mode
+
+This affects every configuration reload: `POST /api/config/reload`,
+`hangar_reload_config`, SIGHUP, and the config file watcher.
+
+A reload used to reset `tool_access.mode` to `egress` and apply only
+`mcp_servers`. A reload now applies every section startup applies from the
+configuration:
+
+- `mcp_servers`, as before
+- `interceptors.validators`
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A section you delete from the file goes back to its default when you reload.
+Before, it stayed in force until the next restart. Every section is checked
+before any server is stopped. A bad value refuses the reload, and nothing
+changes.
+
+Sections that startup reads only once, such as `auth`, `persistence`,
+`event_store`, `discovery` and `logging`, still need a restart, as before.
+
+### A reload that changes `tool_access.mode` is refused
+
+A reload keeps the mode the gateway started with. If the file sets a different
+`tool_access.mode`, the reload is refused and nothing changes, because the
+front-door tool surface is built at startup. Restart the gateway to change the
+mode.
+
+| Trigger | What you see when the mode changed |
+| --- | --- |
+| `POST /api/config/reload` | HTTP 409, `ConfigurationRestartRequiredError` |
+| `hangar_reload_config` | `status: failed`, with the same message |
+| SIGHUP, file watcher | `configuration_reload_failed` in the log |
+
+The workaround for a `front_door` gateway, `config_reload.enabled: false` and a
+restart for every change, is no longer needed.
+
+### Policies set at runtime
+
+A reload keeps the tool-access policies set at runtime: the REST policy
+endpoint, the agent's `_global` policy, and `hangar_load`. Before, a reload
+removed them. Two exceptions:
+
+- If the file now defines a policy for the same scope, the file's policy
+  replaces the runtime one.
+- A server that the reload removes takes its policies with it, as
+  `hangar_unload` does.
+
+On a restart, the policies stored by the REST endpoint are replayed after the
+file is loaded, as before. So for a scope that both the file and the REST
+endpoint define, a reload applies the file's policy, and the next restart
+applies the stored one.
+
+The policies, withdrawals, pins and `header_exposure` blocks are now swapped in
+as one set. A call made during a reload is resolved against the old set or the
+new one, never against an empty one.
+
 ## Next — a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
