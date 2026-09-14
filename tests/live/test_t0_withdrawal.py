@@ -10,7 +10,8 @@ point -- previously provable only in-process.
 
 The module-local fixture reuses the shared ``_serve_hangar`` engine from
 ``conftest.py`` and the ``X-API-Key`` per-tenant seeding from ``_group_support``.
-Skip-safe: missing binary / stub / unhealthy startup skip rather than fail.
+Skip-safe: a missing stub or an unhealthy startup skips rather than fails; a
+missing binary fails (``tests/_hangar_executable.py``).
 See ``docs/internal/LIVE_VERIFICATION.md``.
 """
 
@@ -26,7 +27,7 @@ from typing import Any, cast
 import pytest
 
 from tests.live import _group_support as gs
-from tests.live.conftest import _MATH_SERVER, _hangar_bin, _serve_hangar
+from tests.live.conftest import _MATH_SERVER, _serve_hangar
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -118,10 +119,9 @@ def _hangar_call(base_url: str, api_key: str, tool: str, arguments: dict[str, An
 def withdrawal_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, dict[str, str]]]:
     """Start hangar with ``power`` withdrawn for TENANT_A; yield (base_url, tenant_keys).
 
-    Skips cleanly if the binary or math stub is missing, or the server does not
-    become healthy within the startup budget.
+    Skips cleanly if the math stub is missing, or the server does not become
+    healthy within the startup budget.
     """
-    _hangar_bin()  # skip if `mcp-hangar` is not on PATH
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 
