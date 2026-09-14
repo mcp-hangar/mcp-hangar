@@ -247,16 +247,7 @@ class PostgresEventStore(IEventStore):
                         actual_version = row[0] if row else -1
                         raise ConcurrencyError(stream_id, expected_version, actual_version)
 
-                    for offset, event in enumerate(events, start=1):
-                        event_type, data = self._serializer.serialize(event)
-                        cur.execute(
-                            f"""
-                            INSERT INTO {self._events_table}
-                            (stream_id, stream_version, event_type, data, created_at)
-                            VALUES (%s, %s, %s, %s, %s)
-                            """,
-                            (stream_id, expected_version + offset, event_type, data, timestamp),
-                        )
+                    self._insert_events(cur, stream_id, events, expected_version, timestamp)
 
                 conn.commit()
 
@@ -280,6 +271,81 @@ class PostgresEventStore(IEventStore):
                     error=str(e),
                 )
                 raise
+
+    def append_at_end(self, stream_id: str, events: list[DomainEvent]) -> int:
+        """Append after whatever the stream holds. The database picks the version.
+
+        One statement creates the stream's row if it is missing, otherwise
+        advances it by the size of the batch, and returns the version it
+        reached. Two appenders, whether two threads or two replicas on one
+        database, queue on that row's lock, and the second one's
+        `version + n` reads what the first one committed. Neither can lose, so
+        a batch that claimed no version cannot conflict.
+        Reading the version first and then appending at it, which `EventBus`
+        used to do, could.
+
+        The event rows take the versions the statement reserved, in the same
+        transaction. The `(stream_id, stream_version)` unique constraint still
+        backs that up.
+        """
+        if not events:
+            return self.get_stream_version(stream_id)
+
+        count = len(events)
+        timestamp = datetime.now(UTC).isoformat()
+
+        with self._connections.get_connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {self._streams_table} (stream_id, version, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (stream_id) DO UPDATE
+                        SET version = {self._streams_table}.version + %s, updated_at = EXCLUDED.updated_at
+                        RETURNING version
+                        """,
+                        (stream_id, count - 1, timestamp, timestamp, count),
+                    )
+                    new_version = int(cur.fetchone()[0])
+                    self._insert_events(cur, stream_id, events, new_version - count, timestamp)
+                conn.commit()
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: rollback and propagate on any DB error
+                conn.rollback()
+                logger.error(
+                    "event_append_failed",
+                    stream_id=stream_id,
+                    error=str(e),
+                )
+                raise
+
+        logger.debug(
+            "events_appended",
+            stream_id=stream_id,
+            events_count=count,
+            new_version=new_version,
+        )
+        return new_version
+
+    def _insert_events(
+        self,
+        cur: Any,
+        stream_id: str,
+        events: list[DomainEvent],
+        after_version: int,
+        timestamp: str,
+    ) -> None:
+        """Write the event rows at the versions after `after_version`, in the caller's transaction."""
+        for offset, event in enumerate(events, start=1):
+            event_type, data = self._serializer.serialize(event)
+            cur.execute(
+                f"""
+                INSERT INTO {self._events_table}
+                (stream_id, stream_version, event_type, data, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (stream_id, after_version + offset, event_type, data, timestamp),
+            )
 
     def read_stream(
         self,

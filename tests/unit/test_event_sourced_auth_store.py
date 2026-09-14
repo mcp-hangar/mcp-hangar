@@ -210,6 +210,7 @@ class TestEventSourcedRoleStoreGaps:
         event_store.read_stream.return_value = iter([])
         event_store.get_stream_version.return_value = 0
         event_store.append.return_value = 1
+        event_store.append_at_end.return_value = 1
 
         store = EventSourcedRoleStore(
             event_store=event_store,
@@ -344,6 +345,7 @@ def mock_event_store():
     store.read_stream.return_value = []
     store.get_stream_version.return_value = -1
     store.append.return_value = 1
+    store.append_at_end.return_value = 1
     return store
 
 
@@ -918,7 +920,8 @@ class TestEventSourcedRoleStoreAssignRole:
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.assign_role("svc-1", "admin", scope="global", assigned_by="system")
 
-        mock_event_store.append.assert_called_once()
+        # At the end of the stream: a role event claims no version.
+        mock_event_store.append_at_end.assert_called_once()
 
     def test_assign_unknown_role_raises(self, mock_event_store):
         """Lines 635-636: assign unknown role raises."""
@@ -946,7 +949,8 @@ class TestEventSourcedRoleStoreAssignRole:
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.assign_role("svc-dup", "admin", scope="global")
 
-        # append should NOT be called because role is already assigned
+        # Nothing is written because the role is already assigned
+        mock_event_store.append_at_end.assert_not_called()
         mock_event_store.append.assert_not_called()
 
     def test_assign_role_publishes_events(self, mock_event_store):
@@ -981,7 +985,8 @@ class TestEventSourcedRoleStoreRevokeRole:
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.revoke_role("svc-rev", "admin", scope="global", revoked_by="admin")
 
-        mock_event_store.append.assert_called_once()
+        # At the end of the stream: a role event claims no version.
+        mock_event_store.append_at_end.assert_called_once()
 
     def test_revoke_non_assigned_is_noop(self, mock_event_store):
         """Revoking a non-assigned role does not save events."""
@@ -991,6 +996,7 @@ class TestEventSourcedRoleStoreRevokeRole:
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
         store.revoke_role("svc-no", "admin", scope="global")
+        mock_event_store.append_at_end.assert_not_called()
         mock_event_store.append.assert_not_called()
 
     def test_revoke_role_publishes_events(self, mock_event_store):
