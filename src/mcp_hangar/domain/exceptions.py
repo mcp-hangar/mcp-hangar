@@ -438,6 +438,17 @@ class ConfigurationError(MCPError):
         super().__init__(message=message, operation="configuration", details=details or {})
 
 
+class ConfigurationRestartRequiredError(ConfigurationError):
+    """A configuration the running process cannot apply, and a restart can.
+
+    A reload refuses a file that changes ``tool_access.mode``: the front-door
+    tool surface is built at boot, so a live change would leave the surface and
+    the access rules disagreeing (#1424). The reload changes nothing, and the
+    API answers 409 -- the file is not wrong and nothing broke, it is only
+    something this process cannot take without a restart.
+    """
+
+
 class ConfigurationUnavailableError(ConfigurationError):
     """A configuration operation failed on a transient/unavailable I/O condition.
 

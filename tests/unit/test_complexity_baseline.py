@@ -29,7 +29,7 @@ SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "mcp_hangar"
 _NOQA = re.compile(r"#\s*noqa:\s*C901\b[^\n]*?baseline CC=(\d+)")
 
 # Lower these as functions are split. Never raise them.
-MAX_BASELINED_FUNCTIONS = 14
+MAX_BASELINED_FUNCTIONS = 13
 MAX_BASELINED_COMPLEXITY = 49
 
 

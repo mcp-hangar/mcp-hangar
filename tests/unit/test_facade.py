@@ -1,20 +1,32 @@
 """Tests for Hangar facade and HangarConfig builder."""
 
-from unittest.mock import Mock
+import asyncio
+import importlib
+import inspect
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from mcp_hangar import facade
 from mcp_hangar.domain.exceptions import ConfigurationError, McpServerNotFoundError
 from mcp_hangar.domain.value_objects import McpServerMode, McpServerState
 from mcp_hangar.facade import (
     FACADE_DEFAULT_CONCURRENCY,
     FACADE_MAX_CONCURRENCY,
+    DiscoverySpec,
     Hangar,
     HangarConfig,
     HealthSummary,
     ProviderInfo,
     SyncHangar,
 )
+from mcp_hangar.server import config as server_config
+from mcp_hangar.server.config import prepare_config
+
+#: The package, not the `bootstrap` function `mcp_hangar.server` re-exports under the same name.
+bootstrap_package = importlib.import_module("mcp_hangar.server.bootstrap")
 
 # --- HangarConfig Builder Tests ---
 
@@ -41,13 +53,34 @@ class TestHangarConfig:
         assert provider["image"] == "mcp/fetch:latest"
 
     def test_add_remote_provider(self):
-        """Should add remote provider with URL."""
+        """A remote server's `url=` is written as `endpoint`, the key the gateway reads (#1423)."""
         config = HangarConfig().add_mcp_server("api", mode="remote", url="http://localhost:8080").build()
 
         assert "api" in config.mcp_servers
         provider = config.mcp_servers["api"]
         assert provider["mode"] == "remote"
-        assert provider["url"] == "http://localhost:8080"
+        assert provider["endpoint"] == "http://localhost:8080"
+        assert "url" not in provider
+
+    def test_group_mode_is_refused(self):
+        """The builder cannot declare a group's members, so it does not build a group."""
+        with pytest.raises(ConfigurationError, match="does not declare a group's members"):
+            HangarConfig().add_mcp_server("pool", mode="group", command=["python"])
+
+    @pytest.mark.parametrize(
+        ("mode", "options", "unread"),
+        [
+            ("subprocess", {"command": ["python"], "url": "http://127.0.0.1:9/mcp"}, "url"),
+            ("subprocess", {"command": ["python"], "image": "img:1"}, "image"),
+            ("remote", {"url": "http://127.0.0.1:9/mcp", "env": {"A": "1"}}, "env"),
+            ("remote", {"url": "http://127.0.0.1:9/mcp", "command": ["python"]}, "command"),
+            ("docker", {"image": "img:1", "url": "http://127.0.0.1:9/mcp"}, "url"),
+        ],
+    )
+    def test_an_option_the_mode_does_not_read_is_refused(self, mode, options, unread):
+        """An option the server's mode ignores used to be stored and never read."""
+        with pytest.raises(ConfigurationError, match=f"{unread} has no effect on a {mode} server"):
+            HangarConfig().add_mcp_server("s", mode=mode, **options)
 
     def test_add_provider_with_env(self):
         """Should add provider with environment variables."""
@@ -107,6 +140,11 @@ class TestHangarConfig:
         """Should raise ConfigurationError for docker without image."""
         with pytest.raises(ConfigurationError, match="image is required"):
             HangarConfig().add_mcp_server("fetch", mode="docker")
+
+    def test_container_without_image_is_refused_at_build(self):
+        """The launcher refused a missing image only at start; the builder refuses it up front."""
+        with pytest.raises(ConfigurationError, match="image is required for container mode"):
+            HangarConfig().add_mcp_server("fetch", mode="container", command=["serve"])
 
     def test_remote_without_url_raises_error(self):
         """Should raise ConfigurationError for remote without URL."""
@@ -176,16 +214,9 @@ class TestHangarConfigMaxConcurrency:
 
     def test_max_concurrency_chaining(self):
         """max_concurrency should return self for fluent chaining."""
-        config = (
-            HangarConfig()
-            .add_mcp_server("math", command=["python"])
-            .max_concurrency(30)
-            .set_intervals(gc_interval_s=60)
-            .build()
-        )
+        config = HangarConfig().add_mcp_server("math", command=["python"]).max_concurrency(30).build()
 
         assert config.max_concurrency == 30
-        assert config.gc_interval_s == 60
         assert "math" in config.mcp_servers
 
 
@@ -206,10 +237,25 @@ class TestHangarConfigDiscovery:
         assert config.discovery.kubernetes is True
 
     def test_enable_filesystem_discovery(self):
-        """Should enable filesystem discovery with paths."""
-        config = HangarConfig().enable_discovery(filesystem=["./providers", "/etc/mcp"]).build()
+        """Should enable filesystem discovery with one directory."""
+        config = HangarConfig().enable_discovery(filesystem=["./providers"]).build()
 
-        assert config.discovery.filesystem == ["./providers", "/etc/mcp"]
+        assert config.discovery.filesystem == ["./providers"]
+
+    def test_a_second_filesystem_directory_is_refused(self):
+        """The gateway keeps one source per type: a second path would replace the first."""
+        with pytest.raises(ConfigurationError, match="one filesystem directory, got 2"):
+            HangarConfig().enable_discovery(filesystem=["./providers", "/etc/mcp"])
+
+    def test_a_second_filesystem_directory_is_refused_on_the_data_too(self):
+        """`from_builder` takes the data, so the data refuses it without the builder."""
+        with pytest.raises(ConfigurationError, match="one filesystem directory"):
+            DiscoverySpec(filesystem=["./a", "./b"])
+
+    def test_discovery_with_no_source_is_refused(self):
+        """`enable_discovery()` with nothing requested enabled nothing."""
+        with pytest.raises(ConfigurationError, match="at least one source"):
+            HangarConfig().enable_discovery()
 
     def test_enable_multiple_discovery_sources(self):
         """Should enable multiple discovery sources."""
@@ -221,19 +267,12 @@ class TestHangarConfigDiscovery:
 
 
 class TestHangarConfigIntervals:
-    """Tests for HangarConfig interval settings."""
+    """`set_intervals` set two fields nothing read; it is refused."""
 
-    def test_set_gc_interval(self):
-        """Should set GC interval."""
-        config = HangarConfig().set_intervals(gc_interval_s=60).build()
-
-        assert config.gc_interval_s == 60
-
-    def test_set_health_check_interval(self):
-        """Should set health check interval."""
-        config = HangarConfig().set_intervals(health_check_interval_s=30).build()
-
-        assert config.health_check_interval_s == 30
+    @pytest.mark.parametrize("interval", [{"gc_interval_s": 60}, {"health_check_interval_s": 30}])
+    def test_set_intervals_is_refused(self, interval):
+        with pytest.raises(ConfigurationError, match="reads no GC or health-check interval"):
+            HangarConfig().set_intervals(**interval)
 
 
 class TestHangarConfigToDict:
@@ -251,31 +290,139 @@ class TestHangarConfigToDict:
         assert result["mcp_servers"]["math"]["command"] == ["python", "-m", "math"]
 
     def test_to_dict_with_discovery(self):
-        """Should include discovery in dict when enabled."""
+        """Discovery is the gateway's `{enabled, sources}`, one additive source per type (#1423)."""
         builder = HangarConfig()
-        builder.enable_discovery(docker=True, filesystem=["./providers"])
+        builder.enable_discovery(docker=True, kubernetes=True, filesystem=["./providers"])
         result = builder.to_dict()
 
-        assert "discovery" in result
-        assert result["discovery"]["docker"] == {"enabled": True}
-        assert result["discovery"]["filesystem"]["paths"] == ["./providers"]
+        assert result["discovery"] == {
+            "enabled": True,
+            "sources": [
+                {"type": "docker", "mode": "additive"},
+                {"type": "kubernetes", "mode": "additive"},
+                {"type": "filesystem", "mode": "additive", "path": "./providers"},
+            ],
+        }
 
-    def test_to_dict_includes_max_concurrency(self):
-        """Should include max_concurrency in dict output."""
+    def test_to_dict_without_discovery_has_no_discovery_section(self):
+        builder = HangarConfig().add_mcp_server("math", command=["python"])
+
+        assert "discovery" not in builder.to_dict()
+
+    def test_to_dict_leaves_out_the_facade_max_concurrency(self):
+        """`max_concurrency` sizes the facade's pool; the gateway has no such top-level key."""
         builder = HangarConfig()
         builder.add_mcp_server("math", command=["python"])
         builder.max_concurrency(30)
         result = builder.to_dict()
 
-        assert result["max_concurrency"] == 30
+        assert "max_concurrency" not in result
+        assert builder.build().max_concurrency == 30
 
-    def test_to_dict_includes_default_max_concurrency(self):
-        """Should include default max_concurrency in dict output."""
-        builder = HangarConfig()
-        builder.add_mcp_server("math", command=["python"])
-        result = builder.to_dict()
 
-        assert result["max_concurrency"] == FACADE_DEFAULT_CONCURRENCY
+class TestTheBuilderWritesOnlyKeysTheGatewayReads:
+    """Every builder option produces a config the gateway accepts under strict mode (#1423).
+
+    Two builder features wrote keys the gateway does not read -- a remote
+    server's `url`, and `discovery.docker`/`.kubernetes`/`.filesystem` -- and
+    nothing said so until a dict was schema-checked (#1415). `build()` now runs
+    that check itself, so a key like those fails the build.
+    """
+
+    #: The options the test below builds. A new builder option fails
+    #: `test_the_test_builds_every_option` until it is added here and there.
+    SERVER_OPTIONS = frozenset({"mode", "command", "image", "url", "env", "idle_ttl_s"})
+    DISCOVERY_OPTIONS = frozenset({"docker", "kubernetes", "filesystem"})
+    METHODS = frozenset({"add_mcp_server", "enable_discovery", "max_concurrency", "set_intervals", "build", "to_dict"})
+
+    @staticmethod
+    def _every_option(directory: str) -> HangarConfig:
+        return (
+            HangarConfig()
+            .add_mcp_server("local", mode="subprocess", command=["python", "-m", "s"], env={"A": "1"}, idle_ttl_s=120)
+            .add_mcp_server("boxed", mode="docker", image="img:1", command=["serve"], env={"A": "1"})
+            .add_mcp_server("podded", mode="container", image="img:1", command=["serve"], env={"A": "1"})
+            .add_mcp_server("api", mode="remote", url="http://127.0.0.1:9/mcp", idle_ttl_s=60)
+            .enable_discovery(docker=True, kubernetes=True, filesystem=[directory])
+            .max_concurrency(7)
+        )
+
+    def test_the_test_builds_every_option(self):
+        server = set(inspect.signature(HangarConfig.add_mcp_server).parameters) - {"self", "name"}
+        discovery = set(inspect.signature(HangarConfig.enable_discovery).parameters) - {"self"}
+        methods = {name for name, _ in inspect.getmembers(HangarConfig, inspect.isfunction) if not name.startswith("_")}
+
+        assert server == self.SERVER_OPTIONS
+        assert discovery == self.DISCOVERY_OPTIONS
+        assert methods == self.METHODS
+
+    def test_every_option_passes_the_schema_check_under_strict_mode(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HANGAR_CONFIG_STRICT", "1")
+        builder = self._every_option(str(tmp_path))
+        builder.build()
+
+        # The gateway's own gate for a dict, strict: it raises on any unknown key.
+        prepared = prepare_config(builder.to_dict(), source="HangarConfig")
+
+        assert prepared["mcp_servers"]["api"] == {
+            "mode": "remote",
+            "idle_ttl_s": 60,
+            "endpoint": "http://127.0.0.1:9/mcp",
+        }
+        assert prepared["discovery"]["enabled"] is True
+        assert [source["type"] for source in prepared["discovery"]["sources"]] == ["docker", "kubernetes", "filesystem"]
+
+    @pytest.mark.parametrize("mode", ["docker", "container"])
+    def test_a_container_server_command_reaches_the_launcher(self, mode, monkeypatch):
+        """`command` is in docker's and container's read set because the launcher runs it.
+
+        The config value object sets `command=None` in docker mode, but that is
+        not the path a spec takes: `_load_mcp_server_config` passes the spec's
+        `command` as `container_command`, and `_create_client` hands it to the
+        container launcher as `command`. Traced here from the builder's spec to
+        the `launch()` call.
+        """
+
+        class Launched(Exception):
+            pass
+
+        builder = HangarConfig().add_mcp_server("boxed", mode=mode, image="img:1", command=["serve", "--stdio"])
+        added: dict[str, Any] = {}
+        repository = SimpleNamespace(add=lambda server_id, server: added.update({server_id: server}))
+        monkeypatch.setattr(server_config, "_mcp_server_repository", lambda: repository)
+        server_config._load_mcp_server_config("boxed", builder.to_dict()["mcp_servers"]["boxed"])
+
+        launcher = MagicMock()
+        launcher.launch.side_effect = Launched
+        with patch("mcp_hangar.infrastructure.launchers.get_launcher", return_value=launcher), pytest.raises(Launched):
+            added["boxed"]._create_client()
+
+        launched = launcher.launch.call_args.kwargs
+        assert launched["command"] == ["serve", "--stdio"]
+        assert launched["image"] == "img:1"
+
+    def test_the_old_remote_key_fails_the_build(self, monkeypatch):
+        """With `url` no longer mapped to `endpoint`, the build names the key."""
+        monkeypatch.setattr(facade, "_SPEC_KEY_FOR_OPTION", {})
+        builder = HangarConfig().add_mcp_server("api", mode="remote", url="http://127.0.0.1:9/mcp")
+
+        with pytest.raises(ConfigurationError, match=r"mcp_servers\.api has unknown key\(s\) \['url'\]"):
+            builder.build()
+
+    def test_the_old_discovery_shape_fails_the_build(self, monkeypatch):
+        """The pre-#1423 `discovery.docker` shape, emitted again, fails the build."""
+        emit = HangarConfig.to_dict
+
+        def old_shape(self: HangarConfig) -> dict:
+            return {**emit(self), "discovery": {"docker": {"enabled": True}}}
+
+        monkeypatch.setattr(HangarConfig, "to_dict", old_shape)
+        builder = HangarConfig().add_mcp_server("math", command=["python"])
+
+        with pytest.raises(ConfigurationError, match=r"discovery has unknown key\(s\) \['docker'\]"):
+            builder.build()
+        # A refused build leaves the builder open, so the caller can fix it.
+        builder.add_mcp_server("other", command=["python"])
 
 
 # --- ProviderInfo Tests ---
@@ -395,6 +542,76 @@ class TestHangarInitialization:
         config = HangarConfig().add_mcp_server("math", command=["python"]).build()
         hangar2 = Hangar.from_builder(config)
         assert hangar2._executor._max_workers != 4
+
+
+class TestHangarRunsDiscovery:
+    """`Hangar.start()` runs the discovery bootstrap built, and `stop()` stops it (#1423).
+
+    `bootstrap()` builds the orchestrator and starts nothing; only `serve`'s
+    `ServerLifecycle` started it, so under the facade a discovery section was
+    built and never ran. The served boot of a real orchestrator is
+    `tests/integration/test_a_builder_config_takes_effect.py`.
+    """
+
+    @staticmethod
+    def _context(orchestrator):
+        context = MagicMock()
+        context.discovery_orchestrator = orchestrator
+        return context
+
+    async def test_start_and_stop_run_discovery_on_its_own_loop(self):
+        loops = []
+
+        async def record():
+            loops.append(asyncio.get_running_loop())
+
+        orchestrator = MagicMock()
+        orchestrator.start.side_effect = record
+        orchestrator.stop.side_effect = record
+        orchestrator.get_stats.return_value = {"sources_count": 1}
+        context = self._context(orchestrator)
+        hangar = Hangar.from_builder(HangarConfig().enable_discovery(docker=True).build())
+
+        with patch.object(bootstrap_package, "bootstrap", return_value=context):
+            await hangar.start()
+            assert hangar._discovery is not None
+            await hangar.stop()
+            # A second stop does not shut the context down again.
+            await hangar.stop()
+
+        assert len(loops) == 2
+        assert loops[0] is loops[1]
+        assert loops[0] is not asyncio.get_running_loop()
+        assert hangar._discovery is None
+        context.shutdown.assert_called_once()
+
+    async def test_no_orchestrator_starts_no_loop(self):
+        context = self._context(None)
+        hangar = Hangar.from_builder(HangarConfig().add_mcp_server("math", command=["python"]).build())
+
+        with patch.object(bootstrap_package, "bootstrap", return_value=context):
+            await hangar.start()
+            await hangar.stop()
+
+        assert hangar._discovery is None
+        context.shutdown.assert_called_once()
+
+    async def test_a_discovery_that_fails_to_start_shuts_the_context_down(self):
+        orchestrator = MagicMock()
+        orchestrator.start.side_effect = RuntimeError("no start")
+        context = self._context(orchestrator)
+        hangar = Hangar.from_builder(HangarConfig().enable_discovery(docker=True).build())
+
+        with patch.object(bootstrap_package, "bootstrap", return_value=context), pytest.raises(RuntimeError):
+            await hangar.start()
+
+        assert hangar._started is False
+        assert hangar._context is None
+        # A caller that stops anyway does not shut the context down a second
+        # time, and the stop releases the thread pool the failed start used.
+        await hangar.stop()
+        context.shutdown.assert_called_once()
+        assert hangar._executor._shutdown is True
 
 
 class TestHangarNotStarted:

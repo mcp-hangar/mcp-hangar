@@ -69,9 +69,9 @@ class TestTheConfigIsRefusedWhereItIsWritten:
         assert get_tool_access_resolver().iter_registered_policies() == []
 
     def test_the_second_entry_point_refuses_it_too(self) -> None:
-        """`ServerConfigLoader.apply_mcp_servers` is the reload path (#838)."""
+        """`ServerConfigLoader.prepare_mcp_servers` is the reload path (#838)."""
         with pytest.raises(ConfigurationError, match="access.resource.approval_list"):
-            ServerConfigLoader().apply_mcp_servers(_spec({"resource": {"approval_list": ["secret://*"]}}))
+            ServerConfigLoader().prepare_mcp_servers(_spec({"resource": {"approval_list": ["secret://*"]}}))
 
     def test_a_config_file_carrying_it_refuses_too(self, tmp_path: Path) -> None:
         path = tmp_path / "config.yaml"

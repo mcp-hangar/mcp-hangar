@@ -268,10 +268,17 @@ def test_the_failed_restarts_count_against_the_member_until_it_leaves_rotation(f
     # every other call through the group failed, all twenty of them.
     outcomes = [_outcome(batch) for batch in failover["calls"]]
     failed_at = [i for i, o in enumerate(outcomes) if not o["success"]]
+    # Every call, spelled out. pytest's repr of a list cuts it off, and the one
+    # failure this test had on CI hid its cause past the cut (#1411).
+    every_call = "\n".join(
+        f"  call {i:2d}: " + ("ok" if o["success"] else f"{o.get('error_type')}: {o.get('error')}")
+        for i, o in enumerate(outcomes)
+    )
+    seen = f"{len(failed_at)} of {len(outcomes)} calls failed, at {failed_at}:\n{every_call}"
 
-    assert len(failed_at) == UNHEALTHY_THRESHOLD, [o.get("error_type") for o in outcomes]
-    assert [outcomes[i]["error_type"] for i in failed_at] == ["McpServerStartError", "CircuitBreakerOpen"]
-    assert all(o["success"] for o in outcomes[max(failed_at) + 1 :]), "the group did not fail over"
+    assert len(failed_at) == UNHEALTHY_THRESHOLD, seen
+    assert [outcomes[i]["error_type"] for i in failed_at] == ["McpServerStartError", "CircuitBreakerOpen"], seen
+    assert all(o["success"] for o in outcomes[max(failed_at) + 1 :]), f"the group did not fail over; {seen}"
 
 
 def test_the_group_fails_over_to_the_healthy_member(failover):

@@ -1,5 +1,152 @@
 # Upgrading MCP Hangar
 
+## Next — `block` and `quarantine` stop a server whose tools drift
+
+A server with `capabilities.enforcement_mode` set to `block` or `quarantine`
+whose upstream serves a tool that is not in `capabilities.tools.expected_tools`
+now serves nothing. Before, block mode detected the drift and marked the server
+`dead`, but the call that started it still ran the tool it asked for, and the
+upstream process was left running. Quarantine did not act on the drift at all
+and served the server as `alert` does.
+
+What happens now, in both modes:
+
+- The start that finds the drift fails with `CapabilityBlockedError`. Hangar
+  closes its connection, records `CapabilityViolationDetected`, and moves the
+  server to `dead` for a capability block (`capability_blocked`). It records no
+  `McpServerStarted`. Quarantine also records `McpServerCapabilityQuarantined`.
+- No call starts the server again: every later call to any of its tools,
+  declared ones included, is refused with `CannotStartMcpServerError`. The
+  recovery saga does not retry it, and a group does not put it in rotation.
+- A tool that appears after a clean start, through a refresh or
+  `tools/list_changed`, blocks the server in the same way at its next call.
+  Hangar closes the connection at once, so a call already in flight on it
+  fails.
+- `alert` mode is unchanged.
+
+If you set `quarantine` expecting it to keep serving, as it did, it no longer
+does: use `alert` for that.
+
+The error does not name the undeclared tools, because the caller it reaches is
+not the operator who has to act on them. The `capability_drift_detected`
+warning and the `CapabilityViolationDetected` event name them.
+
+**To bring a blocked server back**, fix the upstream or add the tool to
+`expected_tools`, then start the server deliberately: `hangar_start`,
+`hangar_warm` naming it, or a start through the REST API. That start checks the
+tools again, and fails the same way while they still drift. A stop leaves the
+server `cold`, and the next start, a call's included, checks them too.
+
+**Prompts, resources and task relays** to a server now need it to be `ready`,
+the same as a tool call. Before, they were forwarded to any server with a live
+connection, a `degraded` one included.
+
+## Next — egress calls are governed with their group and tenant scope
+
+A `hangar_call` that names a group member by its own server id, instead of
+naming the group, is now governed by that group. Before,
+it was governed as if the member were a standalone server.
+
+For each group that owns the member, a call naming the member is now checked
+the way a call naming that group and routed to that member is checked:
+
+| Declared on the group | Before | Now |
+| --- | --- | --- |
+| `tools:` (allow, deny) | not applied | applied |
+| `members[].tools:` for this member | not applied | applied |
+| `tool_projection.withdrawn`, per tenant or for all, and a runtime withdrawal of the group id | not applied | applied |
+| `tool_projection.pins`, in the group's `digest_enforcement` mode | not applied | applied |
+
+The call is still sent to the member it names. The group's member selection
+does not run. Everything the member's own server id declares applies as it did
+before.
+
+A server that is a member of more than one group is governed by all of them,
+and deny wins. A tool that any one of them denies, withdraws, or pins to a
+digest the tool does not match is refused.
+
+**Approval lists declared on groups or tenants now take effect.** The approval
+gate now reads approval lists with the same scope as the access policy. Before,
+it read only the `approval_list` of the server a call named, and asked without
+the caller's tenant.
+
+| Approval list | Before | Now |
+| --- | --- | --- |
+| a server's own `tools.approval_list`, egress | applied | applied |
+| a group's `tools.approval_list`, or `members[].tools.approval_list` | not applied | applied, on a call naming the group or the member |
+| `tool_access.member.<tenant>.approval_list` | not applied | applied to that tenant |
+| any approval list, `front_door` | not applied | applied |
+
+A tool on any list that applies needs approval. The first list that applies
+supplies the timeout and channel. Approval routed by an L7 egress policy's
+`requireApproval` is unchanged.
+
+**Withdrawal is re-checked after an approval hold.** A tool withdrawn while a
+call waits for approval, on the server, on an owning group, for every tenant
+or for the caller's, is now refused with `ToolWithdrawnError` once the call is
+approved. Before, it ran.
+
+**What to check.**
+
+- A caller that relied on naming a member to reach a tool its group denies,
+  withdraws or pins now gets `ToolAccessDeniedError`, `ToolWithdrawnError` or
+  `ToolDigestMismatchError`, as a call naming the group does. If that caller
+  should reach the tool, allow it on the group, or move the server out of the
+  group.
+- If you declared an `approval_list` on a group, on a group member, or for a
+  tenant, or you run `front_door` with approval lists, the tools on those lists
+  now wait for approval. With no approval channel configured, a held call times
+  out after `approval_timeout_seconds`. Remove a list you do not want enforced.
+- On `front_door`, a call has a fixed 30 s budget, so a held front-door call
+  must be approved within 30 s. An approval that arrives later is refused, and
+  the call does not run.
+
+Calls that name a group are governed as before, apart from their approval lists.
+So are servers that are in no group.
+
+## Next — a continuation answers only the caller that made the call
+
+With response truncation on (`truncation.enabled`), the rest of a truncated
+`hangar_call` result is kept in the continuation cache.
+`hangar_fetch_continuation` and `hangar_delete_continuation` now serve it only
+to the caller whose `hangar_call` produced it: the same tenant and the same
+principal. Anyone else who presents the id gets the
+answer for an id that does not exist.
+
+| Tool | Answer to any caller but the one that made the call |
+| --- | --- |
+| `hangar_fetch_continuation` | `{"found": false, "error": "Continuation not found (may have expired)"}` |
+| `hangar_delete_continuation` | `{"deleted": false, "continuation_id": "<the id>"}`, and nothing is deleted |
+
+**What may need a change.**
+
+- A client that fetched a continuation as a different principal from the one
+  that made the call now gets not found, even within the same tenant. Fetch it
+  with the credentials that made the call.
+- A caller with no tenant does not match a continuation stored with one, and
+  the reverse.
+- The `result_truncated` log line no longer carries `continuation_id`. It has
+  `batch_id`, `call_index` and `continuation_advertised`. The cache and
+  continuation-tool log lines carry `continuation_ref` in place of
+  `continuation_id`: the id without its random suffix.
+- A fetch or delete of another caller's continuation logs a
+  `continuation_owner_mismatch` warning naming the owner's and the caller's
+  tenant.
+
+**With auth off**, neither the caller that makes the call nor the caller that
+fetches has an identity. Both are anonymous, and continuations work as before.
+Nothing authenticates a caller there, so this is not a boundary. With the
+memory cache, a continuation is still fetchable only on the replica that
+truncated the result.
+
+**Upgrading with the Redis cache.** Values are now stored with their owner. A
+value written before the upgrade has no owner and is read as anonymous: with
+auth off it is still served, and with auth on it is not found. Either way it
+expires within `cache_ttl_s`. Until every replica runs this version, a replica
+on an older version still serves any continuation to any caller that holds its
+id, and returns a value written by an upgraded replica with the owner in front
+of the payload.
+
 ## Next — `tool_access.rules` is refused as a key nothing reads
 
 `tool_access.rules` was never read. The config schema listed it next to
@@ -24,6 +171,71 @@ applies to a file and to `bootstrap(config_dict=...)` alike.
 Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
 and deny lists of a server, a group and a group member, and `tool_access.mode`
 still selects the `egress` or `front_door` topology.
+
+## Next — a reload applies the whole configuration, and keeps the topology mode
+
+This affects every configuration reload: `POST /api/config/reload`,
+`hangar_reload_config`, SIGHUP, and the config file watcher.
+
+A reload used to reset `tool_access.mode` to `egress` and apply only
+`mcp_servers`. A reload now applies every section startup applies from the
+configuration:
+
+- `mcp_servers`, as before
+- `interceptors.validators`
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A section you delete from the file goes back to its default when you reload.
+Before, it stayed in force until the next restart. Every section is checked
+before any server is stopped. A bad value refuses the reload, and nothing
+changes.
+
+Sections that startup reads only once, such as `auth`, `persistence`,
+`event_store`, `discovery` and `logging`, still need a restart, as before.
+
+### A reload that changes `tool_access.mode` is refused
+
+A reload keeps the mode the gateway started with. If the file sets a different
+`tool_access.mode`, the reload is refused and nothing changes, because the
+front-door tool surface is built at startup. Restart the gateway to change the
+mode.
+
+| Trigger | What you see when the mode changed |
+| --- | --- |
+| `POST /api/config/reload` | HTTP 409, `ConfigurationRestartRequiredError` |
+| `hangar_reload_config` | `status: failed`, with the same message |
+| SIGHUP, file watcher | `configuration_reload_failed` in the log |
+
+The workaround for a `front_door` gateway, `config_reload.enabled: false` and a
+restart for every change, is no longer needed.
+
+### Policies set at runtime
+
+Before, a reload removed every tool-access policy set at runtime. Now:
+
+- The policies stored by the REST policy endpoint are replayed after the file,
+  as a restart does. On a scope that both the file and the REST endpoint
+  define, the stored policy applies, after a reload as after a restart. If the
+  policy store cannot be read, the reload is refused and nothing changes;
+  `POST /api/config/reload` answers HTTP 503.
+- Any other policy set at runtime, such as one `hangar_load` set, is kept
+  unless the file now defines the same scope. The file's policy then replaces
+  it.
+- A server that the reload removes takes its policies with it, as
+  `hangar_unload` does. A policy the REST endpoint stored for it comes back at
+  the next restart, as before.
+
+A group's inline members count as declared by the file. A reload no longer
+stops them as removed servers or strips the policies set on them at runtime.
+
+The groups, and the policies, withdrawals, pins and `header_exposure` blocks,
+are replaced rather than cleared and registered again, so a call made during a
+reload never finds them empty. A reload builds and checks every server and
+group before it stops any, so a bad block refuses the reload and changes
+nothing.
 
 ## Next — a config dict gets every setting it passes
 
@@ -67,6 +279,48 @@ that calls `enable_discovery()`, or adds a server with `mode="remote"` and
 `url=...`, produces keys the gateway does not read. Those settings were never
 applied. They now log `unknown_config_key`, and under strict mode the boot
 refuses.
+
+## Next — remote servers and discovery from the builder take effect
+
+This affects code that builds its configuration with `HangarConfig` and runs it
+with `Hangar.from_builder()`. Code that calls `Hangar.from_config()` on a file
+that enables discovery is affected by the `Hangar.start()` change below.
+
+Two builder features wrote keys the gateway does not read, so neither was ever
+applied. Both now take effect:
+
+- `add_mcp_server(..., mode="remote", url=...)` writes the address as
+  `endpoint`, the key the gateway reads. A remote server now boots with its
+  address and answers calls. The argument is still called `url=`.
+- `enable_discovery(...)` writes `discovery: {enabled: true, sources: [...]}`,
+  one `additive` source per requested type. Additive sources add the servers
+  they find and never remove one.
+
+`Hangar.start()` now runs discovery when the configuration enables it, and
+`Hangar.stop()` stops it. `bootstrap()` builds the discovery sources and starts
+nothing, and only `mcp-hangar serve` used to start them. So under the facade, a
+`discovery` section built its sources and never ran them, whether it came from
+the builder or from a file. If you enabled discovery and relied on it doing
+nothing, remove the call or the section: discovery now registers the servers its
+sources report.
+
+The builder now raises `ConfigurationError` on these calls. Each used to be
+stored and never applied:
+
+| Call | Why |
+| --- | --- |
+| `enable_discovery(filesystem=[a, b])` | The gateway keeps one source per type, so the second directory replaced the first. Pass one directory. |
+| `enable_discovery()` with no source | It enabled nothing. |
+| `add_mcp_server(..., mode="group")` | The builder cannot declare a group's members. Declare the group in a config file. |
+| `add_mcp_server(..., mode="container")` without `image=` | The launcher refused it only when the server started. Pass the image. |
+| An option the mode does not read, such as `url=` on a subprocess server, or `env=` or `command=` on a remote one | The gateway ignored it. Remove the option. |
+| `set_intervals(...)` | No configuration key sets the GC or health-check interval, so the value was never applied. Remove the call. |
+
+`build()` now checks the configuration against the gateway's schema, and raises
+on a key the gateway does not read. `to_dict()` no longer includes
+`max_concurrency`, which sizes the facade's thread pool and is not a gateway
+setting. `HangarConfigData` no longer has `gc_interval_s` or
+`health_check_interval_s`.
 
 ## Next — a server Hangar gives up on reads `dead`, not `cold`
 
