@@ -4,7 +4,7 @@ A McpServerGroup is an aggregate root that manages multiple McpServer instances
 as a single logical unit with automatic load balancing and failover.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import hashlib
 import time
@@ -16,7 +16,7 @@ from ..events import CircuitBreakerStateChanged, DomainEvent
 from ..exceptions import McpServerStartError, CannotStartMcpServerError
 from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, McpServerState
 from .aggregate import AggregateRoot
-from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from .load_balancer import LoadBalancer
 from .mcp_server import DEAD_NOT_ROUTED_BY_GROUPS, McpServer
 
@@ -215,6 +215,8 @@ class McpServerGroup(AggregateRoot):
         self._load_balancer = LoadBalancer(strategy)
         # Optional per-tenant canary/version routing policy (config-driven).
         self._canary: CanaryPolicy | None = None
+        # Told whether the circuit is open, after every transition (#1357).
+        self._circuit_listener: Callable[[bool], None] | None = None
 
         # Circuit breaker (extracted for SRP)
         self._circuit_breaker = CircuitBreaker(
@@ -251,7 +253,9 @@ class McpServerGroup(AggregateRoot):
     def _on_circuit_breaker_state_change(self, old_state: Any, new_state: Any) -> None:
         """Emit a domain event when the circuit breaker transitions between states.
 
-        Called by CircuitBreaker._fire_state_change outside of any lock.
+        Called by CircuitBreaker._fire_state_change outside of the breaker's
+        lock. Every transition the group makes is under its own lock, so the
+        listener hears them in the order they happened.
 
         Args:
             old_state: Previous CircuitState enum value.
@@ -264,6 +268,25 @@ class McpServerGroup(AggregateRoot):
                 new_state=new_state.value,
             )
         )
+        if self._circuit_listener is not None:
+            self._circuit_listener(new_state is CircuitState.OPEN)
+
+    def observe_circuit(self, listener: Callable[[bool], None]) -> None:
+        """Tell ``listener`` whether the circuit is open: now, and after every transition.
+
+        Every transition goes through the breaker's state-change callback:
+        opening on failures in a row, closing at ``min_healthy``,
+        ``rebalance()``'s reset. So the listener hears each one, on the path
+        that made it (#1357). The group's own events cannot do that: nothing
+        drains them on the call path or in the health checks, so they never
+        reach the bus from either.
+
+        Under the group's lock, so the state handed over now cannot land after
+        a transition that followed it.
+        """
+        with self._lock:
+            self._circuit_listener = listener
+            listener(self._circuit_breaker.is_open)
 
     # --- Properties ---
 

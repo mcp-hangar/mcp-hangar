@@ -32,6 +32,12 @@ Modes:
   health check sends, fails while a flag file exists. The harness sets the flag
   for the next check as it hears each one, so the order does not depend on
   timing.
+
+``single`` and ``pair`` also scrape ``mcp_hangar_group_circuit_open`` from the
+endpoint ``serve --http`` mounts at ``/metrics`` (#1357). They scrape right after
+``bootstrap()``, before any call, and after every call that can move the
+circuit. ``single`` then deletes the group and creates it again, through the
+commands the group API sends, and scrapes after each.
 """
 
 from __future__ import annotations
@@ -68,6 +74,8 @@ REAP_DEADLINE_S = 8.0
 SCATTERED = ("fail", "fail", "pass", "fail", "fail", "pass", "fail", "fail", "fail")
 #: Scattered mode: a check lands about every second.
 SCATTERED_DEADLINE_S = 30.0
+#: The gauge ``single`` and ``pair`` scrape (#1357).
+METRIC = "mcp_hangar_group_circuit_open"
 
 
 def _server(mode: str, flag: Path) -> dict[str, Any]:
@@ -155,21 +163,59 @@ def _status(client: Any) -> dict[str, Any]:
     return next(g for g in _tool(client, "hangar_group_list", {})["groups"] if g["group_id"] == GROUP)
 
 
+def _scrape(metrics: Any) -> list[str]:
+    """``GET /metrics``: ``METRIC``'s TYPE line and every sample of it."""
+    response = metrics.get("/metrics")
+    response.raise_for_status()
+    return [
+        line
+        for line in response.text.splitlines()
+        if line == f"# TYPE {METRIC} gauge" or line.startswith(f"{METRIC}{{")
+    ]
+
+
+def _gauge(metrics: Any) -> float | None:
+    """The group's sample, or None when there is none."""
+    prefix = f'{METRIC}{{group="{GROUP}"}} '
+    return next((float(line[len(prefix) :]) for line in _scrape(metrics) if line.startswith(prefix)), None)
+
+
+def _delete_and_create(context: Any, metrics: Any, report: dict[str, Any]) -> None:
+    """Delete the group and create it again, through the commands the group API sends."""
+    from mcp_hangar.application.commands.crud_commands import CreateGroupCommand, DeleteGroupCommand
+
+    context.runtime.command_bus.send(DeleteGroupCommand(group_id=GROUP))
+    report["metric"]["deleted"] = _scrape(metrics)
+    context.runtime.command_bus.send(CreateGroupCommand(group_id=GROUP))
+    report["metric"]["created"] = _scrape(metrics)
+
+
 def _worker(context: Any, task: str) -> Any:
     return next(w for w in context.background_workers if getattr(w, "task", None) == task)
 
 
-def _recover(context: Any, client: Any, report: dict[str, Any], mode: str, passed: dict[str, int]) -> None:
+def _recover(
+    context: Any, client: Any, metrics: Any, report: dict[str, Any], mode: str, passed: dict[str, int]
+) -> None:
     """Fail every member out through calls, then let the health worker run."""
     from mcp_hangar.server.state import GROUPS
 
     members = MEMBERS[mode]
     report["calls"]["before"] = _call(client, "add", {"a": 1, "b": 2})
+    report["metric"]["before"] = _gauge(metrics)
     # Priority routing sends each call to the first member still in rotation,
-    # so two failures per member drive every one of them out.
-    report["calls"]["failures"] = [_call(client, "divide", {"a": 1, "b": 0}) for _ in range(2 * len(members))]
+    # so two failures per member drive every one of them out. After each, the
+    # gauge, and the circuit as `hangar_group_list` reports it.
+    report["calls"]["failures"] = []
+    report["metric"]["failures"] = []
+    for _ in range(2 * len(members)):
+        report["calls"]["failures"].append(_call(client, "divide", {"a": 1, "b": 0}))
+        report["metric"]["failures"].append({"gauge": _gauge(metrics), "circuit_open": _status(client)["circuit_open"]})
     report["status"]["tripped"] = _status(client)
     report["calls"]["refused"] = _call(client, "add", {"a": 1, "b": 2})
+    report["metric"]["tripped"] = _gauge(metrics)
+    # Whole bodies, for the documented PromQL to run against.
+    report["scrapes"] = {"tripped": metrics.get("/metrics").text}
 
     for member in members:
         if member != RECOVERING:
@@ -187,6 +233,10 @@ def _recover(context: Any, client: Any, report: dict[str, Any], mode: str, passe
 
     report["status"]["after"] = _status(client)
     report["calls"]["after"] = _call(client, "add", {"a": 1, "b": 2})
+    report["metric"]["after"] = _gauge(metrics)
+    report["scrapes"]["recovered"] = metrics.get("/metrics").text
+    if mode == "single":
+        _delete_and_create(context, metrics, report)
 
 
 def _idle(context: Any, client: Any, report: dict[str, Any], stopped: list[list[str]]) -> None:
@@ -247,13 +297,15 @@ def _scattered(context: Any, client: Any, report: dict[str, Any], checks: list[d
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
+    from starlette.applications import Starlette
+    from starlette.routing import Route
     from starlette.testclient import TestClient
 
     from mcp_hangar.domain.contracts.event_bus import HandlerKind
     from mcp_hangar.domain.events import DomainEvent, HealthCheckFailed, HealthCheckPassed, McpServerStopped
     from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
     from mcp_hangar.server.bootstrap import bootstrap, workers
-    from mcp_hangar.server.lifecycle import mcp_app_for_serving
+    from mcp_hangar.server.lifecycle import mcp_app_for_serving, metrics_endpoint
 
     workers.HEALTH_CHECK_INTERVAL_SECONDS = 1
     workers.GC_WORKER_INTERVAL_SECONDS = 1
@@ -287,14 +339,17 @@ def main(mode: str, out: Path) -> None:
     # after the saga has.
     context.runtime.event_bus.subscribe_to_all(observe, kind=HandlerKind.PROJECTION)
 
-    report: dict[str, Any] = {"calls": {}, "status": {}}
+    # The endpoint `serve --http` mounts at /metrics, scraped from this process.
+    metrics = TestClient(Starlette(routes=[Route("/metrics", metrics_endpoint, methods=["GET"])]), base_url=BASE_URL)
+    # Before any call: a loaded group is on the scrape before its first transition.
+    report: dict[str, Any] = {"calls": {}, "status": {}, "metric": {"boot": _scrape(metrics)}}
     with TestClient(mcp_app_for_serving(context.mcp_server), base_url=BASE_URL) as client:
         if mode == "idle":
             _idle(context, client, report, stopped)
         elif mode == "scattered":
             _scattered(context, client, report, checks, flag)
         else:
-            _recover(context, client, report, mode, passed)
+            _recover(context, client, metrics, report, mode, passed)
 
     # Taken before the servers below are shut down, which is not under test.
     report["health_checks_passed"] = dict(passed)

@@ -408,3 +408,17 @@ PROJECTION_QUERIES: dict[str, str] = {
         " / sum(rate(mcp_hangar_projected_upstream_bytes_count[5m])) by (mcp_server)"
     ),
 }
+
+# Also copied verbatim into `guides/MCP_SERVER_GROUPS.md`. Each replica keeps its
+# own group circuit breaker (#1358), and the fleet view is these queries, not an
+# endpoint (#1380). They need the `instance` label the scrape adds.
+GROUP_CIRCUIT_QUERIES: dict[str, str] = {
+    # Groups the replicas disagree about: open on at least one, closed on another (#1357).
+    "replicas_disagree": (
+        "max by (group) (mcp_hangar_group_circuit_open) - min by (group) (mcp_hangar_group_circuit_open) > 0"
+    ),
+    # Groups whose circuit is open on at least one replica.
+    "open_anywhere": "max by (group) (mcp_hangar_group_circuit_open) == 1",
+    # Which replicas have a group's circuit open.
+    "open_on": "mcp_hangar_group_circuit_open == 1",
+}
