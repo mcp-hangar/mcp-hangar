@@ -16,7 +16,8 @@ that makes `init` touch no network (the smoke test is what fetches MCP servers
 from npm), and the release states that skipping the test also means skipping the
 pins -- an unverified pin would refuse every call to a tool nobody digested.
 
-Skip-safe: skips (never fails) without the CLI. Run with::
+Fails, rather than skips, without this checkout's CLI
+(``tests/_hangar_executable.py``). Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live -o addopts=""
 """
@@ -29,7 +30,7 @@ import subprocess
 import pytest
 import yaml
 
-from tests.live.conftest import _hangar_bin
+from tests._hangar_executable import hangar_executable
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -41,7 +42,7 @@ def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     config = workdir / "config.yaml"
     result = subprocess.run(
         [
-            _hangar_bin(),
+            hangar_executable(),
             "init",
             "-y",
             "--skip-clients",  # never touch a real client config on a dev machine
@@ -64,7 +65,7 @@ def test_the_generated_config_is_one_hangar_accepts(generated: Path):
     # until 3.0.0, so a key nothing reads would otherwise start fine and apply
     # nothing.
     result = subprocess.run(
-        [_hangar_bin(), "config", "check", str(generated)],
+        [hangar_executable(), "config", "check", str(generated)],
         capture_output=True,
         text=True,
         timeout=60,

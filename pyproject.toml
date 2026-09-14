@@ -69,7 +69,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.6",
+    "ruff==0.16.7",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -305,7 +305,11 @@ drift_allowance = 3.0
   "domain/services/task_consent.py" = 92.7
   "domain/services/task_digest_guard.py" = 97.7
   "domain/services/task_ownership.py" = 97.9
-  "domain/services/tool_access_resolver.py" = 94.1
+  # 94.1 -> 96.0 when tests/unit/test_config_policies_are_adopted_in_one_step.py
+  # drove the reload's policy swap and provenance paths (#1424): 97.38 measured
+  # on 3.11, past the drift allowance. Not --bump's 97.3, for the run-to-run
+  # swing noted below.
+  "domain/services/tool_access_resolver.py" = 96.0
   "domain/services/ui_resource_guard.py" = 100.0
   "domain/value_objects/tool_access_policy.py" = 84.7
   # 88.7 -> 92.7 because the two security regression files moved from

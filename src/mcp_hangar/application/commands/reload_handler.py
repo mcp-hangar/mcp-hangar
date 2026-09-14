@@ -1,29 +1,57 @@
 """Command handler for configuration reload."""
 
+from dataclasses import dataclass
 import time
 from typing import Any
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
 from ...domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
-from ...domain.exceptions import ConfigurationError
+from ...domain.exceptions import ConfigurationError, ConfigurationRestartRequiredError
 from ...domain.repository import IMcpServerRepository
 from ...domain.services import get_tool_access_resolver
+from ...domain.services.tool_access_resolver import configured_topology_mode
 from ...logging_config import get_logger
-from ..ports.config_loader import IConfigLoader
+from ..ports.config_loader import IConfigLoader, PreparedServers
 from .commands import ReloadConfigurationCommand
 
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class _ServerDiff:
+    """How the reloaded file's servers differ from the running ones."""
+
+    added: list[str]
+    removed: list[str]
+    updated: list[str]
+    unchanged: list[str]
+
+
 class ReloadConfigurationHandler(CommandHandler):
     """Handler for ReloadConfigurationCommand.
 
-    Reloads configuration from file and applies changes:
-    - Adds new mcp_servers
-    - Removes deleted mcp_servers
-    - Updates modified mcp_servers (restart with new config)
-    - Preserves unchanged mcp_servers (no restart)
+    Reloads the configuration file and applies the whole of it, through the
+    functions startup uses (#1424):
+
+    - every process-wide section: `execution`, `headers.param_validation`,
+      `resource_links`, `interceptors` and `ui_resources`. A section deleted
+      from the file goes back to its default;
+    - `mcp_servers`: adds new servers, removes deleted ones, restarts modified
+      ones and keeps unchanged ones;
+    - the groups, and the tool-access policies, withdrawals, pins and
+      `header_exposure` blocks the servers declare, swapped in rather than
+      cleared and registered again, so no call is resolved without them. The
+      REST endpoint's stored policies are replayed over the file's, as at
+      startup; any other policy set at runtime is kept unless the file now
+      defines the same scope. A server the reload removes takes its policies
+      with it.
+
+    A file that changes `tool_access.mode` is refused, and nothing is changed:
+    the front-door tool surface is built at startup, so the mode needs a
+    restart. Every process-wide section and every server and group block is
+    checked before any server is stopped, so a bad value anywhere also changes
+    nothing.
     """
 
     def __init__(
@@ -48,7 +76,8 @@ class ReloadConfigurationHandler(CommandHandler):
                 remove. Bootstrap has always injected the adapter, so the
                 fallback only ran in tests, which meant the tested path and the
                 production path were different ones.
-            groups: Groups dict reference for clearing during reload.
+            groups: The group registry. Not cleared by a reload any more: the
+                committed configuration replaces its entries (#1424).
         """
         self._repository = mcp_server_repository
         self._event_bus = event_bus
@@ -56,7 +85,7 @@ class ReloadConfigurationHandler(CommandHandler):
         self._config_loader = config_loader
         self._groups = groups if groups is not None else {}
 
-    def handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:  # noqa: C901 -- baseline CC=16; split before extending
+    def handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:
         """Handle the reload configuration command.
 
         Args:
@@ -67,6 +96,8 @@ class ReloadConfigurationHandler(CommandHandler):
 
         Raises:
             ConfigurationError: If configuration is invalid or cannot be loaded.
+            ConfigurationRestartRequiredError: If the file changes
+                `tool_access.mode`. Nothing is changed.
         """
         start_time = time.perf_counter()
 
@@ -75,7 +106,6 @@ class ReloadConfigurationHandler(CommandHandler):
         if not config_path:
             raise ConfigurationError("No configuration path specified")
 
-        # Publish reload requested event
         self._event_bus.publish(
             ConfigurationReloadRequested(
                 config_path=config_path,
@@ -85,185 +115,188 @@ class ReloadConfigurationHandler(CommandHandler):
         )
 
         try:
-            # Load and validate new configuration
-            new_full_config = self._config_loader.load_from_file(config_path)
-            new_mcp_servers_config = new_full_config.get("mcp_servers", {})
-
-            # Capture current state
-            current_mcp_servers = dict(self._repository.get_all())
-            # Note: Group reload not yet implemented (GROUPS state captured but not used)
-
-            # Calculate diff
-            new_ids = set(new_mcp_servers_config.keys())
-            current_ids = set(current_mcp_servers.keys())
-
-            added_ids = new_ids - current_ids
-            removed_ids = current_ids - new_ids
-            potentially_updated_ids = new_ids & current_ids
-
-            # Check for actual configuration changes
-            updated_ids = []
-            unchanged_ids = []
-            for mcp_server_id in potentially_updated_ids:
-                old_spec = self._get_mcp_server_spec(current_mcp_servers[mcp_server_id])
-                new_spec = new_mcp_servers_config[mcp_server_id]
-                if self._config_differs(old_spec, new_spec):
-                    updated_ids.append(mcp_server_id)
-                else:
-                    unchanged_ids.append(mcp_server_id)
-
-            logger.info(
-                "config_reload_diff_calculated",
-                added=len(added_ids),
-                removed=len(removed_ids),
-                updated=len(updated_ids),
-                unchanged=len(unchanged_ids),
-            )
-
-            # Apply changes atomically
-            # 1. Stop removed and updated mcp_servers
-            for mcp_server_id in list(removed_ids) + updated_ids:
-                mcp_server = current_mcp_servers.get(mcp_server_id)
-                if mcp_server:
-                    try:
-                        # McpServer exposes shutdown() as its lifecycle API.
-                        # Stop failures must abort reload rather than report a
-                        # successful replacement with the old runtime still alive.
-                        mcp_server.shutdown()
-
-                        logger.info(
-                            "mcp_server_stopped_for_reload",
-                            mcp_server_id=mcp_server_id,
-                            graceful=command.graceful,
-                        )
-                    except Exception as e:  # noqa: BLE001 -- preserve the shutdown failure as a reload failure
-                        logger.error(
-                            "mcp_server_stop_failed_during_reload",
-                            mcp_server_id=mcp_server_id,
-                            error=str(e),
-                        )
-                        raise ConfigurationError(f"Failed to stop mcp_server '{mcp_server_id}' for reload: {e}") from e
-
-            # 2. Remove deleted mcp_servers from repository
-            for mcp_server_id in removed_ids:
-                if mcp_server_id in current_mcp_servers:
-                    self._repository.remove(mcp_server_id)
-                    logger.info("mcp_server_removed", mcp_server_id=mcp_server_id)
-
-            # 3. Clear groups (will be reloaded)
-            self._groups.clear()
-
-            # 4. Invalidate and clear tool access policies before reload
-            # Policies will be re-registered during load_config
-            resolver = get_tool_access_resolver()
-            resolver.clear_all()
-            logger.debug("tool_access_policies_cleared_for_reload")
-
-            # 4b. Clear config-withdrawal overlay before reload so that
-            # removing a withdrawal from config actually restores the tool.
-            # Withdrawals will be re-applied by _load_mcp_server_config.
-            from ..read_models.tool_projection import get_tool_projection_registry
-
-            get_tool_projection_registry().clear_config_withdrawals()
-            logger.debug("config_withdrawals_cleared_for_reload")
-
-            # 4c. Clear config-pin overlay (and reset enforcement to block)
-            # before reload so that removing a pin from config reverts to the
-            # strict default. Pins will be re-applied by _load_mcp_server_config.
-            get_tool_projection_registry().clear_config_pins()
-            logger.debug("config_pins_cleared_for_reload")
-
-            # 4d. Clear the header_exposure overlay for the same reason:
-            # deleting the block from config must restore the tools it withheld.
-            from ...domain.policies.header_exposure import clear_header_exposure_policies
-
-            clear_header_exposure_policies()
-            logger.debug("header_exposure_cleared_for_reload")
-
-            # 5. Load new configuration (adds new and updates existing)
-            self._config_loader.apply_mcp_servers(new_mcp_servers_config)
-
-            # 6. Auto-start mcp_servers if they were running before
-            # (This depends on auto_start config and mcp_server state)
-            for mcp_server_id in added_ids:
-                mcp_server = self._repository.get(mcp_server_id)
-                if mcp_server:
-                    logger.info("mcp_server_added", mcp_server_id=mcp_server_id)
-
-            for mcp_server_id in updated_ids:
-                mcp_server = self._repository.get(mcp_server_id)
-                if mcp_server:
-                    logger.info("mcp_server_updated", mcp_server_id=mcp_server_id)
-
-            # Calculate duration
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            # Publish success event
-            self._event_bus.publish(
-                ConfigurationReloaded(
-                    config_path=config_path,
-                    mcp_servers_added=list(added_ids),
-                    mcp_servers_removed=list(removed_ids),
-                    mcp_servers_updated=updated_ids,
-                    mcp_servers_unchanged=unchanged_ids,
-                    reload_duration_ms=duration_ms,
-                    requested_by=command.requested_by,
-                )
-            )
-
-            logger.info(
-                "configuration_reloaded",
-                config_path=config_path,
-                duration_ms=duration_ms,
-                added=len(added_ids),
-                removed=len(removed_ids),
-                updated=len(updated_ids),
-            )
-
-            return {
-                "success": True,
-                "config_path": config_path,
-                "mcp_servers_added": list(added_ids),
-                "mcp_servers_removed": list(removed_ids),
-                "mcp_servers_updated": updated_ids,
-                "mcp_servers_unchanged": unchanged_ids,
-                "duration_ms": duration_ms,
-            }
-
+            diff = self._reload(config_path, graceful=command.graceful)
+        except ConfigurationError as e:
+            # Already a domain error whose message was written to be shown to
+            # the operator (e.g. "Failed to stop mcp_server '<id>' ..."). Let
+            # it through unchanged rather than burying it inside a generic
+            # wrapper -- and rather than re-wrapping, which would also lose
+            # its own status mapping.
+            self._report_failure(e, config_path, command.requested_by, start_time)
+            raise
         except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap reload errors in ConfigurationError for callers
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            # Publish failure event
-            self._event_bus.publish(
-                ConfigurationReloadFailed(
-                    config_path=config_path,
-                    reason=str(e),
-                    error_type=type(e).__name__,
-                    requested_by=command.requested_by,
-                )
-            )
-
-            logger.error(
-                "configuration_reload_failed",
-                config_path=config_path,
-                error=str(e),
-                error_type=type(e).__name__,
-                duration_ms=duration_ms,
-            )
-
-            if isinstance(e, ConfigurationError):
-                # Already a domain error whose message was written to be shown to
-                # the operator (e.g. "Failed to stop mcp_server '<id>' ..."). Let
-                # it through unchanged rather than burying it inside a generic
-                # wrapper -- and rather than re-wrapping, which would also lose
-                # its own status mapping.
-                raise
             # An unexpected internal failure: its text can carry filesystem
             # paths, stringified underlying errors, and other internals, and the
             # REST error envelope renders MCPError.message verbatim to the
-            # caller. The event and the log above keep the full detail for
-            # operators; the caller gets a generic 500 with nothing to leak.
+            # caller. The event and the log keep the full detail for operators;
+            # the caller gets a generic 500 with nothing to leak.
+            self._report_failure(e, config_path, command.requested_by, start_time)
             raise ConfigurationError("Configuration reload failed due to an internal error") from e
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        self._event_bus.publish(
+            ConfigurationReloaded(
+                config_path=config_path,
+                mcp_servers_added=diff.added,
+                mcp_servers_removed=diff.removed,
+                mcp_servers_updated=diff.updated,
+                mcp_servers_unchanged=diff.unchanged,
+                reload_duration_ms=duration_ms,
+                requested_by=command.requested_by,
+            )
+        )
+        logger.info(
+            "configuration_reloaded",
+            config_path=config_path,
+            duration_ms=duration_ms,
+            added=len(diff.added),
+            removed=len(diff.removed),
+            updated=len(diff.updated),
+        )
+        return {
+            "success": True,
+            "config_path": config_path,
+            "mcp_servers_added": diff.added,
+            "mcp_servers_removed": diff.removed,
+            "mcp_servers_updated": diff.updated,
+            "mcp_servers_unchanged": diff.unchanged,
+            "duration_ms": duration_ms,
+        }
+
+    def _reload(self, config_path: str, *, graceful: bool) -> _ServerDiff:
+        """Check and build all of the file first; then apply what can no longer fail on it."""
+        new_full_config = self._config_loader.load_from_file(config_path)
+        self._refuse_a_topology_change(new_full_config, config_path)
+        self._config_loader.check_process_config(new_full_config)
+        # Every server, group and governance block, built and checked before
+        # anything is stopped: a bad block fails the reload with the running
+        # configuration untouched. It used to surface only after the servers
+        # were stopped and the process-wide sections applied (#1424).
+        prepared = self._config_loader.prepare_mcp_servers(new_full_config.get("mcp_servers", {}))
+
+        current_mcp_servers = dict(self._repository.get_all())
+        diff = self._diff(current_mcp_servers, prepared)
+
+        self._stop(current_mcp_servers, diff.removed + diff.updated, graceful=graceful)
+        self._remove(diff.removed)
+
+        # The same function startup applies these sections with. The topology
+        # mode among them is the running one, which the check above ensured.
+        self._config_loader.apply_process_config(new_full_config)
+        # Servers and groups, and their policies, withdrawals, pins and
+        # header_exposure blocks swapped in rather than cleared and registered
+        # again. The group registry is replaced, not emptied first.
+        self._config_loader.commit_mcp_servers(prepared)
+
+        for mcp_server_id in diff.added:
+            logger.info("mcp_server_added", mcp_server_id=mcp_server_id)
+        for mcp_server_id in diff.updated:
+            logger.info("mcp_server_updated", mcp_server_id=mcp_server_id)
+        return diff
+
+    def _refuse_a_topology_change(self, new_full_config: dict[str, Any], config_path: str) -> None:
+        """A reload keeps the topology mode; a file that changes it needs a restart.
+
+        The front-door tool surface is built at startup. A reload that moved the
+        resolver to another mode would leave that surface and the access rules
+        disagreeing -- which is what a reload did until #1424, silently, by
+        resetting every gateway to `egress`.
+        """
+        running = get_tool_access_resolver().topology_mode
+        requested = configured_topology_mode(new_full_config)
+        if requested == running:
+            return
+        raise ConfigurationRestartRequiredError(
+            f"{config_path} sets tool_access.mode to {requested!r}, and this gateway runs as {running!r}. "
+            "A reload cannot change the topology mode, because the tool surface is built at startup. "
+            "Nothing was changed. Restart the gateway to apply the new mode.",
+            details={"running_mode": running, "requested_mode": requested},
+        )
+
+    def _diff(self, current: dict[str, Any], prepared: PreparedServers) -> _ServerDiff:
+        """Compare the running servers with every server the file declares.
+
+        The declared servers include each group's inline members. Counting only
+        the top-level keys made every inline member look removed: it was
+        stopped, rebuilt, and stripped of the policies set on it at runtime.
+
+        A running server the new configuration does not keep is being replaced,
+        so it counts as updated and is stopped. Replacing it without a stop left
+        its process running with nothing to stop it (#1424).
+        """
+        new_specs = prepared.specs
+        new_ids = set(new_specs)
+        current_ids = set(current)
+
+        updated: list[str] = []
+        unchanged: list[str] = []
+        for mcp_server_id in sorted(new_ids & current_ids):
+            running = current[mcp_server_id]
+            old_spec = self._get_mcp_server_spec(running)
+            replaced = not prepared.keeps(mcp_server_id, running)
+            if replaced or self._config_differs(old_spec, new_specs[mcp_server_id]):
+                updated.append(mcp_server_id)
+            else:
+                unchanged.append(mcp_server_id)
+
+        diff = _ServerDiff(
+            added=sorted(new_ids - current_ids),
+            removed=sorted(current_ids - new_ids),
+            updated=updated,
+            unchanged=unchanged,
+        )
+        logger.info(
+            "config_reload_diff_calculated",
+            added=len(diff.added),
+            removed=len(diff.removed),
+            updated=len(diff.updated),
+            unchanged=len(diff.unchanged),
+        )
+        return diff
+
+    def _stop(self, current: dict[str, Any], mcp_server_ids: list[str], *, graceful: bool) -> None:
+        for mcp_server_id in mcp_server_ids:
+            mcp_server = current.get(mcp_server_id)
+            if not mcp_server:
+                continue
+            try:
+                # McpServer exposes shutdown() as its lifecycle API. Stop
+                # failures must abort reload rather than report a successful
+                # replacement with the old runtime still alive.
+                mcp_server.shutdown()
+                logger.info("mcp_server_stopped_for_reload", mcp_server_id=mcp_server_id, graceful=graceful)
+            except Exception as e:  # noqa: BLE001 -- preserve the shutdown failure as a reload failure
+                logger.error("mcp_server_stop_failed_during_reload", mcp_server_id=mcp_server_id, error=str(e))
+                raise ConfigurationError(f"Failed to stop mcp_server '{mcp_server_id}' for reload: {e}") from e
+
+    def _remove(self, mcp_server_ids: list[str]) -> None:
+        resolver = get_tool_access_resolver()
+        for mcp_server_id in mcp_server_ids:
+            self._repository.remove(mcp_server_id)
+            # Its policies go with it, as on `hangar_unload`: the id is now free
+            # for a later server, which must not inherit them (#1028). The
+            # file's own entries would go in the swap anyway; this also takes
+            # the ones a runtime caller set.
+            resolver.remove_mcp_server_policy(mcp_server_id)
+            logger.info("mcp_server_removed", mcp_server_id=mcp_server_id)
+
+    def _report_failure(self, error: Exception, config_path: str, requested_by: str, start_time: float) -> None:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        self._event_bus.publish(
+            ConfigurationReloadFailed(
+                config_path=config_path,
+                reason=str(error),
+                error_type=type(error).__name__,
+                requested_by=requested_by,
+            )
+        )
+        logger.error(
+            "configuration_reload_failed",
+            config_path=config_path,
+            error=str(error),
+            error_type=type(error).__name__,
+            duration_ms=duration_ms,
+        )
 
     def _get_mcp_server_spec(self, mcp_server) -> dict[str, Any]:
         """Extract configuration spec from mcp_server aggregate.

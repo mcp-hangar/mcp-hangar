@@ -22,8 +22,9 @@ The authenticated probe surface is ``/api/system/me`` (auth enforcement runs
 before the handler, so a missing/rotated-out/revoked key is rejected at the
 trust boundary; a valid key reaches the handler which echoes ``authenticated``).
 
-Skip-safe: if the ``mcp-hangar`` binary or the stub backend is missing, or the
-server never becomes healthy, the module SKIPs rather than fails. Run with::
+Skip-safe: if the stub backend is missing, or the server never becomes healthy,
+the module SKIPs rather than fails. A missing ``mcp-hangar`` binary fails it
+(``tests/_hangar_executable.py``). Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t2" -o addopts=""
 """

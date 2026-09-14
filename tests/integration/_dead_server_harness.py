@@ -37,6 +37,22 @@ first failure with ``max_consecutive_failures: 1``. So in those modes the
 restart runs at once. A restart the saga schedules inside that backoff is
 refused and scheduled again (#1401); ``defaults`` mode shows that.
 
+In ``failover`` mode B's backoff is also widened, to 60s, for the twenty calls
+(#1411). At its real 2s, jitter included, it runs out between B's two turns
+when calls are about a second apart. Call 3 then starts B again, a second
+``McpServerStartError``, where a faster run sees ``CircuitBreakerOpen``. The
+refusal is still the server's own: the call gate and the start both read the
+same tracker. Only how long it lasts is fixed, so the expected sequence does not
+depend on how fast the calls go.
+
+Two env knobs slow ``failover`` mode down, to show that its result does not
+depend on pace. Both are off by default:
+
+- ``DEAD_SERVER_PRE_CALL_DELAY_S``: seconds to wait once B is dead, before the
+  first call. At 6 this reproduced a publish race, since fixed.
+- ``DEAD_SERVER_CALL_DELAY_S``: seconds between two calls. From about 1.2 up,
+  with B's real backoff, it flipped call 3's error type.
+
 Modes:
 
 - ``single``: two servers. Both are broken until the saga gives up. One is
@@ -87,6 +103,12 @@ BY_START, BY_CALL = "svc-a", "svc-b"
 GROUP, MEMBER, MEMBER_B = "pool", "member-a", "member-b"
 #: Failover mode: calls through the group once B is dead.
 FAILOVER_CALLS = 20
+#: Failover mode: B's backoff for the twenty calls, the production cap; see the
+#: module docstring.
+FAILOVER_BACKOFF_S = 60.0
+#: Failover mode's opt-in pacing knobs; see the module docstring.
+PRE_CALL_DELAY_ENV = "DEAD_SERVER_PRE_CALL_DELAY_S"
+CALL_DELAY_ENV = "DEAD_SERVER_CALL_DELAY_S"
 #: The saga's first backoff and retry budget; see the module docstring.
 SAGA_BACKOFF_S = 2.5
 SAGA_MAX_RETRIES = 1
@@ -392,7 +414,23 @@ def _failover(
     _wait(lambda: _saw_dead(seen, MEMBER_B, "crashed"), 10)
     report["crashed"] = _group(client)
 
-    report["calls"] = [_call(client, GROUP) for _ in range(FAILOVER_CALLS)]
+    time.sleep(float(os.environ.get(PRE_CALL_DELAY_ENV, "0")))
+    spacing = float(os.environ.get(CALL_DELAY_ENV, "0"))
+
+    # B's backoff is fixed for the window, so call 3 lands inside it however
+    # far apart the calls are; see the module docstring. Set on B's own
+    # tracker, the one the call gate and the start both read, and only once B
+    # is dead: the first call must still be free to try a start.
+    b_health = repository.get(MEMBER_B).health
+    b_health._calculate_backoff = lambda: FAILOVER_BACKOFF_S
+    report["calls"] = []
+    try:
+        for n in range(FAILOVER_CALLS):
+            if n:
+                time.sleep(spacing)
+            report["calls"].append(_call(client, GROUP))
+    finally:
+        del b_health._calculate_backoff
     report["after"] = _group(client)
 
 

@@ -28,39 +28,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
-import pytest
+from tests._hangar_executable import hangar_executable
 
 # The quickstart's own upstream, so this test and the documented walkthrough
 # exercise the same server. `tests/mock_provider.py` is not usable here: it
 # answers `tools/call` with `{"result": 5}`, which is not a `CallToolResult`, and
 # a real SDK client rejects the envelope before any of this can be asserted.
 UPSTREAM = str(Path(__file__).resolve().parent.parent.parent / "examples" / "rugpull" / "server.py")
-
-
-def _hangar_binary() -> str | None:
-    """The console script that belongs to the interpreter running the tests.
-
-    `shutil.which` alone is wrong here: it answers from PATH, which in a venv
-    invoked as `.venv/bin/python -m pytest` does not include the venv's own
-    `bin/`. That made this file skip silently on exactly the setup most people
-    run it in -- a green suite that asserted nothing.
-    """
-    beside = Path(sys.executable).parent / ("mcp-hangar.exe" if sys.platform == "win32" else "mcp-hangar")
-    if beside.is_file():
-        return str(beside)
-    return shutil.which("mcp-hangar")
-
-
-HANGAR = _hangar_binary()
-
-pytestmark = pytest.mark.skipif(
-    HANGAR is None,
-    reason="the `mcp-hangar` console script is not installed for this interpreter",
-)
 
 # The driver runs in its own process for one reason: the SDK's stdio client owns
 # the lifetime of the gateway subprocess, and pytest's event loop and captured
@@ -156,7 +133,7 @@ def drive(tmp_path: Path, config: Path, tool: str = "echo", retries: int = 30) -
     driver = tmp_path / "driver.py"
     driver.write_text(DRIVER)
     result = subprocess.run(
-        [sys.executable, str(driver), HANGAR, str(config), tool, str(retries)],
+        [sys.executable, str(driver), hangar_executable(), str(config), tool, str(retries)],
         capture_output=True,
         text=True,
         # Under the 60s pytest-timeout the CI job applies, so a hung gateway

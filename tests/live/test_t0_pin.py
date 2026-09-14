@@ -16,8 +16,8 @@ changes between two runs (`RUG_DESC` on `examples/rugpull`), with the
 configuration untouched. A poisoned *description* is the version that alters no
 parameter, which is why the digest covers it.
 
-Skip-safe: skips (never fails) when the CLI or the demo upstream are missing.
-Run with::
+Skip-safe: skips (never fails) when the demo upstream is missing. Without this
+checkout's CLI it fails (``tests/_hangar_executable.py``). Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live -o addopts=""
 """
@@ -32,7 +32,7 @@ import sys
 import pytest
 import yaml
 
-from tests.live.conftest import _hangar_bin
+from tests._hangar_executable import hangar_executable
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -73,7 +73,7 @@ def run_pin(config: Path, *args: str, rug: str | None = None) -> subprocess.Comp
         # Reaches the upstream because `pin` starts it as a child of this process.
         env["RUG_DESC"] = rug
     return subprocess.run(
-        [_hangar_bin(), "pin", "--config", str(config), *args],
+        [hangar_executable(), "pin", "--config", str(config), *args],
         capture_output=True,
         text=True,
         timeout=180,
