@@ -59,6 +59,7 @@ GROUP_STATUS_KEYS = {
     "strategy",
     "min_healthy",
     "healthy_count",
+    "members_in_rotation_count",
     "total_members",
     "is_available",
     "circuit_open",
@@ -178,6 +179,7 @@ class TestAGroupHasItsOwnSection:
                 "indicator": "[HEALTHY]",
                 "state": "healthy",
                 "healthy_members": 2,
+                "members_in_rotation_count": 2,
                 "total_members": 2,
                 "circuit_open": False,
             }
