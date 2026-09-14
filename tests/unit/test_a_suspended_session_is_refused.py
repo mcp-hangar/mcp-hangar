@@ -207,7 +207,7 @@ def front_door(monkeypatch):
     monkeypatch.setattr(flat_tool_projection, "_build_flat_map", build_flat_map)
     monkeypatch.setattr(flat_tool_projection, "_member_to_group", lambda: {})
     monkeypatch.setattr("mcp_hangar.server.tools.tool_permissions.management_tools_for", lambda _ctx: frozenset())
-    monkeypatch.setattr("mcp_hangar.server.tools.batch.BatchExecutor", _Executor)
+    monkeypatch.setattr("mcp_hangar.server.tools.batch._executor", _Executor())
 
     handlers: dict[str, Any] = {}
 

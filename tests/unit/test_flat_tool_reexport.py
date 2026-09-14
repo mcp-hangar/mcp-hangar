@@ -618,12 +618,13 @@ class TestFlatCallToolHandler:
                     "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_access_resolver",
                     return_value=resolver,
                 ),
-                # Patched where the handler's deferred import resolves it
-                # (#894). There is no module-level name on the projection to
-                # patch any more, and there must not be one.
+                # The configured executor, which the handler reads per call
+                # through `configured_executor()` (#1425). There is no
+                # module-level name on the projection to patch (#894), and there
+                # must not be one.
                 patch(
-                    "mcp_hangar.server.tools.batch.BatchExecutor",
-                    return_value=mock_executor,
+                    "mcp_hangar.server.tools.batch._executor",
+                    mock_executor,
                 ),
             ):
                 result = await call_fn("read_item", {"x": "hello"})
@@ -714,8 +715,8 @@ class TestFlatCallToolHandler:
                     return_value=resolver,
                 ),
                 patch(
-                    "mcp_hangar.server.tools.batch.BatchExecutor",
-                    return_value=mock_executor,
+                    "mcp_hangar.server.tools.batch._executor",
+                    mock_executor,
                 ),
             ):
                 # The tool is now withdrawn, so it won't be in the flat map.
@@ -775,8 +776,8 @@ class TestFlatCallToolHandler:
                     return_value=resolver,
                 ),
                 patch(
-                    "mcp_hangar.server.tools.batch.BatchExecutor",
-                    return_value=mock_executor,
+                    "mcp_hangar.server.tools.batch._executor",
+                    mock_executor,
                 ),
             ):
                 result = await call_fn("read_item", {})
@@ -898,7 +899,7 @@ class TestGroupsBehindFrontDoor:
                 p1,
                 p2,
                 p3,
-                patch("mcp_hangar.server.tools.batch.BatchExecutor", return_value=mock_executor),
+                patch("mcp_hangar.server.tools.batch._executor", mock_executor),
             ):
                 result = await captured["call"]("read_item", {"x": "1"})
         finally:

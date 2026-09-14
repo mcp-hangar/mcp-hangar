@@ -328,7 +328,7 @@ drift_allowance = 3.0
   # 89.5 -> 90.5 when tests/unit/test_approval_span_result.py began closing the
   # approval loops in teardown (#1389), which runs _close_approval_loops -- until
   # then reached only at exit, where nothing measures it: 93.04 on 3.11.
-  "server/tools/batch/executor.py" = 90.5
+  "server/tools/batch/executor.py" = 92.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
