@@ -39,16 +39,19 @@ class ReloadConfigurationHandler(CommandHandler):
       from the file goes back to its default;
     - `mcp_servers`: adds new servers, removes deleted ones, restarts modified
       ones and keeps unchanged ones;
-    - the tool-access policies, withdrawals, pins and `header_exposure` blocks
-      the servers declare, swapped in as one set, so no call is resolved
-      against an empty one. A policy set at runtime is kept unless the file now
-      defines the same scope; a server the reload removes takes its policies
+    - the groups, and the tool-access policies, withdrawals, pins and
+      `header_exposure` blocks the servers declare, swapped in rather than
+      cleared and registered again, so no call is resolved without them. The
+      REST endpoint's stored policies are replayed over the file's, as at
+      startup; any other policy set at runtime is kept unless the file now
+      defines the same scope. A server the reload removes takes its policies
       with it.
 
     A file that changes `tool_access.mode` is refused, and nothing is changed:
     the front-door tool surface is built at startup, so the mode needs a
-    restart. Every process-wide section is checked before any server is
-    stopped, so a bad value there also changes nothing.
+    restart. Every process-wide section and every server and group block is
+    checked before any server is stopped, so a bad value anywhere also changes
+    nothing.
     """
 
     def __init__(
@@ -73,7 +76,8 @@ class ReloadConfigurationHandler(CommandHandler):
                 remove. Bootstrap has always injected the adapter, so the
                 fallback only ran in tests, which meant the tested path and the
                 production path were different ones.
-            groups: Groups dict reference for clearing during reload.
+            groups: The group registry. Not cleared by a reload any more: the
+                committed configuration replaces its entries (#1424).
         """
         self._repository = mcp_server_repository
         self._event_bus = event_bus
@@ -160,27 +164,29 @@ class ReloadConfigurationHandler(CommandHandler):
         }
 
     def _reload(self, config_path: str, *, graceful: bool) -> _ServerDiff:
-        """Check the file, then apply all of it. Everything that can refuse runs first."""
+        """Check and build all of the file first; then apply what can no longer fail on it."""
         new_full_config = self._config_loader.load_from_file(config_path)
         self._refuse_a_topology_change(new_full_config, config_path)
         self._config_loader.check_process_config(new_full_config)
+        # Every server, group and governance block, built and checked before
+        # anything is stopped: a bad block fails the reload with the running
+        # configuration untouched. It used to surface only after the servers
+        # were stopped and the process-wide sections applied (#1424).
+        prepared = self._config_loader.prepare_mcp_servers(new_full_config.get("mcp_servers", {}))
 
-        new_mcp_servers_config = new_full_config.get("mcp_servers", {})
         current_mcp_servers = dict(self._repository.get_all())
-        diff = self._diff(current_mcp_servers, new_mcp_servers_config)
+        diff = self._diff(current_mcp_servers, prepared.specs)
 
         self._stop(current_mcp_servers, diff.removed + diff.updated, graceful=graceful)
         self._remove(diff.removed)
-        # Groups are rebuilt by apply_mcp_servers below.
-        self._groups.clear()
 
         # The same function startup applies these sections with. The topology
         # mode among them is the running one, which the check above ensured.
         self._config_loader.apply_process_config(new_full_config)
-        # Servers, groups and their policies, withdrawals, pins and
-        # header_exposure blocks, the overlays swapped in as one set: no
-        # clear-then-register, so no call is resolved against an empty set.
-        self._config_loader.apply_mcp_servers(new_mcp_servers_config)
+        # Servers and groups, and their policies, withdrawals, pins and
+        # header_exposure blocks swapped in rather than cleared and registered
+        # again. The group registry is replaced, not emptied first.
+        self._config_loader.commit_mcp_servers(prepared)
 
         for mcp_server_id in diff.added:
             logger.info("mcp_server_added", mcp_server_id=mcp_server_id)
@@ -207,15 +213,21 @@ class ReloadConfigurationHandler(CommandHandler):
             details={"running_mode": running, "requested_mode": requested},
         )
 
-    def _diff(self, current: dict[str, Any], new_mcp_servers_config: dict[str, Any]) -> _ServerDiff:
-        new_ids = set(new_mcp_servers_config)
+    def _diff(self, current: dict[str, Any], new_specs: dict[str, dict[str, Any]]) -> _ServerDiff:
+        """Compare the running servers with every server the file declares.
+
+        *new_specs* includes each group's inline members. Counting only the
+        top-level keys made every inline member look removed: it was stopped,
+        rebuilt, and stripped of the policies set on it at runtime (#1424).
+        """
+        new_ids = set(new_specs)
         current_ids = set(current)
 
         updated: list[str] = []
         unchanged: list[str] = []
         for mcp_server_id in sorted(new_ids & current_ids):
             old_spec = self._get_mcp_server_spec(current[mcp_server_id])
-            if self._config_differs(old_spec, new_mcp_servers_config[mcp_server_id]):
+            if self._config_differs(old_spec, new_specs[mcp_server_id]):
                 updated.append(mcp_server_id)
             else:
                 unchanged.append(mcp_server_id)

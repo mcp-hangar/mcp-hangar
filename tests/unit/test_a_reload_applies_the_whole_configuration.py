@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 from typing import Any
 from collections.abc import Callable
 from unittest.mock import Mock
@@ -42,6 +43,7 @@ from mcp_hangar.fastmcp_server import resource_link_read_through as rt
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.api import middleware
 from mcp_hangar.server.config import load_configuration, ServerConfigLoader
+from mcp_hangar.server.context import get_context
 from mcp_hangar.server.state import get_runtime, GROUPS
 from mcp_hangar.server.tools import batch
 from mcp_hangar.server.tools.batch.concurrency import (
@@ -57,7 +59,7 @@ PIN = "a" * 64
 DENY_Y = ToolAccessPolicy(deny_list=("y",))
 PAYLOAD_CAP = {"type": "payload_size", "max_bytes": 64}
 #: Every server id a test here adds, so teardown removes exactly those.
-IDS = (SERVER, "extra", "late", "other", "m1")
+IDS = (SERVER, "extra", "late", "other", "m1", "bad")
 
 
 def _server(**extra: Any) -> dict[str, Any]:
@@ -309,6 +311,31 @@ def _governance(mcp_server_id: str) -> dict[str, bool]:
     }
 
 
+#: A group whose OWN controls hide `y` (deny) and `gw` (withdrawal) from its
+#: member m1, a top-level server. The front door finds them only through the
+#: group registry.
+GROUP = {
+    "mode": "group",
+    "auto_start": False,
+    "tools": {"deny_list": ["y"]},
+    "tool_projection": {"withdrawn": ["gw"]},
+    "members": [{"id": "m1"}],
+}
+
+
+def _group_rules() -> dict[str, bool]:
+    """What the front door decides for a tenant on the group's member m1."""
+    return {
+        "y_allowed": flat_tool_projection.is_governed_allowed("m1", "y", kind="tool", tenant_id=TENANT),
+        "gw_allowed": flat_tool_projection.is_governed_allowed("m1", "gw", kind="tool", tenant_id=TENANT),
+    }
+
+
+def _process_state() -> dict[str, Any]:
+    """Every process-wide section, as its reader sees it."""
+    return {section: read() for section, (_booted, _edited, read, *_values) in SECTIONS.items()}
+
+
 class TestGovernanceAcrossAReload:
     def test_what_the_file_no_longer_declares_is_lifted(self, gateway: _Gateway) -> None:
         gateway.boot(_config(servers={SERVER: GOVERNED}))
@@ -358,6 +385,42 @@ class TestGovernanceAcrossAReload:
         assert resolver.get_configured_policy("group", "g") == ToolAccessPolicy(deny_list=("y",))
         assert resolver.get_configured_policy("member", "g:m1") == ToolAccessPolicy(deny_list=("x",))
 
+    def test_a_runtime_policy_on_an_inline_member_survives_an_unchanged_reload(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An inline member is declared by the file: not removed, not stopped, not stripped."""
+        # Resources spelled out: a server whose file omits them is restarted by
+        # every reload, which is #1426 and not what this pins.
+        member = {"id": "m1", **_server(resources={"memory": "512m", "cpu": "1.0"})}
+        config = _config(servers={"g": {"mode": "group", "auto_start": False, "members": [member]}})
+        gateway.boot(config)
+        get_tool_access_resolver().set_mcp_server_policy("m1", DENY_Y)  # a REST provider-scope policy
+        _, shutdown = _spy_on_shutdown(monkeypatch, "m1")
+
+        result = gateway.reload(config)
+
+        assert result["mcp_servers_removed"] == []
+        assert result["mcp_servers_unchanged"] == ["m1"]
+        shutdown.assert_not_called()
+        assert get_tool_access_resolver().get_configured_policy("provider", "m1") == DENY_Y
+
+    def test_a_policy_the_rest_endpoint_stored_is_replayed_over_the_file(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """As startup replays the store after the file, so a reload and a restart agree."""
+        stored = [("provider", SERVER, DENY_Y), ("group", "g", DENY_Y)]
+        store = SimpleNamespace(list_all_policies=lambda: stored)
+        monkeypatch.setattr(get_context(), "auth_components", SimpleNamespace(tap_store=store))
+        governed = _config(servers={SERVER: _server(tools={"deny_list": ["x"]})})
+        gateway.boot(governed)
+        resolver = get_tool_access_resolver()
+        resolver.set_mcp_server_policy(SERVER, DENY_Y)  # what the REST endpoint does beside storing it
+
+        gateway.reload(governed)
+
+        assert resolver.get_configured_policy("provider", SERVER) == DENY_Y
+        assert resolver.get_configured_policy("group", "g") == DENY_Y
+
 
 class TestNoCallSeesAGap:
     def test_a_call_during_a_reload_sees_the_previous_governance(
@@ -367,9 +430,11 @@ class TestNoCallSeesAGap:
 
         A concurrent caller probes then, on another thread. Before #1424 the
         policies, withdrawals, pins and header_exposure blocks had all been
-        cleared by this point, so every probe below read False.
+        cleared by this point, and so had the group registry, so a member was
+        checked as a standalone server and its group's rules did not apply.
         """
-        gateway.boot(_config(servers={SERVER: GOVERNED}))
+        servers = {SERVER: GOVERNED, "m1": _server(), "g": GROUP}
+        gateway.boot(_config(servers=servers))
         built, probed = threading.Event(), threading.Event()
         seen: dict[str, Any] = {}
         original = server_config._load_mcp_server_config
@@ -384,6 +449,7 @@ class TestNoCallSeesAGap:
         def a_concurrent_call() -> None:
             assert built.wait(10)
             seen.update(_governance(SERVER))
+            seen.update(_group_rules())
             seen["late_is_served"] = get_runtime().repository.get("late") is not None
             probed.set()
 
@@ -391,7 +457,7 @@ class TestNoCallSeesAGap:
         caller = threading.Thread(target=a_concurrent_call)
         caller.start()
 
-        gateway.reload(_config(servers={SERVER: GOVERNED, "late": _server(tools={"deny_list": ["x"]})}))
+        gateway.reload(_config(servers={**servers, "late": _server(tools={"deny_list": ["x"]})}))
         caller.join(10)
 
         assert seen == {
@@ -399,16 +465,41 @@ class TestNoCallSeesAGap:
             "withdrawn": True,
             "pinned": True,
             "header_exposure": True,
+            "y_allowed": False,
+            "gw_allowed": False,
             # Not in the repository before its policy is in force.
             "late_is_served": False,
         }
         assert get_runtime().repository.get("late") is not None
         assert not get_tool_access_resolver().is_tool_allowed("late", "x")
+        assert _group_rules() == {"y_allowed": False, "gw_allowed": False}
 
-    def test_a_reload_that_fails_while_building_leaves_the_governance_in_force(self, gateway: _Gateway) -> None:
-        gateway.boot(_config(servers={SERVER: GOVERNED}))
+    def test_a_reload_that_fails_while_building_changes_nothing(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One edit deletes every process-wide section and breaks one server block.
+
+        The block is refused only when the servers are built. That used to
+        happen after the servers were stopped and the sections applied, so the
+        refused reload had already removed the validators and emptied the
+        group registry (#1424).
+        """
+        servers = {SERVER: GOVERNED, "m1": _server(), "g": GROUP}
+        gateway.boot(_config(servers=servers, **{section: spec[0] for section, spec in SECTIONS.items()}))
+        sections = _process_state()
+        repository = get_runtime().repository
+        running = {mcp_server_id: repository.get(mcp_server_id) for mcp_server_id in (SERVER, "m1")}
+        group = GROUPS["g"]
+        _, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
+        broken = _server(access={"prompt": {"approval_list": ["draft_*"]}})
 
         with pytest.raises(ConfigurationError, match="approval_list"):
-            gateway.reload(_config(servers={SERVER: _server(access={"prompt": {"approval_list": ["draft_*"]}})}))
+            gateway.reload(_config(servers={**servers, "bad": broken}))
 
+        assert _process_state() == sections
+        assert all(repository.get(mcp_server_id) is server for mcp_server_id, server in running.items())
+        assert repository.get("bad") is None
+        shutdown.assert_not_called()
+        assert GROUPS["g"] is group
         assert set(_governance(SERVER).values()) == {True}
+        assert _group_rules() == {"y_allowed": False, "gw_allowed": False}

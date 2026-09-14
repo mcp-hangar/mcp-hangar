@@ -5,7 +5,18 @@ without importing from server.config (which is in the server layer).
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol
+
+
+class PreparedServers(Protocol):
+    """A configuration's servers, groups and governance, built and checked, and not in force yet.
+
+    Opaque to the application layer except for what the reload diff needs.
+    """
+
+    #: Every server the file declares, by id: the top-level entries and each
+    #: group's inline members, whose spec is the member entry itself.
+    specs: dict[str, dict[str, Any]]
 
 
 class IConfigLoader(ABC):
@@ -13,7 +24,9 @@ class IConfigLoader(ABC):
 
     Application layer uses this port; server.config provides the implementation.
     A reload goes through the same functions startup does, so a section cannot
-    be applied at boot and left stale by a reload (#1424).
+    be applied at boot and left stale by a reload (#1424). Everything that can
+    refuse a file refuses in `check_process_config` or `prepare_mcp_servers`,
+    before a reload stops anything.
     """
 
     @abstractmethod
@@ -56,12 +69,24 @@ class IConfigLoader(ABC):
         """
 
     @abstractmethod
-    def apply_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> None:
-        """Apply a mcp_servers configuration section to the running system.
-
-        Registers new mcp_servers, updates existing ones, and replaces the
-        previous configuration's governance overlays in one step.
+    def prepare_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> PreparedServers:
+        """Build and check a mcp_servers section, and put none of it in force.
 
         Args:
             mcp_servers_config: Mapping of mcp_server_id -> mcp_server spec dict.
+
+        Raises:
+            ConfigurationError: If a server or group block is invalid.
+        """
+
+    @abstractmethod
+    def commit_mcp_servers(self, prepared: PreparedServers) -> None:
+        """Put a prepared section in force, replacing the previous one's.
+
+        Its servers, its groups, and its governance overlays, which are swapped
+        in rather than cleared and registered again. Does not fail on the file:
+        everything that could was checked by `prepare_mcp_servers`.
+
+        Args:
+            prepared: What `prepare_mcp_servers` returned.
         """

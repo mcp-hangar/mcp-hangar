@@ -42,23 +42,26 @@ restart for every change, is no longer needed.
 
 ### Policies set at runtime
 
-A reload keeps the tool-access policies set at runtime: the REST policy
-endpoint, the agent's `_global` policy, and `hangar_load`. Before, a reload
-removed them. Two exceptions:
+Before, a reload removed every tool-access policy set at runtime. Now:
 
-- If the file now defines a policy for the same scope, the file's policy
-  replaces the runtime one.
+- The policies stored by the REST policy endpoint are replayed after the file,
+  as a restart does. On a scope that both the file and the REST endpoint
+  define, the stored policy applies, after a reload as after a restart.
+- Any other policy set at runtime, such as one `hangar_load` set, is kept
+  unless the file now defines the same scope. The file's policy then replaces
+  it.
 - A server that the reload removes takes its policies with it, as
-  `hangar_unload` does.
+  `hangar_unload` does. A policy the REST endpoint stored for it comes back at
+  the next restart, as before.
 
-On a restart, the policies stored by the REST endpoint are replayed after the
-file is loaded, as before. So for a scope that both the file and the REST
-endpoint define, a reload applies the file's policy, and the next restart
-applies the stored one.
+A group's inline members count as declared by the file. A reload no longer
+stops them as removed servers or strips the policies set on them at runtime.
 
-The policies, withdrawals, pins and `header_exposure` blocks are now swapped in
-as one set. A call made during a reload is resolved against the old set or the
-new one, never against an empty one.
+The groups, and the policies, withdrawals, pins and `header_exposure` blocks,
+are replaced rather than cleared and registered again, so a call made during a
+reload never finds them empty. A reload builds and checks every server and
+group before it stops any, so a bad block refuses the reload and changes
+nothing.
 
 ## Next — a config dict gets every setting it passes
 

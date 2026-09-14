@@ -19,7 +19,8 @@ tools on that server, and nothing about prompts on another -- the same
 always had, applied per kind rather than reinvented for the new ones.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 import logging
 import threading
 from typing import Any, Literal, cast
@@ -790,6 +791,17 @@ class ToolAccessResolver:
             for keys in self._config_keys.values():
                 keys.clear()
             self._config_mapping_keys.clear()
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        """Hold the resolver's lock across several steps, so a concurrent resolve sees none or all of them.
+
+        A reload adopts the file's policies and then replays the stored runtime
+        ones over them (#1424); between the two, a scope both define would
+        otherwise resolve to the file's policy for a moment.
+        """
+        with self._lock:
+            yield
 
     def reset(self) -> None:
         """Put the resolver back as it was built: no policies, and the default mode."""

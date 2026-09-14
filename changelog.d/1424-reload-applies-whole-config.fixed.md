@@ -10,9 +10,11 @@ again it resolved calls against none. This held for every trigger:
 
 A reload now applies every one of those sections through the function startup
 uses, and a section deleted from the file goes back to its default. Every
-section is checked before any server is stopped, so a bad value refuses the
-reload and changes nothing. The policies, withdrawals, pins and
-`header_exposure` blocks are swapped in as one set. A policy set at runtime is
-kept, unless the file now defines the same scope. A file that changes
-`tool_access.mode` is refused with HTTP 409 and changes nothing: the mode needs
-a restart. See `UPGRADE.md`.
+section, server and group is built and checked before any server is stopped,
+so a bad value refuses the reload and changes nothing. The groups, policies,
+withdrawals, pins and `header_exposure` blocks are replaced rather than cleared
+and registered again. The REST endpoint's stored policies are replayed after
+the file, as at startup; any other policy set at runtime is kept unless the
+file now defines the same scope. A group's inline members are no longer treated
+as removed servers. A file that changes `tool_access.mode` is refused with HTTP
+409 and changes nothing: the mode needs a restart. See `UPGRADE.md`.

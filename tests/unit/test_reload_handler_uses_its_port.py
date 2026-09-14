@@ -41,7 +41,8 @@ class TestTheAdapterSatisfiesThePort:
         assert isinstance(ServerConfigLoader(), IConfigLoader)
 
     @pytest.mark.parametrize(
-        "method", ["load_from_file", "check_process_config", "apply_process_config", "apply_mcp_servers"]
+        "method",
+        ["load_from_file", "check_process_config", "apply_process_config", "prepare_mcp_servers", "commit_mcp_servers"],
     )
     def test_the_signatures_match(self, method):
         port = inspect.signature(getattr(IConfigLoader, method))

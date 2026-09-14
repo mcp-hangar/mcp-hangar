@@ -23,7 +23,7 @@ from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
-from ..application.ports.config_loader import IConfigLoader
+from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..logging_config import get_logger
 
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
@@ -79,21 +79,32 @@ class _StagedConfig:
     header_exposure: "dict[str, HeaderExposurePolicy]" = field(default_factory=dict)
     servers: dict[str, McpServer] = field(default_factory=dict)
     groups: dict[str, McpServerGroup] = field(default_factory=dict)
+    #: The spec each server in `servers` was built from: a top-level entry, or
+    #: a group's inline member entry. What a reload diffs against.
+    specs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def commit(self, *, replace: bool) -> None:
-        """Put this configuration in force.
+        """Put this configuration in force. Nothing here fails on the file: `build_config` checked it.
 
         Args:
-            replace: Whether it replaces the previous configuration's overlays,
-                which is what a reload does, or adds to them, which is what a
-                first load does. See `ToolAccessResolver.adopt_config_policies`
-                for what happens to a policy a runtime caller set.
+            replace: Whether it replaces the previous configuration, which is
+                what a reload does, or adds to it, which is what a first load
+                does. See `ToolAccessResolver.adopt_config_policies` for what
+                happens to a policy a runtime caller set.
         """
         from ..application.read_models.tool_projection import get_tool_projection_registry
         from ..domain.policies.header_exposure import adopt_header_exposure_policies
         from ..domain.services import get_tool_access_resolver
 
-        get_tool_access_resolver().adopt_config_policies(self.policies, replace=replace)
+        resolver = get_tool_access_resolver()
+        with resolver.locked():
+            resolver.adopt_config_policies(self.policies, replace=replace)
+            if replace:
+                # What startup does after the file: the REST endpoint's stored
+                # policies go over it, so a reload and a restart agree on a
+                # scope both define. Under the same lock, so no call is resolved
+                # against the file's policy on that scope in between.
+                _replay_stored_runtime_policies()
         get_tool_projection_registry().adopt_config_overlays(self.projections, replace=replace)
         adopt_header_exposure_policies(self.header_exposure, replace=replace)
 
@@ -104,30 +115,65 @@ class _StagedConfig:
             GROUPS[group_id] = group
             # After the group is in GROUPS, which the gauge's writer checks (#1357).
             observe_group_circuit(group)
+        if replace:
+            # Replaced, never cleared first: the front door finds a member's
+            # group only in GROUPS, so while it was empty a member was checked
+            # as a standalone server and its group's deny list, access policies
+            # and withdrawals did not apply (#1424).
+            for group_id in [known for known in GROUPS if known not in self.groups]:
+                del GROUPS[group_id]
+
+
+def _replay_stored_runtime_policies() -> None:
+    """Replay the REST endpoint's stored tool-access policies, as startup does after the file.
+
+    The function startup uses, `auth.bootstrap._replay_tap_policies`, on the
+    store the running auth components hold. Without auth, or without a store,
+    there is nothing to replay. A store that cannot be read is logged rather
+    than raised: a reload runs this after it has stopped the servers it
+    replaces, and the runtime policies the resolver already holds stay in force.
+    """
+    from .context import get_context
+
+    tap_store = getattr(getattr(get_context(), "auth_components", None), "tap_store", None)
+    if tap_store is None:
+        return
+
+    from ..auth.bootstrap import _replay_tap_policies
+
+    try:
+        _replay_tap_policies(tap_store)
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: a store read must not half-apply a reload
+        logger.error("stored_tool_access_policy_replay_failed", error=str(e), error_type=type(e).__name__)
 
 
 _staged: ContextVar[_StagedConfig | None] = ContextVar("mcp_hangar_staged_config", default=None)
 
 
 @contextmanager
-def _staging(*, replace: bool = False) -> Iterator[_StagedConfig]:
-    """Build a configuration aside, and commit it when the body returns.
-
-    A nested use joins the configuration already being built, so a server a
-    group declares inline is committed with the rest. If the body raises,
-    nothing is committed and the running configuration is left as it was.
-    """
-    outer = _staged.get()
-    if outer is not None:
-        yield outer
-        return
-    staged = _StagedConfig()
+def _building(staged: _StagedConfig) -> Iterator[_StagedConfig]:
+    """Make *staged* the configuration the loaders below write into."""
     token = _staged.set(staged)
     try:
         yield staged
     finally:
         _staged.reset(token)
-    staged.commit(replace=replace)
+
+
+@contextmanager
+def _staging() -> Iterator[_StagedConfig]:
+    """Join the configuration being built; or build one, and commit it when the body returns.
+
+    If the body raises, nothing is committed and the running configuration is
+    left as it was.
+    """
+    outer = _staged.get()
+    if outer is not None:
+        yield outer
+        return
+    with _building(_StagedConfig()) as staged:
+        yield staged
+    staged.commit(replace=False)
 
 
 def _staged_config() -> _StagedConfig:
@@ -317,18 +363,36 @@ def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
     Load mcp_server and group configuration.
 
     Creates McpServer aggregates and McpServerGroup aggregates based on mode,
-    with the governance each one declares. Nothing is in force until every
-    entry has been built (see `_StagedConfig`), so a load that fails part-way
-    leaves the running configuration as it was.
+    with the governance each one declares: `build_config`, then commit. A load
+    that fails part-way leaves the running configuration as it was.
 
     Args:
         config: Dictionary mapping mcp_server IDs to mcp_server spec dictionaries
         replace: Whether this is the whole configuration, replacing the previous
-            one, which is what a reload passes. A policy, withdrawal, pin or
-            `header_exposure` block the previous file had and this one does not
-            is then lifted. Without it the entries are added, as on a first load.
+            one, which is what a reload passes. A policy, withdrawal, pin,
+            `header_exposure` block or group the previous file had and this one
+            does not is then gone. Without it the entries are added, as on a
+            first load.
     """
-    with _staging(replace=replace):
+    build_config(config).commit(replace=replace)
+
+
+def build_config(config: dict[str, Any]) -> _StagedConfig:
+    """Build and check every server, group and governance block in *config*, and put none in force.
+
+    Everything that can refuse a file refuses here -- an `access` or
+    `header_exposure` block, a pin, a capabilities block -- so a reload builds
+    first and stops servers only once nothing is left to fail on the file
+    (#1424). It used to build after stopping them, and a refused block left
+    a reload half-applied.
+
+    Args:
+        config: Dictionary mapping mcp_server IDs to mcp_server spec dictionaries
+
+    Returns:
+        The built configuration; `commit` puts it in force.
+    """
+    with _building(_StagedConfig()) as staged:
         for mcp_server_id, spec_dict in config.items():
             result = validate_mcp_server_id(mcp_server_id)
             if not result.valid:
@@ -342,6 +406,7 @@ def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
                 continue
 
             _load_mcp_server_config(mcp_server_id, spec_dict)
+    return staged
 
 
 def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
@@ -380,10 +445,12 @@ def _load_group_members(
             logger.warning("skipping_invalid_member_id", member_id=member_id)
             continue
 
-        # Use already-loaded mcp_server if it exists (defined in top-level mcp_servers
-        # section, earlier in this load or already running). Only create a new one
-        # from member_spec if not found.
-        member_mcp_server = _staged_config().servers.get(member_id) or _mcp_server_repository().get(member_id)
+        # Use the mcp_server this load already built, if the top-level
+        # mcp_servers section defines it. Only create a new one from member_spec
+        # if not found. Not the running repository: a reload builds before it
+        # removes anything, and reusing the running aggregate would ignore an
+        # edited inline member (#1424).
+        member_mcp_server = _staged_config().servers.get(member_id)
         if member_mcp_server is None:
             member_mcp_server = _load_mcp_server_config(member_id, member_spec)
         else:
@@ -773,6 +840,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         capabilities=capabilities,
     )
     _staged_config().servers[mcp_server_id] = mcp_server
+    _staged_config().specs[mcp_server_id] = spec_dict
 
     # Register tool access policy if configured
     if tools_access_policy is not None:
@@ -1343,16 +1411,13 @@ class ServerConfigLoader(IConfigLoader):
         """Apply every process-wide section, as startup does."""
         apply_process_config(full_config)
 
-    def apply_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> None:
-        """Apply a mcp_servers configuration section to the running system.
+    def prepare_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> _StagedConfig:
+        """Build and check a mcp_servers section, and put none of it in force. See `build_config`."""
+        return build_config(mcp_servers_config)
 
-        The whole section, replacing the previous one's governance overlays in
-        one step: see `load_config` and `_StagedConfig`.
-
-        Args:
-            mcp_servers_config: Mapping of mcp_server_id -> mcp_server spec dict.
-        """
-        load_config(mcp_servers_config, replace=True)
+    def commit_mcp_servers(self, prepared: PreparedServers) -> None:
+        """Put a prepared section in force, replacing the previous one's servers, groups and overlays."""
+        cast(_StagedConfig, prepared).commit(replace=True)
 
 
 def load_configuration(config_path: str | None = None, *, load_servers: bool = True) -> dict[str, Any]:
