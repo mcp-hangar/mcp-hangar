@@ -45,7 +45,8 @@ from ...fastmcp_server.subscription_relay import maybe_register_subscription_rel
 from ...infrastructure.saga_manager import get_saga_manager, SagaManager
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
-from ..config import _interpolate_env_vars, load_config, load_configuration
+from ...domain.exceptions import ConfigurationError
+from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
@@ -361,6 +362,33 @@ def _declare_stdio_principal(full_config: dict[str, Any], stdio: bool) -> None:
     )
 
 
+def _read_configuration(config_path: str | None, config_dict: dict[str, Any] | None) -> dict[str, Any]:
+    """The configuration this boot runs, checked and with its process-wide sections applied.
+
+    A file and a dict go through the same `apply_configuration` (#1415). What
+    differs is only what a file has and a dict does not: something to read,
+    and something to watch. Asking a dict for reload is refused rather than
+    accepted: the watcher would be built with no file and do nothing, which is
+    the silent drop this function exists to end.
+    """
+    if config_dict is None:
+        return load_configuration(config_path, load_servers=False)
+
+    if config_path is not None:
+        # Both used to be accepted: the dict ran, and the file was what reload
+        # watched, so the first reload replaced the dict's servers with the file's.
+        raise ValueError("bootstrap() takes config_path or config_dict, not both")
+
+    reload_config = config_dict.get("config_reload")
+    if isinstance(reload_config, dict) and reload_config.get("enabled", True):
+        raise ConfigurationError(
+            "config_reload asks for a configuration file to be watched, and a config_dict has none. "
+            "Set config_reload.enabled: false, or pass the configuration as config_path."
+        )
+
+    return apply_configuration(config_dict, source="config_dict", load_servers=False)
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -383,13 +411,22 @@ def bootstrap(
     12. Initialize discovery (if enabled, DO NOT START)
 
     Args:
-        config_path: Optional path to config.yaml
-        config_dict: Optional configuration dictionary (takes precedence over config_path)
+        config_path: Optional path to config.yaml. Watched for reload.
+        config_dict: Optional configuration dictionary, instead of a file. It
+            is the whole configuration and is applied exactly as the same
+            document read from a file would be: validated, interpolated, every
+            section (#1415). No file is read, and relative paths resolve
+            against the working directory, as a file's do.
         stdio: Whether this process serves over stdio. Only then is
             `auth.stdio.principal` read (ADR-026); over HTTP the block is ignored.
 
     Returns:
         Fully initialized ApplicationContext (components not started)
+
+    Raises:
+        ValueError: If both `config_path` and `config_dict` are given.
+        ConfigurationError: If `config_dict` asks for something only a file
+            can have (`config_reload`).
     """
     logger.info("bootstrap_start", config_path=config_path, has_config_dict=config_dict is not None)
 
@@ -412,21 +449,7 @@ def bootstrap(
     # loading servers before the backend is selected leaves the gateway with the
     # in-memory config repository for the rest of its life, and every durable
     # half of the fleet then quietly does nothing.
-    if config_dict is not None:
-        # Use provided config dict, merge with defaults.
-        #
-        # Interpolate `${VAR}` here, once, exactly as the file path does inside
-        # `load_config_from_file`. The programmatic entry point never touches
-        # that file loader -- it hands the dict straight through -- so without
-        # this pass a programmatic `auth: {token: "${API_TOKEN}"}` reached the
-        # upstream as the literal fourteen characters (a 401), and a missing
-        # variable no longer failed the boot closed. Applied to the caller's
-        # dict alone, before the merge, so the defaults (already interpolated by
-        # `load_configuration`) are not passed through a second time.
-        full_config = load_configuration(None, load_servers=False)
-        full_config.update(_interpolate_env_vars(config_dict))
-    else:
-        full_config = load_configuration(config_path, load_servers=False)
+    full_config = _read_configuration(config_path, config_dict)
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.
