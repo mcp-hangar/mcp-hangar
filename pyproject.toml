@@ -325,7 +325,10 @@ drift_allowance = 3.0
   # run-to-run swing noted above. 89.0 -> 89.5 when
   # tests/unit/test_span_error_on_failure.py drove _gate_cold_start's failure
   # path (#1272): 92.03 on 3.11 against 91.52 in CI on main, past the allowance.
-  "server/tools/batch/executor.py" = 89.5
+  # 89.5 -> 90.5 when tests/unit/test_approval_span_result.py began closing the
+  # approval loops in teardown (#1389), which runs _close_approval_loops -- until
+  # then reached only at exit, where nothing measures it: 93.04 on 3.11.
+  "server/tools/batch/executor.py" = 92.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -411,7 +414,7 @@ reserved_without_producer = [
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
   "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
-  "McpServerApproved", "McpServerCapabilityQuarantineReleased", "McpServerCapabilityQuarantined",
+  "McpServerApproved", "McpServerCapabilityQuarantineReleased",
   "PolicyPushRejected", ]
 # DiscoveryCycleCompleted and DiscoverySourceHealthChanged stay unemitted on
 # purpose rather than for lack of a caller: at the default 30s refresh a cycle

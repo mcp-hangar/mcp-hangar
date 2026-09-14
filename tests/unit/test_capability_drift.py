@@ -119,8 +119,12 @@ class TestVerifyCapabilityDrift:
         assert v.enforcement_action == "alert"
         assert v.severity == ViolationSeverity.HIGH.value
 
-    def test_undeclared_tools_block_mode_goes_dead(self) -> None:
-        """In block mode, undeclared tools transition provider to DEAD."""
+    def test_undeclared_tools_block_mode_answers_refuse(self) -> None:
+        """In block mode the check records the violation and answers that it refuses.
+
+        It changes no state: the start or the call that asked acts on the answer,
+        see test_capability_block_stops_the_start.py.
+        """
         provider = _make_provider(
             expected_tools=("tool_a",),
             enforcement_mode="block",
@@ -132,10 +136,8 @@ class TestVerifyCapabilityDrift:
             ]
         )
 
-        provider._verify_capability_drift()
-
-        # Provider transitions to DEAD in block mode
-        assert provider._state == ProviderState.DEAD
+        assert provider._verify_capability_drift() is True
+        assert provider._state == ProviderState.READY
 
         events = provider.collect_events()
         violation_events = [e for e in events if isinstance(e, CapabilityViolationDetected)]
@@ -144,10 +146,19 @@ class TestVerifyCapabilityDrift:
         v = violation_events[0]
         assert v.violation_type == ViolationType.SCHEMA_MISMATCH.value
         assert v.enforcement_action == "block"
+        assert not [e for e in events if isinstance(e, McpServerStateChanged)]
 
-        # Should also have a McpServerStateChanged event for READY -> DEAD
-        state_events = [e for e in events if isinstance(e, McpServerStateChanged)]
-        assert any(e.new_state == ProviderState.DEAD.value for e in state_events)
+    def test_undeclared_tools_alert_mode_answers_serve(self) -> None:
+        """Alert mode records the same violation and answers that it serves anyway."""
+        provider = _make_provider(expected_tools=("tool_a",), enforcement_mode="alert")
+        provider._tools.update_from_list(
+            [
+                {"name": "tool_a", "description": "A", "inputSchema": {}},
+                {"name": "tool_b", "description": "B", "inputSchema": {}},
+            ]
+        )
+
+        assert provider._verify_capability_drift() is False
 
     def test_missing_tools_not_flagged(self) -> None:
         """Tools in expected_tools but absent at runtime should NOT be violations."""

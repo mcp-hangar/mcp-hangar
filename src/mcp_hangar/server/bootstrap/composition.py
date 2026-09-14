@@ -6,6 +6,7 @@ server startup and runtime wiring.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import Any, TYPE_CHECKING, cast
 import warnings
@@ -15,9 +16,12 @@ from ...application.sagas import GroupRebalanceSaga
 from ...bootstrap.runtime import create_runtime
 from ...domain.model import McpServerGroup
 from ...infrastructure.runtime_store import RuntimeMcpServerStore
+from ...logging_config import get_logger
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
+
+logger = get_logger(__name__)
 
 # Runtime wiring
 _runtime: Runtime | None = None
@@ -56,6 +60,26 @@ RUNTIME_PROVIDERS: RuntimeMcpServerStore = RuntimeMcpServerStore()
 _group_rebalance_saga: GroupRebalanceSaga | None = None
 _discovery_orchestrator: DiscoveryOrchestrator | None = None
 _persistence_backend: Any = None
+
+# What bootstrap starts that no component it hands out will stop: the loop
+# behind the fleet writer and the one behind the fleet projection. The handlers
+# holding them live as long as the buses do, so nobody else would (#1389).
+_closers: list[Callable[[], None]] = []
+
+
+def close_at_shutdown(close: Callable[[], None]) -> None:
+    """Have `ApplicationContext.shutdown` call `close`."""
+    _closers.append(close)
+
+
+def close_what_bootstrap_started() -> None:
+    """Call every closer `close_at_shutdown` was given, newest first, once each."""
+    while _closers:
+        close = _closers.pop()
+        try:
+            close()
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one failed close must not leave the rest running
+            logger.warning("bootstrap_resource_close_failed", error=str(e))
 
 
 def get_runtime(

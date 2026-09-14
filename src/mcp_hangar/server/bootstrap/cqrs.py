@@ -7,12 +7,12 @@ from ...application.queries import register_all_handlers as register_query_handl
 from ...application.sagas import GroupRebalanceSaga
 from ...application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga
 from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
-from ...domain.model.circuit_breaker import CircuitBreaker
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
 from .components import register_auth_cqrs
+from .composition import close_at_shutdown
 from ..context import get_context
 from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
@@ -70,6 +70,7 @@ def _fleet_writer(runtime: "Runtime") -> Any:
     # The lease is asked per write rather than captured here: a tenure that has
     # ended between bootstrap and the write is exactly the case being fenced.
     writer = RepositoryFleetWriter(repository, lease_provider=_current_lease)
+    close_at_shutdown(writer.close)
     logger.info("fleet_writer_configured", repository=type(repository).__name__)
     return writer
 
@@ -223,106 +224,21 @@ def _restore_saga_state(
     )
 
 
-def _restore_group_circuit_breakers(
-    store: SagaStateStore | NullSagaStateStore,
-    groups: dict[str, Any],
-) -> None:
-    """Restore circuit breaker state for mcp_server groups from saga state store.
-
-    Loads CB state persisted under saga_type="circuit_breaker" with saga_id=group_id.
-    If found, replaces the group's CircuitBreaker with the restored one.
-
-    Args:
-        store: Saga state store to load from.
-        groups: Dictionary of group_id -> McpServerGroup.
-    """
-    for group_id, group in groups.items():
-        result = store.load("circuit_breaker")
-        if result is None:
-            continue
-
-        try:
-            cb = CircuitBreaker.from_dict(result["state_data"])
-            group._circuit_breaker = cb
-            # Re-wire the state-change callback so transitions after restore emit events/metrics.
-            cb._on_state_change = group._on_circuit_breaker_state_change
-            logger.info(
-                "circuit_breaker_restored",
-                group_id=group_id,
-                state=cb.state.value,
-                failure_count=cb.failure_count,
-            )
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: CB restore failure must not prevent bootstrap
-            logger.warning(
-                "circuit_breaker_restore_failed",
-                group_id=group_id,
-                error=str(e),
-            )
-
-
-def save_group_circuit_breakers(
-    store: SagaStateStore | NullSagaStateStore,
-    groups: dict[str, Any],
-) -> None:
-    """Save circuit breaker state for all mcp_server groups.
-
-    Persists CB state under saga_type="circuit_breaker" with saga_id=group_id.
-    Called during shutdown to preserve CB state across restarts.
-
-    **Only from the instance holding the management lease.** Each replica keeps
-    its own breaker in memory -- deliberately, so that one replica with a
-    network problem cannot cut a healthy upstream off from the other two
-    (#790, phase 3.4). But they all shared one row here, and all wrote it on the
-    way out, so a rolling update ended with whichever pod happened to stop last
-    having overwritten the other two. The restored state was then not the
-    fleet's and not any replica's: it was the last one out's.
-
-    A follower skipping the write loses nothing, because what it would have
-    written is its own view of an upstream the leader was also watching.
-
-    Args:
-        store: Saga state store to save to.
-        groups: Dictionary of group_id -> McpServerGroup.
-    """
-    from .coordination import may_manage
-
-    if not may_manage():
-        logger.info(
-            "circuit_breaker_save_skipped",
-            detail="this instance does not hold the management lease; the holder persists the shared row",
-        )
-        return
-
-    for group_id, group in groups.items():
-        try:
-            cb_dict = group._circuit_breaker.to_dict()
-            store.checkpoint(
-                saga_type="circuit_breaker",
-                saga_id=group_id,
-                state_data=cb_dict,
-                last_event_position=0,
-            )
-            logger.debug("circuit_breaker_saved", group_id=group_id)
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: CB save failure must not prevent shutdown
-            logger.warning(
-                "circuit_breaker_save_failed",
-                group_id=group_id,
-                error=str(e),
-            )
-
-
-def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | NullSagaStateStore:
+def init_saga(full_config: dict[str, Any] | None = None) -> None:
     """Initialize all sagas with optional persistence.
 
     Creates SagaStateStore when SQLite event store is configured, loads
-    persisted state for recovery and failover sagas, restores circuit
-    breaker state for mcp_server groups, and registers all three sagas.
+    persisted state for recovery and failover sagas, and registers all three
+    sagas.
+
+    Group circuit breakers are not persisted. Each replica keeps its own, and a
+    group's circuit closes by itself once its members recover (#1383), so one
+    saved as open hours earlier would only hold traffic off a group that is
+    healthy now (#1388). A `circuit_breaker` row an older version left in the
+    store is never loaded.
 
     Args:
         full_config: Full application configuration dictionary.
-
-    Returns:
-        The saga state store instance (for shutdown access).
     """
     ctx = get_context()
     saga_manager = get_saga_manager()
@@ -333,8 +249,12 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     # Inject store into saga manager
     saga_manager._saga_state_store = saga_state_store
 
-    # 1. GroupRebalanceSaga (existing)
-    group_saga = GroupRebalanceSaga(groups=ctx.groups)
+    # 1. GroupRebalanceSaga. `GROUPS`, not `ctx.groups`: at this point in
+    # `bootstrap()` the context still holds the empty dict it was built with,
+    # and is pointed at `GROUPS` only at the end. The saga kept the empty one,
+    # found no group for any member, and so no passing health check ever put a
+    # member back in rotation (#1355).
+    group_saga = GroupRebalanceSaga(groups=GROUPS)
     ctx.group_rebalance_saga = group_saga
     set_group_rebalance_saga(group_saga)
     saga_manager.register_event_saga(group_saga)
@@ -349,13 +269,8 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     _restore_saga_state(saga_state_store, failover_saga)
     saga_manager.register_event_saga(failover_saga)
 
-    # 4. Restore circuit breaker state for groups
-    _restore_group_circuit_breakers(saga_state_store, ctx.groups)
-
     logger.info(
         "sagas_initialized",
         sagas_registered=3,
         persistence_enabled=not isinstance(saga_state_store, NullSagaStateStore),
     )
-
-    return saga_state_store

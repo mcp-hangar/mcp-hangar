@@ -17,8 +17,10 @@ from ..contracts.launcher import TransportClient
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
+    DEGRADED_BY_HEALTH_CHECKS,
     CapabilityViolationDetected,
     DomainEvent,
+    McpServerCapabilityQuarantined,
     EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
@@ -35,10 +37,12 @@ from ..events import (
 )
 from ..exceptions import (
     CannotStartMcpServerError,
+    CapabilityBlockedError,
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
     McpServerNotHereError,
+    McpServerNotReadyError,
     McpServerStartError,
     ToolInvocationError,
     ToolNotFoundError,
@@ -68,8 +72,45 @@ _MODERN_PROTOCOL_VERSION = "2026-07-28"
 # is stateless, skip the handshake" rather than a startup failure.
 _JSONRPC_METHOD_NOT_FOUND = -32601
 
+#: The enforcement modes that refuse a server serving a tool outside its
+#: `expected_tools`: it serves nothing, and goes DEAD for a capability block
+#: (`DEAD_CAPABILITY_BLOCKED`). `quarantine` is documented to stop a server
+#: serving new requests, and does.
+_REFUSING_MODES = frozenset({"block", "quarantine"})
 
-# Valid state transitions
+
+# Why a server is DEAD (#1361). Each means it failed and is not running, and
+# the health worker, the recovery saga and the GC leave it there. They differ
+# in what may start it again:
+#
+# - DEAD_GIVEN_UP: the recovery saga ran out of retries. A deliberate start
+#   revives it, and so does a call that names it once its backoff has passed.
+#   A group never routes a call to it.
+# - DEAD_CAPABILITY_BLOCKED: block or quarantine mode found a tool outside its
+#   `expected_tools`. Only a deliberate start revives it, and that start checks
+#   the tools again. A group never routes a call to it, and a call naming it is
+#   refused.
+# - DEAD_CRASHED, DEAD_START_FAILED: any call starts it again once its backoff
+#   has passed, including one a group routes to it.
+#
+# Deliberate starts, which revive any of them: hangar_start, the REST start and
+# StartMcpServerCommand; a group's start_all and add_member(auto_start);
+# hangar_warm naming the server; and a failover saga starting the backup it
+# was configured with. Bulk warm-ups -- the front door's at boot, hangar_warm()
+# with no names -- skip every DEAD server, and hangar_tools lists one without
+# starting it.
+DEAD_GIVEN_UP = "given_up"
+DEAD_CRASHED = "crashed"
+DEAD_START_FAILED = "start_failed"
+DEAD_CAPABILITY_BLOCKED = "capability_blocked"
+
+#: Why-dead reasons a group does not route a call to.
+DEAD_NOT_ROUTED_BY_GROUPS = frozenset({DEAD_GIVEN_UP, DEAD_CAPABILITY_BLOCKED})
+#: Why-dead reasons a call does not revive: only a deliberate start does.
+DEAD_NOT_REVIVED_BY_CALLS = frozenset({DEAD_CAPABILITY_BLOCKED})
+
+# Valid state transitions. DEAD -> INITIALIZING is the way out of DEAD, through
+# `ensure_ready()`.
 VALID_TRANSITIONS = {
     McpServerState.COLD: {McpServerState.INITIALIZING},
     McpServerState.INITIALIZING: {
@@ -82,7 +123,8 @@ VALID_TRANSITIONS = {
         McpServerState.DEAD,
         McpServerState.DEGRADED,
     },
-    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD},
+    # DEAD: the recovery saga ran out of retries (`give_up`).
+    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD, McpServerState.DEAD},
     McpServerState.DEAD: {McpServerState.INITIALIZING, McpServerState.DEGRADED},
 }
 
@@ -107,6 +149,13 @@ def _rpc_error_type(error: dict[str, Any]) -> str:
     """
     code = error.get("code")
     return str(code) if type(code) is int else OTHER_ERROR_TYPE
+
+
+def _start_refusal(reason: str, time_left: float) -> str:
+    """What `ensure_ready()` tells a caller it would not start the server for."""
+    if reason == "not_revived_by_calls":
+        return "a capability block is not revived by a call; start it explicitly"
+    return f"backoff not elapsed, retry in {time_left:.1f}s"
 
 
 class McpServer(AggregateRoot):
@@ -234,6 +283,8 @@ class McpServer(AggregateRoot):
 
         # State
         self._state = McpServerState.COLD
+        # Why it is DEAD, while it is: one of the DEAD_* constants.
+        self._dead_reason: str | None = None
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
         # Typed by the port rather than Any: the domain's whole use of a launched
@@ -442,6 +493,11 @@ class McpServer(AggregateRoot):
         return self._state
 
     @property
+    def dead_reason_snapshot(self) -> str | None:
+        """Why it is DEAD (a ``DEAD_*`` constant), or None when it is not; read as `state_snapshot` is."""
+        return self._dead_reason if self._state is McpServerState.DEAD else None
+
+    @property
     def health(self) -> HealthTracker:
         """Health tracker."""
         return self._health
@@ -548,7 +604,35 @@ class McpServer(AggregateRoot):
             )
         )
 
-    def _can_start(self) -> tuple:
+    def _mark_dead(self, reason: str) -> None:
+        """Move to DEAD from a failure path, and say why (must hold lock).
+
+        ``reason`` is one of the ``DEAD_*`` constants; the note above
+        `VALID_TRANSITIONS` says what each means and what leaves it.
+
+        Not `_transition_to`: these are failure paths, reached from whatever state
+        a concurrent stop left behind, and an invalid-transition error raised
+        inside one would replace the failure being handled. The event is the one
+        `_transition_to` records. The assignments this replaces recorded none, so
+        `mcp_hangar_mcp_server_state` kept the last value an event had set --
+        `ready` for a crashed process -- and never read `dead` (#1361).
+        """
+        if self._state == McpServerState.DEAD:
+            return
+        old_state = self._state
+        self._state = McpServerState.DEAD
+        self._dead_reason = reason
+        self._increment_version()
+        self._record_event(
+            McpServerStateChanged(
+                mcp_server_id=self.mcp_server_id,
+                old_state=str(old_state.value),
+                new_state=str(McpServerState.DEAD.value),
+                dead_reason=reason,
+            )
+        )
+
+    def _can_start(self, by_call: bool = False) -> tuple:
         """
         Check if mcp_server can be started (must hold lock).
 
@@ -558,18 +642,26 @@ class McpServer(AggregateRoot):
             if self._client and self._client.is_alive():
                 return True, "already_ready", 0
 
-        if self._state == McpServerState.DEGRADED:
-            if not self._health.can_retry():
-                time_left = self._health.time_until_retry()
-                return False, "backoff_not_elapsed", time_left
+        if by_call and self._state == McpServerState.DEAD and self._dead_reason in DEAD_NOT_REVIVED_BY_CALLS:
+            return False, "not_revived_by_calls", 0
+
+        # A call waits out a DEAD server's backoff as it does a DEGRADED one's;
+        # a deliberate start does not (#1361).
+        in_backoff = self._state == McpServerState.DEGRADED or (by_call and self._state == McpServerState.DEAD)
+        if in_backoff and not self._health.can_retry():
+            time_left = self._health.time_until_retry()
+            return False, "backoff_not_elapsed", time_left
 
         return True, "", 0
 
     # --- Business Operations ---
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self, *, by_call: bool = False) -> None:
         """
         Ensure mcp_server is in READY state, starting if necessary.
+
+        ``by_call``: a call is asking, not a deliberate start. A DEAD server then
+        waits out its backoff first, as a DEGRADED one always does (#1361).
 
         Thread-safe. Blocks until ready or raises exception.
 
@@ -591,9 +683,7 @@ class McpServer(AggregateRoot):
             if self._state == McpServerState.READY:
                 if self._client and self._client.is_alive():
                     return
-                # Client died
-                logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
-                self._state = McpServerState.DEAD
+                self._lost_connection()
 
             # Another thread is starting: become a waiter
             if self._state == McpServerState.INITIALIZING:
@@ -604,13 +694,9 @@ class McpServer(AggregateRoot):
                 McpServerState.DEGRADED,
             ):
                 # Check if we can start
-                can_start, reason, time_left = self._can_start()
+                can_start, reason, time_left = self._can_start(by_call)
                 if not can_start:
-                    raise CannotStartMcpServerError(
-                        self.mcp_server_id,
-                        f"backoff not elapsed, retry in {time_left:.1f}s",
-                        time_left,
-                    )
+                    raise CannotStartMcpServerError(self.mcp_server_id, _start_refusal(reason, time_left), time_left)
                 # We are the starter: transition and prepare event
                 self._transition_to(McpServerState.INITIALIZING)
                 self._ready_event = threading.Event()  # Fresh event for this attempt
@@ -651,6 +737,7 @@ class McpServer(AggregateRoot):
         start_time = time.time()
         cold_start_time = self._begin_cold_start_tracking()
         client = None  # Track client for diagnostics on failure
+        kept = False  # Whether `_finalize_start` took the client over
 
         try:
             # I/O outside lock: subprocess launch and MCP handshake
@@ -659,7 +746,9 @@ class McpServer(AggregateRoot):
 
             # Reacquire lock to finalize state
             with self._lock:
+                self._refuse_capability_drift()
                 self._finalize_start(client, start_time)
+                kept = True
                 self._end_cold_start_tracking(cold_start_time, success=True)
                 self._ready_event.set()  # Wake waiters: success
 
@@ -683,7 +772,7 @@ class McpServer(AggregateRoot):
             raise
         except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in McpServerStartError for callers
             # Collect diagnostics from client if available
-            diagnostics = self._collect_startup_diagnostics(client) if client else {}
+            diagnostics = self._startup_diagnostics(client)
 
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
@@ -699,6 +788,36 @@ class McpServer(AggregateRoot):
                 self._ready_event.set()  # Wake waiters: failure
 
             raise start_error from e
+        finally:
+            # Every way out but success, handled above or not.
+            if not kept:
+                self._discard_failed_client(client)
+
+    def _discard_failed_client(self, client: Any) -> None:
+        """Close the client a start launched and did not keep.
+
+        Unless ``_finalize_start`` took it over, that client is not
+        ``self._client``, and ``_handle_start_failure`` does not close it: the
+        upstream process it launched would go on running with no owner, with a
+        stdio reader thread waiting on it. ``_start`` calls this from its
+        ``finally``, so it runs on every failure path, outside the lock and after
+        the waiters are woken, because closing waits for the process to exit, up
+        to five seconds before it is killed.
+
+        It leaves the connection gauge alone. ``_handle_start_failure`` resets
+        that before the waiters are woken; resetting it here, after them, could
+        overwrite what a start one of them began has set.
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: cleanup must not mask the start error
+            logger.warning(
+                "failed_start_client_close_error",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__name__),
+            )
 
     def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
@@ -728,19 +847,61 @@ class McpServer(AggregateRoot):
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
-        # stdio transports start unlabeled; tag them so their message metrics
-        # carry this server's ID (HTTP clients are labeled at construction).
-        if getattr(client, "mcp_server_id", "unset") is None:
-            client.mcp_server_id = str(self.mcp_server_id)
+        try:
+            # stdio transports start unlabeled; tag them so their message metrics
+            # carry this server's ID (HTTP clients are labeled at construction).
+            if getattr(client, "mcp_server_id", "unset") is None:
+                client.mcp_server_id = str(self.mcp_server_id)
 
-        # Start live stderr-reader thread if a log buffer is configured and the
-        # client has a process with a stderr pipe (subprocess/docker/container modes).
-        if self._log_buffer is not None:
-            self._start_stderr_reader(client)
+            # Start live stderr-reader thread if a log buffer is configured and the
+            # client has a process with a stderr pipe (subprocess/docker/container modes).
+            if self._log_buffer is not None:
+                self._start_stderr_reader(client)
 
-        self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+        except BaseException:
+            # Launched but not yet returned, so `_start` has no client to close.
+            self._discard_failed_client(client)
+            raise
 
         return client
+
+    def _close_quietly(self, client: TransportClient | None) -> None:
+        """Close a client and never raise.
+
+        ``close()`` is idempotent by contract. A failure is logged by type and
+        dropped, so it cannot fail a start that has otherwise succeeded. Safe
+        under this server's lock, as ``_shutdown_internal`` already closes: a
+        client's own locks rank below it (STDIO_CLIENT, HTTP_CLIENT).
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed close must not mask the start error
+            logger.warning(
+                "mcp_server_client_close_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+
+    def _startup_diagnostics(self, client: Any) -> dict[str, Any]:
+        """Diagnostics for a failed start, or none if collecting them fails.
+
+        A failure here must not replace the start error, nor skip what follows
+        it: recording the failure, waking every waiter, closing the client.
+        """
+        if client is None:
+            return {}
+        try:
+            return self._collect_startup_diagnostics(client)
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: diagnostics must not mask the start error
+            logger.warning(
+                "mcp_server_start_diagnostics_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+            return {}
 
     def _start_stderr_reader(self, client: Any) -> None:
         """Spawn a daemon thread that reads stderr lines into the log buffer.
@@ -954,7 +1115,7 @@ class McpServer(AggregateRoot):
             self._log_client_error(client, error_msg)
 
             # Collect full diagnostics for user-friendly error
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"MCP initialization failed: {error_msg}",
@@ -999,7 +1160,7 @@ class McpServer(AggregateRoot):
         tools_resp = client.call("tools/list", {})
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"Failed to list tools: {error_msg}",
@@ -1137,23 +1298,12 @@ class McpServer(AggregateRoot):
         except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
-        # Try to capture stderr (may already be captured by StdioClient)
+        # Only the stderr the stdio client captured. The process's pipe is never
+        # read here: read() returns only at EOF, and an upstream that answered
+        # with an error is usually still running, so the start would never fail.
         last_stderr = getattr(client, "_last_stderr", None)
         if last_stderr:
             logger.error(f"mcp_server_stderr: {last_stderr}")
-            return
-
-        # Fallback: try to read stderr directly
-        stderr = getattr(proc, "stderr", None)
-        if stderr:
-            try:
-                err_bytes = stderr.read()
-                if err_bytes:
-                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
-                    if err_text:
-                        logger.error(f"mcp_server_stderr: {err_text}")
-            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
-                pass
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
         """Collect diagnostic information from a failed client/process.
@@ -1164,6 +1314,11 @@ class McpServer(AggregateRoot):
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
         """Finalize successful mcp_server start."""
+        # A server can still hold a client here: one that health checks
+        # degraded keeps its connection open. Assigning over it leaked that
+        # client on every restart.
+        if self._client is not client:
+            self._close_quietly(self._client)
         self._client = client
         self._meta = {
             "init_result": {},
@@ -1186,31 +1341,37 @@ class McpServer(AggregateRoot):
 
         logger.info(f"mcp_server_started: {self.mcp_server_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
-        # Runtime capability drift check -- after READY, before lock release
+        # The mode that serves anyway (alert) records drift here, after READY,
+        # as it always has. The refusing modes refused it before the start
+        # kept anything (`_refuse_capability_drift`).
         self._verify_capability_drift()
 
-    def _verify_capability_drift(self) -> None:
-        """Check runtime tools against declared expected_tools.
+    def _verify_capability_drift(self) -> bool:
+        """Check runtime tools against declared expected_tools (must hold lock).
 
         Only flags undeclared runtime tools (tools present at runtime but NOT
         in expected_tools). Missing expected tools are not violations per
         CONTEXT.md decisions.
 
-        Called inside _finalize_start() after READY transition, under lock.
-        Records events via _record_event() (no I/O -- just appends to list).
-        In block mode, transitions to DEAD immediately.
+        Records a ``CapabilityViolationDetected`` event (no I/O -- just appends
+        to the list) and logs a warning. Changes no state: acting on the answer
+        is the caller's job.
+
+        Returns:
+            Whether the enforcement mode refuses the drift found: block and
+            quarantine do, alert does not.
         """
         if self._capabilities is None:
-            return
+            return False
         expected = set(self._capabilities.tools.expected_tools)
         if not expected:
-            return  # No expected_tools declared -- skip check
+            return False  # No expected_tools declared -- skip check
 
         actual = set(self._tools.list_names())
         undeclared = actual - expected
 
         if not undeclared:
-            return
+            return False
 
         violation_detail = f"Undeclared runtime tools: {sorted(undeclared)}"
         enforcement = self._capabilities.enforcement_mode
@@ -1232,8 +1393,75 @@ class McpServer(AggregateRoot):
             enforcement_mode=enforcement,
         )
 
-        if enforcement == "block":
-            self._transition_to(McpServerState.DEAD)
+        return enforcement in _REFUSING_MODES
+
+    def _drift_refused_by(self) -> str | None:
+        """The refusing mode that refuses the catalogue as it stands, or None (must hold lock).
+
+        Only the refusing modes (block, quarantine) are checked, so alert
+        records no more violations than it did. A violation is recorded when
+        this answers a mode.
+        """
+        if self._capabilities is None or self._capabilities.enforcement_mode not in _REFUSING_MODES:
+            return None
+        return self._capabilities.enforcement_mode if self._verify_capability_drift() else None
+
+    def _refuse_capability_drift(self) -> None:
+        """Fail a start whose upstream serves a tool a refusing mode refuses (must hold lock).
+
+        ``_start`` asks before ``_finalize_start``: before the client is kept,
+        READY is entered or ``McpServerStarted`` is recorded. The check used to
+        run after all three, so the call that started the server went on to
+        invoke its tool on a client left open. ``_handle_start_failure`` then
+        marks the server DEAD for a capability block, and ``_start`` closes the
+        client.
+        """
+        mode = self._drift_refused_by()
+        if mode is not None:
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
+
+    def _block_for_drift(self, mode: str) -> None:
+        """Stop serving for drift a refusing mode refuses (must hold lock).
+
+        Closes the connection the server holds, if any: the live one when drift
+        turns up in a catalogue refreshed after the start. A start's own client
+        is not held yet, and ``_start`` closes it. Then marks the server DEAD for
+        a capability block (``DEAD_CAPABILITY_BLOCKED``): no call starts it
+        again and no group routes to it, and a deliberate start checks its tools
+        again. Quarantine also records ``McpServerCapabilityQuarantined``.
+
+        A capability block never degrades, so the recovery saga, which acts on
+        ``McpServerDegraded``, never retries it.
+        """
+        if mode == "quarantine":
+            self._record_event(
+                McpServerCapabilityQuarantined(
+                    mcp_server_id=self.mcp_server_id,
+                    reason="capability_violation: serves tools that are not in its declared expected_tools",
+                )
+            )
+        self._close_client()
+        self._mark_dead(DEAD_CAPABILITY_BLOCKED)
+
+    def _check_serving(self) -> None:
+        """Refuse unless this server may be handed a request now (must hold lock).
+
+        For every path that takes ``self._client`` to send an upstream request.
+        ``ensure_ready()`` returning is not enough. The state can change between
+        it and this lock. The catalogue can also gain a tool after the start's
+        check, from a refresh or ``tools/list_changed``, and in block or
+        quarantine mode that blocks the whole server, as the start would have.
+
+        Raises:
+            CapabilityBlockedError: The catalogue drifted, and a refusing mode refuses it.
+            McpServerNotReadyError: The server is not READY with a client.
+        """
+        if self._state != McpServerState.READY or self._client is None:
+            raise McpServerNotReadyError(self.mcp_server_id, self._state.value)
+        mode = self._drift_refused_by()
+        if mode is not None:
+            self._block_for_drift(mode)
+            raise CapabilityBlockedError(self.mcp_server_id, mode)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
@@ -1244,14 +1472,27 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
-            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+        # Unconditionally, and before the waiters are woken: the attempt's own
+        # client is closed only after them (`_discard_failed_client`), and none
+        # of this server's connections is active once a start has failed.
+        self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
         error_str = str(error) if error else "unknown error"
 
+        if self._state != McpServerState.INITIALIZING:
+            # Stopped while it was starting. The stop stands: reading DEAD here
+            # would page someone for an operator's own action.
+            logger.info(f"mcp_server_start_failed_after_stop: {self.mcp_server_id}, state={self._state.value}")
+            return
+
         # Determine new state
-        if self._health.should_degrade():
+        if isinstance(error, CapabilityBlockedError):
+            # Not a failure a retry after backoff could clear, so it never
+            # degrades: DEAD for a capability block, which no call revives.
+            self._block_for_drift(error.enforcement_mode)
+        elif self._health.should_degrade():
             # Use direct assignment to avoid transition validation issues
             self._state = McpServerState.DEGRADED
             self._increment_version()
@@ -1267,8 +1508,7 @@ class McpServer(AggregateRoot):
                 )
             )
         else:
-            self._state = McpServerState.DEAD
-            self._increment_version()
+            self._mark_dead(DEAD_START_FAILED)
 
         logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
@@ -1436,14 +1676,16 @@ class McpServer(AggregateRoot):
         self._enforce_l7_policy(tool_name, arguments, l7_approval_id, correlation_id, identity_context_dict)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
-        # state and signal every cold-start waiter.
-        self.ensure_ready()
+        # state and signal every cold-start waiter. A call, so a DEAD server
+        # waits out its backoff (#1361).
+        self.ensure_ready(by_call=True)
 
         # Lock cycle 1: Validation, check tool, maybe prepare refresh
         needs_refresh = False
         tool_found = False
         client = None
         with self._lock:
+            self._check_serving()
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:
@@ -1490,6 +1732,10 @@ class McpServer(AggregateRoot):
                 if refresh_error is None and refresh_result and "result" in refresh_result:
                     tool_list = refresh_result.get("result", {}).get("tools", [])
                     self._tools.update_from_list(tool_list)
+
+                # Again: the state may have moved during the refresh, and the
+                # refreshed catalogue has not been checked.
+                self._check_serving()
 
                 if not self._tools.has(tool_name):
                     raise ToolNotFoundError(self.mcp_server_id, tool_name)
@@ -1680,8 +1926,17 @@ class McpServer(AggregateRoot):
                 (relay-unavailable), or if the transport call fails.
         """
         # Copy the live client under the lock; do NOT cold-start. Mirrors the
-        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock.
+        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock,
+        # including its check that the server may be handed a request at all.
         with self._lock:
+            try:
+                self._check_serving()
+            except (CapabilityBlockedError, McpServerNotReadyError) as e:
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"relay unavailable: {e}",
+                    {"method": method},
+                ) from e
             client = self._client
             if client is None or not client.is_alive():
                 raise ToolInvocationError(
@@ -1738,8 +1993,7 @@ class McpServer(AggregateRoot):
                 return False
 
             if not self._client or not self._client.is_alive():
-                self._state = McpServerState.DEAD
-                self._increment_version()
+                self._lost_connection()
                 return False
 
             # Copy client reference for I/O outside lock
@@ -1792,7 +2046,7 @@ class McpServer(AggregateRoot):
                             mcp_server_id=self.mcp_server_id,
                             consecutive_failures=self._health.consecutive_failures,
                             total_failures=self._health.total_failures,
-                            reason="health_check_failures",
+                            reason=DEGRADED_BY_HEALTH_CHECKS,
                         )
                     )
 
@@ -1841,8 +2095,59 @@ class McpServer(AggregateRoot):
         """Stop the mcp_server. Alias for shutdown(). Thread-safe."""
         self.shutdown()
 
-    def _shutdown_internal(self, reason: str = "shutdown") -> None:
-        """Shutdown implementation (must hold lock)."""
+    def give_up(self, reason: str) -> bool:
+        """Stop trying: close a degraded server's connection and leave it DEAD.
+
+        What the recovery saga does when it runs out of retries (#1361). It used
+        to stop the server instead, which returned it to COLD -- the state of a
+        server nobody has called yet -- so an outage read as an idle server.
+
+        Only from DEGRADED, the state the saga gives up on. In any other state
+        the server moved on after the event the saga acted on -- a call started
+        it, an operator stopped it -- and that stands. DEAD is not terminal: a
+        deliberate start leaves it through `ensure_ready()`, and so does a call
+        naming it once its backoff has passed. A group does not route to it.
+
+        Thread-safe.
+
+        Returns:
+            Whether the server was given up on.
+        """
+        with self._lock:
+            if self._state != McpServerState.DEGRADED:
+                logger.info(
+                    "mcp_server_give_up_skipped",
+                    mcp_server_id=self.mcp_server_id,
+                    state=self._state.value,
+                    reason=reason,
+                )
+                return False
+            self._close_client()
+            # As a stop does: nothing should list the tools of a server that is
+            # not running. A start lists them again.
+            self._tools.clear()
+            self._meta.clear()
+            self._mark_dead(DEAD_GIVEN_UP)
+        logger.warning("mcp_server_given_up", mcp_server_id=self.mcp_server_id, reason=reason)
+        return True
+
+    def _lost_connection(self) -> None:
+        """READY, but with no live connection (must hold lock).
+
+        A connection that died is a crash: close what is left of it and go DEAD.
+        No connection at all is not: that is READY read back from the event log
+        after this process restarted, with nothing ever connected in it, and a
+        server that is simply not running is COLD.
+        """
+        if self._client is None:
+            self._transition_to(McpServerState.COLD)
+            return
+        logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
+        self._close_client()
+        self._mark_dead(DEAD_CRASHED)
+
+    def _close_client(self) -> None:
+        """Close the connection, if there is one (must hold lock)."""
         if self._client:
             try:
                 self._client.close()
@@ -1850,6 +2155,10 @@ class McpServer(AggregateRoot):
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
             self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
+
+    def _shutdown_internal(self, reason: str = "shutdown") -> None:
+        """Shutdown implementation (must hold lock)."""
+        self._close_client()
 
         self._state = McpServerState.COLD
         self._increment_version()
@@ -2063,7 +2372,8 @@ class McpServer(AggregateRoot):
 
     def _replay_started(self, event: "McpServerStarted") -> None:
         self._state = McpServerState.READY
-        self._health.restore(consecutive_failures=0)
+        # A completed start is a success, as `_finalize_start` records it.
+        self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)
         self._last_used = event.occurred_at
 
     def _replay_stopped(self, event: "McpServerStopped") -> None:
@@ -2082,6 +2392,8 @@ class McpServer(AggregateRoot):
 
     def _replay_state_changed(self, event: "McpServerStateChanged") -> None:
         self._state = McpServerState(event.new_state)
+        # A stream written before the reason existed has none: not given up.
+        self._dead_reason = event.dead_reason if self._state is McpServerState.DEAD else None
 
     def _replay_tool_completed(self, event: "ToolInvocationCompleted") -> None:
         self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)

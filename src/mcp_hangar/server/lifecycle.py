@@ -12,6 +12,7 @@ The lifecycle flow:
 """
 
 import asyncio
+from dataclasses import dataclass
 import ipaddress
 from pathlib import Path
 import signal
@@ -131,7 +132,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     if not is_front_door():
         return
 
-    warmed = failed = 0
+    warmed = failed = skipped = 0
 
     # A listing that arrives before this finishes would be answered with an
     # empty catalogue the client then caches forever (#1231). It waits instead,
@@ -139,6 +140,13 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     catalogue_warmup.warmup_started()
     try:
         for mcp_server_id in runtime.repository.get_all_ids():
+            server = runtime.repository.get(mcp_server_id)
+            if server is not None and server.state.value == "dead":
+                # Restored DEAD from the event log. A warm-up of everything is not
+                # a deliberate start of each server, and only a deliberate start
+                # revives a dead one (#1361).
+                skipped += 1
+                continue
             try:
                 runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
                 warmed += 1
@@ -150,7 +158,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
         # waiting out the full deadline for something that will never finish.
         catalogue_warmup.warmup_finished()
 
-    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
+    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed, skipped_dead=skipped)
 
 
 def mcp_app_for_serving(mcp_server: Any) -> Any:
@@ -211,6 +219,20 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
             stateless_http=True,
         )
     )
+
+
+def metrics_endpoint(request: Any) -> Any:
+    """``GET /metrics``: the Prometheus exposition ``serve --http`` answers with.
+
+    At module level so a test can scrape the gateway through the same endpoint
+    the served process mounts (#1369). A test that read the registry directly
+    could not tell whether the scrape carries the metric.
+    """
+    from starlette.responses import PlainTextResponse
+
+    from ..metrics import get_metrics
+
+    return PlainTextResponse(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -411,10 +433,9 @@ class ServerLifecycle:
         import time
 
         from starlette.applications import Starlette
-        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.responses import JSONResponse
         from starlette.routing import Route
 
-        from ..metrics import get_metrics
         from .bootstrap.composition import get_runtime
 
         _start_time = time.time()
@@ -441,13 +462,6 @@ class ServerLifecycle:
                     "startup_complete": _startup_complete,
                     "uptime_seconds": round(uptime, 2),
                 }
-            )
-
-        def metrics_endpoint(request):
-            """Prometheus metrics endpoint."""
-            return PlainTextResponse(
-                get_metrics(),
-                media_type="text/plain; version=0.0.4; charset=utf-8",
             )
 
         routes = [
@@ -612,6 +626,11 @@ class ServerLifecycle:
         self._catalogue_stop.set()
         logger.info("server_lifecycle_shutdown_start")
 
+        # First: a retry a saga scheduled would otherwise fire while the servers
+        # below are being stopped, and start one again (#1389). The context
+        # cancels once more after its workers stop, for any armed in between.
+        self._context.cancel_scheduled_commands()
+
         self._cleanup_runtime_mcp_servers()
 
         self._stop_discovery()
@@ -625,16 +644,6 @@ class ServerLifecycle:
         if tailer is not None:
             tailer.stop()
 
-        # Before the lease is given up: `context.shutdown` saves the shared
-        # circuit-breaker row, and that write is for the lease holder only. A
-        # release first would mean nobody wrote it -- the leader would have
-        # stopped being the leader a moment before doing the one thing only the
-        # leader may do.
-        # Before the lease is given up: `context.shutdown` saves the shared
-        # circuit-breaker row, and that write is for the lease holder only. A
-        # release first would mean nobody wrote it -- the leader would have
-        # stopped being the leader a moment before doing the one thing only the
-        # leader may do.
         self._context.shutdown()
 
         # Last. Releasing hands management to a peer in seconds rather than a
@@ -757,43 +766,86 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
         logger.debug("sighup_handler_registered")
 
 
-def _setup_logging_from_config(cli_config: CLIConfig) -> None:
-    """Setup logging based on CLI config and config file.
+@dataclass(frozen=True)
+class LoggingSettings:
+    """What `setup_logging` is called with once every source has been read."""
 
-    Logging configuration priority:
-    1. CLI arguments (--log-level, --log-file, --json-logs)
-    2. Config file (logging section)
-    3. Environment variables
-    4. Defaults
+    level: str
+    json_format: bool
+    log_file: str | None
+
+
+def resolve_logging_settings(
+    config_path: str | None,
+    *,
+    log_level: str = "INFO",
+    log_file: str | None = None,
+    json_logs: bool = False,
+) -> LoggingSettings:
+    """Resolve the logging settings from the command line and the config file.
+
+    `serve` and `pin` both resolve through here, so one command cannot honour a
+    control the other ignores (#1236).
+
+    The order, highest first:
+
+    1. ``--log-level`` / ``--log-file`` / ``--json-logs``;
+    2. ``MCP_LOG_LEVEL`` / ``MCP_JSON_LOGS``. Typer folds these into the flag's
+       value, so they arrive here as the flag and outrank the config file;
+    3. the config file's ``logging`` section (``level``, ``file``, ``json_format``);
+    4. the defaults: INFO, console format, no file.
+
+    A level of ``INFO`` from layer 1 or 2 cannot be told apart from the default,
+    so the config file's ``logging.level`` overrides it.
 
     Args:
-        cli_config: Parsed CLI configuration.
+        config_path: The config file whose ``logging`` section is read, if any.
+        log_level: The level from the flag or its environment variable.
+        log_file: The log file from the flag, if any.
+        json_logs: Whether the flag or its environment variable asked for JSON.
     """
-    log_level = cli_config.log_level
-    log_file = cli_config.log_file
-    json_format = cli_config.json_logs
+    log_level = log_level.upper()
+    level = log_level
+    file = log_file
+    json_format = json_logs
 
-    # Try to load additional settings from config file
-    if cli_config.config_path and Path(cli_config.config_path).exists():
+    if config_path and Path(config_path).exists():
         try:
-            full_config = load_config_from_file(cli_config.config_path)
+            full_config = load_config_from_file(config_path)
             logging_config = full_config.get("logging", {})
 
             # Config file values are used only if CLI didn't specify
-            if cli_config.log_level == "INFO":  # Default value
-                log_level = logging_config.get("level", log_level).upper()
+            if log_level == "INFO":  # Default value
+                level = logging_config.get("level", level).upper()
 
-            if not cli_config.log_file:
-                log_file = logging_config.get("file", log_file)
+            if not log_file:
+                file = logging_config.get("file", file)
 
-            if not cli_config.json_logs:
+            if not json_logs:
                 json_format = logging_config.get("json_format", json_format)
 
         except (FileNotFoundError, yaml.YAMLError, ValueError, OSError) as e:
             # Config loading failed - use CLI values, log will be set up shortly
             logger.debug("config_preload_failed", error=str(e))
 
-    setup_logging(level=log_level, json_format=json_format, log_file=log_file)
+    return LoggingSettings(level=level, json_format=json_format, log_file=file)
+
+
+def _setup_logging_from_config(cli_config: CLIConfig) -> None:
+    """Set up logging for `serve` from its CLI config and the config file.
+
+    The order of precedence is `resolve_logging_settings`'s.
+
+    Args:
+        cli_config: Parsed CLI configuration.
+    """
+    settings = resolve_logging_settings(
+        cli_config.config_path,
+        log_level=cli_config.log_level,
+        log_file=cli_config.log_file,
+        json_logs=cli_config.json_logs,
+    )
+    setup_logging(level=settings.level, json_format=settings.json_format, log_file=settings.log_file)
 
 
 def run_server(cli_config: CLIConfig) -> None:

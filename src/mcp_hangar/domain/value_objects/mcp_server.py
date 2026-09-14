@@ -24,15 +24,17 @@ class McpServerState(Enum):
         - COLD -> INITIALIZING (on start)
         - INITIALIZING -> READY (on success) | DEAD (on failure) | DEGRADED (on max failures)
         - READY -> COLD (on shutdown) | DEAD (on client death) | DEGRADED (on health failures)
-        - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown)
-        - DEAD -> INITIALIZING (on retry) | DEGRADED (on max failures)
+        - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown) | DEAD (recovery gave up)
+        - DEAD -> INITIALIZING (on an explicit start or a call) | DEGRADED (on max failures)
 
     Attributes:
         COLD: McpServer is not running, no resources allocated.
         INITIALIZING: McpServer is starting up, handshake in progress.
         READY: McpServer is running and accepting requests.
         DEGRADED: McpServer has failures but may recover after backoff.
-        DEAD: McpServer has failed fatally and requires manual intervention or retry.
+        DEAD: McpServer failed and is not running. Health checks, the recovery
+            saga and the GC leave it there. Why it died decides what starts it
+            again: see the DEAD_* reasons in ``domain.model.mcp_server``.
     """
 
     COLD = "cold"

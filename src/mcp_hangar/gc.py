@@ -21,8 +21,12 @@ try:
 
     WATCHDOG_AVAILABLE = True
 except ImportError:
+    # Not logged here. This runs at import -- every CLI invocation, `--help` and
+    # `pin` included, imports it through `mcp_hangar.server` -- before any
+    # command has set up logging, so a line here printed at every level and no
+    # control could turn it down (#1236). `ConfigReloadWorker.start()` says it
+    # instead, when hot reload asks for watchdog and has to poll.
     WATCHDOG_AVAILABLE = False
-    logger.debug("watchdog package not installed, config file watching will use polling")
 
 
 class BackgroundWorker:
@@ -114,8 +118,11 @@ class BackgroundWorker:
                         # State-aware health check scheduling
                         state_str = normalize_state_to_str(mcp_server.state)
 
-                        # Skip mcp_servers that are not started or starting up
-                        if state_str in ("cold", "initializing"):
+                        # Skip mcp_servers that are not started, starting up, or
+                        # given up on. A DEAD server stays unprobed until a
+                        # deliberate start or a call revives it (#1361); probing
+                        # it here counted an "unhealthy" check that never ran.
+                        if state_str in ("cold", "initializing", "dead"):
                             continue
 
                         # Check per-mcp_server timing -- skip if not due yet
@@ -211,6 +218,7 @@ class ConfigReloadWorker:
         self.command_bus = command_bus
         self.interval_s = interval_s
         self.use_watchdog = use_watchdog and WATCHDOG_AVAILABLE
+        self._watchdog_requested = use_watchdog
 
         self.thread: threading.Thread | None = None
         self.running = False
@@ -239,6 +247,11 @@ class ConfigReloadWorker:
             return
 
         self.running = True
+
+        # Here rather than at import: only a hot reload that wanted watchdog has
+        # a reason to hear it is missing, and by now logging is configured.
+        if self._watchdog_requested and not WATCHDOG_AVAILABLE:
+            logger.debug("watchdog package not installed, config file watching will use polling")
 
         if self.use_watchdog:
             self._start_watchdog()
@@ -405,6 +418,9 @@ class MetricsSnapshotWorker:
         # which replica happened to be scheduled. Gated on the lease, and asked
         # per cycle rather than at startup.
         self._may_manage = may_manage or (lambda: True)
+        # Waited on between snapshots rather than slept through, so `stop()`
+        # ends the thread now and not up to a minute later (#1389).
+        self._stopped = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-metrics-snapshot")
 
     def start(self) -> None:
@@ -414,14 +430,15 @@ class MetricsSnapshotWorker:
         logger.info("metrics_snapshot_worker_started", interval_s=self.interval_s)
 
     def stop(self) -> None:
-        """Signal the worker to stop.  Does not block until completion."""
+        """Signal the worker to stop. Does not block, and its wait ends at once."""
         self.running = False
+        self._stopped.set()
         logger.info("metrics_snapshot_worker_stopped")
 
     def _loop(self) -> None:
         """Main worker loop."""
         while self.running:
-            time.sleep(self.interval_s)
+            self._stopped.wait(self.interval_s)
             if not self.running:
                 break
             if not self._may_manage():

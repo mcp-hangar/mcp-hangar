@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import time
 
 from mcp_hangar.domain.events import (
+    ConfigurationReloaded,
     CostReportGenerated,
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
@@ -20,6 +21,8 @@ from mcp_hangar.domain.events import (
     HealthCheckFailed,
     HealthCheckPassed,
     McpServerDegraded,
+    McpServerDeregistered,
+    McpServerHotUnloaded,
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
@@ -32,6 +35,7 @@ from mcp_hangar.domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
+from mcp_hangar.domain.model.mcp_server_group import GroupDeleted
 from mcp_hangar import metrics as prometheus_metrics
 
 
@@ -115,6 +119,9 @@ class MetricsEventHandler:
         DigestMismatchInTask: "_handle_task_digest_drift",
         TaskConsentDecided: "_handle_task_consent_decided",
         CostReportGenerated: "_handle_cost_report",
+        McpServerHotUnloaded: "_handle_mcp_server_unloaded",
+        ConfigurationReloaded: "_handle_configuration_reloaded",
+        GroupDeleted: "_handle_group_deleted",
     }
 
     def handle(self, event: DomainEvent) -> None:
@@ -161,12 +168,36 @@ class MetricsEventHandler:
         # Update Prometheus metrics
         prometheus_metrics.record_mcp_server_start(event.mcp_server_id, success=True)
         prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "ready", mode=event.mode)
+        # A completed start is a handshake and a tools/list that answered.
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_mcp_server_stopped(self, event: McpServerStopped) -> None:
         """Handle mcp_server stopped event."""
         # Update Prometheus metrics
         prometheus_metrics.record_mcp_server_stop(event.mcp_server_id, reason=event.reason)
         prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "cold")
+
+    def _handle_mcp_server_unloaded(self, event: McpServerHotUnloaded) -> None:
+        """An unloaded server takes its lifecycle gauges with it (#1361).
+
+        A hot-loaded server lives on one replica, so an effect is enough. A
+        deleted one does not: see `remove_series_of_deregistered`.
+        """
+        prometheus_metrics.remove_mcp_server_series(event.mcp_server_id)
+
+    def _handle_configuration_reloaded(self, event: ConfigurationReloaded) -> None:
+        """So does one a reload removed. One it replaced keeps its series: its new
+        aggregate may already have written to them."""
+        for mcp_server_id in event.mcp_servers_removed:
+            prometheus_metrics.remove_mcp_server_series(mcp_server_id)
+
+    def _handle_group_deleted(self, event: GroupDeleted) -> None:
+        """A deleted group takes its circuit gauge with it (#1357).
+
+        An effect is enough. A group is deleted on one replica, and nothing
+        removes it from the others: they keep serving it, and keep its series.
+        """
+        prometheus_metrics.remove_group_series(event.group_id)
 
     def _handle_state_changed(self, event: McpServerStateChanged) -> None:
         """Handle mcp_server state changed event."""
@@ -193,6 +224,7 @@ class MetricsEventHandler:
             duration=duration_s,
             success=True,
         )
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_tool_failed(self, event: ToolInvocationFailed) -> None:
         """Handle tool invocation failed event."""
@@ -222,6 +254,7 @@ class MetricsEventHandler:
             healthy=True,
             consecutive_failures=0,
         )
+        prometheus_metrics.record_mcp_server_healthy(event.mcp_server_id, event.occurred_at)
 
     def _handle_health_failed(self, event: HealthCheckFailed) -> None:
         """Handle health check failed event."""
@@ -330,3 +363,15 @@ class MetricsEventHandler:
         """Reset all metrics (mainly for testing)."""
         self._metrics.clear()
         self._started_at = time.time()
+
+
+def remove_series_of_deregistered(event: DomainEvent) -> None:
+    """Drop a deregistered server's lifecycle gauges, on every replica (#1361).
+
+    A projection, not one of the handler's effects. A server is deleted on one
+    replica, and every replica that has served it holds its gauges; the tailer
+    hands a peer's deletion to projections only. Left behind, the gauges read as
+    live forever: a deleted dead server at `state == 4`.
+    """
+    if isinstance(event, McpServerDeregistered):
+        prometheus_metrics.remove_mcp_server_series(event.mcp_server_id)

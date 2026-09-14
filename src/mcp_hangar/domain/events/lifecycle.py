@@ -39,6 +39,15 @@ class McpServerDegraded(DomainEvent):
     reason: str
 
 
+DEGRADED_BY_HEALTH_CHECKS = "health_check_failures"
+"""The `McpServerDegraded.reason` of a server that failing health checks degraded.
+
+Named because two places must agree on it: `McpServer.health_check()` emits it
+in the same check as that check's `HealthCheckFailed`, and whoever counts
+failures must then count only one of the two.
+"""
+
+
 @dataclass
 class McpServerStateChanged(DomainEvent):
     """Published when mcp_server state transitions."""
@@ -46,6 +55,10 @@ class McpServerStateChanged(DomainEvent):
     mcp_server_id: str
     old_state: str
     new_state: str
+    #: Why, when ``new_state`` is ``dead``: one of the ``DEAD_*`` constants in
+    #: ``domain.model.mcp_server``. None otherwise, and in streams written
+    #: before it existed (#1361).
+    dead_reason: str | None = None
 
 
 # Circuit Breaker Events

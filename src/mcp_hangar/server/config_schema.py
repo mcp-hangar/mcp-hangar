@@ -15,7 +15,9 @@ shape to the surface every user actually touches.
 
 Validated: **top-level section names**, the **direct child keys of each
 section**, and the keys of an **`mcp_servers.<id>` spec**. Not validated:
-anything deeper.
+anything deeper, with one exception: a group's `circuit_breaker.reset_timeout_s`,
+which was removed (#1398). It is one named key with a known history, not a guess
+at the readers below the spec.
 
 That line is not a guess about where typos happen -- it is where a single
 reader exists to enumerate from. Sections are dispatched in `server/bootstrap`,
@@ -164,6 +166,38 @@ def _unknown(where: str, present: Any, allowed: frozenset[str]) -> list[str]:
     return [f"{where} has unknown key(s) {unknown}; allowed keys: {sorted(allowed)}"]
 
 
+# A group's circuit reset timeout, in both spellings (#1398). The nested one was
+# read into the group's breaker and never consulted; the flat one is the old
+# `McpServerGroup` keyword and never had a reader in the config. Named rather
+# than reported as a typo: whoever wrote it meant it, so the message says why it
+# is gone instead of listing the allowed set. It is still a key nothing reads,
+# so strict mode and `config check` refuse it like any other.
+_REMOVED_GROUP_RESET_TIMEOUT = (
+    "has no effect on group {group!r} and was removed: a group's circuit closes once "
+    "`min_healthy` members are back in rotation, never on a timer (#1398). Delete the key."
+)
+
+
+def _group_reset_timeouts(spec: dict[str, Any]) -> list[str]:
+    """The removed reset timeout keys a group spec sets, dotted under the spec."""
+    found = ["circuit_reset_timeout_s"] if "circuit_reset_timeout_s" in spec else []
+    breaker = spec.get("circuit_breaker")
+    if isinstance(breaker, dict) and "reset_timeout_s" in breaker:
+        found.append("circuit_breaker.reset_timeout_s")
+    return found
+
+
+def _server_spec_problems(server_id: str, spec: Any) -> list[str]:
+    where = f"mcp_servers.{server_id}"
+    if not isinstance(spec, dict) or spec.get("mode") != "group":
+        return _unknown(where, spec, SERVER_SPEC_KEYS)
+
+    message = _REMOVED_GROUP_RESET_TIMEOUT.format(group=server_id)
+    problems = [f"{where}.{key} {message}" for key in _group_reset_timeouts(spec)]
+    rest = {key: value for key, value in spec.items() if key != "circuit_reset_timeout_s"}
+    return problems + _unknown(where, rest, SERVER_SPEC_KEYS)
+
+
 def validate_config(config: dict[str, Any]) -> list[str]:
     """Every key in *config* that no reader looks for, as one message each."""
     if not isinstance(config, dict):
@@ -179,6 +213,6 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     servers = config.get("mcp_servers")
     if isinstance(servers, dict):
         for server_id, spec in servers.items():
-            problems += _unknown(f"mcp_servers.{server_id}", spec, SERVER_SPEC_KEYS)
+            problems += _server_spec_problems(str(server_id), spec)
 
     return problems

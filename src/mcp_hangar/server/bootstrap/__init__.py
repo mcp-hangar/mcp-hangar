@@ -42,17 +42,19 @@ from ...fastmcp_server.prompt_proxy import maybe_register_prompt_proxy
 from ...fastmcp_server.resource_link_read_through import maybe_register_resource_read_through
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...fastmcp_server.subscription_relay import maybe_register_subscription_relay
-from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
+from ...infrastructure.saga_manager import get_saga_manager, SagaManager
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
-from ..config import _interpolate_env_vars, load_config, load_configuration
+from ...domain.exceptions import ConfigurationError
+from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
 from .components import ServerComponents, get_auth_compat_exports, load_components
+from .composition import close_what_bootstrap_started
 
 from .coordination import init_event_tailer, init_lease_keeper
-from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
+from .cqrs import init_cqrs, init_auth_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
@@ -118,19 +120,31 @@ class ApplicationContext:
     observability_adapter: ObservabilityPort | None = None
     """Observability adapter for tracing (Langfuse, etc.)."""
 
-    saga_state_store: SagaStateStore | NullSagaStateStore | None = None
-    """Saga state store for persisting saga state and circuit breakers."""
-
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
     approval_service: Any = None
     """Approval gate service (when approvals are configured)."""
 
+    saga_manager: SagaManager | None = None
+    """Saga manager whose scheduled commands shutdown cancels."""
+
     @property
     def mcp_servers(self):
         """Get mcp_servers mapping for easy access."""
         return self.runtime.repository
+
+    def cancel_scheduled_commands(self) -> None:
+        """Cancel every command a saga scheduled on a timer and has not sent.
+
+        Nothing called this before #1389, so a recovery retry armed before
+        shutdown could fire during it and start a server being stopped.
+        """
+        if self.saga_manager is None:
+            return
+        cancelled = self.saga_manager.cancel_all_scheduled_commands()
+        if cancelled:
+            logger.info("scheduled_commands_cancelled", count=cancelled)
 
     def shutdown(self) -> None:
         """Graceful shutdown of all components.
@@ -150,12 +164,9 @@ class ApplicationContext:
                     error=str(e),
                 )
 
-        # Save circuit breaker state for mcp_server groups before stopping
-        if self.saga_state_store is not None:
-            try:
-                save_group_circuit_breakers(self.saga_state_store, GROUPS)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if CB save fails
-                logger.warning("circuit_breaker_save_failed", error=str(e))
+        # After the workers, whose health checks are what degrade a server and
+        # arm a retry; before the servers stop, so no retry restarts one.
+        self.cancel_scheduled_commands()
 
         # Stop all mcp_servers
         for mcp_server_id, mcp_server in self.runtime.repository.get_all().items():
@@ -170,6 +181,9 @@ class ApplicationContext:
 
         # Shutdown observability (tracing, Langfuse)
         shutdown_observability(self.observability_adapter)
+
+        # Last: the fleet writer's loop has to outlive every server's stop.
+        close_what_bootstrap_started()
 
         logger.info("application_context_shutdown_complete")
 
@@ -348,6 +362,33 @@ def _declare_stdio_principal(full_config: dict[str, Any], stdio: bool) -> None:
     )
 
 
+def _read_configuration(config_path: str | None, config_dict: dict[str, Any] | None) -> dict[str, Any]:
+    """The configuration this boot runs, checked and with its process-wide sections applied.
+
+    A file and a dict go through the same `apply_configuration` (#1415). What
+    differs is only what a file has and a dict does not: something to read,
+    and something to watch. Asking a dict for reload is refused rather than
+    accepted: the watcher would be built with no file and do nothing, which is
+    the silent drop this function exists to end.
+    """
+    if config_dict is None:
+        return load_configuration(config_path, load_servers=False)
+
+    if config_path is not None:
+        # Both used to be accepted: the dict ran, and the file was what reload
+        # watched, so the first reload replaced the dict's servers with the file's.
+        raise ValueError("bootstrap() takes config_path or config_dict, not both")
+
+    reload_config = config_dict.get("config_reload")
+    if isinstance(reload_config, dict) and reload_config.get("enabled", True):
+        raise ConfigurationError(
+            "config_reload asks for a configuration file to be watched, and a config_dict has none. "
+            "Set config_reload.enabled: false, or pass the configuration as config_path."
+        )
+
+    return apply_configuration(config_dict, source="config_dict", load_servers=False)
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -370,13 +411,22 @@ def bootstrap(
     12. Initialize discovery (if enabled, DO NOT START)
 
     Args:
-        config_path: Optional path to config.yaml
-        config_dict: Optional configuration dictionary (takes precedence over config_path)
+        config_path: Optional path to config.yaml. Watched for reload.
+        config_dict: Optional configuration dictionary, instead of a file. It
+            is the whole configuration and is applied exactly as the same
+            document read from a file would be: validated, interpolated, every
+            section (#1415). No file is read, and relative paths resolve
+            against the working directory, as a file's do.
         stdio: Whether this process serves over stdio. Only then is
             `auth.stdio.principal` read (ADR-026); over HTTP the block is ignored.
 
     Returns:
         Fully initialized ApplicationContext (components not started)
+
+    Raises:
+        ValueError: If both `config_path` and `config_dict` are given.
+        ConfigurationError: If `config_dict` asks for something only a file
+            can have (`config_reload`).
     """
     logger.info("bootstrap_start", config_path=config_path, has_config_dict=config_dict is not None)
 
@@ -399,21 +449,7 @@ def bootstrap(
     # loading servers before the backend is selected leaves the gateway with the
     # in-memory config repository for the rest of its life, and every durable
     # half of the fleet then quietly does nothing.
-    if config_dict is not None:
-        # Use provided config dict, merge with defaults.
-        #
-        # Interpolate `${VAR}` here, once, exactly as the file path does inside
-        # `load_config_from_file`. The programmatic entry point never touches
-        # that file loader -- it hands the dict straight through -- so without
-        # this pass a programmatic `auth: {token: "${API_TOKEN}"}` reached the
-        # upstream as the literal fourteen characters (a 401), and a missing
-        # variable no longer failed the boot closed. Applied to the caller's
-        # dict alone, before the merge, so the defaults (already interpolated by
-        # `load_configuration`) are not passed through a second time.
-        full_config = load_configuration(None, load_servers=False)
-        full_config.update(_interpolate_env_vars(config_dict))
-    else:
-        full_config = load_configuration(config_path, load_servers=False)
+    full_config = _read_configuration(config_path, config_dict)
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.
@@ -507,7 +543,7 @@ def bootstrap(
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
     # Initialize saga with persistence
-    saga_state_store = init_saga(full_config)
+    init_saga(full_config)
 
     # Apply config.yaml rate_limit overrides (config takes precedence over env)
     from ...bootstrap.runtime import apply_rate_limit_config
@@ -651,9 +687,9 @@ def bootstrap(
         load_mcp_server_handler=load_handler,
         unload_mcp_server_handler=unload_handler,
         observability_adapter=observability_adapter,
-        saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
         approval_service=components.approval_service,
+        saga_manager=get_saga_manager(),
     )
 
     # Update application context for tools to access

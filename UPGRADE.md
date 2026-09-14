@@ -1,5 +1,208 @@
 # Upgrading MCP Hangar
 
+## Next — a config dict gets every setting it passes
+
+This affects code that calls `bootstrap(config_dict=...)` directly, such as
+embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
+a file and are unchanged. `Hangar.from_builder()` passes a dict and is covered
+at the end of this section.
+
+A dict is now applied the same way as the same document in a file. Before, the
+dict path dropped these settings without logging anything:
+
+- `tool_access.mode`, so a dict that asked for `front_door` came up in `egress`
+- `interceptors.validators`, so no parameter validator ran
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A dict now gets all of them. If a harness passed one of these and relied on it
+being ignored, remove it from the dict.
+
+The schema check now runs on a dict too. An unknown or removed key logs
+`unknown_config_key`, and under `HANGAR_CONFIG_STRICT=1` the boot refuses, as it
+does for a file.
+
+Four more cases used to be accepted without a word:
+
+| A dict that | Before | Now |
+| --- | --- | --- |
+| is passed while `MCP_CONFIG` or `./config.yaml` exists | was laid over that file: the file's topology, validators and `ui://` allow list applied, and the dict replaced the file's other sections | is the whole configuration, and no file is read |
+| has no `mcp_servers` section | booted the built-in example server | is refused, as a file is, unless `discovery.enabled` is true |
+| enables `config_reload` | built a reload watcher with no file, which did nothing | is refused: set `config_reload.enabled: false`, or pass a file |
+| is passed together with `config_path` | ran the dict, while reload watched the file | is refused |
+
+Relative paths in a dict resolve against the working directory, as they do in a
+file.
+
+`Hangar.from_builder()` no longer passes its own `max_concurrency` to the
+gateway, which never read it. It still sizes the facade's thread pool. A builder
+that calls `enable_discovery()`, or adds a server with `mode="remote"` and
+`url=...`, produces keys the gateway does not read. Those settings were never
+applied. They now log `unknown_config_key`, and under strict mode the boot
+refuses.
+
+## Next — a server Hangar gives up on reads `dead`, not `cold`
+
+When the recovery saga runs out of retries, the server now goes to `dead`.
+Before, giving up was a stop, so the server went to `cold`: the state of a
+server nobody has called yet. Two other failures already reached `dead` but
+published no state change, so the gauges kept their last values. A crashed
+process read `ready` and `up` 1 until something called it, and a start that
+failed below `max_consecutive_failures` read `initializing`. All three now read
+`dead`.
+
+This affects anything that reads `mcp_hangar_mcp_server_state`,
+`mcp_hangar_mcp_server_up` or `mcp_hangar_mcp_server_initialized`, and anything
+that reads a server's `state` from `hangar_list`, `hangar_status` or
+`GET /api/mcp_servers`.
+
+| Server | `state` before | now | `up` before | now | `initialized` before | now |
+| --- | --- | --- | --- | --- | --- | --- |
+| the recovery saga gave up on it | `0` (cold) | `4` (dead) | `0` | `0` | `0` | `1` |
+| its process crashed | `2` (ready) | `4` | `1` | `0` | `1` | `1` |
+| its start failed, below `max_consecutive_failures` | `1` (initializing) | `4` | `0` | `0` | `1` | `1` |
+| never started, stopped, or reaped for being idle | `0` | `0` | `0` | `0` | `0` | `0` |
+
+**An alert on `mcp_hangar_mcp_server_state == 0` no longer fires for a server
+Hangar gave up on.** `0` now means only that the server is not running and is
+not failing. Use one of these instead:
+
+- `mcp_hangar_mcp_server_state == 4` fires when a server is dead.
+- The new gauge `mcp_hangar_mcp_server_last_healthy_timestamp_seconds` holds
+  when Hangar last saw the server working: a passing health check, a completed
+  start or a successful tool call. It is kept when the server goes cold or dead.
+
+```promql
+time() - mcp_hangar_mcp_server_last_healthy_timestamp_seconds > 900
+  unless mcp_hangar_mcp_server_state == 0
+```
+
+Keep the `unless`, and keep its default matching. A cold server is not probed,
+so without the `unless` the rule also fires for every server reaped for being
+idle more than 15 minutes ago. `unless on(mcp_server)` would drop the
+`instance` label, so with more than one replica a server that is cold on one
+replica would hide it being dead on another. A server that was never healthy
+has no series, so pair the rule with `state == 4`.
+
+**`sum(mcp_hangar_mcp_server_up) == 0` can newly fire.** A crashed server used
+to keep reading `up` 1; it now reads 0. A pool whose only servers reading `up`
+had crashed now reads 0.
+
+### What starts a dead server again
+
+Why it died decides. A call is refused while the server's backoff lasts and is
+told how long to wait: through `hangar_call`, `CircuitBreakerOpen` with the
+time to retry. Once the backoff has passed, the call starts it.
+
+| Why it died | A call through a group | A call naming it | A deliberate start |
+| --- | --- | --- | --- |
+| the recovery saga gave up on it | never | yes, after its backoff | yes |
+| a capability block stopped it | never | never | yes |
+| its process crashed, or its start failed | yes, after its backoff | yes, after its backoff | yes |
+
+The deliberate starts are `hangar_start` on the server or on its group,
+`POST /api/mcp_servers/{id}/start`, `hangar_warm` naming the server, a group
+adding the server with auto-start, and a failover saga starting the backup it
+was configured with.
+
+Nothing else starts a dead server:
+
+- The health worker does not check it. It used to, every 60s, and counted
+  `mcp_hangar_health_checks_total{result="unhealthy"}` for a check that sent
+  nothing, so that series stops moving while a server is dead.
+- The recovery saga cancels the restarts it has scheduled when it gives up, and
+  when the server starts or stops.
+- The bulk warm-ups skip it: the front door's at boot, and `hangar_warm` with
+  no names, which now lists it under `skipped_dead`.
+- `hangar_tools` lists a dead server, or a group's dead member, without
+  starting it.
+- The GC acts only on servers that are `ready`.
+
+A group does not count a dead member as healthy. A member Hangar gave up on,
+or one a capability block stopped, leaves rotation, and a successful start puts
+it back, subject to the group's `healthy_threshold`. A member whose process
+crashed stays in rotation, so the next call through the group restarts it, as
+it always did. When that restart fails, or the call is refused inside the
+member's backoff, the call counts as the member's failure, so a member whose
+restart keeps failing leaves rotation and the group fails over.
+
+### Other changes
+
+- A give-up no longer also counts
+  `mcp_hangar_mcp_server_stops_total{reason="shutdown"}`. It still counts
+  `reason="max_retries_exceeded"`.
+- `hangar_stop` on a dead server makes it `cold`.
+- A server that is deleted, unloaded or reloaded away loses its lifecycle
+  gauges, so a removed dead server stops reading `4`. A deletion removes them
+  on every replica. Its counters stay.
+- With a durable event store, a server restored `dead` or `degraded` reads so
+  from boot. A server restored `ready` has no connection in the new process:
+  it has no series until its first health check or call, which make it `cold`,
+  not `dead`.
+
+### a group's `circuit_breaker.reset_timeout_s` is removed
+
+It never did anything. An open group circuit did not half-open once the
+timeout passed, however long it waited: a breaker half-opens only when asked
+whether to let a request through, and a group never asks. The circuit closes
+once `min_healthy` members are back in rotation, after a passing health check
+or a successful call, and that is unchanged. A timed probe would have been a
+second way out, competing with that one, so the option was removed rather
+than honoured (#1398).
+
+Delete it from every group:
+
+```yaml
+mcp_servers:
+  pool:
+    mode: group
+    circuit_breaker:
+      failure_threshold: 10
+      reset_timeout_s: 60   # delete this line
+```
+
+A config that still sets it loads, and logs `unknown_config_key` naming the
+group and the key. `HANGAR_CONFIG_STRICT=1` and `mcp-hangar config check`
+refuse it, as they refuse any key nothing reads: under strict mode a gateway
+whose config still sets it does not start, so delete the key before
+upgrading. The flat spelling
+`circuit_reset_timeout_s` is reported the same way. In Python,
+`McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
+raises `TypeError`.
+
+## Next — a group's `healthy_count` counts members that are `ready`
+
+A group's `healthy_count` used to count every member in rotation that was not
+`dead`, `cold` ones included. It now counts the members that are `ready` and in
+rotation. The number of members in rotation, in any state, is a new field,
+`members_in_rotation_count`: the length of the `members_in_rotation` list that
+`hangar_group_rebalance` returns.
+
+`healthy_count` changes meaning, so its value drops for any group with a member
+in rotation that is not `ready`. The common case is a group whose members the
+GC reaped for being idle. Before, it read `healthy_count: 2` with nothing
+running; it now reads `healthy_count: 0` and `members_in_rotation_count: 2`
+until a call through the group starts a member.
+
+This affects anything that reads a group's `healthy_count` from
+`GET /api/groups`, `GET /api/groups/{id}`, `hangar_details`,
+`hangar_group_list`, `hangar_list`, `hangar_start` or `hangar_group_rebalance`,
+or its `healthy_members` from `hangar_status`, `hangar_health` or
+`hangar_metrics`. The `GroupStateChanged` event's `healthy_count` changes the
+same way and gains `members_in_rotation_count`. No metric reports either count.
+
+**A check that treats `healthy_count: 0` as a group that cannot serve now
+fires for idle groups that serve fine.** A group routes as long as
+`is_available` is true. To ask whether a group can take a call, read
+`is_available`. To ask whether members are in rotation, read
+`members_in_rotation_count`.
+
+What the group decides is unchanged. `is_available`, the group `state` and the
+`min_healthy` rule that closes an open circuit count the members in rotation
+that are not `dead`, as `healthy_count` did before.
+
 ## Upgrade to 2.19.1
 
 ### a suspended session is refused

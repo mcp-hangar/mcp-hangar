@@ -11,13 +11,13 @@ from datetime import datetime, timedelta, UTC
 import hashlib
 import secrets
 import threading
-from typing import Protocol
+from typing import Protocol, TypeVar
 from collections.abc import Callable
 
 from .constant_time import constant_time_key_lookup
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore
-from mcp_hangar.domain.contracts.event_store import IEventStore
+from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import ApiKeyCreated, DomainEvent
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot, EventSourcedApiKey
@@ -28,6 +28,12 @@ from mcp_hangar.logging_config import get_logger
 from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = get_logger(__name__)
+
+_T = TypeVar("_T")
+
+#: How many times a key revocation or rotation loads the key and decides again
+#: after another writer changed it first.
+_CONFLICT_ATTEMPTS = 16
 
 
 class IEventPublisher(Protocol):
@@ -90,35 +96,69 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         self._principal_index: dict[str, set[str]] | None = None
 
     def _build_index(self) -> None:
-        """Build index by scanning all api_key streams."""
+        """Build the index by scanning all api_key streams, once."""
         if self._index is not None:
             return
+        with self._lock:
+            if self._index is None:
+                self._scan_into_index()
 
-        self._index = {}
-        self._principal_index = {}
+    def _scan_into_index(self) -> None:
+        """Scan every api_key stream and replace the index with what the log holds.
 
-        # Scan all streams with our prefix
-        # This is expensive but only done once
+        Caller holds `self._lock`, which `_save_key` also takes to add to the
+        index. The index is built into locals and published whole. It used to
+        be set to an empty dict before the scan and filled in place. Another
+        thread arriving mid-scan found it already "built" and missed the key it
+        was looking for, and a revocation returned False as if the key did not
+        exist. The principal index is published first, so
+        a reader that sees `_index` set sees both.
+        """
+        index: dict[str, tuple[str, str]] = {}
+        principal_index: dict[str, set[str]] = {}
         for stream_id in self._event_store.list_streams(f"{self.STREAM_PREFIX}:"):
             key_hash = stream_id.split(":", 1)[1]
-            events = list(self._event_store.read_stream(stream_id))
+            events = self._event_store.read_stream(stream_id)
+            creation = next((event for event in events if isinstance(event, ApiKeyCreated)), None)
+            if creation is not None:
+                index[key_hash] = (creation.key_id, creation.principal_id)
+                principal_index.setdefault(creation.principal_id, set()).add(key_hash)
 
-            if events:
-                # Find creation event for metadata
-                for event in events:
-                    if isinstance(event, ApiKeyCreated):
-                        self._index[key_hash] = (event.key_id, event.principal_id)
-
-                        if event.principal_id not in self._principal_index:
-                            self._principal_index[event.principal_id] = set()
-                        self._principal_index[event.principal_id].add(key_hash)
-                        break
-
+        self._principal_index = principal_index
+        self._index = index
         logger.info(
             "api_key_index_built",
-            total_keys=len(self._index),
-            total_principals=len(self._principal_index),
+            total_keys=len(index),
+            total_principals=len(principal_index),
         )
+
+    def _find_key(self, key_id: str) -> tuple[str, tuple[str, str]] | None:
+        """Find a key's hash and index entry by its id, rescanning the log once on a miss.
+
+        The index is built once per process, and after that it only learns
+        about keys this process saved. A key created through another replica
+        that shares the event store is missing from it. Revoking such a key
+        here used to return False as if the key did not exist, while the key
+        went on authenticating. Management calls rescan
+        on a miss. Authentication does not: an unknown key arrives on that
+        path, and a scan per unknown key would be a cheap way to load the
+        store.
+        """
+        self._build_index()
+        found = self._lookup_key_id(key_id)
+        if found is None:
+            with self._lock:
+                self._scan_into_index()
+            found = self._lookup_key_id(key_id)
+        return found
+
+    def _lookup_key_id(self, key_id: str) -> tuple[str, tuple[str, str]] | None:
+        """The index entry for `key_id`, or None. Iterates a copy: `_save_key` may add to it meanwhile."""
+        assert self._index is not None
+        for key_hash, entry in list(self._index.items()):
+            if entry[0] == key_id:
+                return key_hash, entry
+        return None
 
     def _stream_id(self, key_hash: str) -> str:
         """Get stream ID for a key hash."""
@@ -237,6 +277,29 @@ class EventSourcedApiKeyStore(IApiKeyStore):
             new_version=new_version,
         )
 
+    def _retry_on_conflict(self, operation: Callable[[], _T]) -> _T:
+        """Run a load-decide-save operation again when another writer changed the key first.
+
+        `_save_key` claims the version the key was loaded at, and the claim is
+        real: whether a key may be revoked or rotated is decided on the loaded
+        state. When another writer appended in between, the save raises
+        `ConcurrencyError` before anything is applied. The aggregate was a local
+        copy, and the index and the snapshot are touched only after a successful
+        append. Running the whole operation again on a fresh load decides
+        against the state that is actually there. A revocation that lost the
+        race to a rotation still lands, and a rotation that lost to a revocation
+        is refused as a rotation of a revoked key.
+
+        Bounded: when every attempt loses, the caller gets the
+        `ConcurrencyError`, and nothing was applied.
+        """
+        for _ in range(_CONFLICT_ATTEMPTS - 1):
+            try:
+                return operation()
+            except ConcurrencyError as e:
+                logger.info("api_key_write_conflict_retrying", stream_id=e.stream_id)
+        return operation()
+
     # =========================================================================
     # IApiKeyStore Implementation
     # =========================================================================
@@ -348,19 +411,20 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         revoked_by: str | None = None,
         reason: str | None = None,
     ) -> bool:
-        """Revoke an API key."""
-        # Find key by key_id
-        self._build_index()
-        assert self._index is not None and self._principal_index is not None
+        """Revoke an API key.
 
-        key_hash = None
-        for kh, (kid, _) in self._index.items():
-            if kid == key_id:
-                key_hash = kh
-                break
+        Raises:
+            ConcurrencyError: Only when another writer changed the key on every
+                attempt. Nothing was applied.
+        """
+        return self._retry_on_conflict(lambda: self._revoke_key_once(key_id, revoked_by, reason))
 
-        if key_hash is None:
+    def _revoke_key_once(self, key_id: str, revoked_by: str | None, reason: str | None) -> bool:
+        """One load-decide-save pass of `revoke_key`."""
+        found = self._find_key(key_id)
+        if found is None:
             return False
+        key_hash, _entry = found
 
         key = self._load_key(key_hash)
         if key is None or key.is_revoked:
@@ -436,21 +500,22 @@ class EventSourcedApiKeyStore(IApiKeyStore):
 
         Raises:
             ValueError: If key doesn't exist, is revoked, or already rotated.
+            ConcurrencyError: Only when another writer changed the key on every
+                attempt. Nothing was applied, and no new key was stored.
         """
-        # Find key by key_id
-        self._build_index()
-        assert self._index is not None and self._principal_index is not None
+        return self._retry_on_conflict(lambda: self._rotate_key_once(key_id, grace_period_seconds, rotated_by))
 
-        key_hash = None
-        index_entry = None
-        for kh, (kid, principal_id) in self._index.items():
-            if kid == key_id:
-                key_hash = kh
-                index_entry = (kid, principal_id)
-                break
+    def _rotate_key_once(self, key_id: str, grace_period_seconds: float, rotated_by: str) -> str:
+        """One load-decide-save pass of `rotate_key`.
 
-        if key_hash is None:
+        The old key is saved first, under the version it was loaded at. A
+        conflict there raises before the new key is stored, so a retry leaves
+        nothing behind.
+        """
+        found = self._find_key(key_id)
+        if found is None:
             raise ValueError(f"API key not found: {key_id}")
+        key_hash, index_entry = found
 
         # Load old key
         old_key = self._load_key(key_hash, index_entry=index_entry)
@@ -583,14 +648,23 @@ class EventSourcedRoleStore(IRoleStore):
             return
 
         stream_id = self._stream_id(assignment.principal_id)
-        current_version = self._event_store.get_stream_version(stream_id)
 
-        # Append events
-        new_version = self._event_store.append(
-            stream_id=stream_id,
-            events=events,
-            expected_version=current_version,
-        )
+        # At the end of the stream, claiming no version.
+        # The version used to be read here, just before the append, and
+        # claimed. Read at save time, it guarded nothing: whether to record the
+        # event was decided on the state loaded earlier. A writer landing
+        # between the read and the append still turned the append into a
+        # ConcurrencyError, and an assignment or a revocation that nothing was
+        # wrong with failed. Each role event is a fact about one role in one
+        # scope, and replay applies them last-writer-wins, so there is no
+        # invariant across them for a version to protect.
+        #
+        # The snapshot below stays sound. Its version is the one this aggregate
+        # was loaded at, not the one it was saved at, because recording an event
+        # does not advance it. Loading from the snapshot therefore replays every
+        # event appended since, including ones other writers appended in
+        # between.
+        new_version = self._event_store.append_at_end(stream_id, events)
 
         # Create snapshot if needed
         self._maybe_create_snapshot(

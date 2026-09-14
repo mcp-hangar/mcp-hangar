@@ -43,12 +43,16 @@ def register_group_tools(mcp: FastMCP) -> None:
                     strategy: str,
                     min_healthy: int,
                     healthy_count: int,
+                    members_in_rotation_count: int,
                     total_members: int,
                     is_available: bool,
                     circuit_open: bool,
                     members: [{id, state, in_rotation, weight, priority, consecutive_failures}]
                 }]
             }
+            healthy_count counts members that are ready and in rotation.
+            members_in_rotation_count counts members in rotation in any state:
+            a cold one is started by the next call through the group.
 
         Example:
             hangar_group_list()
@@ -91,15 +95,18 @@ def register_group_tools(mcp: FastMCP) -> None:
                 group_id: str,
                 state: str,
                 healthy_count: int,
+                members_in_rotation_count: int,
                 total_members: int,
                 members_in_rotation: list[str]
             }
+            members_in_rotation_count is the length of members_in_rotation.
             Error: ValueError with "unknown_group: <id>"
 
         Example:
             hangar_group_rebalance("llm-group")
             # {"group_id": "llm-group", "state": "ready", "healthy_count": 2,
-            #  "total_members": 3, "members_in_rotation": ["llm-1", "llm-2"]}
+            #  "members_in_rotation_count": 2, "total_members": 3,
+            #  "members_in_rotation": ["llm-1", "llm-2"]}
 
             hangar_group_rebalance("unknown")
             # Error: unknown_group: unknown
@@ -113,10 +120,12 @@ def register_group_tools(mcp: FastMCP) -> None:
         assert g is not None
         g.rebalance()
 
+        in_rotation = [m.id for m in g.members if m.in_rotation]
         return {
             "group_id": group,
             "state": g.state.value,
             "healthy_count": g.healthy_count,
+            "members_in_rotation_count": len(in_rotation),
             "total_members": g.total_count,
-            "members_in_rotation": [m.id for m in g.members if m.in_rotation],
+            "members_in_rotation": in_rotation,
         }

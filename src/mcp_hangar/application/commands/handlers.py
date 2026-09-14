@@ -14,6 +14,7 @@ from ...metrics import observe_tool_call, record_error, record_mcp_server_start,
 from ..ports.bus import ICommandBus
 from ..ports.config_loader import IConfigLoader
 from .commands import (
+    GiveUpOnMcpServerCommand,
     HealthCheckCommand,
     InvokeToolCommand,
     ShutdownIdleMcpServersCommand,
@@ -63,12 +64,21 @@ class BaseMcpServerHandler(CommandHandler):
             return
         try:
             self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, events)
-        except (RuntimeError, ValueError, TypeError) as e:
-            # The barrier stays where it was and keeps its type list. It now
-            # covers a batch rather than one event, which is what appending to a
-            # stream is: the store writes all of them or none.
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the command already ran; publishing its events must not change its outcome
+            # Any exception, not a short list of types. This runs after the
+            # command has done its work, which for a tool call means after the
+            # upstream executed it, and `InvokeToolHandler` runs it in a
+            # `finally`. An exception that got past the old list
+            # (RuntimeError, ValueError, TypeError) reported a call that ran as
+            # a failure. A client could then retry a non-idempotent action.
+            # When the call had raised, the exception also replaced the call's
+            # own error. The bus already delivers a batch
+            # its store refused. Whatever still reaches here is logged and
+            # counted, and the command's result stands.
+            record_error("event_publish", type(e).__name__)
             logger.error(
                 "event_publish_failed",
+                mcp_server_id=mcp_server.mcp_server_id,
                 event_types=[type(event).__name__ for event in events],
                 error=str(e),
                 exc_info=True,
@@ -119,6 +129,28 @@ class StopMcpServerHandler(BaseMcpServerHandler):
         self._publish_events(mcp_server)
 
         return {"stopped": command.mcp_server_id, "reason": command.reason}
+
+
+class GiveUpOnMcpServerHandler(BaseMcpServerHandler):
+    """Handler for GiveUpOnMcpServerCommand."""
+
+    def handle(self, command: GiveUpOnMcpServerCommand) -> dict[str, Any]:
+        """
+        Leave a degraded mcp_server DEAD (#1361).
+
+        The stop counter keeps the increment it had when this was a stop: the
+        connection is closed either way, under the reason the saga gave.
+
+        Returns:
+            Whether it was given up on, and the state it is in.
+        """
+        mcp_server = self._get_mcp_server(command.mcp_server_id)
+        gave_up = mcp_server.give_up(command.reason)
+        if gave_up:
+            record_mcp_server_stop(command.mcp_server_id, reason=command.reason)
+        self._publish_events(mcp_server)
+
+        return {"mcp_server": command.mcp_server_id, "gave_up": gave_up, "state": mcp_server.state.value}
 
 
 class InvokeToolHandler(BaseMcpServerHandler):
@@ -221,6 +253,7 @@ def register_all_handlers(
 
     command_bus.register(StartMcpServerCommand, StartMcpServerHandler(repository, event_bus, runtime_store))
     command_bus.register(StopMcpServerCommand, StopMcpServerHandler(repository, event_bus, runtime_store))
+    command_bus.register(GiveUpOnMcpServerCommand, GiveUpOnMcpServerHandler(repository, event_bus, runtime_store))
     command_bus.register(InvokeToolCommand, InvokeToolHandler(repository, event_bus, runtime_store))
     command_bus.register(HealthCheckCommand, HealthCheckHandler(repository, event_bus, runtime_store))
     command_bus.register(

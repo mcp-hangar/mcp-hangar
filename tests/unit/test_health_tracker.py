@@ -257,6 +257,6 @@ class TestHealthTrackerJitter:
         assert interval == 4.0
 
     def test_get_health_check_interval_dead(self):
-        """get_health_check_interval() returns max ceiling (60.0) for DEAD."""
+        """get_health_check_interval() returns 0.0 for DEAD (skip): Hangar gave up on it (#1361)."""
         tracker = HealthTracker()
-        assert tracker.get_health_check_interval("dead") == 60.0
+        assert tracker.get_health_check_interval("dead") == 0.0
