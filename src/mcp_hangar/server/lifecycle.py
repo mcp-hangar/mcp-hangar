@@ -111,8 +111,9 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
 
     And, on a front door with ``tool_access.required_catalogue``, a replica
     whose boot warm-up has not yet projected every server on that list (#1446):
-    the ``catalogue`` field names what is missing and what the retry will not
-    start. That is not a warm-backend rule, and it does not bring #599 back. It
+    the ``catalogue`` field counts what is missing. This endpoint answers
+    without authentication, so it carries counts only, and the ids are logged
+    (`catalogue_readiness`). That is not a warm-backend rule, and it does not bring #599 back. It
     asks whether a server was projected **once**, and a projection outlives the
     server's stop, so an idle or failed backend never makes a ready replica not
     ready again. With no list, or in ``egress``, the body has no ``catalogue``
@@ -130,7 +131,7 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     durability = get_event_store_durability_status()
     event_store_ok = durability is None or not durability.degraded
     catalogue = catalogue_readiness(repository)
-    catalogue_ok = catalogue is None or catalogue["status"] == "complete"
+    catalogue_ok = catalogue is None or bool(catalogue["complete"])
 
     body: dict[str, Any] = {
         "status": "healthy" if event_store_ok and catalogue_ok else "unhealthy",

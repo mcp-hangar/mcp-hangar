@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 import importlib
+import json
 import sys
 import threading
 import time
@@ -207,6 +208,19 @@ class _Repository:
         return len(self.servers)
 
 
+def _counts(**fields: Any) -> dict[str, Any]:
+    """The readiness body's `catalogue` field: counts and state only."""
+    return {
+        "complete": False,
+        "required": 1,
+        "projected": 0,
+        "missing_count": 1,
+        "not_retried_count": 0,
+        "retry": "not_started",
+        **fields,
+    }
+
+
 class TestReadiness:
     def test_no_list_changes_nothing(self) -> None:
         body, status = build_readiness_report(_Repository(payments=_server("cold")))
@@ -214,7 +228,7 @@ class TestReadiness:
         assert status == 200
         assert "catalogue" not in body
 
-    def test_it_waits_until_the_list_is_projected_and_names_what_is_missing(self) -> None:
+    def test_it_waits_until_the_list_is_projected_and_counts_what_is_missing(self) -> None:
         configure_required_catalogue(_required(_server_req("payments"), _server_req("search")))
         repository = _Repository(payments=_server("ready"), search=_server("dead", "start_failed"))
         _project("payments")
@@ -223,18 +237,26 @@ class TestReadiness:
 
         assert status == 503
         assert body["status"] == "unhealthy"
-        assert body["catalogue"] == {
-            "status": "waiting",
-            "missing": ["search"],
-            "not_retried": {},
-            "retry": "not_started",
-        }
+        assert body["catalogue"] == _counts(required=2, projected=1)
 
         _project("search")
         body, status = build_readiness_report(repository)
 
         assert status == 200
-        assert body["catalogue"] == {"status": "complete"}
+        assert body["catalogue"] == _counts(complete=True, required=2, projected=2, missing_count=0)
+
+    def test_the_unauthenticated_body_names_no_server_and_no_dead_reason(self) -> None:
+        # `/health/ready` is on the auth skip-list: whoever can reach the port reads it.
+        configure_required_catalogue(_required(_server_req("payments"), _server_req("search")))
+        repository = _Repository(payments=_server("dead", "capability_blocked"), search=_server("dead", "given_up"))
+
+        body, status = build_readiness_report(repository)
+
+        assert status == 503
+        assert body["catalogue"] == _counts(required=2, missing_count=2, not_retried_count=2)
+        text = json.dumps(body)
+        for word in ("payments", "search", "capability_blocked", "given_up"):
+            assert word not in text
 
     def test_once_complete_a_cold_fleet_and_a_new_list_leave_it_ready(self) -> None:
         # The #599 deadlock is "the last backend went idle -> 503". A projection
@@ -247,7 +269,7 @@ class TestReadiness:
         body, status = build_readiness_report(_Repository(payments=_server("cold"), search=_server("dead", "crashed")))
 
         assert status == 200
-        assert body["catalogue"] == {"status": "complete"}
+        assert body["catalogue"]["complete"] is True
 
     def test_a_reload_that_adds_a_list_to_a_ready_replica_does_not_take_it_out(self) -> None:
         configure_required_catalogue(None)  # booted without one
@@ -268,23 +290,56 @@ class TestReadiness:
     def test_one_member_satisfies_a_group(self) -> None:
         configure_required_catalogue(_required(Requirement(name="pool", servers=("pool-a", "pool-b"))))
         repository = _Repository(**{"pool-a": _server("dead", "start_failed"), "pool-b": _server("cold")})
-        assert build_readiness_report(repository)[0]["catalogue"]["missing"] == ["pool"]
+        assert build_readiness_report(repository)[0]["catalogue"] == _counts()
 
         _project("pool-b")
 
         assert build_readiness_report(repository)[1] == 200
 
-    def test_it_says_which_servers_the_retry_will_not_start_and_why(self) -> None:
+
+class TestWhereTheNamesGo:
+    """The ids and dead reasons the readiness body leaves out, on the surfaces operators already use."""
+
+    def _fleet(self) -> _Repository:
         configure_required_catalogue(_required(_server_req("payments"), _server_req("search")))
-        repository = _Repository(
-            payments=_server("dead", "capability_blocked"),
-            search=_server("dead", "given_up"),
+        return _Repository(payments=_server("dead", "capability_blocked"), search=_server("dead", "start_failed"))
+
+    def test_the_log_names_what_is_missing_and_why_once_per_change(self) -> None:
+        repository = self._fleet()
+
+        with capture_logs() as logs:
+            build_readiness_report(repository)
+            build_readiness_report(repository)  # a probe a few seconds later: nothing new
+            _project("search")
+            build_readiness_report(repository)
+
+        waiting = [entry for entry in logs if entry["event"] == "required_catalogue_waiting"]
+        assert [(entry["missing"], entry["not_retried"]) for entry in waiting] == [
+            (["payments", "search"], {"payments": "capability_blocked"}),
+            (["payments"], {"payments": "capability_blocked"}),
+        ]
+
+    def test_hangar_health_names_them(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from mcp_hangar.server.tools import health
+
+        repository = self._fleet()
+        view = SimpleNamespace(
+            groups=[], total_servers=2, servers_by_state=lambda: {"dead": 2}, scope_fields=lambda: {}
         )
+        context = SimpleNamespace(rate_limiter=SimpleNamespace(get_stats=lambda: {}), repository=repository)
+        monkeypatch.setattr(health, "observe_replica", lambda: view)
+        monkeypatch.setattr(health, "get_context", lambda: context)
 
-        body, status = build_readiness_report(repository)
+        assert health.hangar_health()["catalogue"] == {
+            "complete": False,
+            "required": ["payments", "search"],
+            "missing": ["payments", "search"],
+            "not_retried": {"payments": "capability_blocked"},
+            "retry": "not_started",
+        }
 
-        assert status == 503
-        assert body["catalogue"]["not_retried"] == {"payments": "capability_blocked", "search": "given_up"}
+        catalogue_readiness.reset()
+        assert "catalogue" not in health.hangar_health()
 
 
 # ----------------------------------------------------------------------------

@@ -89,19 +89,27 @@ def test_a_replica_whose_required_backend_is_down_at_boot_is_not_ready(recover):
 
     assert ready["status"] == 503, ready
     assert ready["body"]["status"] == "unhealthy"
-    assert ready["body"]["catalogue"] == {"status": "waiting", "missing": [LATE], "not_retried": {}, "retry": "running"}
+    assert ready["body"]["catalogue"] == {
+        "complete": False,
+        "required": 2,
+        "projected": 1,
+        "missing_count": 1,
+        "not_retried_count": 0,
+        "retry": "running",
+    }
 
 
 def test_it_stays_not_ready_while_the_retry_fails(recover):
     assert recover["while_late"]["ready"]["status"] == 503
-    assert recover["while_late"]["ready"]["body"]["catalogue"]["missing"] == [LATE]
+    assert recover["while_late"]["ready"]["body"]["catalogue"]["missing_count"] == 1
 
 
 def test_it_becomes_ready_once_the_retry_projects_the_backend(recover):
     ready = recover["recovered"]["ready"]
 
     assert ready["status"] == 200, ready
-    assert ready["body"]["catalogue"] == {"status": "complete"}
+    catalogue = ready["body"]["catalogue"]
+    assert (catalogue["complete"], catalogue["projected"], catalogue["missing_count"]) == (True, 2, 0)
     retries = recover["recovered"]["late_retries"]
     assert retries.get("failed", 0) >= 1, retries
     assert retries.get("projected") == 1.0, "the backend came back through something other than the retry"
@@ -122,7 +130,8 @@ def test_a_ready_replica_stays_ready_through_an_idle_stop_and_a_later_outage(rec
 
     assert after["late_state"][0] != "ready", after
     assert after["ready"]["status"] == 200, after
-    assert after["ready"]["body"]["catalogue"] == {"status": "complete"}
+    assert after["ready"]["body"]["catalogue"]["complete"] is True
+    assert after["ready"]["body"]["catalogue"]["retry"] == "finished"
 
 
 # ----------------------------------------------------------------------------
@@ -155,8 +164,14 @@ def test_readiness_stays_503_and_says_why(blocked):
     ready = blocked["window"]["ready"]
 
     assert ready["status"] == 503
-    assert ready["body"]["catalogue"]["missing"] == [BLOCKED, GIVEN_UP, DOWN]
-    assert ready["body"]["catalogue"]["not_retried"] == {BLOCKED: "capability_blocked", GIVEN_UP: "given_up"}
+    assert ready["body"]["catalogue"] == {
+        "complete": False,
+        "required": 3,
+        "projected": 0,
+        "missing_count": 3,
+        "not_retried_count": 2,
+        "retry": "running",
+    }
 
 
 def test_the_retry_stops_at_shutdown(blocked):
@@ -182,3 +197,26 @@ def test_egress_starts_nothing(egress):
     assert egress["starts"] == {IDLE: 0, LATE: 0}
     assert egress["retries"] == {IDLE: {}, LATE: {}}
     assert egress["ever_served"] == {IDLE: False, LATE: False}
+
+
+# ----------------------------------------------------------------------------
+# What an unauthenticated caller can read
+# ----------------------------------------------------------------------------
+
+
+def test_no_readiness_body_names_a_server_or_a_dead_reason(runs):
+    # `/health/ready` is on the auth skip-list, so it carries counts; the ids are logged.
+    bodies = [
+        runs["recover"]["boot"],
+        runs["recover"]["while_late"]["ready"],
+        runs["recover"]["recovered"]["ready"],
+        runs["recover"]["after_outage"]["ready"],
+        runs["blocked"]["window"]["ready"],
+        runs["blocked"]["after_shutdown"]["ready"],
+        runs["egress"]["boot"],
+        runs["egress"]["later"],
+    ]
+    text = json.dumps([ready["body"] for ready in bodies])
+
+    for word in (IDLE, LATE, BLOCKED, GIVEN_UP, DOWN, "capability_blocked", "given_up", "start_failed", "crashed"):
+        assert word not in text

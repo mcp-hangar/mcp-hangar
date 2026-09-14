@@ -18,11 +18,16 @@ projected before it is ready::
 ## What readiness waits for, and for how long
 
 Until every required server has been projected **once** on this replica,
-``/health/ready`` answers 503 and names what is missing. After that, readiness
+``/health/ready`` answers 503. After that, readiness
 never looks at the catalogue again: a projection is not removed when a server
 stops, so a later outage or an idle stop cannot take the replica out of the
 Service. That is what keeps #599 fixed. An idle gateway with every backend cold
 is still ready, because being ready here means "was projected", not "is warm".
+
+``/health/ready`` answers without authentication, so its ``catalogue`` field
+carries counts and the retry's state, never a server id or a dead reason. The
+ids and reasons go where operators already look: a ``required_catalogue_waiting``
+log line each time they change, the retry's own log lines, and ``hangar_health``.
 
 A group id is required as a group: it is satisfied once **any one** of its
 members has been projected, since that member's tools are the group's.
@@ -39,7 +44,7 @@ does not fight the server lifecycle, which is how #1429 failed:
   its own backoff, which is also checked before the command is sent, and a
   capability-blocked one is refused.
 - It never starts a server that is ``dead`` for ``given_up`` or
-  ``capability_blocked``. Readiness stays 503 and names the reason: the replica
+  ``capability_blocked``. Readiness stays 503 and the log names the reason: the replica
   cannot serve the catalogue it was told to, and only an operator can decide
   that server should run again, by starting it deliberately or by taking it off
   the list.
@@ -197,6 +202,8 @@ class _Gate:
         self._required: RequiredCatalogue | None = None
         self._complete = False
         self._retry = "not_started"
+        # What `observe` last logged, so a probe every few seconds logs a change once.
+        self._logged: tuple[Any, ...] | None = None
 
     def configure(self, required: RequiredCatalogue | None) -> None:
         with self._lock:
@@ -229,19 +236,55 @@ class _Gate:
                 logger.info("required_catalogue_projected", required=[r.name for r in required.requirements])
         return missing
 
-    def readiness(self, repository: Any) -> dict[str, Any] | None:
-        """The ``catalogue`` field of ``/health/ready``, or None when no list is in force."""
-        if self.required() is None:
-            return None
+    def observe(self, repository: Any) -> tuple[list[Requirement], dict[str, str]]:
+        """What is missing, and each server the retry will not start and why.
+
+        Logged, with the ids and dead reasons and never error text, each time
+        either changes. That line is where an operator reads them: the readiness
+        endpoint is unauthenticated, so it reports counts.
+        """
         missing = self.unsatisfied()
-        if not missing:
-            return {"status": "complete"}
+        not_retried = _not_retried(repository, missing) if missing else {}
+        seen = (tuple(requirement.name for requirement in missing), tuple(sorted(not_retried.items())))
+        with self._lock:
+            changed = bool(missing) and seen != self._logged
+            self._logged = seen
+            retry = self._retry
+        if changed:
+            logger.warning("required_catalogue_waiting", missing=list(seen[0]), not_retried=not_retried, retry=retry)
+        return missing, not_retried
+
+    def readiness(self, repository: Any) -> dict[str, Any] | None:
+        """The ``catalogue`` field of ``/health/ready``: counts and state, no ids. None when no list is in force."""
+        required = self.required()
+        if required is None:
+            return None
+        missing, not_retried = self.observe(repository)
+        with self._lock:
+            retry = self._retry
+        total = len(required.requirements)
+        return {
+            "complete": not missing,
+            "required": total,
+            "projected": total - len(missing),
+            "missing_count": len(missing),
+            "not_retried_count": len(not_retried),
+            "retry": retry,
+        }
+
+    def detail(self, repository: Any) -> dict[str, Any] | None:
+        """The same, with the ids and dead reasons, for a surface that authenticates its caller."""
+        required = self.required()
+        if required is None:
+            return None
+        missing, not_retried = self.observe(repository)
         with self._lock:
             retry = self._retry
         return {
-            "status": "waiting",
+            "complete": not missing,
+            "required": [requirement.name for requirement in required.requirements],
             "missing": [requirement.name for requirement in missing],
-            "not_retried": _not_retried(repository, missing),
+            "not_retried": not_retried,
             "retry": retry,
         }
 
@@ -271,8 +314,13 @@ def configure_required_catalogue(required: RequiredCatalogue | None) -> None:
 
 
 def catalogue_readiness(repository: Any) -> dict[str, Any] | None:
-    """What ``/health/ready`` says about the catalogue, or None when it has nothing to say."""
+    """What ``/health/ready`` says about the catalogue: counts, no ids. None when it has nothing to say."""
     return _gate.readiness(repository)
+
+
+def catalogue_detail(repository: Any) -> dict[str, Any] | None:
+    """The catalogue with its ids and dead reasons, for ``hangar_health``. None when no list is in force."""
+    return _gate.detail(repository)
 
 
 def reset() -> None:
@@ -323,7 +371,8 @@ class CatalogueRetry:
     def _loop(self, deadline: float) -> str:
         """The retry itself; returns how it ended."""
         while not self._stop.is_set():
-            missing = _gate.unsatisfied()
+            # `observe`, not `unsatisfied`: the waiting line is logged even when nothing probes readiness.
+            missing, _ = _gate.observe(self._runtime.repository)
             if not missing:
                 return "finished"
             if time.monotonic() >= deadline:

@@ -55,10 +55,13 @@ tool_access:
 ```
 
 - A replica answers `/health/ready` with 503 until its boot warm-up has
-  projected every listed server once. The body carries a `catalogue` field:
-  `missing` lists the ids not projected yet, `not_retried` names each server the
-  retry will not start and why, and `retry` says whether the retry is
-  `running`, `finished`, `exhausted`, `stopped` or `off`.
+  projected every listed server once. The readiness endpoint is
+  unauthenticated, so its `catalogue` field reports counts and state only:
+  `complete`, `required`, `projected`, `missing_count`, `not_retried_count`, and
+  `retry`, which is `running`, `finished`, `exhausted`, `stopped` or `off`.
+- The missing ids, and the reason the retry will not start a server, are
+  logged in a `required_catalogue_waiting` line each time they change, and
+  `hangar_health` returns them under `catalogue`.
 - A server the warm-up could not start is retried for `retry_for_s` seconds,
   600 by default; 0 turns the retry off. The retry starts a server the way a
   call does, so a dead server waits out its backoff. It never starts a server
@@ -79,8 +82,9 @@ tool_access:
   stays ready. One still waiting waits for the new list, or stops waiting if
   the block is removed.
 
-**If readiness stays 503.** A server in `not_retried` is one Hangar gave up on
-or blocked for a capability drift. Fix it, then start it deliberately
+**If readiness stays 503.** Read the `required_catalogue_waiting` log line, or
+`hangar_health`, for the ids. A server under `not_retried` is one Hangar gave up
+on or blocked for a capability drift. Fix it, then start it deliberately
 (`hangar_start`, or a start through the REST API), or take it off the list. If
 `retry` reads `exhausted`, the backend did not come up within `retry_for_s`:
 start it deliberately once it is back, or restart the replica.
