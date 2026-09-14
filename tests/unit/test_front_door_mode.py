@@ -177,11 +177,24 @@ class TestTopologyModeResolver:
         with resolver._lock:
             assert ("tool", "mcp_server:srv") not in resolver._policy_cache
 
-    def test_clear_all_resets_topology_mode_to_egress(self, resolver):
-        """clear_all() must reset topology mode to the safe default (egress)."""
+    def test_clear_all_keeps_the_topology_mode(self, resolver):
+        """clear_all() drops policies, not the mode (#1424).
+
+        It used to reset the mode too, and a reload called it: every reload
+        turned a front door into an egress gateway, so a caller with no tenant
+        went from denied to the server's policy.
+        """
         resolver.set_topology_mode("front_door")
         resolver.clear_all()
-        # After clear, unauthenticated caller gets server policy (egress default).
+
+        assert resolver.topology_mode == "front_door"
+        assert not resolver.resolve_effective_policy("srv").is_tool_allowed("any_tool")
+
+    def test_reset_puts_the_topology_mode_back_to_egress(self, resolver):
+        """reset() is the full reset: no policies and the default mode."""
+        resolver.set_topology_mode("front_door")
+        resolver.reset()
+        # After reset, unauthenticated caller gets server policy (egress default).
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy())
         policy = resolver.resolve_effective_policy("srv")
         assert policy.is_tool_allowed("any_tool")
