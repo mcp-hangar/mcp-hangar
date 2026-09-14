@@ -328,7 +328,10 @@ drift_allowance = 3.0
   # 89.5 -> 90.5 when tests/unit/test_approval_span_result.py began closing the
   # approval loops in teardown (#1389), which runs _close_approval_loops -- until
   # then reached only at exit, where nothing measures it: 93.04 on 3.11.
-  "server/tools/batch/executor.py" = 90.5
+  # 90.5 -> 91.0 when the front door's flat call began running through the
+  # configured executor (#1425): 93.69 on 3.11 locally and 93.33 in CI on main
+  # before it, which straddles the drift allowance's 93.5. 91.0 sits under both.
+  "server/tools/batch/executor.py" = 91.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
