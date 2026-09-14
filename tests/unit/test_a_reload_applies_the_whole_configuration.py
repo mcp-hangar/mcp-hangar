@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sys
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from collections.abc import Callable
@@ -33,7 +35,11 @@ from mcp_hangar.application.read_models.tool_projection import (
     reset_tool_projection_registry,
 )
 from mcp_hangar.domain.events import ConfigurationReloadFailed
-from mcp_hangar.domain.exceptions import ConfigurationError, ConfigurationRestartRequiredError
+from mcp_hangar.domain.exceptions import (
+    ConfigurationError,
+    ConfigurationRestartRequiredError,
+    ConfigurationUnavailableError,
+)
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies, get_header_exposure_policy
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
@@ -84,6 +90,7 @@ def _reset() -> None:
     rt.set_max_links_per_tenant(rt.DEFAULT_MAX_LINKS_PER_TENANT)
     reset_ui_resource_guard()
     reset_concurrency_manager()
+    server_config._BUILT_FROM.clear()
     repository = get_runtime().repository
     for mcp_server_id in IDS:
         if repository.exists(mcp_server_id):
@@ -420,6 +427,157 @@ class TestGovernanceAcrossAReload:
 
         assert resolver.get_configured_policy("provider", SERVER) == DENY_Y
         assert resolver.get_configured_policy("group", "g") == DENY_Y
+
+
+MOCK_PROVIDER = Path(__file__).resolve().parents[1] / "mock_provider.py"
+#: Spelled out: a server whose file omits `resources` is restarted by every reload (#1426).
+RESOURCES = {"resources": {"memory": "512m", "cpu": "1.0"}}
+
+
+class TestAnUnchangedServerIsKept:
+    def test_a_running_server_and_an_inline_member_stay_the_running_objects(self, gateway: _Gateway) -> None:
+        """Not replaced by idle copies, which left the running processes with nothing to stop them (#1424)."""
+        real = {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)], **RESOURCES}
+        group = {"mode": "group", "auto_start": False, "members": [{"id": "m1", **real}]}
+        config = _config(servers={SERVER: real, "g": group})
+        gateway.boot(config)
+        repository = get_runtime().repository
+        running = {mcp_server_id: repository.get(mcp_server_id) for mcp_server_id in (SERVER, "m1")}
+        try:
+            for server in running.values():
+                server.ensure_ready()
+            states = {mcp_server_id: server.state for mcp_server_id, server in running.items()}
+
+            result = gateway.reload(config)
+
+            assert result["mcp_servers_unchanged"] == ["m1", SERVER]
+            assert all(repository.get(mcp_server_id) is server for mcp_server_id, server in running.items())
+            member = GROUPS["g"].get_member("m1")
+            assert member is not None and member.mcp_server is running["m1"]
+            assert {mcp_server_id: server.state for mcp_server_id, server in running.items()} == states
+        finally:
+            for server in running.values():
+                server.shutdown()
+
+    def test_a_server_whose_entry_changed_is_stopped_before_it_is_replaced(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even for a field the change check does not compare: a server that is replaced is stopped."""
+        gateway.boot(_config(servers={SERVER: _server(description="before", **RESOURCES)}))
+        before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
+
+        result = gateway.reload(_config(servers={SERVER: _server(description="after", **RESOURCES)}))
+
+        assert result["mcp_servers_updated"] == [SERVER]
+        shutdown.assert_called_once()
+        assert get_runtime().repository.get(SERVER) is not before
+
+
+DENY_Z = ToolAccessPolicy(deny_list=("z",))
+
+
+class _PolicyStore:
+    """The REST endpoint's policy store, as the replay reads it."""
+
+    def __init__(self, rows: list[Any]) -> None:
+        self.rows = rows
+        self.failing_reads: tuple[int, ...] = ()
+        self.delay = 0.0
+        self.reads = 0
+        self.reading = threading.Event()
+
+    def list_all_policies(self) -> list[Any]:
+        self.reads += 1
+        self.reading.set()
+        time.sleep(self.delay)
+        if self.reads in self.failing_reads:
+            raise OSError("database is locked")
+        return list(self.rows)
+
+
+@pytest.fixture
+def store(monkeypatch: pytest.MonkeyPatch) -> _PolicyStore:
+    policy_store = _PolicyStore([("provider", SERVER, DENY_Y)])
+    monkeypatch.setattr(get_context(), "auth_components", SimpleNamespace(tap_store=policy_store))
+    return policy_store
+
+
+class TestTheStoredPoliciesAcrossAReload:
+    GOVERNED_X = _server(tools={"deny_list": ["x"]})
+
+    def _boot(self, gateway: _Gateway) -> None:
+        gateway.boot(_config(servers={SERVER: self.GOVERNED_X}))
+        get_tool_access_resolver().set_mcp_server_policy(SERVER, DENY_Y)  # what the REST endpoint does beside storing
+
+    def test_a_store_that_cannot_be_read_refuses_the_reload(
+        self, gateway: _Gateway, store: _PolicyStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Applying the file without the stored rows would loosen `y` and report success."""
+        self._boot(gateway)
+        before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
+        store.failing_reads = (1,)
+
+        with pytest.raises(ConfigurationUnavailableError, match="nothing was changed"):
+            gateway.reload(_config(servers={SERVER: self.GOVERNED_X, "late": _server()}))
+
+        shutdown.assert_not_called()
+        repository = get_runtime().repository
+        assert repository.get(SERVER) is before
+        assert repository.get("late") is None
+        assert get_tool_access_resolver().get_configured_policy("provider", SERVER) == DENY_Y
+
+    def test_a_failed_read_before_the_swap_uses_the_rows_read_when_prepared(
+        self, gateway: _Gateway, store: _PolicyStore
+    ) -> None:
+        self._boot(gateway)
+        store.failing_reads = (2,)
+
+        gateway.reload(_config(servers={SERVER: self.GOVERNED_X}))
+
+        assert store.reads == 2
+        assert get_tool_access_resolver().get_configured_policy("provider", SERVER) == DENY_Y
+
+    def test_a_rest_write_made_while_the_reload_runs_is_not_undone(
+        self, gateway: _Gateway, store: _PolicyStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._boot(gateway)
+        loader = gateway.handler._config_loader
+        apply_sections = loader.apply_process_config
+
+        def a_rest_write_lands(full_config: dict[str, Any]) -> None:
+            """Between the read when the reload was prepared and its commit."""
+            apply_sections(full_config)
+            store.rows = [("provider", SERVER, DENY_Z)]
+            get_tool_access_resolver().set_mcp_server_policy(SERVER, DENY_Z)
+
+        monkeypatch.setattr(loader, "apply_process_config", a_rest_write_lands)
+
+        gateway.reload(_config(servers={SERVER: self.GOVERNED_X}))
+
+        assert get_tool_access_resolver().get_configured_policy("provider", SERVER) == DENY_Z
+
+    def test_a_slow_store_never_holds_up_a_policy_check(self, gateway: _Gateway, store: _PolicyStore) -> None:
+        """Both reads happen with the resolver lock free, so a call is not held up by the database."""
+        self._boot(gateway)
+        store.delay = 0.5
+        waits: list[float] = []
+
+        def a_policy_check_during_each_read() -> None:
+            for _read in range(2):  # the read when prepared, and the one before the swap
+                assert store.reading.wait(10)
+                store.reading.clear()
+                time.sleep(0.05)
+                started = time.monotonic()
+                get_tool_access_resolver().is_tool_allowed(SERVER, "z", member_id=TENANT)
+                waits.append(time.monotonic() - started)
+
+        caller = threading.Thread(target=a_policy_check_during_each_read)
+        caller.start()
+        gateway.reload(_config(servers={SERVER: self.GOVERNED_X}))
+        caller.join(10)
+
+        assert len(waits) == 2
+        assert max(waits) < 0.1, waits
 
 
 class TestNoCallSeesAGap:

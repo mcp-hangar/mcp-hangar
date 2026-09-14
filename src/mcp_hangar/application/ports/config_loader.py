@@ -18,6 +18,14 @@ class PreparedServers(Protocol):
     #: group's inline members, whose spec is the member entry itself.
     specs: dict[str, dict[str, Any]]
 
+    def keeps(self, mcp_server_id: str, running: Any) -> bool:
+        """Whether the new configuration keeps *running* as that server, rather than replacing it.
+
+        A running server it does not keep is replaced when it is committed, so
+        a reload must stop it first.
+        """
+        ...
+
 
 class IConfigLoader(ABC):
     """Interface for loading and applying configuration to the running process.

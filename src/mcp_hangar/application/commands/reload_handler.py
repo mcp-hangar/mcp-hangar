@@ -12,7 +12,7 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.services import get_tool_access_resolver
 from ...domain.services.tool_access_resolver import configured_topology_mode
 from ...logging_config import get_logger
-from ..ports.config_loader import IConfigLoader
+from ..ports.config_loader import IConfigLoader, PreparedServers
 from .commands import ReloadConfigurationCommand
 
 logger = get_logger(__name__)
@@ -175,7 +175,7 @@ class ReloadConfigurationHandler(CommandHandler):
         prepared = self._config_loader.prepare_mcp_servers(new_full_config.get("mcp_servers", {}))
 
         current_mcp_servers = dict(self._repository.get_all())
-        diff = self._diff(current_mcp_servers, prepared.specs)
+        diff = self._diff(current_mcp_servers, prepared)
 
         self._stop(current_mcp_servers, diff.removed + diff.updated, graceful=graceful)
         self._remove(diff.removed)
@@ -213,21 +213,28 @@ class ReloadConfigurationHandler(CommandHandler):
             details={"running_mode": running, "requested_mode": requested},
         )
 
-    def _diff(self, current: dict[str, Any], new_specs: dict[str, dict[str, Any]]) -> _ServerDiff:
+    def _diff(self, current: dict[str, Any], prepared: PreparedServers) -> _ServerDiff:
         """Compare the running servers with every server the file declares.
 
-        *new_specs* includes each group's inline members. Counting only the
-        top-level keys made every inline member look removed: it was stopped,
-        rebuilt, and stripped of the policies set on it at runtime (#1424).
+        The declared servers include each group's inline members. Counting only
+        the top-level keys made every inline member look removed: it was
+        stopped, rebuilt, and stripped of the policies set on it at runtime.
+
+        A running server the new configuration does not keep is being replaced,
+        so it counts as updated and is stopped. Replacing it without a stop left
+        its process running with nothing to stop it (#1424).
         """
+        new_specs = prepared.specs
         new_ids = set(new_specs)
         current_ids = set(current)
 
         updated: list[str] = []
         unchanged: list[str] = []
         for mcp_server_id in sorted(new_ids & current_ids):
-            old_spec = self._get_mcp_server_spec(current[mcp_server_id])
-            if self._config_differs(old_spec, new_specs[mcp_server_id]):
+            running = current[mcp_server_id]
+            old_spec = self._get_mcp_server_spec(running)
+            replaced = not prepared.keeps(mcp_server_id, running)
+            if replaced or self._config_differs(old_spec, new_specs[mcp_server_id]):
                 updated.append(mcp_server_id)
             else:
                 unchanged.append(mcp_server_id)

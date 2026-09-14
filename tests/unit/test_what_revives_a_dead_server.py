@@ -269,7 +269,7 @@ def test_reloading_a_dead_server_away_removes_its_series():
         load_from_file=lambda _path: {"mcp_servers": {}},
         check_process_config=lambda _config: None,
         apply_process_config=lambda _config: None,
-        prepare_mcp_servers=lambda _config: SimpleNamespace(specs={}),
+        prepare_mcp_servers=lambda _config: SimpleNamespace(specs={}, keeps=lambda *_: False),
         commit_mcp_servers=lambda _prepared: None,
     )
 

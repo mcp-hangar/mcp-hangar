@@ -46,7 +46,9 @@ Before, a reload removed every tool-access policy set at runtime. Now:
 
 - The policies stored by the REST policy endpoint are replayed after the file,
   as a restart does. On a scope that both the file and the REST endpoint
-  define, the stored policy applies, after a reload as after a restart.
+  define, the stored policy applies, after a reload as after a restart. If the
+  policy store cannot be read, the reload is refused and nothing changes;
+  `POST /api/config/reload` answers HTTP 503.
 - Any other policy set at runtime, such as one `hangar_load` set, is kept
   unless the file now defines the same scope. The file's policy then replaces
   it.

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast, ParamSpec, TypeVar
 
 import yaml
 
-from ..domain.exceptions import ConfigurationError
+from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
@@ -82,6 +82,13 @@ class _StagedConfig:
     #: The spec each server in `servers` was built from: a top-level entry, or
     #: a group's inline member entry. What a reload diffs against.
     specs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The REST endpoint's stored policies, read when a reload is prepared so
+    #: that a store that cannot be read refuses the reload. None: no store.
+    stored_policies: list[Any] | None = None
+
+    def keeps(self, mcp_server_id: str, running: Any) -> bool:
+        """Whether this configuration keeps *running* as that server, rather than replacing it."""
+        return self.servers.get(mcp_server_id) is running
 
     def commit(self, *, replace: bool) -> None:
         """Put this configuration in force. Nothing here fails on the file: `build_config` checked it.
@@ -96,21 +103,29 @@ class _StagedConfig:
         from ..domain.policies.header_exposure import adopt_header_exposure_policies
         from ..domain.services import get_tool_access_resolver
 
+        # Outside the resolver lock: this may wait on a database.
+        stored = _stored_policies_now(self.stored_policies) if replace else None
         resolver = get_tool_access_resolver()
         with resolver.locked():
             resolver.adopt_config_policies(self.policies, replace=replace)
-            if replace:
+            if stored is not None:
                 # What startup does after the file: the REST endpoint's stored
                 # policies go over it, so a reload and a restart agree on a
                 # scope both define. Under the same lock, so no call is resolved
-                # against the file's policy on that scope in between.
-                _replay_stored_runtime_policies()
+                # against the file's policy on that scope in between; from rows
+                # already read, so nothing waits on the store while it is held.
+                _replay_stored_rows(stored)
         get_tool_projection_registry().adopt_config_overlays(self.projections, replace=replace)
         adopt_header_exposure_policies(self.header_exposure, replace=replace)
 
         repository = _mcp_server_repository()
         for mcp_server_id, mcp_server in self.servers.items():
             repository.add(mcp_server_id, mcp_server)
+        if replace:
+            _BUILT_FROM.clear()
+        _BUILT_FROM.update(
+            {sid: (self.specs[sid], server) for sid, server in self.servers.items() if sid in self.specs}
+        )
         for group_id, group in self.groups.items():
             GROUPS[group_id] = group
             # After the group is in GROUPS, which the gauge's writer checks (#1357).
@@ -124,27 +139,90 @@ class _StagedConfig:
                 del GROUPS[group_id]
 
 
-def _replay_stored_runtime_policies() -> None:
-    """Replay the REST endpoint's stored tool-access policies, as startup does after the file.
+#: Each server a configuration built, with the spec it was built from. A reload
+#: keeps the running server only when the file declares it exactly so (#1424).
+_BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
 
-    The function startup uses, `auth.bootstrap._replay_tap_policies`, on the
-    store the running auth components hold. Without auth, or without a store,
-    there is nothing to replay. A store that cannot be read is logged rather
-    than raised: a reload runs this after it has stopped the servers it
-    replaces, and the runtime policies the resolver already holds stay in force.
+
+def _kept_or_built(mcp_server_id: str, spec_dict: dict[str, Any], built: McpServer) -> McpServer:
+    """The running server, when the file declares it exactly as it was built; *built* otherwise.
+
+    A reload used to put a fresh copy of every server in the repository and
+    stop only the ones it counted as changed. An unchanged running server was
+    replaced without a stop: its process kept running outside idle timeout, GC
+    and shutdown, and the next call started a second one (#1424). Only the
+    object built from this very spec, and still the running one, is kept;
+    anything else is replaced, and the reload stops what it replaces.
     """
+    previous = _BUILT_FROM.get(mcp_server_id)
+    if previous is None or previous[0] != spec_dict:
+        return built
+    running = _mcp_server_repository().get(mcp_server_id)
+    return running if running is previous[1] else built
+
+
+def _tap_store() -> Any:
+    """The REST endpoint's policy store the running auth components hold, or None."""
     from .context import get_context
 
-    tap_store = getattr(getattr(get_context(), "auth_components", None), "tap_store", None)
-    if tap_store is None:
-        return
+    return getattr(getattr(get_context(), "auth_components", None), "tap_store", None)
 
+
+def _read_stored_policies() -> list[Any] | None:
+    """Read the REST endpoint's stored policies while a reload can still be refused (#1424).
+
+    None when there is no store. A store that cannot be read refuses the
+    reload: applying the file without its rows would loosen every scope both
+    define, and report success.
+    """
+    store = _tap_store()
+    if store is None:
+        return None
+    try:
+        return list(store.list_all_policies())
+    except Exception as e:  # noqa: BLE001 -- any store failure refuses the reload, before anything changed
+        raise ConfigurationUnavailableError(
+            "The stored tool-access policies could not be read, so the reload was refused and nothing was "
+            "changed. Reload again once the policy store is reachable."
+        ) from e
+
+
+def _stored_policies_now(read_when_prepared: list[Any] | None) -> list[Any] | None:
+    """Read the store again just before the swap, outside the resolver lock.
+
+    So a REST write made after the reload was prepared is not undone by older
+    rows. If this read fails, the rows read when the reload was prepared are
+    used: by now the reload has stopped servers, and those rows are the store
+    as it was a moment ago.
+    """
+    if read_when_prepared is None:
+        return None
+    try:
+        return list(_tap_store().list_all_policies())
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: fall back to the rows read when prepared
+        logger.warning("stored_tool_access_policy_reread_failed", error=str(e), error_type=type(e).__name__)
+        return read_when_prepared
+
+
+class _StoredRows:
+    """A policy store that answers from rows already read.
+
+    Handed to the replay startup uses, `auth.bootstrap._replay_tap_policies`,
+    which asks its store for every row. A reload runs it under the resolver
+    lock, where nothing may wait on a database.
+    """
+
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def list_all_policies(self) -> list[Any]:
+        return self._rows
+
+
+def _replay_stored_rows(rows: list[Any]) -> None:
     from ..auth.bootstrap import _replay_tap_policies
 
-    try:
-        _replay_tap_policies(tap_store)
-    except Exception as e:  # noqa: BLE001 -- fault-barrier: a store read must not half-apply a reload
-        logger.error("stored_tool_access_policy_replay_failed", error=str(e), error_type=type(e).__name__)
+    _replay_tap_policies(_StoredRows(rows))
 
 
 _staged: ContextVar[_StagedConfig | None] = ContextVar("mcp_hangar_staged_config", default=None)
@@ -839,6 +917,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         # Capability declarations
         capabilities=capabilities,
     )
+    mcp_server = _kept_or_built(mcp_server_id, spec_dict, mcp_server)
     _staged_config().servers[mcp_server_id] = mcp_server
     _staged_config().specs[mcp_server_id] = spec_dict
 
@@ -1412,8 +1491,14 @@ class ServerConfigLoader(IConfigLoader):
         apply_process_config(full_config)
 
     def prepare_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> _StagedConfig:
-        """Build and check a mcp_servers section, and put none of it in force. See `build_config`."""
-        return build_config(mcp_servers_config)
+        """Build and check a mcp_servers section and read the stored policies; put nothing in force.
+
+        Both can refuse a reload, and both do it here, before anything is
+        stopped. See `build_config` and `_read_stored_policies`.
+        """
+        prepared = build_config(mcp_servers_config)
+        prepared.stored_policies = _read_stored_policies()
+        return prepared
 
     def commit_mcp_servers(self, prepared: PreparedServers) -> None:
         """Put a prepared section in force, replacing the previous one's servers, groups and overlays."""
