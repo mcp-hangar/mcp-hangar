@@ -84,11 +84,12 @@ class SQLiteEventStore(IEventStore):
         return conn
 
     def _init_schema(self) -> None:
-        """Initialize database schema."""
-        conn = self._connect()
-        try:
-            conn.executescript(
-                """
+        """Initialize database schema, under the lock like every other use of the shared connection."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executescript(
+                    """
                 -- Main events table
                 CREATE TABLE IF NOT EXISTS events (
                     global_position INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,10 +126,10 @@ class SQLiteEventStore(IEventStore):
                     created_at TEXT NOT NULL
                 );
             """
-            )
-        finally:
-            if not self._is_memory:
-                conn.close()
+                )
+            finally:
+                if not self._is_memory:
+                    conn.close()
 
     def _connect(self) -> sqlite3.Connection:
         """Get database connection.
@@ -139,6 +140,40 @@ class SQLiteEventStore(IEventStore):
         if self._is_memory and self._persistent_conn:
             return self._persistent_conn
         return self._create_connection()
+
+    def _query(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
+        """Run one read and return every row it produced.
+
+        A `:memory:` store has one connection for its whole life, because each
+        new connection to `:memory:` is a new, empty database. Every thread
+        therefore shares it, so this read takes `self._lock`, the same lock the
+        appends take. Two reasons, and either alone is enough:
+
+        * One `sqlite3.Connection` is not safe to drive from two threads at
+          once. From Python 3.12 the connection's statement cache can hand the
+          same prepared statement to both, and one resets it under the other:
+          the reader gets `InterfaceError: bad parameter or other API misuse`,
+          a short row, or `NULL` where a value was stored.
+        * A connection has a single transaction. A read running inside another
+          thread's `BEGIN IMMEDIATE` sees rows that `_append` may still roll
+          back, and would return events that were never stored.
+
+        The rows are fetched inside the lock and returned as a list: a live
+        cursor would be read after the lock was released, which is the same
+        unserialized use one step later.
+
+        A file-backed store opens a connection per call, which no other thread
+        touches, so it needs no lock.
+        """
+        if self._persistent_conn is not None:
+            with self._lock:
+                return self._persistent_conn.execute(sql, params).fetchall()
+
+        conn = self._create_connection()
+        try:
+            return conn.execute(sql, params).fetchall()
+        finally:
+            conn.close()
 
     def append(
         self,
@@ -276,33 +311,25 @@ class SQLiteEventStore(IEventStore):
         Returns:
             List of events in order. Empty if stream doesn't exist.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute(
-                """
-                SELECT event_type, data FROM events
-                WHERE stream_id = ? AND stream_version >= ?
-                ORDER BY stream_version ASC
-                """,
-                (stream_id, from_version),
-            )
+        rows = self._query(
+            """
+            SELECT event_type, data FROM events
+            WHERE stream_id = ? AND stream_version >= ?
+            ORDER BY stream_version ASC
+            """,
+            (stream_id, from_version),
+        )
 
-            events = []
-            for row in cursor.fetchall():
-                event = self._serializer.deserialize(row["event_type"], row["data"])
-                events.append(event)
+        events = [self._serializer.deserialize(row["event_type"], row["data"]) for row in rows]
 
-            logger.debug(
-                "stream_read",
-                stream_id=stream_id,
-                from_version=from_version,
-                events_count=len(events),
-            )
+        logger.debug(
+            "stream_read",
+            stream_id=stream_id,
+            from_version=from_version,
+            events_count=len(events),
+        )
 
-            return events
-        finally:
-            if not self._is_memory:
-                conn.close()
+        return events
 
     def read_all(
         self,
@@ -318,24 +345,19 @@ class SQLiteEventStore(IEventStore):
         Yields:
             Tuples of (global_position, stream_id, event).
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute(
-                """
-                SELECT global_position, stream_id, event_type, data
-                FROM events
-                WHERE global_position > ?
-                ORDER BY global_position ASC
-                LIMIT ?
-                """,
-                (from_position, limit),
-            )
-
-            # Fetch all rows first to allow closing connection
-            rows = cursor.fetchall()
-        finally:
-            if not self._is_memory:
-                conn.close()
+        # Every row is fetched before the first yield: the caller consumes this
+        # iterator after the read returns, and `_query` holds the shared
+        # connection's lock only for the read itself.
+        rows = self._query(
+            """
+            SELECT global_position, stream_id, event_type, data
+            FROM events
+            WHERE global_position > ?
+            ORDER BY global_position ASC
+            LIMIT ?
+            """,
+            (from_position, limit),
+        )
 
         for row in rows:
             event = self._serializer.deserialize(row["event_type"], row["data"])
@@ -350,17 +372,11 @@ class SQLiteEventStore(IEventStore):
         Returns:
             Current version, or -1 if stream doesn't exist.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute(
-                "SELECT version FROM streams WHERE stream_id = ?",
-                (stream_id,),
-            )
-            row = cursor.fetchone()
-            return row["version"] if row else -1
-        finally:
-            if not self._is_memory:
-                conn.close()
+        rows = self._query(
+            "SELECT version FROM streams WHERE stream_id = ?",
+            (stream_id,),
+        )
+        return int(rows[0]["version"]) if rows else -1
 
     def get_all_stream_ids(self) -> list[str]:
         """Get all stream IDs in the store.
@@ -368,13 +384,7 @@ class SQLiteEventStore(IEventStore):
         Returns:
             List of stream identifiers.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute("SELECT stream_id FROM streams ORDER BY stream_id")
-            return [row["stream_id"] for row in cursor.fetchall()]
-        finally:
-            if not self._is_memory:
-                conn.close()
+        return [row["stream_id"] for row in self._query("SELECT stream_id FROM streams ORDER BY stream_id")]
 
     def get_event_count(self) -> int:
         """Get total number of events in the store.
@@ -382,14 +392,8 @@ class SQLiteEventStore(IEventStore):
         Returns:
             Total event count.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute("SELECT COUNT(*) as count FROM events")
-            row = cursor.fetchone()
-            return row["count"] if row else 0
-        finally:
-            if not self._is_memory:
-                conn.close()
+        rows = self._query("SELECT COUNT(*) as count FROM events")
+        return int(rows[0]["count"]) if rows else 0
 
     def get_stream_count(self) -> int:
         """Get total number of streams.
@@ -397,14 +401,8 @@ class SQLiteEventStore(IEventStore):
         Returns:
             Total stream count.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute("SELECT COUNT(*) as count FROM streams")
-            row = cursor.fetchone()
-            return row["count"] if row else 0
-        finally:
-            if not self._is_memory:
-                conn.close()
+        rows = self._query("SELECT COUNT(*) as count FROM streams")
+        return int(rows[0]["count"]) if rows else 0
 
     def list_streams(self, prefix: str = "") -> list[str]:
         """List all stream IDs, optionally filtered by prefix.
@@ -415,19 +413,14 @@ class SQLiteEventStore(IEventStore):
         Returns:
             List of stream IDs matching the prefix.
         """
-        conn = self._connect()
-        try:
-            if prefix:
-                cursor = conn.execute(
-                    "SELECT stream_id FROM streams WHERE stream_id LIKE ? ORDER BY stream_id",
-                    (f"{prefix}%",),
-                )
-            else:
-                cursor = conn.execute("SELECT stream_id FROM streams ORDER BY stream_id")
-            return [row["stream_id"] for row in cursor.fetchall()]
-        finally:
-            if not self._is_memory:
-                conn.close()
+        if prefix:
+            rows = self._query(
+                "SELECT stream_id FROM streams WHERE stream_id LIKE ? ORDER BY stream_id",
+                (f"{prefix}%",),
+            )
+        else:
+            rows = self._query("SELECT stream_id FROM streams ORDER BY stream_id")
+        return [row["stream_id"] for row in rows]
 
     def save_snapshot(
         self,
@@ -480,22 +473,16 @@ class SQLiteEventStore(IEventStore):
         Returns:
             Dict with "version" and "state" keys, or None if no snapshot exists.
         """
-        conn = self._connect()
-        try:
-            cursor = conn.execute(
-                "SELECT version, state_data FROM snapshots WHERE stream_id = ?",
-                (stream_id,),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            return {
-                "version": row["version"],
-                "state": json.loads(row["state_data"]),
-            }
-        finally:
-            if not self._is_memory:
-                conn.close()
+        rows = self._query(
+            "SELECT version, state_data FROM snapshots WHERE stream_id = ?",
+            (stream_id,),
+        )
+        if not rows:
+            return None
+        return {
+            "version": rows[0]["version"],
+            "state": json.loads(rows[0]["state_data"]),
+        }
 
     def compact_stream(self, stream_id: str) -> int:
         """Delete events that precede the latest snapshot for a stream.
