@@ -95,18 +95,21 @@ class RunningHangar:
 
 
 @contextmanager
-def running_hangar(workdir: Path, config_text: str, env: dict[str, str] | None = None) -> Iterator[RunningHangar]:
+def running_hangar(
+    workdir: Path, config_text: str, env: dict[str, str] | None = None, binary: str | None = None
+) -> Iterator[RunningHangar]:
     """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
     config into ``workdir``, binds a free loopback port, polls ``/health/live``
     until healthy, then yields and tears the process down on exit. ``env``, when
-    given, is the process's whole environment. Output goes to a file, not a pipe
-    nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
-    (never fails) if the binary is missing or the server does not become healthy
-    within the startup budget.
+    given, is the process's whole environment. ``binary``, when given, is the
+    executable to run instead of the one on PATH. Output goes to a file, not a
+    pipe nobody reads, so a chatty server cannot block on a full pipe. Skips
+    cleanly (never fails) if the binary is missing or the server does not
+    become healthy within the startup budget.
     """
-    binary = _hangar_bin()
+    binary = binary or _hangar_bin()
 
     config_path = workdir / "config.yaml"
     config_path.write_text(config_text)
