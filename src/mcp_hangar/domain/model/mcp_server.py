@@ -760,7 +760,7 @@ class McpServer(AggregateRoot):
             raise
         except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in McpServerStartError for callers
             # Collect diagnostics from client if available
-            diagnostics = self._collect_startup_diagnostics(client) if client else {}
+            diagnostics = self._startup_diagnostics(client)
 
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
@@ -835,19 +835,61 @@ class McpServer(AggregateRoot):
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
-        # stdio transports start unlabeled; tag them so their message metrics
-        # carry this server's ID (HTTP clients are labeled at construction).
-        if getattr(client, "mcp_server_id", "unset") is None:
-            client.mcp_server_id = str(self.mcp_server_id)
+        try:
+            # stdio transports start unlabeled; tag them so their message metrics
+            # carry this server's ID (HTTP clients are labeled at construction).
+            if getattr(client, "mcp_server_id", "unset") is None:
+                client.mcp_server_id = str(self.mcp_server_id)
 
-        # Start live stderr-reader thread if a log buffer is configured and the
-        # client has a process with a stderr pipe (subprocess/docker/container modes).
-        if self._log_buffer is not None:
-            self._start_stderr_reader(client)
+            # Start live stderr-reader thread if a log buffer is configured and the
+            # client has a process with a stderr pipe (subprocess/docker/container modes).
+            if self._log_buffer is not None:
+                self._start_stderr_reader(client)
 
-        self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
+        except BaseException:
+            # Launched but not yet returned, so `_start` has no client to close.
+            self._discard_failed_client(client)
+            raise
 
         return client
+
+    def _close_quietly(self, client: TransportClient | None) -> None:
+        """Close a client and never raise.
+
+        ``close()`` is idempotent by contract. A failure is logged by type and
+        dropped, so it cannot fail a start that has otherwise succeeded. Safe
+        under this server's lock, as ``_shutdown_internal`` already closes: a
+        client's own locks rank below it (STDIO_CLIENT, HTTP_CLIENT).
+        """
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed close must not mask the start error
+            logger.warning(
+                "mcp_server_client_close_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+
+    def _startup_diagnostics(self, client: Any) -> dict[str, Any]:
+        """Diagnostics for a failed start, or none if collecting them fails.
+
+        A failure here must not replace the start error, nor skip what follows
+        it: recording the failure, waking every waiter, closing the client.
+        """
+        if client is None:
+            return {}
+        try:
+            return self._collect_startup_diagnostics(client)
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: diagnostics must not mask the start error
+            logger.warning(
+                "mcp_server_start_diagnostics_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+            return {}
 
     def _start_stderr_reader(self, client: Any) -> None:
         """Spawn a daemon thread that reads stderr lines into the log buffer.
@@ -1061,7 +1103,7 @@ class McpServer(AggregateRoot):
             self._log_client_error(client, error_msg)
 
             # Collect full diagnostics for user-friendly error
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"MCP initialization failed: {error_msg}",
@@ -1106,7 +1148,7 @@ class McpServer(AggregateRoot):
         tools_resp = client.call("tools/list", {})
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
-            diagnostics = self._collect_startup_diagnostics(client)
+            diagnostics = self._startup_diagnostics(client)
             raise McpServerStartError(
                 mcp_server_id=self.mcp_server_id,
                 reason=f"Failed to list tools: {error_msg}",
@@ -1260,6 +1302,11 @@ class McpServer(AggregateRoot):
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
         """Finalize successful mcp_server start."""
+        # A server can still hold a client here: one that health checks
+        # degraded keeps its connection open. Assigning over it leaked that
+        # client on every restart.
+        if self._client is not client:
+            self._close_quietly(self._client)
         self._client = client
         self._meta = {
             "init_result": {},
