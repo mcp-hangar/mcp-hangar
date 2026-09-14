@@ -76,12 +76,18 @@ class HotLoadedServer:
 
 @dataclass(frozen=True)
 class GroupView:
-    """One group as this replica sees it. `healthy_count` is the group's own (#1356)."""
+    """One group as this replica sees it. `healthy_count` is the group's own (#1356).
+
+    `state` is the group vocabulary (inactive, partial, healthy, degraded): the
+    group's availability, computed from its members. It is not a server
+    lifecycle state and is never mapped onto one (#1378).
+    """
 
     group_id: str
     state: str
     healthy_count: int
     total_count: int
+    circuit_open: bool
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,7 @@ def observe_replica() -> ReplicaView:
             state=group.state.value,
             healthy_count=group.healthy_count,
             total_count=group.total_count,
+            circuit_open=group.circuit_open,
         )
         for group_id, group in ctx.groups.items()
     )

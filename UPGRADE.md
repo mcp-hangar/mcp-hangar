@@ -99,6 +99,36 @@ restart keeps failing leaves rotation and the group fails over.
   it has no series until its first health check or call, which make it `cold`,
   not `dead`.
 
+### a group's `circuit_breaker.reset_timeout_s` is removed
+
+It never did anything. An open group circuit did not half-open once the
+timeout passed, however long it waited: a breaker half-opens only when asked
+whether to let a request through, and a group never asks. The circuit closes
+once `min_healthy` members are back in rotation, after a passing health check
+or a successful call, and that is unchanged. A timed probe would have been a
+second way out, competing with that one, so the option was removed rather
+than honoured (#1398).
+
+Delete it from every group:
+
+```yaml
+mcp_servers:
+  pool:
+    mode: group
+    circuit_breaker:
+      failure_threshold: 10
+      reset_timeout_s: 60   # delete this line
+```
+
+A config that still sets it loads, and logs `unknown_config_key` naming the
+group and the key. `HANGAR_CONFIG_STRICT=1` and `mcp-hangar config check`
+refuse it, as they refuse any key nothing reads: under strict mode a gateway
+whose config still sets it does not start, so delete the key before
+upgrading. The flat spelling
+`circuit_reset_timeout_s` is reported the same way. In Python,
+`McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
+raises `TypeError`.
+
 ## Upgrade to 2.19.1
 
 ### a suspended session is refused

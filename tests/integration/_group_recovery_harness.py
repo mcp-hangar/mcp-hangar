@@ -99,7 +99,7 @@ def _config(mode: str, flag: Path) -> dict[str, Any]:
             # As strict as the group gets: one counted failure takes a member
             # out, two open the circuit. Idle reaping must count as neither.
             "health": {"unhealthy_threshold": 1, "healthy_threshold": 1},
-            "circuit_breaker": {"failure_threshold": 2, "reset_timeout_s": 3600},
+            "circuit_breaker": {"failure_threshold": 2},
             "members": [{"id": member} for member in members],
         }
         return {"mcp_servers": servers}
@@ -111,7 +111,7 @@ def _config(mode: str, flag: Path) -> dict[str, Any]:
             # Only the circuit is under test: two failures in a row neither take
             # the member out of rotation nor degrade the server. Three do both.
             "health": {"unhealthy_threshold": 3, "healthy_threshold": 1},
-            "circuit_breaker": {"failure_threshold": 3, "reset_timeout_s": 3600},
+            "circuit_breaker": {"failure_threshold": 3},
             "members": [{"id": RECOVERING, "priority": 1}],
         }
         return {"mcp_servers": servers}
@@ -124,10 +124,10 @@ def _config(mode: str, flag: Path) -> dict[str, Any]:
         # The circuit counts failures in a row (#1390), so this is one member's
         # two. In pair mode it also opens when math-a goes out. math-b's start,
         # reported to the group as a success, then closes it (min_healthy 1)
-        # and ends the run, and math-b's own two failures open it again. And it
-        # cannot close by time within this run, so a recovered group is not the
-        # reset timeout's doing.
-        "circuit_breaker": {"failure_threshold": 2, "reset_timeout_s": 3600},
+        # and ends the run, and math-b's own two failures open it again. A group
+        # circuit has no timer (#1398): it closes only once members are back,
+        # so a recovered group is the members' doing.
+        "circuit_breaker": {"failure_threshold": 2},
         "members": [{"id": member, "priority": rank} for rank, member in enumerate(members, start=1)],
     }
     return {"mcp_servers": servers}

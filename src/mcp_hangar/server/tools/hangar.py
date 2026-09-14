@@ -4,6 +4,8 @@ Uses ApplicationContext for dependency injection (DIP).
 Separates commands (write) from queries (read) following CQRS.
 """
 
+import unicodedata
+
 from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.commands import (
@@ -22,6 +24,7 @@ from ...domain.exceptions import (
     RegistryServerNotFoundError,
     UnverifiedMcpServerError,
 )
+from ...domain.value_objects import GroupState, McpServerState
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
 from .replica_view import observe_replica
@@ -299,7 +302,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
         Returns:
             {
                 mcp_servers: [{id: str, indicator: str, state: str, mode: str, last_used?: str}],
-                groups: [{id: str, indicator: str, state: str, healthy_members: int, total_members: int}],
+                groups: [{id: str, indicator: str, state: str, healthy_members: int, total_members: int,
+                          circuit_open: bool}],
                 runtime_mcp_servers: [{id: str, indicator: str, state: str, source: str, verified: bool}],
                 summary: {healthy_mcp_servers: int, total_mcp_servers: int, uptime: str, uptime_seconds: float},
                 replica: {instance_id: str, uptime_seconds: float, uptime: str},
@@ -309,7 +313,12 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             }
             summary.uptime and summary.uptime_seconds are the answering replica's
             uptime, the same values as replica.uptime and replica.uptime_seconds.
-            Indicator values: [READY], [COLD], [STARTING], [DEGRADED], [DEAD]
+            Two vocabularies, kept apart, each in its own section of `formatted`:
+            servers (and runtime_mcp_servers) have a lifecycle state, with
+            indicators [READY], [COLD], [STARTING] (state "initializing"),
+            [DEGRADED], [DEAD]. Groups have an availability state computed from
+            their members, with indicators [HEALTHY], [PARTIAL], [INACTIVE],
+            [DEGRADED]. A group is never "cold"; its members are.
 
         Example:
             hangar_status()
@@ -351,10 +360,11 @@ def hangar_status() -> dict:
     groups_status = [
         {
             "id": group.group_id,
-            "indicator": _get_status_indicator(group.state),
+            "indicator": _group_indicator(group.state),
             "state": group.state,
             "healthy_members": group.healthy_count,
             "total_members": group.total_count,
+            "circuit_open": group.circuit_open,
         }
         for group in view.groups
     ]
@@ -399,17 +409,51 @@ def hangar_status() -> dict:
     }
 
 
+#: One indicator per server lifecycle state, keyed by the enum. `initializing`
+#: is shown as `[STARTING]`, the documented name. A state added to the enum
+#: without an entry here renders `[?]`, and the test that walks the enum fails.
+_SERVER_INDICATORS: dict[McpServerState, str] = {
+    McpServerState.COLD: "[COLD]",
+    McpServerState.INITIALIZING: "[STARTING]",
+    McpServerState.READY: "[READY]",
+    McpServerState.DEGRADED: "[DEGRADED]",
+    McpServerState.DEAD: "[DEAD]",
+}
+
+#: A group's state is a second vocabulary: its availability, computed from its
+#: members, not a lifecycle. A group is never "cold"; its members are. So it has
+#: its own indicators and never borrows the server ones (#1378).
+_GROUP_INDICATORS: dict[GroupState, str] = {
+    GroupState.INACTIVE: "[INACTIVE]",
+    GroupState.PARTIAL: "[PARTIAL]",
+    GroupState.HEALTHY: "[HEALTHY]",
+    GroupState.DEGRADED: "[DEGRADED]",
+}
+
+#: The frame is never narrower than it was before #1378, so a small fleet looks
+#: the same, and never wider than this, so one very long name cannot stretch it.
+_FRAME_MIN_INNER = 47
+_FRAME_MAX_INNER = 100
+#: Widest a column other than the last may grow. Longer cells are elided with `…`.
+_COLUMN_MAX = 40
+_COLUMN_GAP = "  "
+_ELISION = "…"
+
+
 def _get_status_indicator(state: str) -> str:
-    """Get visual indicator for mcp_server state."""
-    indicators = {
-        "ready": "[READY]",
-        "cold": "[COLD]",
-        "starting": "[STARTING]",
-        "degraded": "[DEGRADED]",
-        "dead": "[DEAD]",
-        "error": "[ERROR]",
-    }
-    return indicators.get(state.lower(), "[?]")
+    """Indicator for a server lifecycle state; `[?]` only for a string that is not one."""
+    try:
+        return _SERVER_INDICATORS.get(McpServerState(state.lower()), "[?]")
+    except ValueError:
+        return "[?]"
+
+
+def _group_indicator(state: str) -> str:
+    """Indicator for a group availability state; `[?]` only for a string that is not one."""
+    try:
+        return _GROUP_INDICATORS.get(GroupState(state.lower()), "[?]")
+    except ValueError:
+        return "[?]"
 
 
 def _format_status_dashboard(
@@ -426,43 +470,96 @@ def _format_status_dashboard(
     instance id is a pod name plus a suffix and can be longer than a row, and
     it must not be truncated, because the suffix is what tells two replicas
     apart.
+
+    Servers and groups are separate sections with separate columns, because
+    their states are separate vocabularies (#1378). The frame is sized to what
+    it holds, so every line has the same width and the frame closes.
     """
-    lines = [
-        f"Answered by replica: {instance_id}",
-        _DASHBOARD_SCOPE_LINE,
-        "╭─────────────────────────────────────────────────╮",
-        "│ MCP-Hangar Status (this replica)".ljust(50) + "│",
-        "├─────────────────────────────────────────────────┤",
+    sections = [["MCP-Hangar Status (this replica)"]]
+    if mcp_servers:
+        sections.append(_server_table(mcp_servers))
+    if groups:
+        sections.append(_group_table(groups))
+    sections.append([f"Health: {healthy}/{total} mcp_servers healthy", f"Replica uptime: {uptime}"])
+    return "\n".join([f"Answered by replica: {instance_id}", _DASHBOARD_SCOPE_LINE, *_frame(sections)])
+
+
+def _server_table(servers: list) -> list[str]:
+    """The server section: lifecycle indicator, id, state, note."""
+    rows = [
+        [s["indicator"], s["id"], s["state"], f"last: {s['last_used']}" if "last_used" in s else s.get("note", "")]
+        for s in servers
+    ]
+    return _table(["STATUS", "SERVER", "STATE", "NOTE"], rows)
+
+
+def _group_table(groups: list) -> list[str]:
+    """The group section: id, availability state, members healthy, circuit."""
+    rows = [
+        [
+            g["id"],
+            g["state"],
+            f"{g['healthy_members']}/{g['total_members']}",
+            "open" if g["circuit_open"] else "closed",
+        ]
+        for g in groups
+    ]
+    return _table(["GROUP", "STATE", "HEALTHY", "CIRCUIT"], rows)
+
+
+def _table(header: list[str], rows: list[list[str]]) -> list[str]:
+    """Cells aligned in columns, header first.
+
+    Every column but the last is as wide as its widest cell, up to
+    `_COLUMN_MAX`. The last is left ragged; the frame fits it.
+    """
+    table = [header, *rows]
+    widths = [min(_COLUMN_MAX, max(_display_width(row[i]) for row in table)) for i in range(len(header) - 1)]
+    return [
+        _COLUMN_GAP.join([*(_fit(cell, width) for cell, width in zip(row[:-1], widths, strict=True)), row[-1]]).rstrip()
+        for row in table
     ]
 
-    # McpServers
-    for p in mcp_servers:
-        indicator = p["indicator"]
-        name = p["id"][:15].ljust(15)
-        state = p["state"][:8].ljust(8)
-        extra = ""
-        if "last_used" in p:
-            extra = f"last: {p['last_used']}"
-        elif "note" in p:
-            extra = p["note"][:20]
-        line = f"│ {indicator} {name} {state} {extra[:22].ljust(22)}│"
-        lines.append(line)
 
-    # Groups
-    for g in groups:
-        indicator = g["indicator"]
-        name = g["id"][:15].ljust(15)
-        state = g["state"][:8].ljust(8)
-        extra = f"{g['healthy_members']}/{g['total_members']} healthy"
-        line = f"│ {indicator} {name} {state} {extra[:22].ljust(22)}│"
-        lines.append(line)
+def _frame(sections: list[list[str]]) -> list[str]:
+    """Box the sections, separated by rules, every line the same display width."""
+    inner = max(_FRAME_MIN_INNER, min(_FRAME_MAX_INNER, max(_display_width(line) for s in sections for line in s)))
+    rule = "─" * (inner + 2)
+    lines = [f"╭{rule}╮"]
+    for n, section in enumerate(sections):
+        if n:
+            lines.append(f"├{rule}┤")
+        lines.extend(f"│ {_fit(line, inner)} │" for line in section)
+    lines.append(f"╰{rule}╯")
+    return lines
 
-    lines.append("├─────────────────────────────────────────────────┤")
-    lines.append(f"│ Health: {healthy}/{total} mcp_servers healthy".ljust(50) + "│")
-    lines.append(f"│ Replica uptime: {uptime}".ljust(50) + "│")
-    lines.append("╰─────────────────────────────────────────────────╯")
 
-    return "\n".join(lines)
+def _fit(text: str, width: int) -> str:
+    """`text` in exactly `width` display columns: padded, or cut and ended with `…`.
+
+    The cut is visible so that a shortened id is never mistaken for a real one.
+    """
+    if _display_width(text) <= width:
+        return text + " " * (width - _display_width(text))
+    kept: list[str] = []
+    used = 0
+    for char in text:
+        if used + _char_width(char) > width - 1:
+            break
+        kept.append(char)
+        used += _char_width(char)
+    return "".join(kept) + _ELISION + " " * (width - 1 - used)
+
+
+def _display_width(text: str) -> int:
+    """Terminal columns `text` takes: East Asian wide characters two, combining marks none."""
+    return sum(_char_width(char) for char in text)
+
+
+def _char_width(char: str) -> int:
+    if unicodedata.combining(char):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
 def _validate_mcp_server_name(name: str) -> None:
