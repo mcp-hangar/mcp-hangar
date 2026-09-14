@@ -208,7 +208,7 @@ def digest_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[st
     )
 
     gen = cast(Generator[str, None, None], _serve_hangar(workdir, config_text))
-    base_url = next(gen)  # may pytest.skip if the binary is missing or startup times out
+    base_url = next(gen)  # skips if startup times out; fails if the binary is missing
     try:
         # Warm the cold subprocess so the ToolProjectionRegistry is populated: the
         # digest check reads the discovered projection and is a no-op on the very

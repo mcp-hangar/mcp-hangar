@@ -20,7 +20,8 @@ What it pins, in order:
 4. without the principal block, the same config serves nothing -- the
    fail-closed behaviour ADR-026 must not have loosened.
 
-Skip-safe: skips (never fails) without the CLI or the demo upstream. Run with::
+Skip-safe: skips (never fails) without the demo upstream. Without this
+checkout's CLI it fails (``tests/_hangar_executable.py``). Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live -o addopts=""
 """
@@ -36,7 +37,7 @@ import sys
 from mcp import ClientSession
 import pytest
 
-from tests.live.conftest import _hangar_bin
+from tests._hangar_executable import hangar_executable
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -75,7 +76,7 @@ def _write_config(workdir: Path, *, principal: bool) -> Path:
 
 def _pin(config: Path) -> None:
     result = subprocess.run(
-        [_hangar_bin(), "pin", "--config", str(config), "--write"],
+        [hangar_executable(), "pin", "--config", str(config), "--write"],
         capture_output=True,
         text=True,
         timeout=180,
@@ -94,7 +95,7 @@ def _drive(config: Path, *, rug: str | None = None, wait_for_tool: bool = True) 
         env["RUG_DESC"] = rug
 
     async def _run() -> dict:
-        async with open_stdio_streams(_hangar_bin(), ["--config", str(config), "serve"], env) as (read, write):
+        async with open_stdio_streams(hangar_executable(), ["--config", str(config), "serve"], env) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 names: list[str] = []

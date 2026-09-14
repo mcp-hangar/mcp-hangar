@@ -16,8 +16,9 @@ keys the resolver on ``member_id=<caller tenant>``, so the listing path
 (``hangar_tools``) must too -- otherwise a denied tool is rejected on invoke yet
 stays visible, a fail-open on the visibility half of the claim.
 
-The fixture is skip-safe: if the binary or stub backend is missing, or the server
-does not become healthy, the module SKIPs rather than fails. Run with::
+The fixture is skip-safe: if the stub backend is missing, or the server does not
+become healthy, the module SKIPs rather than fails. A missing binary, or one that
+is not this checkout's, fails it (``tests/_hangar_executable.py``). Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t0" -o addopts=""
 """
@@ -35,7 +36,8 @@ import httpx
 import pytest
 
 from tests.live import _group_support as gs
-from tests.live.conftest import _free_port, _hangar_bin, _MATH_SERVER, _POLL_INTERVAL_S, _STARTUP_TIMEOUT_S
+from tests._hangar_executable import hangar_executable
+from tests.live.conftest import _free_port, _MATH_SERVER, _POLL_INTERVAL_S, _STARTUP_TIMEOUT_S
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -94,11 +96,11 @@ class _AccessHarness:
 def tool_access_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_AccessHarness]:
     """Run a real hangar with a standalone math server + per-tenant deny; yield harness.
 
-    Skips cleanly if the binary or stub is missing or the server never becomes
-    healthy. Reuses the shipped ``SQLiteApiKeyStore`` seeding (``_group_support``)
-    so the presented ``X-API-Key`` authenticates as ``_TENANT``.
+    Skips cleanly if the stub is missing or the server never becomes healthy.
+    Reuses the shipped ``SQLiteApiKeyStore`` seeding (``_group_support``) so the
+    presented ``X-API-Key`` authenticates as ``_TENANT``.
     """
-    binary = _hangar_bin()
+    binary = hangar_executable()
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 

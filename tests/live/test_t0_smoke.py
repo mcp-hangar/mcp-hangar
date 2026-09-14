@@ -68,13 +68,12 @@ def test_stdio_stdout_carries_only_jsonrpc(tmp_path):
     fail parsing and drop the session, which is the Claude Desktop / Cursor path.
     """
     import json
-    import shutil
     import subprocess
     import time
 
-    binary = shutil.which("mcp-hangar")
-    if binary is None:
-        pytest.skip("`mcp-hangar` not on PATH (run under `uv run`)")
+    from tests._hangar_executable import hangar_executable
+
+    binary = hangar_executable()
 
     config = tmp_path / "stdio.yaml"
     config.write_text("logging:\n  level: DEBUG\nmcp_servers: {}\n")
