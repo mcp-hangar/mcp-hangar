@@ -26,7 +26,7 @@ from ..logging_config import get_logger, setup_logging
 from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
-from .config import load_config_from_file
+from .config import http_graceful_shutdown_timeout, load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
@@ -427,7 +427,17 @@ class ServerLifecycle:
                 message=message,
             )
 
-        logger.info("starting_http_server", host=host, port=port)
+        # Checked at bootstrap, so this cannot raise for a configuration that
+        # booted. None is uvicorn's own default: in-flight requests are waited
+        # for without a bound, and it is logged as null so the bound in force
+        # is visible either way (#1447).
+        graceful_shutdown_timeout_s = http_graceful_shutdown_timeout(self._context.config)
+        logger.info(
+            "starting_http_server",
+            host=host,
+            port=port,
+            graceful_shutdown_timeout_s=graceful_shutdown_timeout_s,
+        )
 
         # Update FastMCP settings for HTTP mode. FastMCP (SDK v1) carries
         # host/port on .settings; MCPServer (SDK v2) exposes a Settings object
@@ -594,6 +604,10 @@ class ServerLifecycle:
             # `MCP_TRUSTED_PROXIES` (`TrustedProxyResolver`) is now the one
             # decision, applied by the auth middleware and the identity bridge.
             proxy_headers=False,
+            # `http.graceful_shutdown_timeout_s`: how long a stop waits for the
+            # requests in flight before cancelling them. Unset passes None,
+            # which is uvicorn's own default, so nothing changes (#1447).
+            timeout_graceful_shutdown=graceful_shutdown_timeout_s,
         )
 
         async def run_server():
