@@ -1,26 +1,41 @@
-"""Per-tenant execution budgets: how many calls a tenant may have in flight, and how fast it may start them (#1445).
+"""Per-tenant execution budgets: how many calls a tenant may have executing, and how fast it may start them (#1445).
 
 `execution.max_concurrency` bounds the process, not a tenant. One tenant's
 burst could take every slot, and every other tenant was then queued behind it
-or refused. A budget bounds each tenant on its own: `max_concurrency` calls in
-flight at once, started at `rps` per second on average and at most `burst` at
-once (a token bucket).
+or refused. A budget bounds each tenant on its own: `max_concurrency` calls
+executing at once, started at `rps` per second on average and at most `burst`
+at once (a token bucket).
 
 Where it is taken
-    After every policy gate, and before the execution slot and the upstream
-    call (`BatchExecutor._enforce_tenant_budget`). A call the tool-access
-    policy refuses, a withdrawn tool, a pin that does not match, a validator's
-    refusal and a call held for a human's approval spend nothing: neither a
-    token nor a slot. The slot is given back when the call returns, on every
-    path.
+    In two steps, both after the policy gates -- tool access, withdrawal,
+    pins, the circuit breaker and the validators -- so a call one of them
+    refuses spends nothing.
+
+    - The token, and the check that the caller has a budget at all, come next:
+      before the approval hold and the cold start
+      (`BatchExecutor._gate_tenant_budget`). A caller with no budget, or over
+      its rate, is refused before anyone is asked to approve its call, and
+      before its call starts a stopped server. A call refused after this step
+      -- denied or expired at approval, no longer valid after the hold, its
+      server failing to start -- gets its token back.
+    - The slot comes last, just before the execution slot and the upstream
+      call (`BatchExecutor._enforce_tenant_budget`). A call held for approval,
+      or waiting on a cold start, holds no slot, and the slot is given back
+      when the call returns, on every path.
+
+    Two consequences follow. An approved call is refused if its tenant's slots
+    are all taken when it is dispatched: the refusal's log line names the
+    approval, and running the call again needs a new one. And a tenant at its
+    concurrency limit can still start a stopped server, with a call that is
+    then refused.
 
 Who is held to which budget
     - A tenant listed in `execution.tenant_limits` has its own budget.
     - Any other tenant has a budget of its own, built from the `"*"` entry.
       `"*"` is a template, not one pool that every unlisted tenant shares: a
       pool would let one unlisted tenant take all of it, which is what budgets
-      exist to prevent. Callers with no tenant count as one caller, and share
-      one budget.
+      exist to prevent. Callers with no tenant -- every caller, when
+      authentication is off -- count as one caller, and share one budget.
     - With no `"*"` entry, a tenant that is not listed and a caller with no
       tenant are refused. A table of budgets says who may run, so it fails
       closed.
@@ -34,16 +49,25 @@ Per process
 
 Never waits
     A call over its budget is refused at once with `TenantQuotaExceeded`. It is
-    neither queued nor retried: a call queued for a slot holds a worker thread
-    that does nothing, and worker threads are what the budget protects.
+    neither queued nor retried: a queued call would hold the executor's worker
+    thread -- on the front door, a thread of the event loop's shared pool --
+    for as long as it waited.
 
 Reload
     `configure` reconciles in place. A tenant whose limits are unchanged keeps
-    its budget, with its in-flight count and tokens. A tenant whose limits
+    its budget, with its calls in flight and its tokens. A tenant whose limits
     changed gets a new budget that keeps counting the calls it has in flight,
     so lowering a limit never lets more than the new limit start. A tenant
-    that is no longer configured is dropped, and a call still running on it
-    releases into nothing.
+    that is no longer configured is refused from then on. Its budget is kept
+    while calls on it are still running, so they are counted again if the
+    tenant comes back, and it is dropped once they finish. Calls already
+    running when budgets are first turned on are not counted.
+
+Limits
+    `max_concurrency` and `burst` are integers from 1 to `MAX_COUNT`, and `rps`
+    is a number above 0 and at most `MAX_RPS`. `"none"` is not a tenant id
+    here: it is the refusal metric's `budget` label for a caller that no entry
+    applied to.
 
 A budget is kept only while it differs from a new one: a call in flight, or
 tokens spent. Once many are kept, the idle and full ones are dropped, which
@@ -70,8 +94,17 @@ NO_BUDGET = "no_budget"
 CONCURRENCY = "concurrency"
 RATE = "rate"
 
-#: The `budget` label of a refusal that no entry applied to.
+#: The `budget` label of a refusal that no entry applied to. Refused as a
+#: tenant id, so the label cannot also name a tenant.
 NO_ENTRY = "none"
+
+#: The largest `max_concurrency` and `burst`. A number beyond any real limit
+#: is a typo, and one too large for a float would fail every call instead of
+#: the configuration.
+MAX_COUNT = 10**9
+
+#: The largest `rps`, for the same reason.
+MAX_RPS = 1_000_000
 
 #: How many budgets are kept before the idle, full ones are dropped.
 _PRUNE_AT = 1024
@@ -107,13 +140,17 @@ def parse_tenant_limits(raw: object) -> dict[str, TenantLimits]:
 
 
 def _tenant_id(tenant: object) -> str:
-    if isinstance(tenant, str) and tenant:
-        return tenant
-    raise ValueError(f"tenant id {tenant!r} must be a non-empty string (quote a numeric id in YAML)")
+    if not isinstance(tenant, str) or not tenant:
+        raise ValueError(f"tenant id {_shown(tenant)} must be a non-empty string (quote a numeric id in YAML)")
+    if tenant == NO_ENTRY:
+        raise ValueError(
+            f"tenant id {NO_ENTRY!r} is reserved: it is the refusal metric's label for a caller no entry applied to"
+        )
+    return tenant
 
 
 def _limits(tenant: object, values: object) -> TenantLimits:
-    where = f"entry {tenant!r}"
+    where = f"entry {_shown(tenant)}"
     if not isinstance(values, Mapping):
         raise ValueError(f"{where} must be a mapping with the keys {sorted(BUDGET_KEYS)}")
     unknown = sorted(str(key) for key in values if key not in BUDGET_KEYS)
@@ -123,18 +160,38 @@ def _limits(tenant: object, values: object) -> TenantLimits:
             f"{where} must have exactly the keys {sorted(BUDGET_KEYS)}: unknown {unknown}, missing {missing}"
         )
     concurrency, rps, burst = values["max_concurrency"], values["rps"], values["burst"]
-    if not _positive_int(concurrency):
-        raise ValueError(f"{where}: max_concurrency must be an integer of at least 1, got {concurrency!r}")
-    if not _positive_int(burst):
-        raise ValueError(f"{where}: burst must be an integer of at least 1, got {burst!r}")
-    if isinstance(rps, bool) or not isinstance(rps, int | float) or not math.isfinite(rps) or rps <= 0:
-        raise ValueError(f"{where}: rps must be a finite number above 0, got {rps!r}")
-    return TenantLimits(max_concurrency=concurrency, rps=float(rps), burst=burst)
+    if not _count(concurrency):
+        raise ValueError(
+            f"{where}: max_concurrency must be an integer from 1 to {MAX_COUNT}, got {_shown(concurrency)}"
+        )
+    if not _count(burst):
+        raise ValueError(f"{where}: burst must be an integer from 1 to {MAX_COUNT}, got {_shown(burst)}")
+    rate = _rate(rps)
+    if rate is None:
+        raise ValueError(f"{where}: rps must be a number above 0 and at most {MAX_RPS}, got {_shown(rps)}")
+    return TenantLimits(max_concurrency=concurrency, rps=rate, burst=burst)
 
 
-def _positive_int(value: object) -> TypeGuard[int]:
-    """An int of at least 1. A bool is an int to Python, and is not one here."""
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+def _count(value: object) -> TypeGuard[int]:
+    """An int from 1 to `MAX_COUNT`. A bool is an int to Python, and is not one here."""
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_COUNT
+
+
+def _rate(value: object) -> float | None:
+    """*value* as a rate, or None when it is not a number above 0 and at most `MAX_RPS`."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        rate = float(value)
+    except OverflowError:  # an int too large for a float
+        return None
+    return rate if math.isfinite(rate) and 0 < rate <= MAX_RPS else None
+
+
+def _shown(value: object) -> str:
+    """*value* for an error message, cut short: a 400-digit number is not worth printing."""
+    text = repr(value)
+    return text if len(text) <= 40 else f"{text[:37]}..."
 
 
 class _Slots:
@@ -158,6 +215,9 @@ class _Budget:
     def refill(self, now: float) -> None:
         self.tokens = min(float(self.limits.burst), self.tokens + (now - self.updated) * self.limits.rps)
         self.updated = now
+
+    def give_back_token(self) -> None:
+        self.tokens = min(float(self.limits.burst), self.tokens + 1)
 
     def is_new(self, now: float) -> bool:
         """Whether a budget built now would give every answer this one gives."""
@@ -200,6 +260,36 @@ class Refusal:
     reason: str
 
 
+class Reservation:
+    """A token taken for one call, before its slot (`TenantAdmission.reserve`).
+
+    `grant` takes the slot, or refuses the call and gives the token back.
+    `refund` gives the token back for a call refused before it got that far.
+    The first of them ends the reservation: a later `refund` does nothing, and
+    a later `grant` is a bug and raises.
+    """
+
+    __slots__ = ("_admission", "open", "tenant_id")
+
+    def __init__(self, admission: TenantAdmission | None, tenant_id: str | None) -> None:
+        self._admission = admission
+        self.tenant_id = tenant_id
+        self.open = True
+
+    def grant(self) -> Grant | Refusal:
+        if self._admission is None:
+            return _UNBUDGETED
+        return self._admission.grant(self)
+
+    def refund(self) -> None:
+        if self._admission is not None:
+            self._admission.refund(self)
+
+
+#: What a call is given when no budgets are configured.
+_UNRESERVED = Reservation(None, None)
+
+
 class TenantAdmission:
     """The budgets in force, and the calls admitted against them."""
 
@@ -224,28 +314,53 @@ class TenantAdmission:
             budget = self._budgets.get(tenant_id)
             return budget.slots.active if budget is not None else 0
 
-    def admit(self, tenant_id: str | None) -> Grant | Refusal:
-        """Take a slot and a token for one call of *tenant_id*, or say why not. Never waits for a slot."""
+    def reserve(self, tenant_id: str | None) -> Reservation | Refusal:
+        """Take a token for one call of *tenant_id*, or say why not. Never waits."""
         with self._lock:
             if not self._limits:
-                return _UNBUDGETED
+                return _UNRESERVED
             entry = self._entry_for(tenant_id)
             if entry is None:
                 return Refusal(budget=NO_ENTRY, reason=NO_BUDGET)
-            now = self._clock()
-            budget = self._budgets.get(tenant_id)
-            if budget is None:
-                budget = self._add(tenant_id, entry, now)
-            else:
-                budget.refill(now)
-            # The slot first: a call refused for concurrency spends no token.
-            if budget.slots.active >= budget.limits.max_concurrency:
-                return Refusal(budget=budget.entry, reason=CONCURRENCY)
+            budget = self._budget_for(tenant_id, entry)
             if budget.tokens < 1:
                 return Refusal(budget=budget.entry, reason=RATE)
             budget.tokens -= 1
+            return Reservation(self, tenant_id)
+
+    def grant(self, reservation: Reservation) -> Grant | Refusal:
+        """Take the slot of a reserved call, or refuse it and give its token back. Never waits."""
+        with self._lock:
+            if not reservation.open:
+                raise RuntimeError("a reservation is granted once, and never after its refund")
+            reservation.open = False
+            if not self._limits:
+                return _UNBUDGETED  # budgets were turned off while the call waited
+            entry = self._entry_for(reservation.tenant_id)
+            if entry is None:
+                return Refusal(budget=NO_ENTRY, reason=NO_BUDGET)  # its entry went while the call waited
+            budget = self._budget_for(reservation.tenant_id, entry)
+            if budget.slots.active >= budget.limits.max_concurrency:
+                budget.give_back_token()
+                return Refusal(budget=budget.entry, reason=CONCURRENCY)
             budget.slots.active += 1
             return Grant(self._lock, budget.slots)
+
+    def refund(self, reservation: Reservation) -> None:
+        """Give back the token of a reserved call that was refused before its slot. Once."""
+        with self._lock:
+            if not reservation.open:
+                return
+            reservation.open = False
+            budget = self._budgets.get(reservation.tenant_id)
+            if budget is not None and self._entry_for(reservation.tenant_id) is not None:
+                budget.refill(self._clock())
+                budget.give_back_token()
+
+    def admit(self, tenant_id: str | None) -> Grant | Refusal:
+        """Take a token and a slot at once: `reserve`, then `grant`."""
+        reserved = self.reserve(tenant_id)
+        return reserved if isinstance(reserved, Refusal) else reserved.grant()
 
     def configure(self, limits: Mapping[str, TenantLimits]) -> None:
         """Put *limits* in force, keeping every budget whose limits did not change."""
@@ -255,7 +370,10 @@ class TenantAdmission:
             for tenant_id, budget in list(self._budgets.items()):
                 entry = self._entry_for(tenant_id)
                 if entry is None:
-                    del self._budgets[tenant_id]
+                    # Refused from now on. Kept while calls on it run, so they
+                    # are counted again if the tenant comes back.
+                    if budget.slots.active == 0:
+                        del self._budgets[tenant_id]
                     continue
                 name, new = entry
                 budget.entry = name
@@ -272,9 +390,17 @@ class TenantAdmission:
         default = self._limits.get(DEFAULT_BUDGET)
         return (DEFAULT_BUDGET, default) if default is not None else None
 
+    def _budget_for(self, tenant_id: str | None, entry: tuple[str, TenantLimits]) -> _Budget:
+        now = self._clock()
+        budget = self._budgets.get(tenant_id)
+        if budget is None:
+            return self._add(tenant_id, entry, now)
+        budget.refill(now)
+        return budget
+
     def _add(self, tenant_id: str | None, entry: tuple[str, TenantLimits], now: float) -> _Budget:
         if len(self._budgets) >= self._prune_at:
-            for idle in [key for key, budget in self._budgets.items() if budget.is_new(now)]:
+            for idle in [key for key, budget in self._budgets.items() if self._droppable(key, budget, now)]:
                 del self._budgets[idle]
             # Swept again only once the survivors have doubled, so a flood of
             # busy tenants costs one sweep per doubling, not one per tenant.
@@ -283,6 +409,12 @@ class TenantAdmission:
         budget = _Budget(limits=limits, entry=name, tokens=float(limits.burst), updated=now, slots=_Slots())
         self._budgets[tenant_id] = budget
         return budget
+
+    def _droppable(self, tenant_id: str | None, budget: _Budget, now: float) -> bool:
+        """Idle and full, or idle with no entry left: dropping it changes no answer."""
+        if budget.slots.active == 0 and self._entry_for(tenant_id) is None:
+            return True
+        return budget.is_new(now)
 
 
 _admission = TenantAdmission()
@@ -296,3 +428,13 @@ def get_tenant_admission() -> TenantAdmission:
 def configure_tenant_limits(limits: Mapping[str, TenantLimits]) -> None:
     """Put *limits* in force for the process; see `TenantAdmission.configure`."""
     _admission.configure(limits)
+
+
+def reset_tenant_admission() -> None:
+    """Forget every budget, and every call counted against one (for testing).
+
+    `configure_tenant_limits({})` is not a reset: it keeps a budget that still
+    has calls in flight, as a reload must.
+    """
+    global _admission
+    _admission = TenantAdmission()

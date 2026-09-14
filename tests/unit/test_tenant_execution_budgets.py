@@ -32,6 +32,7 @@ from mcp_hangar.server import config_schema
 from mcp_hangar.server.config import apply_process_config, check_process_config
 from mcp_hangar.server.config_serializer import serialize_execution_config
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, tenant_admission
+from mcp_hangar.server.tools.batch import executor as executor_module
 from mcp_hangar.server.tools.batch.concurrency import reset_concurrency_manager
 from mcp_hangar.server.tools.batch.models import CallResult
 from mcp_hangar.server.tools.batch.tenant_admission import (
@@ -40,11 +41,15 @@ from mcp_hangar.server.tools.batch.tenant_admission import (
     DEFAULT_BUDGET,
     get_tenant_admission,
     Grant,
+    MAX_COUNT,
+    MAX_RPS,
     NO_BUDGET,
     NO_ENTRY,
     parse_tenant_limits,
     RATE,
     Refusal,
+    Reservation,
+    reset_tenant_admission,
     TenantAdmission,
     TenantLimits,
 )
@@ -77,11 +82,17 @@ def _granted(admission: TenantAdmission, tenant: str | None) -> Grant:
     return granted
 
 
+def _reserved(admission: TenantAdmission, tenant: str | None) -> Reservation:
+    reserved = admission.reserve(tenant)
+    assert isinstance(reserved, Reservation), reserved
+    return reserved
+
+
 @pytest.fixture
 def budgets():
-    """The process's budgets, put back to none afterwards."""
+    """The process's budgets, forgotten afterwards with every call counted against them."""
     yield configure_tenant_limits
-    configure_tenant_limits({})
+    reset_tenant_admission()
 
 
 class TestTheConfigIsChecked:
@@ -100,6 +111,7 @@ class TestTheConfigIsChecked:
             ([A], "mapping of tenant id to budget"),
             ({7: _entry()}, "quote a numeric id"),
             ({"": _entry()}, "non-empty string"),
+            ({NO_ENTRY: _entry()}, "is reserved"),
             ({A: 3}, "must be a mapping"),
             ({A: {**_entry(), "max_concurency": 1}}, "unknown ['max_concurency']"),
             ({A: {"max_concurrency": 1, "rps": 1}}, "missing ['burst']"),
@@ -107,14 +119,20 @@ class TestTheConfigIsChecked:
             ({A: _entry(max_concurrency=True)}, "max_concurrency"),
             ({A: _entry(max_concurrency=1.5)}, "max_concurrency"),
             ({A: _entry(max_concurrency="2")}, "max_concurrency"),
+            ({A: _entry(max_concurrency=MAX_COUNT + 1)}, "max_concurrency"),
+            ({A: _entry(max_concurrency=10**400)}, "max_concurrency"),
             ({A: _entry(burst=0)}, "burst"),
             ({A: _entry(burst=True)}, "burst"),
+            ({A: _entry(burst=MAX_COUNT + 1)}, "burst"),
+            ({A: _entry(burst=10**400)}, "burst"),
             ({A: _entry(rps=0)}, "rps"),
             ({A: _entry(rps=-1)}, "rps"),
             ({A: _entry(rps=math.nan)}, "rps"),
             ({A: _entry(rps=math.inf)}, "rps"),
             ({A: _entry(rps=True)}, "rps"),
             ({A: _entry(rps="5")}, "rps"),
+            ({A: _entry(rps=MAX_RPS + 1)}, "rps"),
+            ({A: _entry(rps=10**400)}, "rps"),
         ],
     )
     def test_a_bad_entry_is_refused_and_named(self, raw: Any, named: str) -> None:
@@ -124,6 +142,17 @@ class TestTheConfigIsChecked:
     def test_the_process_check_refuses_it_before_anything_is_applied(self) -> None:
         with pytest.raises(ConfigurationError, match=r"execution\.tenant_limits"):
             check_process_config({"execution": {"tenant_limits": {A: {"rps": 1}}}})
+
+    @pytest.mark.parametrize("key", ["max_concurrency", "burst", "rps"])
+    def test_a_number_too_large_for_a_float_is_a_configuration_error(self, key: str) -> None:
+        """Not an `OverflowError` from the check, and not one from every later call."""
+        with pytest.raises(ConfigurationError, match=rf"execution\.tenant_limits: .*{key}"):
+            check_process_config({"execution": {"tenant_limits": {A: {**_entry(), key: 10**400}}}})
+
+    def test_the_largest_values_allowed_admit_a_call(self) -> None:
+        admission = TenantAdmission(parse_tenant_limits({A: _entry(MAX_COUNT, MAX_RPS, MAX_COUNT)}))
+
+        _granted(admission, A).release()
 
     def test_the_schema_knows_the_key(self) -> None:
         assert config_schema.validate_config({"execution": {"tenant_limits": {A: _entry()}}}) == []
@@ -138,6 +167,7 @@ class TestTheBucket:
         assert admission.in_flight(A) == 0
         for grant in granted:
             grant.release()
+        _reserved(admission, A).refund()
 
     def test_a_tenant_at_its_concurrency_is_refused_and_another_is_not(self) -> None:
         admission = TenantAdmission({A: _limits(1, 100, 100), B: _limits(1, 100, 100)})
@@ -233,13 +263,76 @@ class TestTheBucket:
         busy.release()
 
 
+class TestAReservation:
+    """The token is taken first (before an approval hold), the slot later."""
+
+    def test_a_reserved_token_is_spent_before_any_slot_is_taken(self) -> None:
+        admission = TenantAdmission({A: _limits(max_concurrency=1, rps=NEVER, burst=1)})
+        reserved = _reserved(admission, A)
+
+        assert admission.reserve(A) == Refusal(budget=A, reason=RATE)
+        assert admission.in_flight(A) == 0
+        assert isinstance(reserved.grant(), Grant)
+        assert admission.in_flight(A) == 1
+
+    def test_a_refund_gives_the_token_back_once(self) -> None:
+        admission = TenantAdmission({A: _limits(max_concurrency=10, rps=NEVER, burst=3)})
+        first = _reserved(admission, A)
+        _reserved(admission, A)
+
+        first.refund()
+        first.refund()
+
+        # Two tokens left, not three: the second refund gave nothing back.
+        _reserved(admission, A)
+        _reserved(admission, A)
+        assert admission.reserve(A) == Refusal(budget=A, reason=RATE)
+
+    def test_a_slot_refused_at_the_grant_gives_the_token_back(self) -> None:
+        admission = TenantAdmission({A: _limits(max_concurrency=1, rps=NEVER, burst=2)})
+        held = _granted(admission, A)
+        waiting = _reserved(admission, A)
+
+        assert waiting.grant() == Refusal(budget=A, reason=CONCURRENCY)
+        held.release()
+
+        _granted(admission, A)  # the refused call's token
+
+    def test_a_reservation_is_granted_once(self) -> None:
+        admission = TenantAdmission({A: _limits(max_concurrency=10, rps=100, burst=100)})
+        reserved = _reserved(admission, A)
+        reserved.grant()
+
+        with pytest.raises(RuntimeError, match="granted once"):
+            reserved.grant()
+        reserved.refund()  # does nothing
+        assert admission.in_flight(A) == 1
+
+    def test_an_entry_removed_while_the_call_waited_refuses_the_slot(self) -> None:
+        admission = TenantAdmission({A: _limits(), B: _limits()})
+        reserved = _reserved(admission, A)
+
+        admission.configure({B: _limits()})
+
+        assert reserved.grant() == Refusal(budget=NO_ENTRY, reason=NO_BUDGET)
+
+    def test_budgets_turned_off_while_the_call_waited_admit_it_uncounted(self) -> None:
+        admission = TenantAdmission({A: _limits()})
+        reserved = _reserved(admission, A)
+
+        admission.configure({})
+
+        assert isinstance(reserved.grant(), Grant)
+        assert admission.in_flight(A) == 0
+
+
 class TestAReload:
     def test_unchanged_limits_keep_the_budget_its_calls_and_its_tokens(self) -> None:
-        admission = TenantAdmission({A: _limits(max_concurrency=2, rps=NEVER, burst=2)})
+        admission = TenantAdmission({A: _limits(max_concurrency=2, rps=NEVER, burst=3)})
         held = _granted(admission, A)
         budget = admission._budgets[A]
 
-        admission.configure({A: _limits(max_concurrency=2, rps=NEVER, burst=2)})
+        admission.configure({A: _limits(max_concurrency=2, rps=NEVER, burst=3)})
 
         assert admission._budgets[A] is budget
         assert admission.in_flight(A) == 1
@@ -247,7 +340,8 @@ class TestAReload:
         assert admission.admit(A) == Refusal(budget=A, reason=CONCURRENCY)
         held.release()
         second.release()
-        # The reload refilled nothing: both tokens stay spent.
+        # The reload refilled nothing: two of the three tokens stay spent.
+        _granted(admission, A).release()
         assert admission.admit(A) == Refusal(budget=A, reason=RATE)
 
     def test_a_lowered_limit_keeps_counting_the_calls_in_flight(self) -> None:
@@ -273,16 +367,39 @@ class TestAReload:
         assert admission.admit(A) == Refusal(budget=A, reason=RATE)
 
     def test_a_removed_tenant_is_refused_and_a_call_still_running_releases_harmlessly(self) -> None:
-        admission = TenantAdmission({A: _limits(), B: _limits()})
+        limits = _limits(max_concurrency=1, rps=100, burst=100)
+        admission = TenantAdmission({A: limits, B: limits})
         running = _granted(admission, A)
 
-        admission.configure({B: _limits()})
+        admission.configure({B: limits})
         assert admission.admit(A) == Refusal(budget=NO_ENTRY, reason=NO_BUDGET)
         running.release()
 
-        admission.configure({A: _limits(), B: _limits()})
+        admission.configure({A: limits, B: limits})
         assert admission.in_flight(A) == 0
         _granted(admission, A)
+
+    def test_a_tenant_removed_and_added_back_still_counts_its_calls(self) -> None:
+        limits = _limits(max_concurrency=1, rps=100, burst=100)
+        admission = TenantAdmission({A: limits, B: limits})
+        running = _granted(admission, A)
+
+        admission.configure({B: limits})
+        admission.configure({A: limits, B: limits})
+
+        assert admission.admit(A) == Refusal(budget=A, reason=CONCURRENCY)
+        running.release()
+        _granted(admission, A)
+
+    def test_a_removed_tenant_is_forgotten_once_its_calls_finish(self) -> None:
+        admission = TenantAdmission({A: _limits(), B: _limits()})
+        running = _granted(admission, A)
+        admission.configure({B: _limits()})
+        running.release()
+
+        admission.configure({B: _limits()})
+
+        assert A not in admission._budgets
 
     def test_a_tenant_moved_from_the_default_to_its_own_entry_keeps_its_calls(self) -> None:
         admission = TenantAdmission({DEFAULT_BUDGET: _limits(max_concurrency=1, rps=100, burst=100)})
@@ -306,7 +423,7 @@ class TestAReload:
 def process_path():
     """What `apply_process_config` sets, put back afterwards."""
     yield
-    configure_tenant_limits({})
+    reset_tenant_admission()
     reset_concurrency_manager()
     reset_tool_access_resolver()
 
@@ -315,7 +432,7 @@ def process_path():
 class TestTheProcessPath:
     """`apply_process_config` is what startup and every reload apply (#1424)."""
 
-    CONFIG: dict[str, Any] = {"execution": {"tenant_limits": {A: _entry(max_concurrency=2, rps=NEVER, burst=2)}}}
+    CONFIG: dict[str, Any] = {"execution": {"tenant_limits": {A: _entry(max_concurrency=2, rps=NEVER, burst=3)}}}
 
     def test_a_reload_of_the_same_file_keeps_the_calls_in_flight_and_the_tokens_spent(self) -> None:
         apply_process_config(self.CONFIG)
@@ -329,6 +446,7 @@ class TestTheProcessPath:
         assert admission.admit(A) == Refusal(budget=A, reason=CONCURRENCY)
         held.release()
         second.release()
+        _granted(admission, A).release()
         assert admission.admit(A) == Refusal(budget=A, reason=RATE)
 
     def test_a_reload_without_the_section_removes_every_budget(self) -> None:
@@ -343,13 +461,14 @@ class TestTheProcessPath:
 
     def test_a_reload_that_fails_leaves_the_budgets_in_force(self) -> None:
         apply_process_config(self.CONFIG)
-        _granted(get_tenant_admission(), A)
+        running = _granted(get_tenant_admission(), A)
 
         with pytest.raises(ConfigurationError):
             apply_process_config({"execution": {"tenant_limits": {A: {"rps": 1}}}})
 
-        assert get_tenant_admission().limits == {A: TenantLimits(2, NEVER, 2)}
+        assert get_tenant_admission().limits == {A: TenantLimits(2, NEVER, 3)}
         assert get_tenant_admission().in_flight(A) == 1
+        running.release()
 
     def test_an_export_writes_the_budgets_back(self) -> None:
         apply_process_config(self.CONFIG)
@@ -365,6 +484,8 @@ _SERVER = "server_a"
 _TOOL = "read_item"
 _OTHER = "other_item"
 _TOO_FAST = "This tenant's execution budget is exhausted: calls started too fast"
+_IN_FLIGHT = "This tenant's execution budget is exhausted: too many calls in flight"
+_NO_BUDGET = "No execution budget is configured for this tenant"
 
 
 def _identity(tenant_id: str | None) -> IdentityContext:
@@ -420,6 +541,10 @@ def _run(tenant: str | None, tool: str = _TOOL) -> CallResult:
     return batch.results[0]
 
 
+def _sent(ctx: Mock) -> list[str]:
+    return [type(call.args[0]).__name__ for call in ctx.command_bus.send.call_args_list]
+
+
 class TestTheExecutor:
     def test_a_call_over_its_budget_is_refused_before_the_backend(self, ctx, budgets) -> None:
         budgets({A: _limits(max_concurrency=5, rps=NEVER, burst=1)})
@@ -465,7 +590,7 @@ class TestTheExecutor:
         ],
         ids=["tool_access", "withdrawn", "digest_pin"],
     )
-    def test_a_call_a_gate_refuses_spends_nothing(self, ctx, budgets, arrange, refusal) -> None:
+    def test_a_call_a_policy_gate_refuses_spends_nothing(self, ctx, budgets, arrange, refusal) -> None:
         budgets({A: _limits(max_concurrency=1, rps=NEVER, burst=1)})
         arrange()
 
@@ -473,17 +598,92 @@ class TestTheExecutor:
         assert _run(A).success is True  # the one token was still there
         assert _run(A).error_type == "TenantQuotaExceeded"
 
-    def test_the_budget_is_taken_after_the_approval_gate(self, ctx, budgets) -> None:
-        budgets({A: _limits(max_concurrency=1, rps=100, burst=100)})
-        seen: list[int] = []
+    def test_during_the_approval_hold_the_token_is_taken_and_the_slot_is_not(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=1, rps=NEVER, burst=1)})
+        seen: list[tuple[int, Any]] = []
 
         def approval_gate(*_args: Any, **_kwargs: Any) -> None:
-            seen.append(get_tenant_admission().in_flight(A))
+            seen.append((get_tenant_admission().in_flight(A), get_tenant_admission().reserve(A)))
 
         with patch.object(BatchExecutor, "_check_approval_gate", side_effect=approval_gate):
             assert _run(A).success is True
 
-        assert seen == [0]
+        assert seen == [(0, Refusal(budget=A, reason=RATE))]
+
+    def test_a_call_over_its_rate_is_never_held_for_approval(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=5, rps=NEVER, burst=1)})
+        asked: list[str] = []
+
+        with patch.object(
+            BatchExecutor, "_check_approval_gate", side_effect=lambda call, *_a, **_k: asked.append(call.tool)
+        ):
+            assert _run(A).success is True
+            assert _run(A).error_type == "TenantQuotaExceeded"
+
+        assert asked == [_TOOL]
+
+    def test_a_call_denied_at_approval_gets_its_token_back(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=5, rps=NEVER, burst=1)})
+        denied = CallResult(
+            index=0, call_id="c-1", success=False, error="no", error_type="ApprovalDenied", elapsed_ms=0
+        )
+
+        with patch.object(BatchExecutor, "_check_approval_gate", return_value=denied):
+            assert _run(A).error_type == "ApprovalDenied"
+
+        assert _run(A).success is True
+        assert _run(A).error_type == "TenantQuotaExceeded"
+
+    def test_a_gate_that_raises_after_the_token_was_taken_gives_it_back(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=5, rps=NEVER, burst=1)})
+
+        with patch.object(BatchExecutor, "_check_approval_gate", side_effect=RuntimeError("boom")):
+            assert _run(A).success is False
+
+        assert _run(A).success is True
+
+    def test_an_unlisted_tenant_does_not_start_a_stopped_server(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=5, rps=100, burst=100)})
+        ctx.get_mcp_server.return_value.state.value = "cold"
+
+        refused = _run(B)
+
+        assert (refused.error_type, refused.error) == ("TenantQuotaExceeded", _NO_BUDGET)
+        assert _sent(ctx) == []
+        assert _run(A).success is True
+        assert _sent(ctx) == ["StartMcpServerCommand", "InvokeToolCommand"]
+
+    def test_a_call_whose_server_fails_to_start_gets_its_token_back(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=5, rps=NEVER, burst=1)})
+        server = ctx.get_mcp_server.return_value
+        server.state.value = "cold"
+        ctx.command_bus.send.side_effect = RuntimeError("the server did not start")
+
+        assert _run(A).error_type == "McpServerStartError"
+
+        server.state.value = "ready"
+        ctx.command_bus.send.side_effect = None
+        assert _run(A).success is True
+        assert _run(A).error_type == "TenantQuotaExceeded"
+
+    def test_an_approved_call_refused_for_its_slot_names_the_approval_and_keeps_its_token(self, ctx, budgets) -> None:
+        budgets({A: _limits(max_concurrency=1, rps=NEVER, burst=2)})
+        held = _granted(get_tenant_admission(), A)
+
+        def approved(*_args: Any, **_kwargs: Any) -> None:
+            executor_module._approval_loop_local.approval_id = "approval-1"
+
+        with (
+            patch.object(BatchExecutor, "_check_approval_gate", side_effect=approved),
+            patch.object(executor_module, "logger") as log,
+        ):
+            refused = _run(A)
+
+        assert (refused.error_type, refused.error) == ("TenantQuotaExceeded", _IN_FLIGHT)
+        (line,) = [call for call in log.warning.call_args_list if call.args[0] == "tenant_quota_exceeded"]
+        assert (line.kwargs["approval_id"], line.kwargs["reason"]) == ("approval-1", CONCURRENCY)
+        held.release()
+        assert _run(A).success is True  # the refused call's token came back
 
     def test_the_slot_is_held_while_the_invoke_runs(self, ctx, budgets) -> None:
         budgets({A: _limits(max_concurrency=1, rps=100, burst=100)})

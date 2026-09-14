@@ -12,6 +12,8 @@ on this transport and carried into the executor's worker thread.
 * A's rate budget refills over time.
 * A call held for approval holds no slot: while it is held, another A call runs.
 * A call the tool-access policy refuses spends no token.
+* A call over its rate is refused before it is held for approval, and a
+  tenant with no budget does not start a stopped server.
 * A tenant that is not listed follows the documented rule: refused when there
   is no ``"*"`` entry, held to a budget of its own when there is one.
 * With no ``tenant_limits``, nothing is refused.
@@ -45,7 +47,7 @@ from mcp_hangar.fastmcp_server import flat_call_log
 from mcp_hangar.server.config import _init_tenant_limits_from_config
 from mcp_hangar.server.context import get_context
 from mcp_hangar.server.tools.batch.executor import _close_approval_loops
-from mcp_hangar.server.tools.batch.tenant_admission import configure_tenant_limits, get_tenant_admission
+from mcp_hangar.server.tools.batch.tenant_admission import get_tenant_admission, reset_tenant_admission
 from tests.integration._front_door_harness import FrontDoor, front_door, jsonrpc, SERVER, TENANT_A, TENANT_B
 
 READ = "read_item"
@@ -64,7 +66,7 @@ def _budget(max_concurrency: int, *, rps: float = 1000, burst: int = 1000) -> di
 
 @pytest.fixture
 def budgets() -> Iterator[Callable[[dict[str, Any]], None]]:
-    """Configure ``execution.tenant_limits`` as startup and a reload do. No budgets afterwards."""
+    """Configure ``execution.tenant_limits`` as startup and a reload do. Forgotten afterwards."""
 
     def configure(tenant_limits: dict[str, Any]) -> None:
         _init_tenant_limits_from_config({"execution": {"tenant_limits": tenant_limits}})
@@ -72,7 +74,7 @@ def budgets() -> Iterator[Callable[[dict[str, Any]], None]]:
     try:
         yield configure
     finally:
-        configure_tenant_limits({})
+        reset_tenant_admission()
 
 
 class _CallLog:
@@ -290,6 +292,46 @@ class TestWhatSpendsNothing:
         assert served["success"] is True, served
         assert (refused["error_type"], refused["error"]) == ("TenantQuotaExceeded", TOO_FAST), refused
         assert reached == [READ]
+
+
+class TestWhatIsRefusedEarly:
+    def test_a_call_over_its_rate_is_refused_before_it_is_held_for_approval(
+        self, budgets: Callable[[dict[str, Any]], None]
+    ) -> None:
+        budgets({TENANT_A: _budget(5, rps=0.001, burst=1)})
+        try:
+            with front_door((READ, HELD)) as door:
+                approvals = _Approvals()
+                get_tool_access_resolver().set_standalone_member_policy(
+                    SERVER, TENANT_A, ToolAccessPolicy(approval_list=(HELD,), approval_timeout_seconds=30)
+                )
+                served = _served(door, TENANT_A, READ)
+                refused = _refused(door, TENANT_A, HELD)
+                pending = approvals.pending()
+        finally:
+            _close_approval_loops()
+
+        assert served == f"did {READ}"
+        assert refused == TOO_FAST
+        assert pending == [], "a call that could not run was put to a human"
+
+    def test_a_tenant_with_no_budget_does_not_start_a_stopped_server(
+        self, budgets: Callable[[dict[str, Any]], None]
+    ) -> None:
+        budgets({TENANT_A: _budget(5)})
+        with front_door((READ,)) as door:
+            server = get_context().get_mcp_server(SERVER)
+            assert server is not None
+            server.stop()
+            stopped = server.state.value
+            refused = _refused(door, TENANT_B, READ)
+            after_the_refusal = server.state.value
+            served = _served(door, TENANT_A, READ)
+            after_a_call = server.state.value
+
+        assert (stopped, after_the_refusal) == ("cold", "cold")
+        assert refused == NO_BUDGET
+        assert (served, after_a_call) == (f"did {READ}", "ready")
 
 
 class TestWhoIsHeldToWhichBudget:
