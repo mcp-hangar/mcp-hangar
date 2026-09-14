@@ -25,12 +25,23 @@ class Command(ABC):
 
 @dataclass(frozen=True, init=False)
 class StartMcpServerCommand(Command):
-    """Command to start a mcp_server."""
+    """Command to start a mcp_server.
+
+    ``deliberate`` is True for every start that is asked for on purpose: an
+    operator's, a saga's, a call's cold start. A deliberate start revives a
+    ``dead`` server at once, whatever it died of (#1361). False starts the server
+    the way a call does instead (``ensure_ready(by_call=True)``): a dead server
+    waits out its backoff, and a capability-blocked one is refused. The front
+    door's catalogue retry is the one sender of False (#1446): it must not
+    revive what the lifecycle stopped.
+    """
 
     mcp_server_id: str
+    deliberate: bool = True
 
-    def __init__(self, mcp_server_id: str | None = None, **kwargs: object):
+    def __init__(self, mcp_server_id: str | None = None, *, deliberate: bool = True, **kwargs: object):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
+        object.__setattr__(self, "deliberate", deliberate)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")

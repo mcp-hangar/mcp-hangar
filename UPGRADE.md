@@ -41,6 +41,55 @@ server `cold`, and the next start, a call's included, checks them too.
 the same as a tool call. Before, they were forwarded to any server with a live
 connection, a `degraded` one included.
 
+## Next — a front door can wait for its catalogue before it is ready
+
+Opt-in: nothing changes unless you add `tool_access.required_catalogue`, and it
+only takes effect with `tool_access.mode: front_door`.
+
+```yaml
+tool_access:
+  mode: front_door
+  required_catalogue:
+    servers: [payments, search-pool]
+    retry_for_s: 600
+```
+
+- A replica answers `/health/ready` with 503 until its boot warm-up has
+  projected every listed server once. The body carries a `catalogue` field:
+  `missing` lists the ids not projected yet, `not_retried` names each server the
+  retry will not start and why, and `retry` says whether the retry is
+  `running`, `finished`, `exhausted`, `stopped` or `off`.
+- A server the warm-up could not start is retried for `retry_for_s` seconds,
+  600 by default; 0 turns the retry off. The retry starts a server the way a
+  call does, so a dead server waits out its backoff. It never starts a server
+  that is `dead` for `given_up` or `capability_blocked`, it leaves a `degraded`
+  server to the recovery saga, and it never starts a server this replica has
+  already projected, so a server stopped for being idle stays stopped. Each
+  attempt writes a `required_catalogue_retry` log line and one sample of
+  `mcp_hangar_catalogue_retries_total{mcp_server, outcome}`.
+- Once every listed server has been projected, readiness never depends on the
+  catalogue again: a backend that stops, goes idle or fails later does not make
+  the replica not ready.
+- A group id is satisfied once any one of its members has been projected.
+- The block is checked at load, from a file and from a dict alike. An id that is
+  not in `mcp_servers`, a group with no members, or a key other than `servers`
+  and `retry_for_s` refuses the configuration. In `egress` it is checked and
+  then ignored.
+- A reload checks the block like any other key. A replica that has been ready
+  stays ready. One still waiting waits for the new list, or stops waiting if
+  the block is removed.
+
+**If readiness stays 503.** A server in `not_retried` is one Hangar gave up on
+or blocked for a capability drift. Fix it, then start it deliberately
+(`hangar_start`, or a start through the REST API), or take it off the list. If
+`retry` reads `exhausted`, the backend did not come up within `retry_for_s`:
+start it deliberately once it is back, or restart the replica.
+
+**Probe timings.** A replica can now stay not ready for as long as a listed
+backend takes to come up, up to `retry_for_s`. A failing readiness probe does
+not restart a pod, but a rollout waits for it, so check the Deployment's
+`progressDeadlineSeconds` against `retry_for_s` and your backends' start time.
+
 ## Next — egress calls are governed with their group and tenant scope
 
 A `hangar_call` that names a group member by its own server id, instead of
