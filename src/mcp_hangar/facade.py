@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -49,11 +50,24 @@ logger = get_logger(__name__)
 
 @dataclass
 class DiscoverySpec:
-    """Specification for discovery settings."""
+    """Specification for discovery settings.
+
+    `filesystem` holds at most one directory. The gateway keeps one discovery
+    source per type, so a second filesystem source replaces the first rather
+    than adding to it; a second path is refused here instead.
+    """
 
     docker: bool = False
     kubernetes: bool = False
     filesystem: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if len(self.filesystem) > 1:
+            raise ConfigurationError(
+                f"discovery takes one filesystem directory, got {len(self.filesystem)}: the gateway "
+                "holds one discovery source per type, so a second path would replace the first. "
+                "Put the server files in one directory."
+            )
 
 
 # Facade concurrency defaults
@@ -63,6 +77,39 @@ FACADE_DEFAULT_CONCURRENCY = 20
 FACADE_MAX_CONCURRENCY = 100
 """Upper bound for facade thread pool size."""
 
+#: The builder options each mode's server reads. The builder used to write any
+#: option into any spec, so `url=` on a subprocess server or `env=` on a remote
+#: one was stored and never read. Group is absent: a group needs members, which
+#: this builder cannot declare. A docker or container server's `command` is the
+#: container command: `_load_mcp_server_config` passes it as `container_command`
+#: and the container launcher runs it.
+_OPTIONS_READ_BY_MODE: dict[McpServerMode, frozenset[str]] = {
+    McpServerMode.SUBPROCESS: frozenset({"command", "env"}),
+    McpServerMode.DOCKER: frozenset({"image", "command", "env"}),
+    McpServerMode.CONTAINER: frozenset({"image", "command", "env"}),
+    McpServerMode.REMOTE: frozenset({"url"}),
+}
+
+#: The option a mode cannot start without. Container mode needs an image as
+#: docker does: the config value object does not check it, and the launcher
+#: only refuses a missing image at start, long after `build()` returned.
+_OPTION_REQUIRED_BY_MODE: dict[McpServerMode, str] = {
+    McpServerMode.SUBPROCESS: "command",
+    McpServerMode.DOCKER: "image",
+    McpServerMode.CONTAINER: "image",
+    McpServerMode.REMOTE: "url",
+}
+
+#: A builder option whose spec key has another name. The builder's `url=` is
+#: its public argument; the gateway reads a remote server's address from
+#: `endpoint`, and a spec carrying `url` booted a server with no address.
+_SPEC_KEY_FOR_OPTION = {"url": "endpoint"}
+
+#: The mode of every discovery source the builder declares. Additive only adds
+#: servers; authoritative also removes the ones a source stops reporting, which
+#: a boolean flag should not decide for its caller.
+_BUILDER_DISCOVERY_MODE = "additive"
+
 
 @dataclass
 class HangarConfigData:
@@ -70,8 +117,6 @@ class HangarConfigData:
 
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     discovery: DiscoverySpec = field(default_factory=DiscoverySpec)
-    gc_interval_s: int = 30
-    health_check_interval_s: int = 10
     max_concurrency: int = FACADE_DEFAULT_CONCURRENCY
 
 
@@ -109,22 +154,27 @@ class HangarConfig:
 
         Args:
             name: Unique mcp_server name.
-            mode: McpServer mode - "subprocess", "docker", or "remote".
-            command: Command for subprocess mode.
-            image: Docker image for docker mode.
-            url: URL for remote mode.
-            env: Environment variables for the mcp_server.
+            mode: McpServer mode - "subprocess", "docker", "container" or "remote".
+            command: Command for subprocess mode, or the container command for
+                docker and container mode.
+            image: Container image for docker and container mode.
+            url: Address of a remote server. Written as the spec's `endpoint`,
+                the key the gateway reads.
+            env: Environment variables for a subprocess or container server.
             idle_ttl_s: Idle timeout before auto-shutdown (default: 300s).
 
         Returns:
             Self for chaining.
 
         Raises:
-            ConfigurationError: If mcp_server name is empty or mode is invalid.
+            ConfigurationError: If the name is empty, the mode is `group`, the
+                mode's required option is missing, or an option is given that
+                the mode does not read.
 
         Example:
             config.add_mcp_server("math", command=["python", "-m", "math_server"])
             config.add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
+            config.add_mcp_server("api", mode="remote", url="http://localhost:8080/mcp")
         """
         self._check_not_built()
 
@@ -132,27 +182,19 @@ class HangarConfig:
             raise ConfigurationError("McpServer name cannot be empty")
 
         normalized_mode = McpServerMode.normalize(mode)
-
-        # Validate mode-specific requirements
-        if normalized_mode == McpServerMode.SUBPROCESS and not command:
-            raise ConfigurationError(f"McpServer '{name}': command is required for subprocess mode")
-        if normalized_mode == McpServerMode.DOCKER and not image:
-            raise ConfigurationError(f"McpServer '{name}': image is required for docker mode")
-        if normalized_mode == McpServerMode.REMOTE and not url:
-            raise ConfigurationError(f"McpServer '{name}': url is required for remote mode")
+        options = {
+            option: value
+            for option, value in {"command": command, "image": image, "url": url, "env": env}.items()
+            if value
+        }
+        _check_server_options(name, normalized_mode, options)
 
         mcp_server_config: dict[str, Any] = {
             "mode": normalized_mode.value,
             "idle_ttl_s": idle_ttl_s,
         }
-        if command:
-            mcp_server_config["command"] = command
-        if image:
-            mcp_server_config["image"] = image
-        if url:
-            mcp_server_config["url"] = url
-        if env:
-            mcp_server_config["env"] = env
+        for option, value in options.items():
+            mcp_server_config[_SPEC_KEY_FOR_OPTION.get(option, option)] = value
 
         self._data.mcp_servers[name] = mcp_server_config
         return self
@@ -166,22 +208,36 @@ class HangarConfig:
     ) -> HangarConfig:
         """Enable mcp_server discovery.
 
+        Each requested source becomes one entry of the gateway's
+        `discovery.sources`, in `additive` mode: a discovered server is added,
+        and a server the source stops reporting is left alone.
+
         Args:
             docker: Enable Docker container discovery.
-            kubernetes: Enable Kubernetes discovery.
-            filesystem: List of paths to scan for mcp_server YAML files.
+            kubernetes: Enable Kubernetes discovery (in-cluster, every
+                namespace). Needs the `kubernetes` extra; without it the
+                gateway logs `discovery_source_unavailable` and runs the other
+                sources.
+            filesystem: One directory to scan for mcp_server YAML files, as a
+                one-element list.
 
         Returns:
             Self for chaining.
+
+        Raises:
+            ConfigurationError: If no source is requested, or more than one
+                filesystem directory is given.
 
         Example:
             config.enable_discovery(docker=True, filesystem=["./mcp_servers"])
         """
         self._check_not_built()
+        if not (docker or kubernetes or filesystem):
+            raise ConfigurationError("enable_discovery() needs at least one source: docker, kubernetes or filesystem")
         self._data.discovery = DiscoverySpec(
             docker=docker,
             kubernetes=kubernetes,
-            filesystem=filesystem or [],
+            filesystem=list(filesystem or []),
         )
         return self
 
@@ -212,65 +268,111 @@ class HangarConfig:
         gc_interval_s: int | None = None,
         health_check_interval_s: int | None = None,
     ) -> HangarConfig:
-        """Set background worker intervals.
+        """Refused: the gateway reads no worker interval from its configuration.
 
-        Args:
-            gc_interval_s: Garbage collection interval (default: 30s).
-            health_check_interval_s: Health check interval (default: 10s).
+        This used to store both values on the built data, where nothing read
+        them: the GC and health-check workers run on fixed intervals, and no
+        configuration key sets either one. A call that looked like it applied
+        a setting and applied nothing is refused rather than kept.
 
-        Returns:
-            Self for chaining.
+        Raises:
+            ConfigurationError: Always.
         """
         self._check_not_built()
-        if gc_interval_s is not None:
-            self._data.gc_interval_s = gc_interval_s
-        if health_check_interval_s is not None:
-            self._data.health_check_interval_s = health_check_interval_s
-        return self
+        raise ConfigurationError(
+            "set_intervals() is refused: the gateway reads no GC or health-check interval from its "
+            "configuration, so the value was never applied. Remove the call."
+        )
 
     def build(self) -> HangarConfigData:
         """Build and validate the configuration.
+
+        The configuration is checked against the gateway's config schema, so a
+        key the gateway does not read fails here rather than at boot.
 
         Returns:
             Immutable configuration data.
 
         Raises:
-            ConfigurationError: If configuration is invalid.
+            ConfigurationError: If the configuration carries a key the gateway
+                does not read.
         """
+        from .server.config_schema import validate_config
+
+        problems = validate_config(self.to_dict())
+        if problems:
+            raise ConfigurationError("HangarConfig built keys the gateway does not read:\n  " + "\n  ".join(problems))
         self._built = True
         return self._data
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to config dict format (compatible with YAML config).
+        """The gateway configuration this builder describes, in `config.yaml`'s shape.
+
+        Holds only keys the gateway reads, so it can be passed to
+        `bootstrap(config_dict=...)` or saved as YAML. `max_concurrency` is not
+        in it: that sizes the facade's own thread pool, not the gateway.
 
         Returns:
-            Dictionary that can be passed to bootstrap or saved as YAML.
+            The configuration dictionary.
         """
         result: dict[str, Any] = {
-            "mcp_servers": dict(self._data.mcp_servers),
-            "max_concurrency": self._data.max_concurrency,
+            "mcp_servers": {name: dict(spec) for name, spec in self._data.mcp_servers.items()},
         }
-
-        # Add discovery if enabled
-        discovery = self._data.discovery
-        if discovery.docker or discovery.kubernetes or discovery.filesystem:
-            result["discovery"] = {}
-            if discovery.docker:
-                result["discovery"]["docker"] = {"enabled": True}
-            if discovery.kubernetes:
-                result["discovery"]["kubernetes"] = {"enabled": True}
-            if discovery.filesystem:
-                result["discovery"]["filesystem"] = {
-                    "enabled": True,
-                    "paths": discovery.filesystem,
-                }
-
+        sources = _discovery_sources(self._data.discovery)
+        if sources:
+            result["discovery"] = {"enabled": True, "sources": sources}
         return result
 
     def _check_not_built(self) -> None:
         """Check that config hasn't been built yet."""
         if self._built:
             raise ConfigurationError("Configuration already built, cannot modify")
+
+
+def _check_server_options(name: str, mode: McpServerMode, options: dict[str, Any]) -> None:
+    """Refuse a server the gateway could not start, or an option it would not read.
+
+    Args:
+        name: The server's name, for the message.
+        mode: The normalized mode.
+        options: The options given, the unset ones left out.
+
+    Raises:
+        ConfigurationError: If the mode is `group`, its required option is
+            missing, or an option is given that the mode does not read.
+    """
+    read = _OPTIONS_READ_BY_MODE.get(mode)
+    if read is None:
+        raise ConfigurationError(
+            f"McpServer '{name}': mode {mode.value!r} cannot be built with HangarConfig, which does not "
+            "declare a group's members. Declare the group in a config file."
+        )
+    required = _OPTION_REQUIRED_BY_MODE.get(mode)
+    if required is not None and required not in options:
+        raise ConfigurationError(f"McpServer '{name}': {required} is required for {mode.value} mode")
+    unread = sorted(set(options) - read)
+    if unread:
+        raise ConfigurationError(
+            f"McpServer '{name}': {', '.join(unread)} has no effect on a {mode.value} server and would "
+            "be ignored. Remove it."
+        )
+
+
+def _discovery_sources(discovery: DiscoverySpec) -> list[dict[str, Any]]:
+    """The `discovery.sources` entries for *discovery*, one per requested type.
+
+    Each entry is what `infrastructure/discovery/registry.py` builds a source
+    from: `type`, `mode`, and the source's own keys. The filesystem source reads
+    one directory from `path`.
+    """
+    sources: list[dict[str, Any]] = []
+    if discovery.docker:
+        sources.append({"type": "docker", "mode": _BUILDER_DISCOVERY_MODE})
+    if discovery.kubernetes:
+        sources.append({"type": "kubernetes", "mode": _BUILDER_DISCOVERY_MODE})
+    for directory in discovery.filesystem:
+        sources.append({"type": "filesystem", "mode": _BUILDER_DISCOVERY_MODE, "path": directory})
+    return sources
 
 
 # --- McpServer Info ---
@@ -364,6 +466,8 @@ class Hangar:
         pool_size = config.max_concurrency if config else FACADE_DEFAULT_CONCURRENCY
         self._executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="hangar-")
         self._started = False
+        #: Discovery's loop and the thread running it, while discovery runs.
+        self._discovery: tuple[asyncio.AbstractEventLoop, threading.Thread] | None = None
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> Hangar:
@@ -415,14 +519,11 @@ class Hangar:
         loop = asyncio.get_event_loop()
 
         if self._config:
-            # Programmatic config - convert to dict and bootstrap
-            config_dict = HangarConfig()
-            config_dict._data = self._config
-            gateway_config = config_dict.to_dict()
-            # This facade's own thread pool, sized in `__init__`. Not a gateway
-            # key: now that a dict is schema-checked like a file (#1415), passing
-            # it on would warn on every start and refuse under strict mode.
-            gateway_config.pop("max_concurrency", None)
+            # Programmatic config. `to_dict()` holds only gateway keys: the
+            # facade's `max_concurrency` sized the thread pool in `__init__`.
+            builder = HangarConfig()
+            builder._data = self._config
+            gateway_config = builder.to_dict()
             self._context = await loop.run_in_executor(
                 self._executor,
                 lambda: bootstrap(config_dict=gateway_config),
@@ -434,6 +535,7 @@ class Hangar:
                 lambda: bootstrap(config_path=self._config_path),
             )
 
+        await loop.run_in_executor(self._executor, self._start_discovery)
         self._started = True
         logger.info("hangar_started", config_path=self._config_path)
 
@@ -443,15 +545,18 @@ class Hangar:
         Stops all mcp_servers and background workers.
         Called automatically when using async context manager.
         """
-        if not self._started:
-            return
-
+        # Not gated on `_started`: a `start()` that raised leaves the thread
+        # pool running, and only this releases it. The context is shut down
+        # once -- `ApplicationContext.shutdown()` has no guard of its own -- so
+        # it is dropped here, and a failed start drops it after shutting it down.
         if self._context:
             loop = asyncio.get_event_loop()
+            await loop.run_in_executor(self._executor, self._stop_discovery)
             await loop.run_in_executor(
                 self._executor,
                 self._context.shutdown,
             )
+            self._context = None
 
         self._executor.shutdown(wait=False)
         self._started = False
@@ -465,6 +570,41 @@ class Hangar:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.stop()
+
+    def _start_discovery(self) -> None:
+        """Run discovery, when the configuration enables it.
+
+        `bootstrap()` builds the orchestrator and its sources and starts
+        neither; `serve` starts them in `ServerLifecycle`. The facade never did,
+        so a discovery section, from a file or from `enable_discovery()`, was
+        built and never ran a cycle.
+        """
+        from .server.lifecycle import start_discovery_loop
+
+        orchestrator = self._context.discovery_orchestrator if self._context else None
+        if orchestrator is None:
+            return
+        try:
+            self._discovery = start_discovery_loop(orchestrator)
+        except Exception:
+            # A caller whose `start()` raised does not call `stop()`, so the
+            # context bootstrap just built would be left running. Dropped once
+            # shut down: `ApplicationContext.shutdown()` has no guard against a
+            # second call.
+            assert self._context is not None
+            context, self._context = self._context, None
+            context.shutdown()
+            raise
+
+    def _stop_discovery(self) -> None:
+        """Stop the discovery `_start_discovery` started, if it did."""
+        from .server.lifecycle import stop_discovery_loop
+
+        running, self._discovery = self._discovery, None
+        orchestrator = self._context.discovery_orchestrator if self._context else None
+        if running is None or orchestrator is None:
+            return
+        stop_discovery_loop(orchestrator, *running)
 
     def _ensure_started(self) -> None:
         """Ensure Hangar is started."""
