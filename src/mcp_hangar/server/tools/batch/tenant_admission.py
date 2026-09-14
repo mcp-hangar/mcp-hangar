@@ -23,11 +23,16 @@ Where it is taken
       or waiting on a cold start, holds no slot, and the slot is given back
       when the call returns, on every path.
 
-    Two consequences follow. An approved call is refused if its tenant's slots
-    are all taken when it is dispatched: the refusal's log line names the
-    approval, and running the call again needs a new one. And a tenant at its
+    Three consequences follow. An approved call is refused if its tenant's
+    slots are all taken when it is dispatched: the refusal's log line names
+    the approval, and running the call again needs a new one. A tenant at its
     concurrency limit can still start a stopped server, with a call that is
-    then refused.
+    then refused. And the pin of a tool on a server that has not started is
+    checked only after the cold start (#601, the deferred pin check), so a
+    caller the first step refuses -- with no budget, or no token -- is told
+    `TenantQuotaExceeded` rather than a pin mismatch, and starts nothing.
+    Moving the first step after that check would move it after the cold start
+    too.
 
 Who is held to which budget
     - A tenant listed in `execution.tenant_limits` has its own budget.
@@ -60,8 +65,9 @@ Reload
     so lowering a limit never lets more than the new limit start. A tenant
     that is no longer configured is refused from then on. Its budget is kept
     while calls on it are still running, so they are counted again if the
-    tenant comes back, and it is dropped once they finish. Calls already
-    running when budgets are first turned on are not counted.
+    tenant comes back. Once they have finished, it is dropped at the next
+    reload or the next sweep. Calls already running when budgets are first
+    turned on are not counted.
 
 Limits
     `max_concurrency` and `burst` are integers from 1 to `MAX_COUNT`, and `rps`
@@ -195,12 +201,18 @@ def _shown(value: object) -> str:
 
 
 class _Slots:
-    """A budget's in-flight count, shared with the budget a reload rebuilds from it."""
+    """A budget's calls in flight and open reservations, shared with the budget a reload rebuilds from it."""
 
-    __slots__ = ("active",)
+    __slots__ = ("active", "reserved")
 
     def __init__(self) -> None:
         self.active = 0
+        #: Tokens taken for calls that have not taken their slot yet: held for
+        #: approval, or waiting on a cold start.
+        self.reserved = 0
+
+    def busy(self) -> bool:
+        return self.active > 0 or self.reserved > 0
 
 
 @dataclass
@@ -222,7 +234,7 @@ class _Budget:
     def is_new(self, now: float) -> bool:
         """Whether a budget built now would give every answer this one gives."""
         self.refill(now)
-        return self.slots.active == 0 and self.tokens >= self.limits.burst
+        return not self.slots.busy() and self.tokens >= self.limits.burst
 
 
 class Grant:
@@ -269,11 +281,13 @@ class Reservation:
     a later `grant` is a bug and raises.
     """
 
-    __slots__ = ("_admission", "open", "tenant_id")
+    __slots__ = ("_admission", "open", "slots", "tenant_id")
 
-    def __init__(self, admission: TenantAdmission | None, tenant_id: str | None) -> None:
+    def __init__(self, admission: TenantAdmission | None, tenant_id: str | None, slots: _Slots | None = None) -> None:
         self._admission = admission
         self.tenant_id = tenant_id
+        #: The counter it is open on, so a sweep sees the budget as busy.
+        self.slots = slots
         self.open = True
 
     def grant(self) -> Grant | Refusal:
@@ -288,6 +302,13 @@ class Reservation:
 
 #: What a call is given when no budgets are configured.
 _UNRESERVED = Reservation(None, None)
+
+
+def _end(reservation: Reservation) -> None:
+    """Close *reservation*: it no longer keeps its budget busy."""
+    reservation.open = False
+    if reservation.slots is not None:
+        reservation.slots.reserved -= 1
 
 
 class TenantAdmission:
@@ -326,14 +347,15 @@ class TenantAdmission:
             if budget.tokens < 1:
                 return Refusal(budget=budget.entry, reason=RATE)
             budget.tokens -= 1
-            return Reservation(self, tenant_id)
+            budget.slots.reserved += 1
+            return Reservation(self, tenant_id, budget.slots)
 
     def grant(self, reservation: Reservation) -> Grant | Refusal:
         """Take the slot of a reserved call, or refuse it and give its token back. Never waits."""
         with self._lock:
             if not reservation.open:
                 raise RuntimeError("a reservation is granted once, and never after its refund")
-            reservation.open = False
+            _end(reservation)
             if not self._limits:
                 return _UNBUDGETED  # budgets were turned off while the call waited
             entry = self._entry_for(reservation.tenant_id)
@@ -351,7 +373,7 @@ class TenantAdmission:
         with self._lock:
             if not reservation.open:
                 return
-            reservation.open = False
+            _end(reservation)
             budget = self._budgets.get(reservation.tenant_id)
             if budget is not None and self._entry_for(reservation.tenant_id) is not None:
                 budget.refill(self._clock())
@@ -411,8 +433,12 @@ class TenantAdmission:
         return budget
 
     def _droppable(self, tenant_id: str | None, budget: _Budget, now: float) -> bool:
-        """Idle and full, or idle with no entry left: dropping it changes no answer."""
-        if budget.slots.active == 0 and self._entry_for(tenant_id) is None:
+        """Idle and full, or idle with no entry left: dropping it changes no answer.
+
+        Idle means no call in flight and no reservation open: a budget whose
+        call is held for approval is kept, however long the hold.
+        """
+        if not budget.slots.busy() and self._entry_for(tenant_id) is None:
             return True
         return budget.is_new(now)
 

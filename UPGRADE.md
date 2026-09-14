@@ -37,7 +37,10 @@ execution:
   - The token, and the check that the caller has a budget at all, come before
     the approval hold and the cold start. A caller with no budget, or over its
     rate, is refused before anyone is asked to approve the call, and before the
-    call starts a stopped server. A call refused after that point (denied or
+    call starts a stopped server. On a server that has not started yet, a
+    pinned tool's pin can only be checked once the server starts, so such a
+    caller is refused with `TenantQuotaExceeded`, not a pin mismatch. A call
+    refused after that point (denied or
     expired at approval, no longer valid after the hold, or its server failing
     to start) gets its token back.
   - The slot comes last, just before the upstream call. A call held for

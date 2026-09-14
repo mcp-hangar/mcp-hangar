@@ -287,6 +287,7 @@ class TestAReservation:
         _reserved(admission, A)
         _reserved(admission, A)
         assert admission.reserve(A) == Refusal(budget=A, reason=RATE)
+        assert admission._budgets[A].slots.reserved == 3  # the three still open
 
     def test_a_slot_refused_at_the_grant_gives_the_token_back(self) -> None:
         admission = TenantAdmission({A: _limits(max_concurrency=1, rps=NEVER, burst=2)})
@@ -307,6 +308,22 @@ class TestAReservation:
             reserved.grant()
         reserved.refund()  # does nothing
         assert admission.in_flight(A) == 1
+
+    def test_a_budget_with_a_reservation_open_is_not_dropped_by_a_sweep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A hold longer than burst/rps refills the token, and the budget still is not idle."""
+        monkeypatch.setattr(tenant_admission, "_PRUNE_AT", 2)
+        clock = _Clock()
+        admission = TenantAdmission({DEFAULT_BUDGET: _limits(max_concurrency=1, rps=1, burst=1)}, clock=clock)
+        held = _reserved(admission, A)  # held for approval
+        budget = admission._budgets[A]
+        clock.now += 100  # far past burst / rps: its token has come back
+        _granted(admission, "tenant:1").release()
+
+        _granted(admission, "tenant:2").release()  # the third budget: a sweep runs
+
+        assert admission._budgets.get(A) is budget
+        assert isinstance(held.grant(), Grant)
+        assert (budget.slots.active, budget.slots.reserved) == (1, 0)
 
     def test_an_entry_removed_while_the_call_waited_refuses_the_slot(self) -> None:
         admission = TenantAdmission({A: _limits(), B: _limits()})

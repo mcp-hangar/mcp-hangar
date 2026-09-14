@@ -1705,6 +1705,12 @@ class BatchExecutor:
         nor starts a stopped server. The token goes back if a later gate
         refuses the call (`_run_gates`); the slot is taken last, by
         `_enforce_tenant_budget`.
+
+        Being before the cold start puts it before the deferred pin check
+        (#601), which needs the catalogue a cold start fills. On a server that
+        has not started, a caller refused here is told `TenantQuotaExceeded`,
+        not a pin mismatch, and nothing starts. Pinned by
+        tests/unit/test_batch_gate_precedence.py.
         """
         reserved = get_tenant_admission().reserve(p.caller_tenant_id)
         if isinstance(reserved, Refusal):
