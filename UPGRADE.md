@@ -172,6 +172,37 @@ upgrading. The flat spelling
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
 
+## Next — a group's `healthy_count` counts members that are `ready`
+
+A group's `healthy_count` used to count every member in rotation that was not
+`dead`, `cold` ones included. It now counts the members that are `ready` and in
+rotation. The number of members in rotation, in any state, is a new field,
+`members_in_rotation_count`: the length of the `members_in_rotation` list that
+`hangar_group_rebalance` returns.
+
+`healthy_count` changes meaning, so its value drops for any group with a member
+in rotation that is not `ready`. The common case is a group whose members the
+GC reaped for being idle. Before, it read `healthy_count: 2` with nothing
+running; it now reads `healthy_count: 0` and `members_in_rotation_count: 2`
+until a call through the group starts a member.
+
+This affects anything that reads a group's `healthy_count` from
+`GET /api/groups`, `GET /api/groups/{id}`, `hangar_details`,
+`hangar_group_list`, `hangar_list`, `hangar_start` or `hangar_group_rebalance`,
+or its `healthy_members` from `hangar_status`, `hangar_health` or
+`hangar_metrics`. The `GroupStateChanged` event's `healthy_count` changes the
+same way and gains `members_in_rotation_count`. No metric reports either count.
+
+**A check that treats `healthy_count: 0` as a group that cannot serve now
+fires for idle groups that serve fine.** A group routes as long as
+`is_available` is true. To ask whether a group can take a call, read
+`is_available`. To ask whether members are in rotation, read
+`members_in_rotation_count`.
+
+What the group decides is unchanged. `is_available`, the group `state` and the
+`min_healthy` rule that closes an open circuit count the members in rotation
+that are not `dead`, as `healthy_count` did before.
+
 ## Upgrade to 2.19.1
 
 ### a suspended session is refused

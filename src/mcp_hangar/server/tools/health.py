@@ -188,6 +188,7 @@ def hangar_health() -> dict:
             "by_state": group_state_counts,
             "total_members": sum(g.total_count for g in view.groups),
             "healthy_members": sum(g.healthy_count for g in view.groups),
+            "members_in_rotation_count": sum(g.members_in_rotation_count for g in view.groups),
         },
         "security": {
             "rate_limiting": ctx.rate_limiter.get_stats(),
@@ -229,19 +230,29 @@ def register_health_tools(mcp: FastMCP) -> None:
             {
                 status: str,
                 mcp_servers: {total: int, by_state: {cold: int, ready: int, degraded: int, dead: int}},
-                groups: {total: int, by_state: object, total_members: int, healthy_members: int},
+                groups: {
+                    total: int,
+                    by_state: object,
+                    total_members: int,
+                    healthy_members: int,
+                    members_in_rotation_count: int
+                },
                 security: {rate_limiting: {active_buckets: int, config: object}},
                 replica: {instance_id: str, uptime_seconds: float, uptime: str},
                 scope: "replica",
                 scope_note: str
             }
             mcp_servers counts configured and hot-loaded servers on this replica.
+            groups sums every group's healthy_count (members ready and in
+            rotation) and members_in_rotation_count (members in rotation in any
+            state), as hangar_group_list reports them.
 
         Example:
             hangar_health()
             # {"status": "healthy",
             #  "mcp_servers": {"total": 3, "by_state": {"ready": 2, "cold": 1}},
-            #  "groups": {"total": 1, "by_state": {"ready": 1}, "total_members": 3, "healthy_members": 2},
+            #  "groups": {"total": 1, "by_state": {"ready": 1}, "total_members": 3, "healthy_members": 2,
+            #             "members_in_rotation_count": 2},
             #  "security": {"rate_limiting": {"active_buckets": 5, "config": {...}}},
             #  "replica": {"instance_id": "hangar-0-3fa81c2e", "uptime_seconds": 8100.0, "uptime": "2h 15m"},
             #  "scope": "replica", "scope_note": "This describes what the replica named ..."}
@@ -272,7 +283,7 @@ def register_health_tools(mcp: FastMCP) -> None:
         Returns:
             JSON format: {
                 mcp_servers: {<id>: {state, mode, tools_count, invocations, errors, avg_latency_ms}},
-                groups: {<id>: {state, strategy, total_members, healthy_members}},
+                groups: {<id>: {state, strategy, total_members, healthy_members, members_in_rotation_count}},
                 tool_calls: {<mcp_server.tool>: {count, errors}},
                 discovery: object,
                 errors: {<type>: int},
@@ -338,6 +349,7 @@ def register_health_tools(mcp: FastMCP) -> None:
                 "strategy": group.strategy.value if hasattr(group.strategy, "value") else str(group.strategy),
                 "total_members": group.total_count,
                 "healthy_members": group.healthy_count,
+                "members_in_rotation_count": group.members_in_rotation_count,
             }
 
         # Summary stats

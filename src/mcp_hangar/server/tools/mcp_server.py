@@ -288,11 +288,15 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 strategy: str,
                 min_healthy: int,
                 healthy_count: int,
+                members_in_rotation_count: int,
                 total_members: int,
                 is_available: bool,
                 circuit_open: bool,
                 members: [{id, state, in_rotation, weight, priority, consecutive_failures}]
             }
+            A group is the same dict GET /api/groups/{id} returns. healthy_count
+            counts members that are ready and in rotation;
+            members_in_rotation_count counts members in rotation in any state.
             Error: ValueError with "unknown_mcp_server: <id>"
 
         Example:

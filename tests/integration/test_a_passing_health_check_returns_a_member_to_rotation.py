@@ -170,4 +170,9 @@ def test_an_idle_reaped_member_never_leaves_rotation(runs):
 def test_idle_reaping_never_opens_the_circuit(runs):
     for number, cycle in enumerate(runs["idle"]["cycles"], start=1):
         status = cycle["status"]
-        assert status["circuit_open"] is False and status["healthy_count"] == len(IDLE_MEMBERS), (number, status)
+        # Reaped members are cold: in rotation, not healthy. `healthy_count == 2` was the shape #1356 removed.
+        assert status["circuit_open"] is False and status["members_in_rotation_count"] == len(IDLE_MEMBERS), (
+            number,
+            status,
+        )
+        assert status["healthy_count"] == 0, (number, status)

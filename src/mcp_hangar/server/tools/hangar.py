@@ -174,7 +174,14 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
 
         Returns:
             McpServer: {mcp_server: str, state: str, tools: list[str]}
-            Group: {group: str, state: str, members_started: int, healthy_count: int, total_members: int}
+            Group: {
+                group: str,
+                state: str,
+                members_started: int,
+                healthy_count: int,
+                members_in_rotation_count: int,
+                total_members: int
+            }
             Error: ValueError with "unknown_mcp_server: <id>" or "unknown_group: <id>"
 
         Example:
@@ -183,7 +190,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
 
             hangar_start("llm-group")
             # {"group": "llm-group", "state": "ready", "members_started": 2,
-            #  "healthy_count": 2, "total_members": 3}
+            #  "healthy_count": 2, "members_in_rotation_count": 2, "total_members": 3}
 
             hangar_start("unknown")
             # Error: unknown_mcp_server: unknown
@@ -200,6 +207,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                 "state": group.state.value,
                 "members_started": started,
                 "healthy_count": group.healthy_count,
+                "members_in_rotation_count": group.members_in_rotation_count,
                 "total_members": group.total_count,
             }
 
@@ -302,8 +310,15 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
         Returns:
             {
                 mcp_servers: [{id: str, indicator: str, state: str, mode: str, last_used?: str}],
-                groups: [{id: str, indicator: str, state: str, healthy_members: int, total_members: int,
-                          circuit_open: bool}],
+                groups: [{
+                    id: str,
+                    indicator: str,
+                    state: str,
+                    healthy_members: int,
+                    members_in_rotation_count: int,
+                    total_members: int,
+                    circuit_open: bool
+                }],
                 runtime_mcp_servers: [{id: str, indicator: str, state: str, source: str, verified: bool}],
                 summary: {healthy_mcp_servers: int, total_mcp_servers: int, uptime: str, uptime_seconds: float},
                 replica: {instance_id: str, uptime_seconds: float, uptime: str},
@@ -363,6 +378,7 @@ def hangar_status() -> dict:
             "indicator": _group_indicator(group.state),
             "state": group.state,
             "healthy_members": group.healthy_count,
+            "members_in_rotation_count": group.members_in_rotation_count,
             "total_members": group.total_count,
             "circuit_open": group.circuit_open,
         }
