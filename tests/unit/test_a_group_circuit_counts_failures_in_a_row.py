@@ -6,13 +6,12 @@ someone ran `rebalance()`. The served path is proved in
 ``tests/integration/test_scattered_health_check_failures_do_not_open_a_group_circuit.py``.
 """
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 
-from mcp_hangar.domain.events import CircuitBreakerStateChanged
 from mcp_hangar.domain.model.circuit_breaker import CircuitState
 from mcp_hangar.domain.model.mcp_server_group import GroupCircuitClosed, GroupCircuitOpened, McpServerGroup
 from mcp_hangar.domain.value_objects import GroupState, ProviderState
-from mcp_hangar.server.bootstrap.cqrs import _restore_group_circuit_breakers
+from mcp_hangar.domain.events import CircuitBreakerStateChanged
 
 
 def _server(server_id: str) -> MagicMock:
@@ -136,16 +135,15 @@ class TestHalfOpen:
 
         assert group._circuit_breaker.state is CircuitState.OPEN
 
-    def test_a_success_closes_a_restored_half_open_circuit(self):
-        """A snapshot the group did not write is the one way in; the group reports it closed."""
-        group = _group(["a"])
-        store = MagicMock(load=Mock(return_value={"state_data": {"state": "half_open", "failure_threshold": 3}}))
-        _restore_group_circuit_breakers(store, {"pool": group})
-        assert group._circuit_breaker.state is CircuitState.HALF_OPEN
-        assert group.circuit_open is False
+    def test_members_coming_back_close_it_straight_from_open(self):
+        """No timer (#1398): however long it has been open, the way out is `_maybe_close_circuit()`."""
+        group = _open(["a", "b"], min_healthy=2)
+        group._circuit_breaker._opened_at = 0.0  # opened long ago
 
         group.report_success("a")
+        assert group._circuit_breaker.state is CircuitState.OPEN
+        group.report_success("b")
 
         assert group._circuit_breaker.state is CircuitState.CLOSED
         changes = [e for e in group.collect_events() if isinstance(e, CircuitBreakerStateChanged)]
-        assert [(e.old_state, e.new_state) for e in changes] == [("half_open", "closed")]
+        assert [(e.old_state, e.new_state) for e in changes] == [("open", "closed")]

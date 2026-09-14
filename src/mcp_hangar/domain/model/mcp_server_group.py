@@ -92,13 +92,18 @@ class GroupMemberHealthChanged(DomainEvent):
 
 @dataclass
 class GroupStateChanged(DomainEvent):
-    """Published when group state transitions."""
+    """Published when group state transitions.
+
+    `healthy_count` and `members_in_rotation_count` mean what they mean on
+    every status surface (#1356).
+    """
 
     group_id: str
     old_state: str
     new_state: str
     healthy_count: int
     total_count: int
+    members_in_rotation_count: int = 0
 
 
 @dataclass
@@ -179,7 +184,6 @@ class McpServerGroup(AggregateRoot):
         unhealthy_threshold: int = 2,
         healthy_threshold: int = 1,
         circuit_failure_threshold: int = 10,
-        circuit_reset_timeout_s: float = 60.0,
         description: str | None = None,
     ):
         """
@@ -192,8 +196,7 @@ class McpServerGroup(AggregateRoot):
             auto_start: Automatically start members when added
             unhealthy_threshold: Failures before removing from rotation
             healthy_threshold: Successes before adding back to rotation
-            circuit_failure_threshold: Failures before circuit opens
-            circuit_reset_timeout_s: Time before circuit resets
+            circuit_failure_threshold: Failures in a row before circuit opens
             description: Human-readable description
         """
         super().__init__()
@@ -218,13 +221,14 @@ class McpServerGroup(AggregateRoot):
         # Told whether the circuit is open, after every transition (#1357).
         self._circuit_listener: Callable[[bool], None] | None = None
 
-        # Circuit breaker (extracted for SRP)
-        self._circuit_breaker = CircuitBreaker(
-            CircuitBreakerConfig(
-                failure_threshold=circuit_failure_threshold,
-                reset_timeout_s=circuit_reset_timeout_s,
-            )
-        )
+        # Circuit breaker (extracted for SRP). No reset timeout: the breaker's
+        # default is left in place and never read. The breaker consults it only
+        # in `allow_request()`, which the group does not call, so an open group
+        # circuit never half-opens on a timer. It closes through
+        # `_maybe_close_circuit()` once `min_healthy` members are back in
+        # rotation. A group option for the timeout was accepted and ignored
+        # until #1398 removed it.
+        self._circuit_breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=circuit_failure_threshold))
         self._circuit_breaker._on_state_change = self._on_circuit_breaker_state_change
 
         # Threading
@@ -313,10 +317,35 @@ class McpServerGroup(AggregateRoot):
 
     @property
     def healthy_count(self) -> int:
-        """Number of members in rotation that are not DEAD.
+        """Members that are `ready` and in rotation. Reported, never decided on (#1356).
 
-        A member whose process crashed stays in rotation, so a call through the
-        group restarts it, but it is not healthy until it is back (#1361).
+        It used to count every member in rotation that was not DEAD, `cold`
+        ones included, so a group could report three healthy members with its
+        circuit open and nothing serving. The group's decisions still count
+        that way, through `_live_rotation_count()`; `members_in_rotation_count`
+        reports rotation size.
+        """
+        with self._lock:
+            return sum(
+                1
+                for m in self._members.values()
+                if m.in_rotation and m.mcp_server.state_snapshot is McpServerState.READY
+            )
+
+    @property
+    def members_in_rotation_count(self) -> int:
+        """Members in rotation, whatever their state: the members `members_in_rotation` names."""
+        with self._lock:
+            return sum(1 for m in self._members.values() if m.in_rotation)
+
+    def _live_rotation_count(self) -> int:
+        """Members in rotation that are not DEAD: what the group's decisions count.
+
+        `is_available`, the group state and the `min_healthy` rule that closes
+        an open circuit count these. A `cold` member counts: a group starts its
+        members lazily, and the next call through it starts one. A member whose
+        process crashed stays in rotation, so a call restarts it, but does not
+        count until it is back (#1361). Until #1356 this was `healthy_count`.
         """
         with self._lock:
             return sum(
@@ -335,7 +364,11 @@ class McpServerGroup(AggregateRoot):
     def is_available(self) -> bool:
         """Can the group accept requests?"""
         with self._lock:
-            return not self._circuit_breaker.is_open and self._state.can_accept_requests and self.healthy_count >= 1
+            return (
+                not self._circuit_breaker.is_open
+                and self._state.can_accept_requests
+                and self._live_rotation_count() >= 1
+            )
 
     @property
     def circuit_open(self) -> bool:
@@ -616,12 +649,10 @@ class McpServerGroup(AggregateRoot):
         Not on an open circuit, which `record_success()` would close at once,
         skipping the `min_healthy` rule in `_maybe_close_circuit()`.
 
-        HALF_OPEN goes the breaker's way too, and this success closes it. The
-        group never gets there by itself: the breaker half-opens only in
-        `allow_request()`, which the group does not call. The one way in is a
-        restored snapshot the group did not write, and there the group already
-        reports the circuit closed (`is_open` is False) and routes through it.
-        Left alone it would stay half-open for good, and one failure would open it.
+        HALF_OPEN goes the breaker's way too, and this success would close it.
+        The group never gets there: the breaker half-opens only in
+        `allow_request()`, which the group does not call, and no saved breaker
+        is restored into a group at startup (#1388).
         """
         self._circuit_breaker.record_success()
 
@@ -638,12 +669,13 @@ class McpServerGroup(AggregateRoot):
         """
         if not self._circuit_breaker.is_open:
             return
-        if self.healthy_count < self._min_healthy:
+        in_rotation = self._live_rotation_count()
+        if in_rotation < self._min_healthy:
             return
 
         self._circuit_breaker.record_success()  # OPEN -> CLOSED
         self._record_event(GroupCircuitClosed(group_id=self.id))
-        logger.info(f"Circuit breaker closed for group {self.id}: {self.healthy_count} member(s) in rotation")
+        logger.info(f"Circuit breaker closed for group {self.id}: {in_rotation} member(s) in rotation")
         self._update_state()
 
     def _maybe_add_to_rotation(self, member: GroupMember, member_id: str) -> None:
@@ -693,7 +725,8 @@ class McpServerGroup(AggregateRoot):
         rotation: a call through the group revives neither. A start that
         succeeds brings it back, through `report_success`. A member whose
         process crashed stays in rotation, so the next call through the group
-        selects and restarts it; `healthy_count` leaves it out meanwhile.
+        selects and restarts it; neither `healthy_count` nor the group's
+        decisions count it meanwhile.
         """
         with self._lock:
             member = self._members.get(member_id)
@@ -751,22 +784,23 @@ class McpServerGroup(AggregateRoot):
     # --- State Management ---
 
     def _update_state(self) -> None:
-        """Update group state based on member health."""
+        """Update group state from the members in rotation that are not DEAD."""
         old_state = self._state
-        healthy = self.healthy_count
+        in_rotation = self._live_rotation_count()
         total = len(self._members)
 
         if self._circuit_breaker.is_open:
             new_state = GroupState.DEGRADED
-        elif healthy == 0:
+        elif in_rotation == 0:
             new_state = GroupState.INACTIVE
-        elif healthy < self._min_healthy:
+        elif in_rotation < self._min_healthy:
             new_state = GroupState.PARTIAL
         else:
             new_state = GroupState.HEALTHY
 
         if new_state != old_state:
             self._state = new_state
+            healthy = self.healthy_count
             self._record_event(
                 GroupStateChanged(
                     group_id=self.id,
@@ -774,9 +808,13 @@ class McpServerGroup(AggregateRoot):
                     new_state=new_state.value,
                     healthy_count=healthy,
                     total_count=total,
+                    members_in_rotation_count=self.members_in_rotation_count,
                 )
             )
-            logger.info(f"Group {self.id} state: {old_state.value} -> {new_state.value} (healthy={healthy}/{total})")
+            logger.info(
+                f"Group {self.id} state: {old_state.value} -> {new_state.value} "
+                f"(healthy={healthy}/{total}, not dead in rotation={in_rotation})"
+            )
 
     def rebalance(self) -> None:
         """
@@ -820,7 +858,10 @@ class McpServerGroup(AggregateRoot):
                 self._record_event(GroupCircuitClosed(group_id=self.id))
 
             self._update_state()
-            logger.info(f"Group {self.id} rebalanced: {self.healthy_count} healthy")
+            logger.info(
+                f"Group {self.id} rebalanced: {self.healthy_count} healthy, "
+                f"{self.members_in_rotation_count} in rotation"
+            )
 
     # --- Lifecycle ---
 
@@ -949,7 +990,14 @@ class McpServerGroup(AggregateRoot):
             return spec
 
     def to_status_dict(self) -> dict[str, Any]:
-        """Get status as dictionary."""
+        """The group's status, read under its lock: one instant.
+
+        `GET /api/groups/{id}`, `hangar_details`, `hangar_group_list` and
+        `hangar_list` return this dict as it is; `hangar_status` and
+        `hangar_health` report its counts. `healthy_count` counts members that
+        are ready and in rotation, `members_in_rotation_count` members in
+        rotation whatever their state (#1356).
+        """
         with self._lock:
             return {
                 "group_id": self.id,
@@ -958,6 +1006,7 @@ class McpServerGroup(AggregateRoot):
                 "strategy": self._strategy.value,
                 "min_healthy": self._min_healthy,
                 "healthy_count": self.healthy_count,
+                "members_in_rotation_count": self.members_in_rotation_count,
                 "total_members": len(self._members),
                 "is_available": self.is_available,
                 "circuit_open": self._circuit_breaker.is_open,

@@ -76,7 +76,11 @@ class HotLoadedServer:
 
 @dataclass(frozen=True)
 class GroupView:
-    """One group as this replica sees it. `healthy_count` is the group's own (#1356).
+    """One group as this replica sees it, from one `to_status_dict()` snapshot.
+
+    The counts and `circuit_open` are the ones `hangar_group_list`,
+    `hangar_details` and `GET /api/groups/{id}` report, taken under the group's
+    lock, so they describe one instant (#1356).
 
     `state` is the group vocabulary (inactive, partial, healthy, degraded): the
     group's availability, computed from its members. It is not a server
@@ -86,6 +90,7 @@ class GroupView:
     group_id: str
     state: str
     healthy_count: int
+    members_in_rotation_count: int
     total_count: int
     circuit_open: bool
 
@@ -139,6 +144,18 @@ class ReplicaView:
         }
 
 
+def _group_view(group_id: str, status: dict[str, Any]) -> GroupView:
+    """A group's `to_status_dict()`, cut down to what the status tools report."""
+    return GroupView(
+        group_id=group_id,
+        state=status["state"],
+        healthy_count=status["healthy_count"],
+        members_in_rotation_count=status["members_in_rotation_count"],
+        total_count=status["total_members"],
+        circuit_open=status["circuit_open"],
+    )
+
+
 def observe_replica() -> ReplicaView:
     """Read this replica's servers, hot-loaded servers and groups, once.
 
@@ -167,16 +184,7 @@ def observe_replica() -> ReplicaView:
         )
         for server, metadata in get_runtime_mcp_servers().list_all()
     )
-    groups = tuple(
-        GroupView(
-            group_id=group_id,
-            state=group.state.value,
-            healthy_count=group.healthy_count,
-            total_count=group.total_count,
-            circuit_open=group.circuit_open,
-        )
-        for group_id, group in ctx.groups.items()
-    )
+    groups = tuple(_group_view(group_id, group.to_status_dict()) for group_id, group in ctx.groups.items())
     return ReplicaView(
         instance_id=current_instance_id(),
         uptime_seconds=time.time() - _PROCESS_STARTED_AT,
