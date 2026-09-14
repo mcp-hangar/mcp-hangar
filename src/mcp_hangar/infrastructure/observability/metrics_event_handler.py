@@ -35,6 +35,7 @@ from mcp_hangar.domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
+from mcp_hangar.domain.model.mcp_server_group import GroupDeleted
 from mcp_hangar import metrics as prometheus_metrics
 
 
@@ -120,6 +121,7 @@ class MetricsEventHandler:
         CostReportGenerated: "_handle_cost_report",
         McpServerHotUnloaded: "_handle_mcp_server_unloaded",
         ConfigurationReloaded: "_handle_configuration_reloaded",
+        GroupDeleted: "_handle_group_deleted",
     }
 
     def handle(self, event: DomainEvent) -> None:
@@ -188,6 +190,14 @@ class MetricsEventHandler:
         aggregate may already have written to them."""
         for mcp_server_id in event.mcp_servers_removed:
             prometheus_metrics.remove_mcp_server_series(mcp_server_id)
+
+    def _handle_group_deleted(self, event: GroupDeleted) -> None:
+        """A deleted group takes its circuit gauge with it (#1357).
+
+        An effect is enough. A group is deleted on one replica, and nothing
+        removes it from the others: they keep serving it, and keep its series.
+        """
+        prometheus_metrics.remove_group_series(event.group_id)
 
     def _handle_state_changed(self, event: McpServerStateChanged) -> None:
         """Handle mcp_server state changed event."""

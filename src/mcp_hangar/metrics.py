@@ -928,6 +928,29 @@ CIRCUIT_BREAKER_STATE = Gauge(
     labels=["mcp_server", "state"],
 )
 
+# A group's circuit, as the replica that exposes it sees it (#1357). Each
+# replica keeps its own breaker (#1358), so two can disagree about one group;
+# the scrape's `instance` label is what tells them apart. The fleet view is a
+# query, not a metric (#1380):
+#
+#   max by (group) (mcp_hangar_group_circuit_open)
+#     - min by (group) (mcp_hangar_group_circuit_open) > 0
+#
+# is 1 for every group the replicas disagree about.
+#
+# 0/1, not a closed/half-open/open enum. A group never half-opens its circuit:
+# the breaker does that only in `allow_request()`, which the group does not
+# call. A half-open breaker is one the group reports closed and routes through,
+# so it would read 0 here, as `circuit_open` in `hangar_group_list` does.
+#
+# Only `group`: one series per group this replica has loaded, seeded when it is
+# loaded, dropped when it is deleted.
+GROUP_CIRCUIT_OPEN = Gauge(
+    name="mcp_hangar_group_circuit_open",
+    description="Whether this replica has the group's circuit breaker open (1=open, 0=closed)",
+    labels=["group"],
+)
+
 # -----------------------------------------------------------------------------
 # Event Store Compaction Metrics
 # -----------------------------------------------------------------------------
@@ -1327,6 +1350,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             CIRCUIT_BREAKER_STATE,
+            GROUP_CIRCUIT_OPEN,
             EVENTS_COMPACTED_TOTAL,
         ]
     )
@@ -1551,6 +1575,20 @@ def update_circuit_breaker_state(mcp_server: str, new_state: str) -> None:
     """
     for state in ("closed", "open", "half_open"):
         CIRCUIT_BREAKER_STATE.set(1.0 if state == new_state else 0.0, mcp_server=mcp_server, state=state)
+
+
+def set_group_circuit_open(group: str, is_open: bool) -> None:
+    """Record whether this replica has the group's circuit open."""
+    GROUP_CIRCUIT_OPEN.set(1.0 if is_open else 0.0, group=group)
+
+
+def remove_group_series(group: str) -> None:
+    """Drop the gauges of a group that was deleted.
+
+    Left behind, a deleted group whose circuit was open would read as open for
+    good, and every disagreement query would keep finding it.
+    """
+    GROUP_CIRCUIT_OPEN.remove(group=group)
 
 
 def record_events_compacted(stream_id: str, count: int) -> None:
