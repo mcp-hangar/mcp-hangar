@@ -240,36 +240,3 @@ class CircuitBreaker:
                 "probe_count": self._config.probe_count,
                 "opened_at": self._opened_at,
             }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "CircuitBreaker":
-        """Restore circuit breaker from a serialized dictionary.
-
-        Reconstructs a CircuitBreaker with its full state including
-        open/closed/half_open status, failure count, and opened_at timestamp.
-        Missing fields use safe defaults (closed state, zero failures).
-
-        Old snapshots that predate HALF_OPEN (state value absent or unknown)
-        are treated as CLOSED for safe forward compatibility.
-
-        Args:
-            d: Dictionary from to_dict(), or partial dict with safe defaults.
-
-        Returns:
-            CircuitBreaker instance with restored state.
-        """
-        config = CircuitBreakerConfig(
-            failure_threshold=d.get("failure_threshold", 10),
-            reset_timeout_s=d.get("reset_timeout_s", 60.0),
-            probe_count=d.get("probe_count", 1),
-        )
-        cb = cls(config=config)
-        raw_state = d.get("state", "closed")
-        try:
-            cb._state = CircuitState(raw_state)
-        except ValueError:
-            # Unknown state value (e.g. future extension) -- default to CLOSED
-            cb._state = CircuitState.CLOSED
-        cb._failure_count = d.get("failure_count", 0)
-        cb._opened_at = d.get("opened_at")
-        return cb

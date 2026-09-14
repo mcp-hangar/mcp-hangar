@@ -42,7 +42,6 @@ from ...fastmcp_server.prompt_proxy import maybe_register_prompt_proxy
 from ...fastmcp_server.resource_link_read_through import maybe_register_resource_read_through
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...fastmcp_server.subscription_relay import maybe_register_subscription_relay
-from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager, SagaManager
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
@@ -54,7 +53,7 @@ from .components import ServerComponents, get_auth_compat_exports, load_componen
 from .composition import close_what_bootstrap_started
 
 from .coordination import init_event_tailer, init_lease_keeper
-from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
+from .cqrs import init_cqrs, init_auth_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
@@ -120,9 +119,6 @@ class ApplicationContext:
     observability_adapter: ObservabilityPort | None = None
     """Observability adapter for tracing (Langfuse, etc.)."""
 
-    saga_state_store: SagaStateStore | NullSagaStateStore | None = None
-    """Saga state store for persisting saga state and circuit breakers."""
-
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
@@ -170,13 +166,6 @@ class ApplicationContext:
         # After the workers, whose health checks are what degrade a server and
         # arm a retry; before the servers stop, so no retry restarts one.
         self.cancel_scheduled_commands()
-
-        # Save circuit breaker state for mcp_server groups before stopping
-        if self.saga_state_store is not None:
-            try:
-                save_group_circuit_breakers(self.saga_state_store, GROUPS)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if CB save fails
-                logger.warning("circuit_breaker_save_failed", error=str(e))
 
         # Stop all mcp_servers
         for mcp_server_id, mcp_server in self.runtime.repository.get_all().items():
@@ -531,7 +520,7 @@ def bootstrap(
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
     # Initialize saga with persistence
-    saga_state_store = init_saga(full_config)
+    init_saga(full_config)
 
     # Apply config.yaml rate_limit overrides (config takes precedence over env)
     from ...bootstrap.runtime import apply_rate_limit_config
@@ -675,7 +664,6 @@ def bootstrap(
         load_mcp_server_handler=load_handler,
         unload_mcp_server_handler=unload_handler,
         observability_adapter=observability_adapter,
-        saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
         approval_service=components.approval_service,
         saga_manager=get_saga_manager(),

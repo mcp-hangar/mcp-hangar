@@ -3,11 +3,9 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.domain.model.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from mcp_hangar.infrastructure.persistence.database_common import (
     MigrationRunner,
     SQLiteConfig,
@@ -395,57 +393,3 @@ class TestBootstrapSagaWiring:
 
         # State should be default (empty)
         assert saga._retry_state == {}
-
-    def test_restore_group_circuit_breakers(self, factory: SQLiteConnectionFactory) -> None:
-        """Circuit breaker state is restored for provider groups from saga state store."""
-        from mcp_hangar.server.bootstrap.cqrs import _restore_group_circuit_breakers
-
-        store = SagaStateStore(factory)
-
-        # Pre-populate CB state in the store
-        cb_state = {
-            "state": "open",
-            "failure_count": 5,
-            "failure_threshold": 10,
-            "reset_timeout_s": 60.0,
-            "opened_at": 1000.0,
-        }
-        store.checkpoint("circuit_breaker", "group-1", cb_state, 0)
-
-        # Create a mock group
-        mock_group = MagicMock()
-        mock_group.id = "group-1"
-        mock_group._circuit_breaker = CircuitBreaker()
-
-        groups = {"group-1": mock_group}
-        _restore_group_circuit_breakers(store, groups)
-
-        # Verify CB was replaced
-        new_cb = mock_group._circuit_breaker
-        assert isinstance(new_cb, CircuitBreaker)
-        assert new_cb.state == CircuitState.OPEN
-        assert new_cb.failure_count == 5
-
-    def test_save_group_circuit_breakers(self, factory: SQLiteConnectionFactory) -> None:
-        """save_group_circuit_breakers persists CB state for all groups."""
-        from mcp_hangar.server.bootstrap.cqrs import save_group_circuit_breakers
-
-        store = SagaStateStore(factory)
-
-        # Create a mock group with open CB
-        cb = CircuitBreaker(CircuitBreakerConfig(failure_threshold=5))
-        # Force open by recording failures
-        for _ in range(5):
-            cb.record_failure()
-
-        mock_group = MagicMock()
-        mock_group.id = "test-group"
-        mock_group._circuit_breaker = cb
-
-        groups = {"test-group": mock_group}
-        save_group_circuit_breakers(store, groups)
-
-        # Verify it was saved
-        result = store.load("circuit_breaker")
-        assert result is not None
-        assert result["state_data"]["state"] == "open"
