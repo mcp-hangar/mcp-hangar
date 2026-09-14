@@ -610,6 +610,23 @@ def param_validation_required() -> bool:
     return _param_validation_required
 
 
+def _authorized_flat_map(mcp_ctx: Any, flat_map: dict[str, tuple[str, str]]) -> dict[str, tuple[str, str]]:
+    """Apply the same per-tool RBAC as hangar_call to listing and dispatch."""
+    from types import SimpleNamespace
+
+    from ..server.tools.batch import _authorize_calls
+
+    entries = list(flat_map.items())
+    context = SimpleNamespace(request_context=SimpleNamespace(request=_http_request(mcp_ctx)))
+    denied = _authorize_calls(
+        [{"tool": target[1]} for _, target in entries],
+        [name for name, _ in entries],
+        context,
+        "frontdoor-rbac",
+    )
+    return {name: target for index, (name, target) in enumerate(entries) if index not in denied}
+
+
 async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListToolsResult:
     """Build this caller's projection, count it only if the client asked for it."""
     identity = get_identity_context()
@@ -630,6 +647,9 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
     if await _catalogue_settled(tenant_id, not governed):
         flat_map = _build_flat_map(tenant_id)
         governed = _build_mcp_tool_list(flat_map)
+
+    flat_map = _authorized_flat_map(mcp_ctx, flat_map)
+    governed = _build_mcp_tool_list(flat_map)
 
     # The SDK's pre-dispatch tools/list on a tools/call (#1049) is not a listing
     # the client received: it must not be counted as one.
@@ -925,6 +945,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # about to exist -- and on a multi-replica front door that is a call the
         # client listed successfully against another replica.
         flat_map = await _settled_flat_map(mcp_ctx, tenant_id)
+        flat_map = _authorized_flat_map(mcp_ctx, flat_map)
 
         if name not in flat_map:
             if name in management_tools_for(mcp_ctx):

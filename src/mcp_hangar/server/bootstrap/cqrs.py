@@ -334,7 +334,12 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     saga_manager._saga_state_store = saga_state_store
 
     # 1. GroupRebalanceSaga (existing)
-    group_saga = GroupRebalanceSaga(groups=ctx.groups)
+    # Configuration is loaded before saga initialization. Resolve pre-existing
+    # members too, including groups added/replaced by later config reloads.
+    def group_for_member(member_id: str) -> str | None:
+        return next((gid for gid, group in ctx.groups.items() if any(m.id == member_id for m in group.members)), None)
+
+    group_saga = GroupRebalanceSaga(groups=ctx.groups, group_lookup=group_for_member)
     ctx.group_rebalance_saga = group_saga
     set_group_rebalance_saga(group_saga)
     saga_manager.register_event_saga(group_saga)
