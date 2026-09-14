@@ -1,5 +1,73 @@
 # Upgrading MCP Hangar
 
+## Next — `tool_access.rules` is refused as a key nothing reads
+
+`tool_access.rules` was never read. The config schema listed it next to
+`tool_access.mode`, so a `rules:` block passed `mcp-hangar config check` and
+`HANGAR_CONFIG_STRICT=1`, loaded without a warning, and restricted nothing. No
+document or example described it (#1422).
+
+Delete it:
+
+```yaml
+tool_access:
+  mode: front_door
+  rules: []   # delete this key, and anything nested under it
+```
+
+A config that still sets it loads, and logs `unknown_config_key` saying the key
+was never read. `HANGAR_CONFIG_STRICT=1` and `mcp-hangar config check` refuse
+it, as they refuse any key nothing reads: under strict mode a gateway whose
+config still sets it does not start, so delete the key before upgrading. This
+applies to a file and to `bootstrap(config_dict=...)` alike.
+
+Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
+and deny lists of a server, a group and a group member, and `tool_access.mode`
+still selects the `egress` or `front_door` topology.
+
+## Next — a config dict gets every setting it passes
+
+This affects code that calls `bootstrap(config_dict=...)` directly, such as
+embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
+a file and are unchanged. `Hangar.from_builder()` passes a dict and is covered
+at the end of this section.
+
+A dict is now applied the same way as the same document in a file. Before, the
+dict path dropped these settings without logging anything:
+
+- `tool_access.mode`, so a dict that asked for `front_door` came up in `egress`
+- `interceptors.validators`, so no parameter validator ran
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A dict now gets all of them. If a harness passed one of these and relied on it
+being ignored, remove it from the dict.
+
+The schema check now runs on a dict too. An unknown or removed key logs
+`unknown_config_key`, and under `HANGAR_CONFIG_STRICT=1` the boot refuses, as it
+does for a file.
+
+Four more cases used to be accepted without a word:
+
+| A dict that | Before | Now |
+| --- | --- | --- |
+| is passed while `MCP_CONFIG` or `./config.yaml` exists | was laid over that file: the file's topology, validators and `ui://` allow list applied, and the dict replaced the file's other sections | is the whole configuration, and no file is read |
+| has no `mcp_servers` section | booted the built-in example server | is refused, as a file is, unless `discovery.enabled` is true |
+| enables `config_reload` | built a reload watcher with no file, which did nothing | is refused: set `config_reload.enabled: false`, or pass a file |
+| is passed together with `config_path` | ran the dict, while reload watched the file | is refused |
+
+Relative paths in a dict resolve against the working directory, as they do in a
+file.
+
+`Hangar.from_builder()` no longer passes its own `max_concurrency` to the
+gateway, which never read it. It still sizes the facade's thread pool. A builder
+that calls `enable_discovery()`, or adds a server with `mode="remote"` and
+`url=...`, produces keys the gateway does not read. Those settings were never
+applied. They now log `unknown_config_key`, and under strict mode the boot
+refuses.
+
 ## Next — remote servers and discovery from the builder take effect
 
 This affects code that builds its configuration with `HangarConfig` and runs it
@@ -41,49 +109,6 @@ on a key the gateway does not read. `to_dict()` no longer includes
 `max_concurrency`, which sizes the facade's thread pool and is not a gateway
 setting. `HangarConfigData` no longer has `gc_interval_s` or
 `health_check_interval_s`.
-
-## Next — a config dict gets every setting it passes
-
-This affects code that calls `bootstrap(config_dict=...)` directly, such as
-embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
-a file and are unchanged. `Hangar.from_builder()` passes a dict and is covered
-at the end of this section.
-
-A dict is now applied the same way as the same document in a file. Before, the
-dict path dropped these settings without logging anything:
-
-- `tool_access.mode`, so a dict that asked for `front_door` came up in `egress`
-- `interceptors.validators`, so no parameter validator ran
-- `ui_resources`, the `ui://` allow list
-- `headers.param_validation`
-- `resource_links`
-- `execution`, the concurrency limits
-
-A dict now gets all of them. If a harness passed one of these and relied on it
-being ignored, remove it from the dict.
-
-The schema check now runs on a dict too. An unknown or removed key logs
-`unknown_config_key`, and under `HANGAR_CONFIG_STRICT=1` the boot refuses, as it
-does for a file.
-
-Four more cases used to be accepted without a word:
-
-| A dict that | Before | Now |
-| --- | --- | --- |
-| is passed while `MCP_CONFIG` or `./config.yaml` exists | was laid over that file: the file's topology, validators and `ui://` allow list applied, and the dict replaced the file's other sections | is the whole configuration, and no file is read |
-| has no `mcp_servers` section | booted the built-in example server | is refused, as a file is, unless `discovery.enabled` is true |
-| enables `config_reload` | built a reload watcher with no file, which did nothing | is refused: set `config_reload.enabled: false`, or pass a file |
-| is passed together with `config_path` | ran the dict, while reload watched the file | is refused |
-
-Relative paths in a dict resolve against the working directory, as they do in a
-file.
-
-`Hangar.from_builder()` no longer passes its own `max_concurrency` to the
-gateway, which never read it. It still sizes the facade's thread pool. A builder
-that called `enable_discovery()`, or added a server with `mode="remote"` and
-`url=...`, produced keys the gateway does not read, so those settings were never
-applied. The builder now writes the keys the gateway reads: see the section
-above.
 
 ## Next — a server Hangar gives up on reads `dead`, not `cold`
 
