@@ -68,9 +68,10 @@ _executor = BatchExecutor()
 def configure_interceptors(validator_specs: list[dict[str, Any]] | None = None) -> None:
     """Rebuild the global executor with an opt-in interceptor configuration.
 
-    Called ONCE at startup after config load. Off by default: an empty or
-    absent ``validator_specs`` yields an empty ValidatorPipeline, so no
-    validators run and behavior is unchanged.
+    Called at startup after config load, and again by every reload (#1424):
+    a batch already running finishes on the executor it started on. Off by
+    default: an empty or absent ``validator_specs`` yields an empty
+    ValidatorPipeline, so no validators run and behavior is unchanged.
 
     Args:
         validator_specs: The parsed ``interceptors.validators`` list (each item

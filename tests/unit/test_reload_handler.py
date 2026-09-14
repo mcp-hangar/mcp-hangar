@@ -256,62 +256,49 @@ class TestReloadConfigurationHandler:
         finally:
             os.unlink(config_path)
 
-    def test_reload_preserves_unchanged_providers(self, handler, mock_repository, mock_event_bus):
-        """Should not restart providers with unchanged configuration."""
-        # Create existing provider
-        existing_provider = Mock(spec=McpServer)
-        existing_provider._mode = Mock(value="subprocess")
-        existing_provider._command = ["python", "-m", "test_server"]
-        existing_provider._image = None
-        existing_provider._endpoint = None
-        existing_provider._env = {}
-        existing_provider._idle_ttl = Mock(seconds=300)
-        existing_provider._health_check_interval = Mock(seconds=60)
-        existing_provider._health = Mock(max_consecutive_failures=3)
-        existing_provider._volumes = []
-        existing_provider._build = None
-        existing_provider._resources = {}
-        existing_provider._network = "none"
-        existing_provider._read_only = True
-        existing_provider._user = None
-        existing_provider._description = None
-        existing_provider._tools = Mock(to_dict=lambda: None)
-        existing_provider._auth_config = None
-        existing_provider._tls_config = None
-        existing_provider._http_config = None
+    def test_reload_preserves_unchanged_providers(self, mock_event_bus):
+        """Should neither restart nor replace a provider whose configuration is unchanged.
 
-        mock_repository.get_all.return_value = {"test-provider": existing_provider}
-        mock_repository.get.return_value = existing_provider
+        Unchanged means the file declares it exactly as the running server was
+        built. A reload used to put a fresh copy in the repository without
+        stopping the running one, which orphaned its process (#1424).
+        """
+        from mcp_hangar.server.config import load_configuration
+        from mcp_hangar.server.state import get_runtime
 
-        # Create config with same provider config
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            config = {
-                "mcp_servers": {
-                    "test-provider": {
-                        "mode": "subprocess",
-                        "command": ["python", "-m", "test_server"],
-                        "idle_ttl_s": 300,
-                    }
+        repository = get_runtime().repository
+        config = {
+            "mcp_servers": {
+                "test-provider": {
+                    "mode": "subprocess",
+                    "command": ["python", "-m", "test_server"],
+                    "idle_ttl_s": 300,
+                    # Spelled out: an omitted `resources` reads as changed on every reload (#1426).
+                    "resources": {"memory": "512m", "cpu": "1.0"},
                 }
             }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(config, f)
             config_path = f.name
 
         try:
-            command = ReloadConfigurationCommand(
-                config_path=config_path,
-                graceful=True,
-            )
+            load_configuration(config_path)
+            existing_provider = repository.get("test-provider")
+            handler = ReloadConfigurationHandler(repository, mock_event_bus, config_loader=ServerConfigLoader())
 
-            with patch("mcp_hangar.server.config.load_config"):
-                result = handler.handle(command)
+            with patch.object(existing_provider, "shutdown") as shutdown:
+                result = handler.handle(ReloadConfigurationCommand(config_path=config_path, graceful=True))
 
             assert result["success"] is True
-            assert "test-provider" in result["mcp_servers_unchanged"]
-            existing_provider.stop.assert_not_called()
+            assert result["mcp_servers_unchanged"] == ["test-provider"]
+            shutdown.assert_not_called()
+            assert repository.get("test-provider") is existing_provider
 
         finally:
             os.unlink(config_path)
+            if repository.exists("test-provider"):
+                repository.remove("test-provider")
 
     def test_reload_uses_shutdown_for_removed_provider(self, handler, mock_repository, mock_event_bus):
         """Reload uses the supported shutdown lifecycle API."""

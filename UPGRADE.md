@@ -172,6 +172,71 @@ Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
 and deny lists of a server, a group and a group member, and `tool_access.mode`
 still selects the `egress` or `front_door` topology.
 
+## Next — a reload applies the whole configuration, and keeps the topology mode
+
+This affects every configuration reload: `POST /api/config/reload`,
+`hangar_reload_config`, SIGHUP, and the config file watcher.
+
+A reload used to reset `tool_access.mode` to `egress` and apply only
+`mcp_servers`. A reload now applies every section startup applies from the
+configuration:
+
+- `mcp_servers`, as before
+- `interceptors.validators`
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A section you delete from the file goes back to its default when you reload.
+Before, it stayed in force until the next restart. Every section is checked
+before any server is stopped. A bad value refuses the reload, and nothing
+changes.
+
+Sections that startup reads only once, such as `auth`, `persistence`,
+`event_store`, `discovery` and `logging`, still need a restart, as before.
+
+### A reload that changes `tool_access.mode` is refused
+
+A reload keeps the mode the gateway started with. If the file sets a different
+`tool_access.mode`, the reload is refused and nothing changes, because the
+front-door tool surface is built at startup. Restart the gateway to change the
+mode.
+
+| Trigger | What you see when the mode changed |
+| --- | --- |
+| `POST /api/config/reload` | HTTP 409, `ConfigurationRestartRequiredError` |
+| `hangar_reload_config` | `status: failed`, with the same message |
+| SIGHUP, file watcher | `configuration_reload_failed` in the log |
+
+The workaround for a `front_door` gateway, `config_reload.enabled: false` and a
+restart for every change, is no longer needed.
+
+### Policies set at runtime
+
+Before, a reload removed every tool-access policy set at runtime. Now:
+
+- The policies stored by the REST policy endpoint are replayed after the file,
+  as a restart does. On a scope that both the file and the REST endpoint
+  define, the stored policy applies, after a reload as after a restart. If the
+  policy store cannot be read, the reload is refused and nothing changes;
+  `POST /api/config/reload` answers HTTP 503.
+- Any other policy set at runtime, such as one `hangar_load` set, is kept
+  unless the file now defines the same scope. The file's policy then replaces
+  it.
+- A server that the reload removes takes its policies with it, as
+  `hangar_unload` does. A policy the REST endpoint stored for it comes back at
+  the next restart, as before.
+
+A group's inline members count as declared by the file. A reload no longer
+stops them as removed servers or strips the policies set on them at runtime.
+
+The groups, and the policies, withdrawals, pins and `header_exposure` blocks,
+are replaced rather than cleared and registered again, so a call made during a
+reload never finds them empty. A reload builds and checks every server and
+group before it stops any, so a bad block refuses the reload and changes
+nothing.
+
 ## Next — a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
