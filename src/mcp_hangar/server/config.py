@@ -738,8 +738,9 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
         auto_start=spec_dict.get("auto_start", True),
         unhealthy_threshold=health_config.get("unhealthy_threshold", 2),
         healthy_threshold=health_config.get("healthy_threshold", 1),
+        # `reset_timeout_s` is not read: it never had an effect on a group and
+        # was removed (#1398). `config_schema` names it at load.
         circuit_failure_threshold=circuit_config.get("failure_threshold", 10),
-        circuit_reset_timeout_s=circuit_config.get("reset_timeout_s", 60.0),
         description=spec_dict.get("description"),
     )
 
