@@ -85,9 +85,27 @@ def _interpolate_env_vars(config: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], interpolate_value(config))
 
 
+def _read_config_file(config_path: str) -> Any:
+    """Parse a YAML configuration file, and nothing else.
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        yaml.YAMLError: If config file is invalid YAML
+    """
+    path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
 def load_config_from_file(config_path: str) -> dict[str, Any]:
     """
     Load configuration from YAML file.
+
+    Reads and checks it (see `prepare_config`); applies nothing. Reload, the
+    `serve` logging preload and the config API read a file this way.
 
     Args:
         config_path: Path to YAML configuration file
@@ -99,13 +117,29 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
         FileNotFoundError: If config file doesn't exist
         yaml.YAMLError: If config file is invalid YAML
     """
-    path = Path(config_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    return prepare_config(_read_config_file(config_path), source=config_path)
 
-    with open(path) as f:
-        config = yaml.safe_load(f)
 
+def prepare_config(config: Any, *, source: str) -> dict[str, Any]:
+    """Interpolate and check one configuration mapping, wherever it came from.
+
+    The file loader and `bootstrap(config_dict=...)` both come through here, so
+    a dict is held to what a file is held to: `${VAR}` resolved once, the
+    `mcp_servers` rule, and the schema check with its strict mode (#1415).
+
+    Args:
+        config: The parsed document or the caller's dict. Not mutated.
+        source: What to name in errors and warnings: a path, or `config_dict`.
+
+    Returns:
+        A new, interpolated configuration dictionary.
+
+    Raises:
+        ValueError: If it is empty, not a mapping, or has no `mcp_servers`
+            section and no discovery to fill one.
+        ConfigSchemaError: If it carries an unknown key under strict mode.
+        ConfigurationError: If a `${VAR}` has no value and no default.
+    """
     # Once, over everything, rather than in the one place that happened to need
     # it first. `${VAR}` was interpolated only inside `mcp_servers.<id>.auth`,
     # while the documentation described it as a property of configuration --
@@ -120,11 +154,12 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
     # with `password authentication failed for user "hangar"`. The alternative
     # -- writing the password into the file -- is what the checklist exists to
     # prevent.
-    if config:
-        config = _interpolate_env_vars(config)
-
     if not config:
-        raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
+        raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {source}")
+    if not isinstance(config, dict):
+        raise ValueError(f"Invalid configuration: {source} must be a mapping, not {type(config).__name__}")
+
+    config = _interpolate_env_vars(config)
 
     if "mcp_servers" not in config:
         # A discovery-only deployment (e.g. container providers found via
@@ -138,15 +173,15 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
         discovery_config = config.get("discovery")
         discovery_enabled = isinstance(discovery_config, dict) and bool(discovery_config.get("enabled", False))
         if not discovery_enabled:
-            raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
+            raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {source}")
         config["mcp_servers"] = {}
 
-    _reject_or_warn_on_unknown_keys(config, config_path)
+    _reject_or_warn_on_unknown_keys(config, source)
 
     return cast(dict[str, Any], config)
 
 
-def _reject_or_warn_on_unknown_keys(config: dict[str, Any], config_path: str) -> None:
+def _reject_or_warn_on_unknown_keys(config: dict[str, Any], source: str) -> None:
     """Say something about a key nothing reads, instead of ignoring it.
 
     Warns today and refuses under `HANGAR_CONFIG_STRICT`; the default becomes
@@ -160,10 +195,10 @@ def _reject_or_warn_on_unknown_keys(config: dict[str, Any], config_path: str) ->
         return
 
     if strict_mode():
-        raise ConfigSchemaError(f"Invalid configuration in {config_path}:\n  " + "\n  ".join(problems))
+        raise ConfigSchemaError(f"Invalid configuration in {source}:\n  " + "\n  ".join(problems))
 
     for problem in problems:
-        logger.warning("unknown_config_key", config_path=config_path, detail=problem)
+        logger.warning("unknown_config_key", config_path=source, detail=problem)
 
 
 def load_config(config: dict[str, Any]) -> None:
@@ -1146,29 +1181,55 @@ def load_configuration(config_path: str | None = None, *, load_servers: bool = T
 
     if Path(config_path).exists():
         logger.info("loading_config_from_file", config_path=config_path)
-        full_config = load_config_from_file(config_path)
-        _init_concurrency_from_config(full_config)
-        _init_topology_mode_from_config(full_config)
-        _init_param_validation_from_config(full_config)
-        _init_resource_links_from_config(full_config)
-        _init_interceptors_from_config(full_config)
-        _init_ui_resources_from_config(full_config)
-        if load_servers:
-            load_config(full_config.get("mcp_servers", {}))
-        return full_config
-    else:
-        logger.info("config_not_found_using_default", config_path=config_path)
-        default_config = {
-            "math_subprocess": {
-                "mode": "subprocess",
-                "command": ["python", "-m", "examples.provider_math.server"],
-                # Explicit even though the subprocess launcher now defaults to
-                # it: this config is what a reader copies as a starting point.
-                "env": {"MCP_TRANSPORT": "stdio"},
-                "idle_ttl_s": 180,
-            },
-        }
-        _init_concurrency_from_config({"mcp_servers": default_config})
-        if load_servers:
-            load_config(default_config)
-        return {"mcp_servers": default_config}
+        return apply_configuration(_read_config_file(config_path), source=config_path, load_servers=load_servers)
+
+    logger.info("config_not_found_using_default", config_path=config_path)
+    default_config = {
+        "math_subprocess": {
+            "mode": "subprocess",
+            "command": ["python", "-m", "examples.provider_math.server"],
+            # Explicit even though the subprocess launcher now defaults to
+            # it: this config is what a reader copies as a starting point.
+            "env": {"MCP_TRANSPORT": "stdio"},
+            "idle_ttl_s": 180,
+        },
+    }
+    return apply_configuration({"mcp_servers": default_config}, source="the default config", load_servers=load_servers)
+
+
+def apply_configuration(config: Any, *, source: str, load_servers: bool = True) -> dict[str, Any]:
+    """Check one configuration and apply its process-wide sections.
+
+    The one function a configuration goes through, whether it was read from a
+    file or handed to `bootstrap(config_dict=...)`. The file path used to be
+    the only caller: the dict path merged the caller's dict into whatever
+    `MCP_CONFIG` or `./config.yaml` held and applied none of this, so a dict's
+    `tool_access.mode`, `execution`, `headers.param_validation`,
+    `resource_links`, `interceptors` and `ui_resources` were dropped without a
+    word, and so was the schema check (#1415). Every other section is read
+    further into `bootstrap()` from the dict this returns, on both paths.
+
+    What stays with the file: reading it, and watching it for reload. No
+    setting resolves a relative path against the file's directory -- each
+    reader opens it as given, so relative to the working directory -- and a
+    dict resolves it the same way.
+
+    Args:
+        config: The parsed document or the caller's dict. Not mutated.
+        source: What to name in errors and warnings: a path, or `config_dict`.
+        load_servers: Whether to build the declared servers too; see
+            `load_configuration` for why bootstrap passes False.
+
+    Returns:
+        The checked, interpolated configuration.
+    """
+    full_config = prepare_config(config, source=source)
+    _init_concurrency_from_config(full_config)
+    _init_topology_mode_from_config(full_config)
+    _init_param_validation_from_config(full_config)
+    _init_resource_links_from_config(full_config)
+    _init_interceptors_from_config(full_config)
+    _init_ui_resources_from_config(full_config)
+    if load_servers:
+        load_config(full_config.get("mcp_servers", {}))
+    return full_config

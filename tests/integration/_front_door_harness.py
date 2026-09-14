@@ -227,11 +227,18 @@ def _with_metrics(served: Any) -> Any:
 
 
 @contextmanager
-def front_door(tools: tuple[str, ...], policies: dict[str, tuple[str, ...]] | None = None) -> Iterator[FrontDoor]:
+def front_door(
+    tools: tuple[str, ...],
+    policies: dict[str, tuple[str, ...]] | None = None,
+    *,
+    topology: str = "front_door",
+) -> Iterator[FrontDoor]:
     """A served front door over one upstream exposing *tools*, each tenant with an API key.
 
     *policies* maps a tenant to its allow-list on the upstream; a tenant without
-    one is allowed everything.
+    one is allowed everything. *topology* serves the same gateway in the
+    default ``egress`` instead, where the upstream is reached through
+    ``hangar_call``, for a test that compares the two surfaces.
     """
     from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
     from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
@@ -244,7 +251,7 @@ def front_door(tools: tuple[str, ...], policies: dict[str, tuple[str, ...]] | No
     reset_tool_access_resolver()
     catalogue_warmup.reset()
     resolver = get_tool_access_resolver()
-    resolver.set_topology_mode("front_door")
+    resolver.set_topology_mode(topology)
     for tenant, allowed in (policies or {}).items():
         resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
 

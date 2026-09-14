@@ -2,11 +2,16 @@
 
 Defines the contract for caching full responses when truncation occurs,
 allowing clients to retrieve the complete content via continuation IDs.
+
+Every operation names the caller it acts for. An entry answers only the owner
+it was stored for; to anyone else it does not exist.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
+
+from ..value_objects.truncation import ContinuationOwner
 
 
 @dataclass
@@ -35,16 +40,21 @@ class IResponseCache(ABC):
 
     Implementations must be thread-safe as they may be accessed
     concurrently from multiple batch execution threads.
+
+    ``owner`` is keyword-only and required on every operation, so a caller
+    cannot reach an entry without saying whose it is.
     """
 
     @abstractmethod
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int, *, owner: ContinuationOwner) -> bool:
         """Store a full response for later retrieval.
 
         Args:
             continuation_id: Unique identifier for this cached response.
             full_response: The complete response data to cache.
             ttl_s: Time-to-live in seconds before the entry expires.
+            owner: The caller whose call produced the response. Only this owner
+                may retrieve or delete the entry.
 
         Returns:
             True if the payload is retrievable under continuation_id.
@@ -56,6 +66,8 @@ class IResponseCache(ABC):
         continuation_id: str,
         offset: int = 0,
         limit: int | None = None,
+        *,
+        owner: ContinuationOwner,
     ) -> CacheRetrievalResult:
         """Retrieve a cached response.
 
@@ -63,17 +75,22 @@ class IResponseCache(ABC):
             continuation_id: The continuation ID to look up.
             offset: Byte offset to start reading from (for pagination).
             limit: Maximum bytes to return (None for all remaining).
+            owner: The caller asking. An entry stored for another owner is
+                answered exactly as a missing one, ``found=False`` and nothing
+                else.
 
         Returns:
             CacheRetrievalResult with the response data or not-found status.
         """
 
     @abstractmethod
-    def delete(self, continuation_id: str) -> bool:
+    def delete(self, continuation_id: str, *, owner: ContinuationOwner) -> bool:
         """Delete a cached response.
 
         Args:
             continuation_id: The continuation ID to delete.
+            owner: The caller asking. An entry stored for another owner is left
+                in place and answered as a missing one.
 
         Returns:
             True if the entry was deleted, False if it didn't exist.
@@ -94,7 +111,7 @@ class NullResponseCache(IResponseCache):
     All operations are no-ops or return empty results.
     """
 
-    def store(self, continuation_id: str, full_response: Any, ttl_s: int) -> bool:
+    def store(self, continuation_id: str, full_response: Any, ttl_s: int, *, owner: ContinuationOwner) -> bool:
         """No-op store."""
         return False
 
@@ -103,11 +120,13 @@ class NullResponseCache(IResponseCache):
         continuation_id: str,
         offset: int = 0,
         limit: int | None = None,
+        *,
+        owner: ContinuationOwner,
     ) -> CacheRetrievalResult:
         """Always returns not found."""
         return CacheRetrievalResult(found=False)
 
-    def delete(self, continuation_id: str) -> bool:
+    def delete(self, continuation_id: str, *, owner: ContinuationOwner) -> bool:
         """Always returns False."""
         return False
 

@@ -13,6 +13,7 @@ from mcp_hangar.application.commands.handlers import InvokeToolHandler
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import L7Policy, ToolRules
+from mcp_hangar.domain.value_objects import McpServerState
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
@@ -33,6 +34,9 @@ def _setup(reply, policy=None):
     server.ensure_ready = Mock()
     upstream = Mock(side_effect=reply) if isinstance(reply, Exception) else Mock(return_value=reply)
     server._client = MagicMock(call=upstream)
+    # A started server: invoke_tool refuses one that is not READY, whatever
+    # ensure_ready() did.
+    server._state = McpServerState.READY
     server._tools.update_from_list([{"name": "add"}])
     events = EventBus()
     events.subscribe_to_all(MetricsEventHandler().handle, kind=HandlerKind.EFFECT)

@@ -1,5 +1,48 @@
 # Upgrading MCP Hangar
 
+## Next — a config dict gets every setting it passes
+
+This affects code that calls `bootstrap(config_dict=...)` directly, such as
+embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
+a file and are unchanged. `Hangar.from_builder()` passes a dict and is covered
+at the end of this section.
+
+A dict is now applied the same way as the same document in a file. Before, the
+dict path dropped these settings without logging anything:
+
+- `tool_access.mode`, so a dict that asked for `front_door` came up in `egress`
+- `interceptors.validators`, so no parameter validator ran
+- `ui_resources`, the `ui://` allow list
+- `headers.param_validation`
+- `resource_links`
+- `execution`, the concurrency limits
+
+A dict now gets all of them. If a harness passed one of these and relied on it
+being ignored, remove it from the dict.
+
+The schema check now runs on a dict too. An unknown or removed key logs
+`unknown_config_key`, and under `HANGAR_CONFIG_STRICT=1` the boot refuses, as it
+does for a file.
+
+Four more cases used to be accepted without a word:
+
+| A dict that | Before | Now |
+| --- | --- | --- |
+| is passed while `MCP_CONFIG` or `./config.yaml` exists | was laid over that file: the file's topology, validators and `ui://` allow list applied, and the dict replaced the file's other sections | is the whole configuration, and no file is read |
+| has no `mcp_servers` section | booted the built-in example server | is refused, as a file is, unless `discovery.enabled` is true |
+| enables `config_reload` | built a reload watcher with no file, which did nothing | is refused: set `config_reload.enabled: false`, or pass a file |
+| is passed together with `config_path` | ran the dict, while reload watched the file | is refused |
+
+Relative paths in a dict resolve against the working directory, as they do in a
+file.
+
+`Hangar.from_builder()` no longer passes its own `max_concurrency` to the
+gateway, which never read it. It still sizes the facade's thread pool. A builder
+that calls `enable_discovery()`, or adds a server with `mode="remote"` and
+`url=...`, produces keys the gateway does not read. Those settings were never
+applied. They now log `unknown_config_key`, and under strict mode the boot
+refuses.
+
 ## Next — a server Hangar gives up on reads `dead`, not `cold`
 
 When the recovery saga runs out of retries, the server now goes to `dead`.
@@ -128,6 +171,37 @@ upgrading. The flat spelling
 `circuit_reset_timeout_s` is reported the same way. In Python,
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
+
+## Next — a group's `healthy_count` counts members that are `ready`
+
+A group's `healthy_count` used to count every member in rotation that was not
+`dead`, `cold` ones included. It now counts the members that are `ready` and in
+rotation. The number of members in rotation, in any state, is a new field,
+`members_in_rotation_count`: the length of the `members_in_rotation` list that
+`hangar_group_rebalance` returns.
+
+`healthy_count` changes meaning, so its value drops for any group with a member
+in rotation that is not `ready`. The common case is a group whose members the
+GC reaped for being idle. Before, it read `healthy_count: 2` with nothing
+running; it now reads `healthy_count: 0` and `members_in_rotation_count: 2`
+until a call through the group starts a member.
+
+This affects anything that reads a group's `healthy_count` from
+`GET /api/groups`, `GET /api/groups/{id}`, `hangar_details`,
+`hangar_group_list`, `hangar_list`, `hangar_start` or `hangar_group_rebalance`,
+or its `healthy_members` from `hangar_status`, `hangar_health` or
+`hangar_metrics`. The `GroupStateChanged` event's `healthy_count` changes the
+same way and gains `members_in_rotation_count`. No metric reports either count.
+
+**A check that treats `healthy_count: 0` as a group that cannot serve now
+fires for idle groups that serve fine.** A group routes as long as
+`is_available` is true. To ask whether a group can take a call, read
+`is_available`. To ask whether members are in rotation, read
+`members_in_rotation_count`.
+
+What the group decides is unchanged. `is_available`, the group `state` and the
+`min_healthy` rule that closes an open circuit count the members in rotation
+that are not `dead`, as `healthy_count` did before.
 
 ## Upgrade to 2.19.1
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -203,12 +204,22 @@ class ISagaManager(ABC):
         """
 
     @abstractmethod
-    def schedule_command(self, command: Command, delay_s: float) -> str:
+    def schedule_command(
+        self,
+        command: Command,
+        delay_s: float,
+        *,
+        on_failure: Callable[[Exception], list[Command]] | None = None,
+    ) -> str:
         """Schedule a command to be sent after a delay.
 
         Args:
             command: The command to dispatch after the delay.
             delay_s: Delay in seconds before the command is sent.
+            on_failure: Called with the exception if sending the command
+                raises; the commands it returns are sent in turn. It may
+                schedule again. Not called once the command was cancelled by
+                cancel_all_scheduled_commands, even if it was already firing.
 
         Returns:
             A unique timer ID that can be passed to cancel_scheduled_command.

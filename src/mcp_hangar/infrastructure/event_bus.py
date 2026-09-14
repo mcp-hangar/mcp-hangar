@@ -365,6 +365,41 @@ class EventBus(IEventBus):
             # code lands (issue #121).
             self._publish_hook(event, HookPhase.OBSERVE, evt_span)
 
+    def _deliver_unpersisted(
+        self,
+        stream_id: str,
+        events: list[DomainEvent],
+        span: object,
+        error: Exception,
+    ) -> None:
+        """Deliver a batch the store did not take, and say loudly that its record is missing.
+
+        Called from an `except` block when persistence failed for an
+        infrastructure reason: disk full, database locked, backend gone. For a
+        batch appended at the end, it is also called when a store that cannot do
+        that atomically lost the race on every retry. Delivering nothing here
+        would be the worse failure. Metrics, audit, security and enforcement
+        handlers all run off this path, so a store outage would silently switch
+        off enforcement while the gateway kept serving traffic. Before
+        persistence those handlers ran without any store at all, and losing
+        them is a regression persistence must not cause.
+
+        So: deliver, and say loudly that the record is missing. The events are
+        gone from the log for good. There is no retry queue in front of a store
+        that just failed.
+        """
+        logger.error(
+            "event_persistence_failed",
+            stream_id=stream_id,
+            events_count=len(events),
+            error=str(error),
+            detail="events delivered to handlers but NOT persisted; the audit log has a hole here",
+            exc_info=True,
+        )
+        record_handled_failure(span, error)
+        for event in events:
+            self._deliver(event)
+
     def publish_to_stream(
         self,
         stream_id: str,
@@ -382,26 +417,21 @@ class EventBus(IEventBus):
             stream_id: Stream identifier (e.g., "mcp_server:math")
             events: List of events to persist and publish
             expected_version: Expected stream version for concurrency check.
-                Use -1 for new streams.
+                Use -1 for new streams, or `APPEND_AT_END` to claim none.
 
         Returns:
-            New stream version after append.
+            New stream version after append, or `expected_version` unchanged
+            when the store did not take the batch.
 
         Raises:
-            ConcurrencyError: If version mismatch in event store.
+            ConcurrencyError: If the stream moved under an explicit expected
+                version. Never for `APPEND_AT_END`, which claims nothing that
+                could conflict.
         """
         if not events:
             return expected_version
 
-        if expected_version == APPEND_AT_END:
-            # No optimistic-concurrency claim: the caller is appending to
-            # whatever is there. Aggregates do not carry a stream version yet --
-            # their state comes from the config repository, not from replay --
-            # so a version they could check against does not exist. Real
-            # concurrency control arrives with rehydration, and the callers that
-            # want it pass a version explicitly, as they do today.
-            expected_version = self._event_store.get_stream_version(stream_id)
-
+        at_end = expected_version == APPEND_AT_END
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("event_store.append") as store_span:
             store_span.set_attribute("event_store.stream_id", stream_id)
@@ -409,35 +439,36 @@ class EventBus(IEventBus):
             store_span.set_attribute("event_store.expected_version", expected_version)
 
             try:
-                new_version = self._event_store.append(stream_id, events, expected_version)
-            except ConcurrencyError:
-                # A genuine conflict is the caller's business, not something to
-                # paper over: someone else wrote where this caller expected to.
-                raise
-            except Exception as e:  # noqa: BLE001 -- see below; the store is not allowed to take delivery down with it
-                # Persistence failed for an infrastructure reason -- disk full,
-                # database locked, backend gone. Delivering nothing here would
-                # be the worse failure: metrics, audit, security and enforcement
-                # handlers all run off this path, so a store outage would
-                # silently switch off enforcement while the gateway kept serving
-                # traffic. Before this change those handlers ran without any
-                # store at all, and losing them is a regression persistence must
-                # not cause.
-                #
-                # So: deliver, and say loudly that the record is missing. The
-                # events are gone from the log for good -- there is no retry
-                # queue in front of a store that just failed.
-                logger.error(
-                    "event_persistence_failed",
-                    stream_id=stream_id,
-                    events_count=len(events),
-                    error=str(e),
-                    detail="events delivered to handlers but NOT persisted; the audit log has a hole here",
-                    exc_info=True,
-                )
-                record_handled_failure(store_span, e)
-                for event in events:
-                    self._deliver(event)
+                if at_end:
+                    # No optimistic-concurrency claim: the caller is appending to
+                    # whatever is there. Aggregates do not carry a stream version
+                    # yet. Their state comes from the config repository, not from
+                    # replay, so there is no version they could check against. Real
+                    # concurrency control arrives with rehydration, and the callers
+                    # that want it pass a version explicitly, as they do today.
+                    #
+                    # The store picks the version inside the write. This used to
+                    # read the version here and then append at it, in two steps.
+                    # A writer in between (a concurrent call, the health or gc
+                    # worker, another replica) made the append fail with
+                    # ConcurrencyError. The batch was then neither stored nor
+                    # delivered.
+                    new_version = self._event_store.append_at_end(stream_id, events)
+                else:
+                    new_version = self._event_store.append(stream_id, events, expected_version)
+            except ConcurrencyError as e:
+                if not at_end:
+                    # A genuine conflict is the caller's business, not something to
+                    # paper over: someone else wrote where this caller expected to.
+                    raise
+                # Only a store that cannot append at the end atomically, and lost
+                # the race on every retry, gets here. The batch claimed nothing,
+                # so this is not a conflict to hand back. It is an outage, and it
+                # is delivered like one.
+                self._deliver_unpersisted(stream_id, events, store_span, e)
+                return expected_version
+            except Exception as e:  # noqa: BLE001 -- see `_deliver_unpersisted`; the store is not allowed to take delivery down with it
+                self._deliver_unpersisted(stream_id, events, store_span, e)
                 return expected_version
 
             store_span.set_attribute("event_store.new_version", new_version)

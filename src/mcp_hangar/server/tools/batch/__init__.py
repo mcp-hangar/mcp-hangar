@@ -89,6 +89,17 @@ def configure_interceptors(validator_specs: list[dict[str, Any]] | None = None) 
     )
 
 
+def configured_executor() -> BatchExecutor:
+    """The executor every tool call runs through, with the configured interceptors.
+
+    Read it on each call. :func:`configure_interceptors` replaces the executor,
+    so a reference kept from before it ran, or a ``BatchExecutor()`` built by a
+    caller, has an empty pipeline and runs no validator. The front door's flat
+    ``tools/call`` built its own and ran none of them (#1425).
+    """
+    return _executor
+
+
 def _authorize_calls(
     calls: list[dict[str, Any]],
     call_ids: list[str],
@@ -507,6 +518,7 @@ __all__ = [
     "hangar_call",
     "register_batch_tools",
     "configure_interceptors",
+    "configured_executor",
     # Models
     "BatchResult",
     "CallResult",

@@ -27,9 +27,9 @@ import yaml
 
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.server.config import (
-    _interpolate_env_vars,
     _load_mcp_server_config,
     load_config_from_file,
+    prepare_config,
 )
 
 
@@ -62,9 +62,9 @@ def load(tmp_path: Path):
 @pytest.fixture
 def load_programmatic():
     """Load a config the way the *programmatic* `bootstrap(config_dict=...)` path
-    does: interpolate the caller's dict once (as the bootstrap entry point now
-    does), then build the server from it. This exercises the path that has no
-    file loader in front of it and therefore lost interpolation in 2.5.0-rc.4."""
+    does: `prepare_config`, which interpolates the caller's dict once, then build
+    the server from it. This exercises the path that has no file in front of it
+    and therefore lost interpolation in 2.5.0-rc.4."""
 
     def go(token: str, mcp_server_id: str = "upstream") -> dict:
         config_dict = {
@@ -76,9 +76,8 @@ def load_programmatic():
                 }
             }
         }
-        # The single interpolation pass bootstrap applies to a provided config
-        # dict before merging it into the full configuration.
-        interpolated = _interpolate_env_vars(config_dict)
+        # What `bootstrap(config_dict=...)` runs the dict through, file or not (#1415).
+        interpolated = prepare_config(config_dict, source="config_dict")
         mcp_server = _load_mcp_server_config(mcp_server_id, interpolated["mcp_servers"][mcp_server_id])
         return mcp_server._auth_config
 

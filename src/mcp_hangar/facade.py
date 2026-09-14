@@ -418,9 +418,14 @@ class Hangar:
             # Programmatic config - convert to dict and bootstrap
             config_dict = HangarConfig()
             config_dict._data = self._config
+            gateway_config = config_dict.to_dict()
+            # This facade's own thread pool, sized in `__init__`. Not a gateway
+            # key: now that a dict is schema-checked like a file (#1415), passing
+            # it on would warn on every start and refuse under strict mode.
+            gateway_config.pop("max_concurrency", None)
             self._context = await loop.run_in_executor(
                 self._executor,
-                lambda: bootstrap(config_dict=config_dict.to_dict()),
+                lambda: bootstrap(config_dict=gateway_config),
             )
         else:
             # File-based config

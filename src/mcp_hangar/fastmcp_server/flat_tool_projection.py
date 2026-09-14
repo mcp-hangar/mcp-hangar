@@ -1001,9 +1001,10 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         Resolution:
         1. Re-build the flat map for this tenant (same filtering as list).
         2. Resolve flat name → (mcp_server, tool).
-        3. Route through the EXISTING enforcement path via BatchExecutor so
-           that policy checks, withdrawal rejection, and TOCTOU are handled
-           identically to the batch path — no enforcement duplication.
+        3. Route through the EXISTING enforcement path, the configured
+           BatchExecutor ``hangar_call`` runs, so that policy checks,
+           withdrawal rejection, TOCTOU and the configured interceptors are
+           handled identically to the batch path — no enforcement duplication.
 
         A name that is not an upstream tool may still be a management tool this
         caller is authorized for (#904), in which case it is dispatched to the
@@ -1027,7 +1028,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # Imported lazily: the batch package reaches `server.bootstrap`, which
         # imports this module back. At module scope that makes this module
         # impossible to import first in a fresh interpreter (#894).
-        from ..server.tools.batch import BatchExecutor, CallSpec
+        from ..server.tools.batch import CallSpec, configured_executor
         from ..server.tools.tool_permissions import management_tools_for
         from .flat_call_tasks import govern_flat_call
 
@@ -1089,14 +1090,18 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # stream (#882) is translated back onto this caller's session.
         upstream_token = _register_caller_progress_forwarder(mcp_ctx)
 
-        # Delegate to BatchExecutor.  This reuses the full enforcement path:
+        # Delegate to the executor `hangar_call` runs.  This reuses the full
+        # enforcement path:
         #   resolver.is_tool_allowed → withdrawal check → command_bus.send
-        # No enforcement logic is duplicated here.  Run in a worker thread: the
-        # executor BLOCKS until the upstream answers, and blocking this loop
-        # would freeze every other request on the connection -- including the
-        # very progress notifications this call asked for.
+        # No enforcement logic is duplicated here.  It is the configured one,
+        # read per call: a `BatchExecutor()` built here has an empty interceptor
+        # pipeline, so this path ran none of the configured validators (#1425).
+        # Run in a worker thread: the executor BLOCKS until the upstream
+        # answers, and blocking this loop would freeze every other request on
+        # the connection -- including the very progress notifications this
+        # call asked for.
         call_id = uuid.uuid4().hex[:12]
-        executor = BatchExecutor()
+        executor = configured_executor()
         try:
             batch = await asyncio.to_thread(
                 executor.execute,

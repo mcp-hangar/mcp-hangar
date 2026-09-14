@@ -248,8 +248,11 @@ class EgressBlocked(DomainEvent):
 class McpServerCapabilityQuarantined(DomainEvent):
     """Published when a mcp_server is quarantined due to capability violations.
 
-    A quarantined mcp_server stops serving new requests until the operator
-    reviews and releases it. Existing in-flight requests complete normally.
+    Recorded when ``enforcement_mode: quarantine`` finds a tool outside the
+    declared ``expected_tools``, at the start or after it. The server goes DEAD
+    for a capability block and serves nothing: no call starts it again, and a
+    deliberate start checks its tools again. Its connection is closed at once,
+    so a request still in flight on it fails.
 
     Attributes:
         mcp_server_id: McpServer that was quarantined.
