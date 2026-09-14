@@ -199,6 +199,10 @@ PREDICATES: tuple[Predicate, ...] = (
     Predicate(BatchExecutor._enforce_digest_pins, paths=_each(_INVOKE_PATHS)),
     Predicate(BatchExecutor._enforce_digest_pin, paths=_each(_INVOKE_PATHS)),
     Predicate(BatchExecutor._check_approval_gate, paths=_each(_INVOKE_PATHS)),
+    # The tenant's execution budget (#1445), taken after every gate above. The
+    # probes' tenant has a budget far above what they spend, so it is taken
+    # and given back on each invoke path and refuses nothing.
+    Predicate(BatchExecutor._enforce_tenant_budget, paths=_each(_INVOKE_PATHS)),
     # The configured interceptors (#1425). The probes configure one
     # `payload_size` validator, with a cap no probe reaches. The validator is
     # what is watched, not `BatchExecutor._check_validators` or the pipeline

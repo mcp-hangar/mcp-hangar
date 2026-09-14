@@ -51,6 +51,7 @@ from ....metrics import (
     BATCH_DURATION_SECONDS,
     BATCH_SIZE_HISTOGRAM,
     BATCH_TRUNCATIONS_TOTAL,
+    TENANT_QUOTA_REFUSALS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
 from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
@@ -59,8 +60,16 @@ from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
+from .tenant_admission import CONCURRENCY, get_tenant_admission, Grant, NO_BUDGET, RATE
 
 logger = get_logger(__name__)
+
+#: What a caller refused by its tenant's execution budget is told, by reason (#1445).
+_TENANT_QUOTA_MESSAGES = {
+    NO_BUDGET: "No execution budget is configured for this tenant",
+    CONCURRENCY: "This tenant's execution budget is exhausted: too many calls in flight",
+    RATE: "This tenant's execution budget is exhausted: calls started too fast",
+}
 
 
 def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
@@ -1252,6 +1261,44 @@ class BatchExecutor:
             if refusal is not None:
                 return refusal
 
+        # The tenant's execution budget (#1445), taken after every gate: a call
+        # a policy refused, or one held for approval, has spent nothing. Taken
+        # before the execution slot, so a tenant over its budget never queues
+        # for one.
+        admitted = self._enforce_tenant_budget(pipeline)
+        if isinstance(admitted, CallResult):
+            return admitted
+        try:
+            return self._dispatch(pipeline)
+        finally:
+            # On every path: a result, a relayed task handle, an exception. A
+            # worker thread cannot be cancelled, so a call its batch gave up on
+            # releases here too, once its invoke returns.
+            admitted.release()
+
+    def _enforce_tenant_budget(self, p: "_CallPipeline") -> Grant | CallResult:
+        """Take a slot and a token from the caller's tenant budget, or refuse the call (#1445).
+
+        Refuses at once: it never waits for a slot or a token, and never
+        retries. See `tenant_admission.py` for which budget a caller is held to.
+        """
+        admitted = get_tenant_admission().admit(p.caller_tenant_id)
+        if isinstance(admitted, Grant):
+            return admitted
+        logger.info(
+            "tenant_quota_exceeded",
+            mcp_server_id=p.call.mcp_server,
+            tool=p.call.tool,
+            tenant_id=p.caller_tenant_id,
+            budget=admitted.budget,
+            reason=admitted.reason,
+        )
+        TENANT_QUOTA_REFUSALS_TOTAL.inc(budget=admitted.budget, reason=admitted.reason)
+        return p.refuse(_TENANT_QUOTA_MESSAGES[admitted.reason], "TenantQuotaExceeded")
+
+    def _dispatch(self, pipeline: "_CallPipeline") -> CallResult:
+        """Run a call every gate let through: the execution slot, the invoke, the relay and the group's health."""
+        call = pipeline.call
         # Acquire concurrency slots (global + per-mcp_server) before invocation.
         # This is where backpressure happens: if the global or mcp_server semaphore
         # is full, this thread blocks until a slot frees up. Crucially, the call
@@ -1277,10 +1324,10 @@ class BatchExecutor:
 
             result = self._invoke_with_retry(
                 call,
-                cancel_event,
+                pipeline.cancel_event,
                 pipeline.effective_timeout,
-                call_start,
-                ctx,
+                pipeline.call_start,
+                pipeline.ctx,
                 pipeline.target_server_id,
             )
 

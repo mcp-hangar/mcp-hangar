@@ -1,5 +1,49 @@
 # Upgrading MCP Hangar
 
+## Next — per-tenant execution budgets
+
+`execution.max_concurrency` bounds the whole process, so one tenant's burst
+could take every execution slot. The new, optional `execution.tenant_limits`
+section bounds each tenant on its own. **With no `tenant_limits` section,
+nothing changes.**
+
+```yaml
+execution:
+  max_concurrency: 50
+  tenant_limits:
+    "tenant:a": {max_concurrency: 4, rps: 10, burst: 20}
+    "*": {max_concurrency: 2, rps: 5, burst: 10}
+```
+
+- `max_concurrency` is how many of the tenant's calls may be in flight at
+  once. `rps` and `burst` are a token bucket: calls start at `rps` per second
+  on average, and at most `burst` at once. All three are required, and a
+  misspelt or extra key refuses the configuration.
+- **A tenant that is not listed** gets a budget of its own, built from the
+  `"*"` entry. `"*"` is a template, not a pool that unlisted tenants share.
+  Callers with no tenant share one such budget.
+- **With budgets configured and no `"*"` entry, an unlisted tenant and a
+  caller with no tenant are refused.** If you add `tenant_limits` for a few
+  tenants, add a `"*"` entry too, unless refusing everyone else is what you
+  want.
+- The budget is taken after every policy gate: tool access, withdrawal, pins,
+  validators and approval. It is taken before the execution slot and the
+  upstream call. A call that a policy refuses, or that is held for approval,
+  spends nothing, and the slot is given back when the call returns. A call
+  that the upstream answers with a task handle returns with the handle, so a
+  task the upstream keeps running does not hold a slot.
+- A call over its budget is refused at once, never queued or retried, with the
+  error type `TenantQuotaExceeded`. The front-door call log records it as
+  `denied`, and `mcp_hangar_tenant_quota_refusals_total{budget,reason}` counts
+  it, with `reason` one of `no_budget`, `concurrency` or `rate`.
+- **Budgets are counted per process**, like `execution.max_concurrency`. With
+  N replicas a tenant can run up to N times its budget, so size each budget for
+  your replica count.
+- A reload keeps the budget of every tenant whose limits did not change, with
+  its calls in flight and its spent tokens. A tenant whose limits changed keeps
+  counting the calls it has in flight, so lowering a limit never lets more than
+  the new limit start.
+
 ## Next — `block` and `quarantine` stop a server whose tools drift
 
 A server with `capabilities.enforcement_mode` set to `block` or `quarantine`

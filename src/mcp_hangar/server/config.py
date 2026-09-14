@@ -30,6 +30,7 @@ from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .bootstrap.group_circuit_metric import observe_group_circuit
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
+from .tools.batch.tenant_admission import configure_tenant_limits, parse_tenant_limits, TenantLimits
 
 if TYPE_CHECKING:
     from ..application.read_models.tool_projection import ToolProjectionRegistry
@@ -1400,6 +1401,27 @@ def _concurrency_limits(full_config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _init_tenant_limits_from_config(full_config: dict[str, Any]) -> None:
+    """Put `execution.tenant_limits` in force (#1445).
+
+    Reconciled, not replaced: a tenant whose limits did not change keeps its
+    budget, with the calls it has in flight and the tokens it has spent, so a
+    reload -- a byte-identical one from the file watcher included -- neither
+    frees slots that running calls hold nor refills a spent budget. An absent
+    section removes every budget. See `tools/batch/tenant_admission.py`.
+    """
+    limits = _tenant_limits(full_config)
+    configure_tenant_limits(limits)
+    if limits:
+        logger.info("tenant_limits_configured", entries=sorted(limits))
+
+
+def _tenant_limits(full_config: dict[str, Any]) -> dict[str, TenantLimits]:
+    """The checked ``execution.tenant_limits``, empty when there is none."""
+    execution_config = full_config.get("execution") or {}
+    return parse_tenant_limits(execution_config.get("tenant_limits") if isinstance(execution_config, dict) else None)
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1432,6 +1454,7 @@ def _validator_specs(full_config: dict[str, Any]) -> list[dict[str, Any]] | None
 #: it used to apply none of it.
 _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_concurrency_from_config,
+    _init_tenant_limits_from_config,
     _init_topology_mode_from_config,
     _init_param_validation_from_config,
     _init_resource_links_from_config,
@@ -1462,6 +1485,10 @@ def check_process_config(full_config: dict[str, Any]) -> None:
         _concurrency_limits(full_config)
     except (TypeError, ValueError) as e:
         raise ConfigurationError(f"Invalid concurrency limit in execution or mcp_servers: {e}") from e
+    try:
+        _tenant_limits(full_config)
+    except ValueError as e:
+        raise ConfigurationError(f"Invalid execution.tenant_limits: {e}") from e
     try:
         build_validator_pipeline(_validator_specs(full_config))
     except (TypeError, ValueError) as e:
