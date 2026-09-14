@@ -10,7 +10,7 @@ import json
 from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.response_cache import IResponseCache
-from ...domain.value_objects.truncation import ContinuationId, TruncationConfig
+from ...domain.value_objects.truncation import ContinuationId, ContinuationOwner, TruncationConfig
 from ...logging_config import get_logger
 from ...metrics import BATCH_TRUNCATIONS_TOTAL
 
@@ -51,7 +51,7 @@ class TruncationManager:
         """Get the response cache."""
         return self._cache
 
-    def process_batch(self, batch_id: str, results: list[CallResult]) -> list[CallResult]:
+    def process_batch(self, batch_id: str, results: list[CallResult], *, owner: ContinuationOwner) -> list[CallResult]:
         """Process batch results, applying truncation if needed.
 
         This is the main entry point. It calculates the total response size,
@@ -61,6 +61,8 @@ class TruncationManager:
         Args:
             batch_id: Unique identifier for the batch.
             results: List of call results to process.
+            owner: The caller the batch ran for. Each full response is cached
+                for this owner alone.
 
         Returns:
             List of call results, potentially with truncated content.
@@ -110,7 +112,7 @@ class TruncationManager:
         truncated_results = []
         for i, (result, budget) in enumerate(zip(results, budgets, strict=False)):
             if sizes[i] > budget:
-                truncated_result = self._truncate_result(result, budget, batch_id, i)
+                truncated_result = self._truncate_result(result, budget, batch_id, i, owner)
                 truncated_results.append(truncated_result)
             else:
                 truncated_results.append(result)
@@ -166,6 +168,7 @@ class TruncationManager:
         budget: int,
         batch_id: str,
         call_index: int,
+        owner: ContinuationOwner,
     ) -> CallResult:
         """Truncate a single result and cache the full response.
 
@@ -174,6 +177,7 @@ class TruncationManager:
             budget: Maximum bytes for the truncated result.
             batch_id: Batch identifier.
             call_index: Index of this call in the batch.
+            owner: The caller the full response is cached for.
 
         Returns:
             New CallResult with truncated content and continuation_id.
@@ -192,6 +196,7 @@ class TruncationManager:
             continuation_id.value,
             result.result,
             self._config.cache_ttl_s,
+            owner=owner,
         )
         if not stored:
             logger.warning(
@@ -218,13 +223,16 @@ class TruncationManager:
         # Record truncation metric
         BATCH_TRUNCATIONS_TOTAL.inc(reason="batch_budget")
 
+        # The id is not logged. Its random suffix is all that kept it
+        # unguessable, and whoever reads the logs is not the caller it was
+        # handed to. batch_id and call_index name it.
         logger.info(
             "result_truncated",
             batch_id=batch_id,
             call_index=call_index,
             original_size=original_size,
             budget=budget,
-            continuation_id=continuation_id.value if stored else None,
+            continuation_advertised=stored,
         )
 
         return CallResult(

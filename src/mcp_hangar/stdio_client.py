@@ -2,7 +2,9 @@
 
 from dataclasses import dataclass
 import json
+import os
 from queue import Empty, Queue
+import select
 import subprocess
 import threading
 import time
@@ -19,6 +21,41 @@ if TYPE_CHECKING:
     from .lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
+
+#: How long the stdout reader goes on collecting stderr once stdout reached EOF.
+#: An exited process's stderr reaches EOF at once. A descendant that inherited
+#: the pipe can hold it open after the process exits, and a process that closed
+#: stdout and kept running never lets it reach EOF: past this deadline, what
+#: arrived is all there is, and the reader goes on to fail the calls in flight.
+_STDERR_DRAIN_S = 1.0
+#: The most stderr collected from a process whose stdout reached EOF.
+_STDERR_DRAIN_MAX_BYTES = 64 * 1024
+
+
+def _drain_pipe(pipe: Any, deadline_s: float, max_bytes: int) -> str:
+    """Read a pipe until EOF, ``max_bytes`` or the deadline, whichever comes first.
+
+    ``read()`` returns only at EOF, and a pipe that a live process holds has
+    none. ``select`` waits for data or EOF for no longer than the time left, so
+    this never waits past the deadline, whatever the other end does.
+    """
+    fd = pipe.fileno()
+    chunks: list[bytes] = []
+    size = 0
+    deadline = time.monotonic() + deadline_s
+    while size < max_bytes:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        readable, _, _ = select.select([fd], [], [], remaining)
+        if not readable:
+            break
+        chunk = os.read(fd, max_bytes - size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks).decode(errors="replace")
 
 
 @dataclass
@@ -157,18 +194,18 @@ class StdioClient:
             stderr = getattr(self.process, "stderr", None)
             if stderr:
                 try:
-                    # Read available stderr (non-blocking would be ideal, but read() works post-exit)
-                    err_bytes = stderr.read()
-                    if err_bytes:
-                        err_text = (
-                            err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")
-                        ).strip()
-                        if err_text:
-                            # Log first 2000 chars to avoid log spam
-                            if len(err_text) > 2000:
-                                err_text = err_text[:2000] + "... (truncated)"
-                            log("stdio_client_process_stderr", stderr=err_text, expected=expected)
-                            stderr_text = err_text
+                    # Never read() to EOF here. Stdout at EOF does not mean
+                    # stderr will get there: a process can close stdout and
+                    # keep running, and a descendant can hold stderr open.
+                    # This thread would stay blocked, and the calls in flight
+                    # would never be failed.
+                    err_text = _drain_pipe(stderr, _STDERR_DRAIN_S, _STDERR_DRAIN_MAX_BYTES).strip()
+                    if err_text:
+                        # Log first 2000 chars to avoid log spam
+                        if len(err_text) > 2000:
+                            err_text = err_text[:2000] + "... (truncated)"
+                        log("stdio_client_process_stderr", stderr=err_text, expected=expected)
+                        stderr_text = err_text
                 except Exception as read_err:  # noqa: BLE001 -- fault-barrier: stderr capture must not crash diagnostics
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
         except Exception as e:  # noqa: BLE001 -- fault-barrier: process diagnostics must not propagate

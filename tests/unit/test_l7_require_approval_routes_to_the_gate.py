@@ -78,7 +78,9 @@ def _executor() -> BatchExecutor:
 
 def _unrestricted_resolver():
     policy = SimpleNamespace(is_unrestricted=lambda: True, requires_approval=lambda tool: False)
-    return SimpleNamespace(resolve_effective_policy=lambda _key: policy)
+    # The resolver's own signature: the gate asks with the group, the tenant and
+    # the member server as well as the server.
+    return SimpleNamespace(resolve_effective_policy=lambda *_scope, **_member: policy)
 
 
 def _call(tool: str):

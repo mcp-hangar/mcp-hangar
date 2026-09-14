@@ -64,12 +64,21 @@ class BaseMcpServerHandler(CommandHandler):
             return
         try:
             self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, events)
-        except (RuntimeError, ValueError, TypeError) as e:
-            # The barrier stays where it was and keeps its type list. It now
-            # covers a batch rather than one event, which is what appending to a
-            # stream is: the store writes all of them or none.
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the command already ran; publishing its events must not change its outcome
+            # Any exception, not a short list of types. This runs after the
+            # command has done its work, which for a tool call means after the
+            # upstream executed it, and `InvokeToolHandler` runs it in a
+            # `finally`. An exception that got past the old list
+            # (RuntimeError, ValueError, TypeError) reported a call that ran as
+            # a failure. A client could then retry a non-idempotent action.
+            # When the call had raised, the exception also replaced the call's
+            # own error. The bus already delivers a batch
+            # its store refused. Whatever still reaches here is logged and
+            # counted, and the command's result stands.
+            record_error("event_publish", type(e).__name__)
             logger.error(
                 "event_publish_failed",
+                mcp_server_id=mcp_server.mcp_server_id,
                 event_types=[type(event).__name__ for event in events],
                 error=str(e),
                 exc_info=True,

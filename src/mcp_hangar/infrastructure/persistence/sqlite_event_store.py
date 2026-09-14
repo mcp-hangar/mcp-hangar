@@ -161,10 +161,34 @@ class SQLiteEventStore(IEventStore):
         """
         if not events:
             return expected_version
+        return self._append(stream_id, events, expected_version)
 
+    def append_at_end(self, stream_id: str, events: list[DomainEvent]) -> int:
+        """Append after whatever the stream holds, reading its version inside the write.
+
+        See `_append`. The version is read in the same write transaction that
+        appends the rows, so no other writer can move the stream in between.
+        That holds for another thread and for another process opening the same
+        file. A batch that claimed no version cannot conflict.
+        """
+        if not events:
+            return self.get_stream_version(stream_id)
+        return self._append(stream_id, events, None)
+
+    def _append(self, stream_id: str, events: list[DomainEvent], expected_version: int | None) -> int:
+        """Read the stream's version, check it if one was claimed, and write, all in one transaction.
+
+        `BEGIN IMMEDIATE` takes SQLite's write lock before the version is read.
+        `self._lock` only serializes the threads of this process, but the file
+        can be open in another one. The version SELECT used to run outside any
+        transaction, so another process could commit between the read and the
+        insert. `expected_version=None` means "append at the end": the version
+        just read is the one to write after.
+        """
         with self._lock:
             conn = self._connect()
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 cursor = conn.cursor()
                 timestamp = datetime.now(UTC).isoformat()
 
@@ -176,7 +200,7 @@ class SQLiteEventStore(IEventStore):
                 row = cursor.fetchone()
                 current_version = row["version"] if row else -1
 
-                if current_version != expected_version:
+                if expected_version is not None and current_version != expected_version:
                     raise ConcurrencyError(stream_id, expected_version, current_version)
 
                 # Append events

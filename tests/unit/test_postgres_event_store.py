@@ -344,9 +344,28 @@ class _FakeCursor:
         ]
         self.rowcount = before - len(self._db.events)
 
+    def _append_at_end_of_stream(self, params: tuple) -> None:
+        # `INSERT ... ON CONFLICT (stream_id) DO UPDATE SET version = version + n
+        # RETURNING version`: create the row at n - 1, or advance it by n.
+        stream_id, first_version, created_at, updated_at, count = params
+        row = self._db.streams.get(stream_id)
+        if row is None:
+            row = {"version": first_version, "created_at": created_at, "updated_at": updated_at}
+            self._db.streams[stream_id] = row
+        else:
+            row["version"] += count
+            row["updated_at"] = updated_at
+        self._result = [(row["version"],)]
+        self.rowcount = 1
+
     # Order matters: more specific prefixes (e.g. the LIKE variant of a
     # SELECT) must be checked before their shorter, more general prefixes.
     _HANDLERS = [
+        (
+            "INSERT INTO streams (stream_id, version, created_at, updated_at) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (stream_id) DO UPDATE",
+            _append_at_end_of_stream,
+        ),
         # The schema statement now arrives with its advisory lock in front of
         # it, so the whole string starts here rather than at CREATE TABLE.
         # Recognised rather than ignored: a double that skipped an unknown
@@ -771,3 +790,59 @@ class TestTheTailCursor:
 
         assert db.last_conn is not None
         assert db.last_conn.commits == 1
+
+
+class TestAppendAtEnd:
+    """The database picks the version, in one statement.
+
+    The fake runs one statement at a time, so it cannot show two writers
+    queueing on the row lock. `tests/integration/test_append_at_end_on_one_postgres.py`
+    does that against a real server. What is checked here is the arithmetic, and
+    that the version is never read before it is written.
+    """
+
+    def test_a_new_stream_starts_at_zero(self, store: PostgresEventStore, db: _FakePostgres):
+        assert store.append_at_end("s1", [_make_event("a"), _make_event("b")]) == 1
+        assert [e["stream_version"] for e in db.events] == [0, 1]
+        assert store.get_stream_version("s1") == 1
+
+    def test_an_existing_stream_is_continued(self, store: PostgresEventStore, db: _FakePostgres):
+        store.append("s1", [_make_event("a")], expected_version=-1)
+
+        assert store.append_at_end("s1", [_make_event("b"), _make_event("c")]) == 2
+        assert [e["stream_version"] for e in db.events] == [0, 1, 2]
+        assert store.get_stream_version("s1") == 2
+
+    def test_the_version_is_not_read_before_it_is_written(self, store: PostgresEventStore, db: _FakePostgres):
+        # Reading the version and then writing at it is the two-step race this
+        # replaced. The one statement that touches `streams` both reserves the
+        # version and returns it.
+        store.append("s1", [_make_event("a")], expected_version=-1)
+        db.executed.clear()
+
+        store.append_at_end("s1", [_make_event("b")])
+
+        on_streams = [
+            s for s in db.executed if s.startswith(("INSERT INTO streams", "UPDATE streams", "SELECT version"))
+        ]
+        assert len(on_streams) == 1
+        assert "ON CONFLICT (stream_id) DO UPDATE SET version = streams.version + %s" in on_streams[0]
+        assert on_streams[0].endswith("RETURNING version")
+        assert db.last_conn is not None
+        assert db.last_conn.commits == 1
+
+    def test_an_empty_batch_writes_nothing(self, store: PostgresEventStore, db: _FakePostgres):
+        assert store.append_at_end("s1", []) == -1
+        assert db.events == []
+        assert "s1" not in db.streams
+
+    def test_a_failed_write_is_rolled_back(self, db: _FakePostgres):
+        serializer = MagicMock()
+        serializer.serialize.side_effect = ValueError("not serializable")
+        store = PostgresEventStore(db, serializer=serializer)
+
+        with pytest.raises(ValueError):
+            store.append_at_end("s1", [_make_event("a")])
+
+        assert db.last_conn is not None
+        assert (db.last_conn.commits, db.last_conn.rollbacks) == (0, 1)

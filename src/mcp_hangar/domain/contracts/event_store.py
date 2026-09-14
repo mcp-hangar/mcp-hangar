@@ -138,6 +138,46 @@ class IEventStore(ABC):
             ConcurrencyError: When expected_version doesn't match actual.
         """
 
+    #: How many times the default `append_at_end` reads the version and tries
+    #: again after another writer got in between.
+    _APPEND_AT_END_ATTEMPTS: ClassVar[int] = 16
+
+    def append_at_end(self, stream_id: str, events: list[DomainEvent]) -> int:
+        """Append events after whatever the stream holds, claiming no version.
+
+        This is what a caller with no version to assert uses: `EventBus` for
+        every aggregate batch and every `publish`. The batch asserts nothing, so
+        another writer moving the stream is not a conflict, and it must not
+        lose the batch.
+
+        The in-tree stores override this so that the version is read and
+        advanced inside the write itself: one lock, one transaction or one
+        statement. Where the store is shared, that holds across processes as
+        well as threads. This default is for a store that has not overridden
+        it. It reads the version and appends at it, and when another writer got
+        in between, it reads again. The loop is bounded, so a store whose
+        version never settles raises instead of hanging.
+
+        Args:
+            stream_id: Identifier of the event stream.
+            events: Events to append. An empty list appends nothing.
+
+        Returns:
+            New version of the stream after append.
+
+        Raises:
+            ConcurrencyError: Only from this default, and only when every
+                attempt lost the race.
+        """
+        if not events:
+            return self.get_stream_version(stream_id)
+        for _ in range(self._APPEND_AT_END_ATTEMPTS - 1):
+            try:
+                return self.append(stream_id, events, self.get_stream_version(stream_id))
+            except ConcurrencyError:
+                continue
+        return self.append(stream_id, events, self.get_stream_version(stream_id))
+
     @abstractmethod
     def read_stream(
         self,
