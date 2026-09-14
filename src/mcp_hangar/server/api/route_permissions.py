@@ -44,8 +44,10 @@ Permission choices worth knowing
   ``PERMISSION_PROVIDERS_WRITE``. ``policy:write`` is admin-only and was defined
   but never enforced anywhere before this table existed.
 * ``/config/reload`` requires ``config:reload`` (admin-only). Reload re-applies
-  every governance input -- tool-access policies, digest pins, topology mode --
-  and launches MCP servers.
+  the configuration file's governance -- tool-access policies, withdrawals,
+  digest pins, ``header_exposure``, validators, the ``ui://`` allow list -- and
+  launches MCP servers. It keeps the topology mode, and refuses a file that
+  changes it (#1424).
 * ``/ws/events`` requires ``audit:read``. The socket streams *every* domain
   event, which is an audit-grade capability rather than a dashboard read.
 * Everything under ``/auth`` requires ``("admin", "*")``. Only

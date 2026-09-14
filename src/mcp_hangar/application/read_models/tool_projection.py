@@ -321,6 +321,47 @@ class ToolProjectionRegistry:
             self._digest_enforcement.clear()
         logger.debug("config_pins_cleared")
 
+    def adopt_config_overlays(self, staged: ToolProjectionRegistry, *, replace: bool) -> None:
+        """Take the withdrawals, pins and enforcement modes a configuration registered on *staged*.
+
+        The configuration registers them on a fresh registry, and they are taken
+        from it here under this registry's lock. A concurrent resolve sees the
+        previous overlays or the new ones, never the empty ones a reload used to
+        leave between clearing and re-registering (#1424).
+
+        With *replace*, which is what a reload asks for, the config overlays
+        become exactly *staged*'s, so deleting a withdrawal or a pin from the
+        file restores the tool and the strict default (#233). Without it they
+        are added to what is there, which is what a first load does. Runtime
+        withdrawals are never touched either way (#235).
+        """
+        with staged._lock:
+            withdrawals = {
+                key: set(entry) if isinstance(entry, set) else entry
+                for key, entry in staged._config_withdrawals.items()
+            }
+            pins = {key: dict(by_tenant) for key, by_tenant in staged._config_pins.items()}
+            pins_all_tenants = dict(staged._config_pins_all_tenants)
+            enforcement = dict(staged._digest_enforcement)
+        with self._lock:
+            if replace:
+                self._config_withdrawals = withdrawals
+                self._config_pins = pins
+                self._config_pins_all_tenants = pins_all_tenants
+                self._digest_enforcement = enforcement
+                return
+            # Added through the setters, so a merge means what registering the
+            # same entries one by one has always meant.
+            for (mcp_server, kind, name), entry in withdrawals.items():
+                for tenant_id in sorted(entry) if isinstance(entry, set) else [None]:
+                    self.set_config_withdrawal(mcp_server, name, tenant_id, kind=kind)
+            for (mcp_server, tool), by_tenant in pins.items():
+                for tenant_id, digest in by_tenant.items():
+                    self.set_config_pin(mcp_server, tool, tenant_id, digest)
+            for (mcp_server, tool), digest in pins_all_tenants.items():
+                self.set_config_pin(mcp_server, tool, None, digest)
+            self._digest_enforcement.update(enforcement)
+
     # ------------------------------------------------------------------
     # Runtime-withdrawal overlay (survives config reloads)
     # ------------------------------------------------------------------

@@ -265,7 +265,13 @@ def test_reloading_a_dead_server_away_removes_its_series():
     fleet = _dead_on_the_metrics()
     repository = InMemoryMcpServerRepository()
     repository.add(fleet.sid, fleet.server)
-    loader = SimpleNamespace(load_from_file=lambda _path: {"mcp_servers": {}}, apply_mcp_servers=lambda _config: None)
+    loader = SimpleNamespace(
+        load_from_file=lambda _path: {"mcp_servers": {}},
+        check_process_config=lambda _config: None,
+        apply_process_config=lambda _config: None,
+        prepare_mcp_servers=lambda _config: SimpleNamespace(specs={}, keeps=lambda *_: False),
+        commit_mcp_servers=lambda _prepared: None,
+    )
 
     ReloadConfigurationHandler(repository, fleet.events, "config.yaml", config_loader=loader).handle(
         ReloadConfigurationCommand(config_path="config.yaml")

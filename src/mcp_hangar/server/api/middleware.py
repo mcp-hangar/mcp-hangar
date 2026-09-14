@@ -35,6 +35,7 @@ from ...domain.exceptions import (
     MCPError,
     McpServerDegradedError,
     McpServerNotFoundError,
+    ConfigurationRestartRequiredError,
     ConfigurationUnavailableError,
     McpServerNotHereError,
     McpServerNotReadyError,
@@ -107,6 +108,9 @@ _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
     # ConfigurationError, this entry is matched before the base MCPError->500
     # below, so the specific case wins and the generic case does not.
     (ConfigurationUnavailableError, 503),
+    # A reload that would change what only a restart can (#1424): nothing is
+    # wrong with the file and nothing was changed, so neither 500 nor 503.
+    (ConfigurationRestartRequiredError, 409),
     (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
     # Not "this broke" but "not here": a follower asked to start a server that
