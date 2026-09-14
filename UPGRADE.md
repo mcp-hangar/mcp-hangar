@@ -1,5 +1,30 @@
 # Upgrading MCP Hangar
 
+## Next — `tool_access.rules` is refused as a key nothing reads
+
+`tool_access.rules` was never read. The config schema listed it next to
+`tool_access.mode`, so a `rules:` block passed `mcp-hangar config check` and
+`HANGAR_CONFIG_STRICT=1`, loaded without a warning, and restricted nothing. No
+document or example described it (#1422).
+
+Delete it:
+
+```yaml
+tool_access:
+  mode: front_door
+  rules: []   # delete this key, and anything nested under it
+```
+
+A config that still sets it loads, and logs `unknown_config_key` saying the key
+was never read. `HANGAR_CONFIG_STRICT=1` and `mcp-hangar config check` refuse
+it, as they refuse any key nothing reads: under strict mode a gateway whose
+config still sets it does not start, so delete the key before upgrading. This
+applies to a file and to `bootstrap(config_dict=...)` alike.
+
+Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
+and deny lists of a server, a group and a group member, and `tool_access.mode`
+still selects the `egress` or `front_door` topology.
+
 ## Next — a reload applies the whole configuration, and keeps the topology mode
 
 This affects every configuration reload: `POST /api/config/reload`,
