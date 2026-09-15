@@ -67,14 +67,15 @@ class _StagedConfig:
     """One configuration's servers, groups and governance overlays, before any of them is in effect.
 
     `load_config` builds everything here, then `commit` puts it in force in an
-    order that leaves no gap a concurrent call could fall into (#1424): first
-    the governance overlays -- the tool-access policies, group policies
-    included, the withdrawals and pins, and the `header_exposure` blocks --
+    order that leaves no gap a concurrent call could fall into (#1424). The
+    governance overlays -- the tool-access policies, group policies included,
+    the withdrawals and pins, and the `header_exposure` blocks -- then the
+    servers and the groups they govern, with each group's membership, are
     swapped in as one set, so a decision read through `read_as_one_set` sees
-    all of them or none (#1431); then the servers and groups they govern. A
-    reload used to clear the policy set and register it again server by server,
-    so a call that arrived in between was resolved against no policies at all,
-    and a server was in the repository before its policy was registered.
+    all of them or none (#1431, #1488). A reload used to clear the policy set
+    and register it again server by server, so a call that arrived in between
+    was resolved against no policies at all, and a server was in the
+    repository before its policy was registered.
     """
 
     policies: "ToolAccessResolver" = field(default_factory=_new_policies)
@@ -119,9 +120,25 @@ class _StagedConfig:
         stored = _stored_policies_now(self.stored_policies) if replace else None
         resolver = get_tool_access_resolver()
         projections = get_tool_projection_registry()
-        # Every overlay in one swap (#1431). Swapped one after another, a
-        # decision reading two of them could take the new policies with the
-        # previous file's withdrawals: a state neither file declares.
+        # Before the servers, so a new server's first call is held to its own
+        # limit. In place: a call running on a limit keeps its slot (#1432).
+        # Before the swap, too: no decision reads a limit, and its lock is then
+        # not taken while the swap is in progress.
+        get_concurrency_manager().set_mcp_server_limits(self.concurrency_limits, replace=replace)
+
+        repository = _mcp_server_repository()
+        # Every overlay, every server and every group's membership in one swap
+        # (#1431, #1488). Swapped one after another, a decision reading two of
+        # them could take the new policies with the previous file's
+        # withdrawals, or with the previous file's groups: a state neither file
+        # declares. A member moved from a group that denies a tool to one that
+        # allows it was governed by the group it left, under that group's new
+        # policy. A server carries its L7 egress policy, so the policy a call
+        # is routed on is swapped here with it.
+        #
+        # Each lock below is taken and released on its own, never while
+        # another is held, and nothing here waits on a decision: see
+        # `governance_overlays` for why no lock-order edge is added.
         with swapping():
             with resolver.locked():
                 resolver.adopt_config_policies(self.policies, replace=replace)
@@ -135,29 +152,29 @@ class _StagedConfig:
             projections.adopt_config_overlays(self.projections, replace=replace)
             adopt_header_exposure_policies(self.header_exposure, replace=replace)
 
-        # Before the servers, so a new server's first call is held to its own
-        # limit. In place: a call running on a limit keeps its slot (#1432).
-        get_concurrency_manager().set_mcp_server_limits(self.concurrency_limits, replace=replace)
+            # A server this configuration keeps is the running object (#1470),
+            # put back under its own id.
+            for mcp_server_id, mcp_server in self.servers.items():
+                repository.add(mcp_server_id, mcp_server)
+            if replace:
+                _BUILT_FROM.clear()
+            _BUILT_FROM.update(
+                {sid: (self.built_with[sid], server) for sid, server in self.servers.items() if sid in self.built_with}
+            )
+            GROUPS.update(self.groups)
+            if replace:
+                # Replaced, never cleared first: the front door finds a member's
+                # group only in GROUPS, so while it was empty a member was checked
+                # as a standalone server and its group's deny list, access policies
+                # and withdrawals did not apply (#1424).
+                for group_id in [known for known in GROUPS if known not in self.groups]:
+                    del GROUPS[group_id]
 
-        repository = _mcp_server_repository()
-        for mcp_server_id, mcp_server in self.servers.items():
-            repository.add(mcp_server_id, mcp_server)
-        if replace:
-            _BUILT_FROM.clear()
-        _BUILT_FROM.update(
-            {sid: (self.built_with[sid], server) for sid, server in self.servers.items() if sid in self.built_with}
-        )
-        for group_id, group in self.groups.items():
-            GROUPS[group_id] = group
-            # After the group is in GROUPS, which the gauge's writer checks (#1357).
+        for group in self.groups.values():
+            # After the group is in GROUPS, which the gauge's writer checks
+            # (#1357). After the swap: this takes the group's lock and writes
+            # a metric, and neither is governance.
             observe_group_circuit(group)
-        if replace:
-            # Replaced, never cleared first: the front door finds a member's
-            # group only in GROUPS, so while it was empty a member was checked
-            # as a standalone server and its group's deny list, access policies
-            # and withdrawals did not apply (#1424).
-            for group_id in [known for known in GROUPS if known not in self.groups]:
-                del GROUPS[group_id]
 
 
 #: Each server a configuration built, with the `McpServer` arguments it was

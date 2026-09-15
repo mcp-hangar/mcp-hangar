@@ -348,11 +348,19 @@ class _Governance:
     `tool_projection.withdrawn: [t]` let `t` through on the new policy and the
     previous withdrawals, which neither file allows. `_decide_governance`
     makes the whole decision through `read_as_one_set` before a gate acts on
-    any of it.
+    any of it. The groups that own a member named directly are read in it too
+    (#1488): a reload swaps the membership with the overlays, and a member
+    moved from one group to another was otherwise governed by the group it
+    left, under that group's new policy.
     """
 
     #: The tenant every overlay was asked for: the caller's.
     tenant_id: str | None
+    #: The groups that own the server the call names, read with the overlays.
+    #: Empty for a call that names a group, and for a server in no group.
+    owning_groups: tuple[str, ...]
+    #: Every scope the call's policy is resolved under (`_policy_scopes`), under `owning_groups`.
+    scopes: tuple[tuple[str, str | None, str | None], ...]
     #: Whether the policy of every scope `_policy_scopes` names allows the tool. Deny wins.
     allowed: bool
     #: The tool's projection as the call resolves it (`_resolve_projection`). None: not in the catalogue.
@@ -365,6 +373,19 @@ class _Governance:
     pins: tuple[tuple[str, Any, DigestEnforcement], ...]
     #: The policy that routes the tool to a human (`_approval_policy`), or None.
     approval_policy: Any
+    #: The L7 egress policy of the server the call names, which the approval
+    #: gate routes the call on (`BatchExecutor._l7_approval_rule`). None: the
+    #: server has none, or it was not looked up.
+    l7_policy: Any = None
+
+
+def _l7_policy_of(servers: Any, mcp_server_id: str) -> Any:
+    """The L7 egress policy of the server *servers* holds under *mcp_server_id*, or None."""
+    try:
+        server = servers.get(mcp_server_id)
+    except Exception:  # noqa: BLE001 -- resolution problems belong to the invoke path's own errors
+        return None
+    return getattr(server, "l7_policy", None)
 
 
 def _decide_governance(
@@ -373,23 +394,30 @@ def _decide_governance(
     mcp_server: str,
     tool: str,
     tenant_id: str | None,
-    scopes: list[tuple[str, str | None, str | None]],
     *,
+    is_group: bool,
     target_server_id: str,
-    owning_groups: tuple[str, ...],
+    servers: Any = None,
 ) -> _Governance:
     """Decide what governs a call of *tool* on *mcp_server* for *tenant_id*. Run it through `read_as_one_set`.
 
-    It reads the policies, the withdrawals, the pins and their modes, and
-    changes nothing, so it can be made again when a reload swaps the overlays
-    while it runs.
+    It reads the groups that own a member named directly, the policies, the
+    withdrawals, the pins and their modes, and the L7 egress policy, and
+    changes nothing, so it can be made again when a reload swaps them while it
+    runs.
 
     Args:
         mcp_server: The id the call named: a group or a server.
-        scopes: The call's policy scopes, from `_policy_scopes`.
+        is_group: Whether that id names a group, as `_gate_resolve_target` found it.
         target_server_id: The server the call goes to. For a group, the member it selected.
-        owning_groups: The groups of a group member named directly.
+        servers: The server repository the L7 egress policy of *mcp_server* is
+            read from. None: it is not read.
     """
+    # Which groups own a member named directly, read with the overlays that
+    # govern it: never the previous file's groups with the new file's
+    # policies (#1488).
+    owning_groups = () if is_group else _groups_owning(mcp_server)
+    scopes = _policy_scopes(mcp_server, is_group, target_server_id, owning_groups)
     projection = _resolve_projection(proj_registry, mcp_server, tool, tenant_id, target_server_id)
     own = proj_registry.resolve_pin(mcp_server, tool, tenant_id)
     if own is None and target_server_id and target_server_id != mcp_server:
@@ -410,11 +438,14 @@ def _decide_governance(
         pins.append((mcp_server, own))
     return _Governance(
         tenant_id=tenant_id,
+        owning_groups=owning_groups,
+        scopes=tuple(scopes),
         allowed=_allowed_in_every_scope(resolver, tool, tenant_id, scopes),
         projection=projection,
         withdrawn=_withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups),
         pins=tuple((scope, pin, proj_registry.digest_enforcement(scope)) for scope, pin in pins),
         approval_policy=_approval_policy(resolver, tool, tenant_id, scopes),
+        l7_policy=_l7_policy_of(servers, mcp_server),
     )
 
 
@@ -436,12 +467,15 @@ def _governance_after_hold(
     *,
     group_id: str | None,
     target_server_id: str,
-    owning_groups: tuple[str, ...],
 ) -> _AfterHold:
     """Read the policy, the catalogue and the withdrawals after an approval hold. Run it through `read_as_one_set`.
 
     See `BatchExecutor._revalidate_after_hold` for the arguments.
     """
+    # The groups that own a member named directly, as they are now: read with
+    # the policies and withdrawals below, as the gate before the hold read
+    # them (#1488). A call naming a group has none.
+    owning_groups = () if group_id is not None else _groups_owning(call.mcp_server)
     # The caller's tenant and the target group are carried, not dropped: asked
     # without them this was a different question than the pre-hold gate asked,
     # and in front_door a resolve with no member_id is the fail-closed
@@ -495,24 +529,17 @@ def current_tool_access_refusal(
         ``(message, error_type)`` as the call's refusal carries them, or ``None``
         when a call would pass both gates.
     """
-    # A group id is not a server id, so this is the choice `_gate_resolve_target` makes.
-    is_group = mcp_server in GROUPS
-    owning_groups = () if is_group else _groups_owning(mcp_server)
-    scopes = _policy_scopes(mcp_server, is_group, target_server_id, owning_groups)
-    # The gates' one decision, against one configuration's overlays (#1431).
-    governance = read_as_one_set(
-        partial(
-            _decide_governance,
-            get_tool_access_resolver(),
-            get_tool_projection_registry(),
-            mcp_server,
-            tool,
-            tenant_id,
-            scopes,
-            target_server_id=target_server_id,
-            owning_groups=owning_groups,
+    resolver, registry = get_tool_access_resolver(), get_tool_projection_registry()
+
+    def decide() -> _Governance:
+        # A group id is not a server id, so this is the choice `_gate_resolve_target` makes.
+        is_group = mcp_server in GROUPS
+        return _decide_governance(
+            resolver, registry, mcp_server, tool, tenant_id, is_group=is_group, target_server_id=target_server_id
         )
-    )
+
+    # The gates' one decision, against one configuration's overlays and groups (#1431, #1488).
+    governance = read_as_one_set(decide)
     if not governance.allowed:
         return _TOOL_ACCESS_DENIED, "ToolAccessDeniedError"
     if governance.withdrawn:
@@ -549,10 +576,6 @@ class _CallPipeline:
     is_group: bool = False
     group_obj: Any = None
     target_server_id: str = ""
-    #: Set by _gate_resolve_target: the groups a server named directly is a
-    #: member of. Empty for a call that names a group,
-    #: and for a server that is in no group.
-    owning_groups: tuple[str, ...] = ()
     #: Decided when a gate first asks: see `governance`.
     _governance: _Governance | None = None
     _projection: Any = _UNRESOLVED
@@ -570,7 +593,8 @@ class _CallPipeline:
         Made when a gate first asks, after `_gate_resolve_target` chose the
         target, and kept. The access, withdrawal, pin and approval gates each
         act on their part of it, so a reload that lands between two gates
-        cannot give them two different files.
+        cannot give them two different files. The groups that own a server
+        named directly are read in it, with the overlays (#1488).
         """
         if self._governance is None:
             self._governance = read_as_one_set(
@@ -581,12 +605,20 @@ class _CallPipeline:
                     self.call.mcp_server,
                     self.call.tool,
                     self.caller_tenant_id,
-                    self.policy_scopes(),
+                    is_group=self.is_group,
                     target_server_id=self.target_server_id,
-                    owning_groups=self.owning_groups,
+                    servers=getattr(self.ctx, "repository", None),
                 )
             )
         return self._governance
+
+    @property
+    def owning_groups(self) -> tuple[str, ...]:
+        """The groups a server named directly is a member of, as the governance decision read them.
+
+        Empty for a call that names a group, and for a server that is in no group.
+        """
+        return self.governance.owning_groups
 
     @property
     def projection(self) -> Any:
@@ -642,9 +674,9 @@ class _CallPipeline:
     def policy_scopes(self) -> list[tuple[str, str | None, str | None]]:
         """Every ``(server id, group id, member server id)`` this call's policy is resolved under.
 
-        See :func:`_policy_scopes`.
+        See :func:`_policy_scopes`. The scopes the governance decision was made under.
         """
-        return _policy_scopes(self.call.mcp_server, self.is_group, self.target_server_id, self.owning_groups)
+        return list(self.governance.scopes)
 
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
@@ -800,19 +832,21 @@ class BatchExecutor:
         by_index = {r.index: r for r in cut}
         return [by_index.get(r.index, r) for r in results]
 
-    def _l7_approval_rule(self, call: CallSpec, ctx: Any) -> str | None:
+    def _l7_approval_rule(self, call: CallSpec, ctx: Any, *, policy: Any = _UNRESOLVED) -> str | None:
         """The L7 (MCPEgressPolicy) requireApproval verdict for this call.
 
         Returns the human-readable reason when the target server's enforced L7
         policy routes this tool to approval (#921), else None. Audit mode
         observes and never blocks, so it never asks a human; deny needs no
         gate -- the aggregate refuses it on invoke.
+
+        Args:
+            policy: The L7 policy the call's governance decision read, with its
+                overlays and groups (#1488). Without it, the policy of the
+                server the call names is read now.
         """
-        try:
-            server = ctx.repository.get(call.mcp_server)
-        except Exception:  # noqa: BLE001 -- resolution problems belong to the invoke path's own errors
-            return None
-        policy = getattr(server, "l7_policy", None)
+        if policy is _UNRESOLVED:
+            policy = _l7_policy_of(getattr(ctx, "repository", None), call.mcp_server)
         if policy is None:
             return None
 
@@ -879,7 +913,11 @@ class BatchExecutor:
         # The L7 egress policy is the second, independent source of "ask a
         # human" (#921): before this, its requireApproval verdict failed
         # closed in the aggregate and was indistinguishable from deny.
-        l7_rule = self._l7_approval_rule(call, ctx)
+        l7_rule = (
+            self._l7_approval_rule(call, ctx)
+            if governance is None
+            else self._l7_approval_rule(call, ctx, policy=governance.l7_policy)
+        )
 
         if not needs_mrtr_approval and l7_rule is None:
             return None
@@ -982,7 +1020,6 @@ class BatchExecutor:
         *,
         group_id: str | None = None,
         target_server_id: str = "",
-        owning_groups: tuple[str, ...] = (),
     ) -> CallResult | None:
         """Re-check, after an approval hold, everything decided before it.
 
@@ -997,9 +1034,11 @@ class BatchExecutor:
                 during the hold did not refuse the approved call.
             target_server_id: The member a group selected, for the projection
                 and pin re-resolve (#1040).
-            owning_groups: The groups of a member named directly, which
-                ``_gate_tool_access`` also asked. A deny
-                added to one of them during the hold refuses the approved call.
+
+        A member named directly is re-checked against the groups that own it
+        now, read with the policy and withdrawals (#1488), as
+        ``_gate_tool_access`` asked the groups that owned it then. A deny added
+        to one of them during the hold refuses the approved call.
         """
 
         def _refuse(reason: str, code: str) -> CallResult:
@@ -1044,7 +1083,6 @@ class BatchExecutor:
                 caller_tenant_id,
                 group_id=group_id,
                 target_server_id=target_server_id,
-                owning_groups=owning_groups,
             )
         )
 
@@ -1713,14 +1751,19 @@ class BatchExecutor:
         checks below still key on the logical group id.
 
         A server named directly is dispatched to as itself and never through a
-        group's selection. When it is a group member, its groups are recorded,
-        and the policy, withdrawal and pin gates below apply theirs too. Before
-        that, naming a member bypassed its group.
+        group's selection. When it is a group member, the policy, withdrawal
+        and pin gates below apply its groups' too. Before that, naming a member
+        bypassed its group. Which groups own it is read by the governance
+        decision, with the overlays, not here (#1488).
+
+        Choosing a group's member is not part of that decision: a selection
+        advances the group's strategy, so it is made once. The governance of a
+        call naming a group, the group's scope and the selected member's,
+        reads no membership.
         """
         p.mcp_server_obj = p.ctx.get_mcp_server(p.call.mcp_server)
         p.target_server_id = p.call.mcp_server
         if p.mcp_server_obj:
-            p.owning_groups = _groups_owning(p.call.mcp_server)
             return None
 
         p.group_obj = GROUPS.get(p.call.mcp_server)
@@ -1733,8 +1776,6 @@ class BatchExecutor:
             p.target_server_id = selected_member.id.value
         elif not p.ctx.mcp_server_exists(p.call.mcp_server):
             return p.refuse(f"McpServer '{p.call.mcp_server}' not found", "McpServerNotFoundError")
-        else:
-            p.owning_groups = _groups_owning(p.call.mcp_server)
         return None
 
     def _gate_tool_access(self, p: "_CallPipeline") -> CallResult | None:
@@ -2069,7 +2110,6 @@ class BatchExecutor:
                     lambda projection, _pin: self._enforce_digest_pins(p, projection),
                     group_id=p.call.mcp_server if p.is_group else None,
                     target_server_id=p.target_server_id,
-                    owning_groups=p.owning_groups,
                 )
                 if refusal is not None:
                     approval_span.set_attribute("approval.result", "revalidation_failed")
@@ -2094,7 +2134,7 @@ class BatchExecutor:
         try:
             # An L7 requireApproval with nobody to ask passes the gate and is
             # refused by the aggregate at dispatch (see _check_approval_gate).
-            l7_rule = self._l7_approval_rule(p.call, p.ctx)
+            l7_rule = self._l7_approval_rule(p.call, p.ctx, policy=p.governance.l7_policy)
         except Exception:  # noqa: BLE001 -- a span label must never decide the call
             return "not_required"
         return "unavailable" if l7_rule is not None else "not_required"
