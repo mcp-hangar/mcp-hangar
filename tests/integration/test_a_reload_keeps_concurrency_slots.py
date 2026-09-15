@@ -126,6 +126,7 @@ class _Calls:
 
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
+        self._releases: list[threading.Event] = []
 
     def hold(self, mcp_server_id: str) -> threading.Event:
         entered, release = threading.Event(), threading.Event()
@@ -152,8 +153,12 @@ class _Calls:
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
         self._threads.append(thread)
+        self._releases.append(release)
 
     def join(self) -> None:
+        """Release every call still held, so a test that failed part-way leaves no thread behind."""
+        for release in self._releases:
+            release.set()
         for thread in self._threads:
             thread.join(5)
             assert not thread.is_alive()
@@ -188,7 +193,9 @@ class TestTheRunningCallsKeepTheirSlots:
 
         result = gateway.reload(EDITED)
 
-        assert result["success"] and result["mcp_servers_removed"] == ["drop"]
+        # Only the servers this test declares: the reload also removes any an
+        # earlier test left in the process's repository.
+        assert result["success"] and [sid for sid in result["mcp_servers_removed"] if sid in IDS] == ["drop"]
         assert get_concurrency_manager() is manager and _manager() is manager, "the same manager, not a new one"
         assert _limits() == {None: 6, "keep": 2, "change": 1, "drop": DEFAULT_PROVIDER_CONCURRENCY, "pool": 3}
         assert _in_flight() == {None: 5, "keep": 2, "change": 2, "drop": 1}
