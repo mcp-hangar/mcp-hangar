@@ -3,10 +3,13 @@
 import time
 from unittest.mock import MagicMock
 
+import pytest
+
 from mcp_hangar.application.commands import GiveUpOnMcpServerCommand, StartMcpServerCommand, StopMcpServerCommand
 from mcp_hangar.application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga, McpServerFailoverSaga
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from mcp_hangar.domain.events import (
+    DELIBERATE_STOP_REASONS,
     STOPPED_BY_GIVING_UP,
     HealthCheckFailed,
     McpServerDegraded,
@@ -107,6 +110,17 @@ class TestMcpServerRecoverySaga:
 
         # Normal shutdown
         saga.handle(McpServerStopped("p1", "shutdown"))
+
+        assert saga.get_retry_state("p1") is None
+
+    @pytest.mark.parametrize("reason", DELIBERATE_STOP_REASONS)
+    def test_a_stop_made_on_purpose_clears_retry_state(self, reason):
+        # Each was recorded as "shutdown" until the stop command's reason
+        # reached the event (#1466), and cleared the state then too.
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
+        saga.handle(McpServerDegraded("p1", 1, 1, "error"))
+
+        saga.handle(McpServerStopped("p1", reason))
 
         assert saga.get_retry_state("p1") is None
 

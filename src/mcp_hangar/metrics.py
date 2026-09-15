@@ -586,15 +586,17 @@ PROVIDER_STARTS_TOTAL = Counter(
 #: a known list, and the metric's HELP line carries it:
 #:
 #: - `idle`: the GC stopped a server unused past its idle TTL.
-#: - `shutdown`: a running server was stopped: hangar_stop, the REST stop, a
-#:   reload, unload or delete, a group's stop_all, process exit. A stop through
-#:   the stop command is also counted under the command's reason, below.
+#: - `shutdown`: Hangar stopped the server itself: a reload, unload or delete, a
+#:   group's stop_all, process exit.
 #: - `user_request`: hangar_stop, or the REST stop without a reason.
 #: - `manual`: the REST stop with an empty reason, or one not in this list.
 #: - `failback`, `compensation`: the failover saga stopped a backup.
 #: - `detection_enforcement:block`: a detection rule, or the REST block, stopped it.
 #: - `max_retries_exceeded`: the recovery saga gave up on the server, which is
 #:   now `dead` (`STOPPED_BY_GIVING_UP` in `domain.events`).
+#:
+#: A stop is counted once, from its `McpServerStopped`, whose reason is the one
+#: the stop was made for (#1466).
 MCP_SERVER_STOP_REASONS = (
     "idle",
     "shutdown",
@@ -1569,16 +1571,25 @@ def record_mcp_server_start(mcp_server: str, success: bool):
         PROVIDER_INITIALIZED.set(1, mcp_server=mcp_server)
 
 
-def record_mcp_server_stop(mcp_server: str, reason: str):
-    """Record a mcp_server stop, under one of `MCP_SERVER_STOP_REASONS`.
+def mcp_server_stop_reason(reason: object) -> str:
+    """The one of `MCP_SERVER_STOP_REASONS` a stop for `reason` is recorded under.
 
-    Any other reason is counted as `manual`: the REST stop takes its reason from
-    the request body, and the label stays the closed set its HELP line lists.
-    Compared against the tuple, not a set: the body can hold a value that does
-    not hash.
+    Any other reason is `manual`: the REST stop takes its reason from the
+    request body, which can hold any JSON value, and the label stays the closed
+    set its HELP line lists. The stop command records its stop under this
+    (#1466), so the event carries a reason every consumer of it knows.
     """
-    label = reason if reason in MCP_SERVER_STOP_REASONS else MCP_SERVER_STOP_REASON_OTHER
-    PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=label)
+    if isinstance(reason, str) and reason in MCP_SERVER_STOP_REASONS:
+        return reason
+    return MCP_SERVER_STOP_REASON_OTHER
+
+
+def record_mcp_server_stop(mcp_server: str, reason: str):
+    """Record a mcp_server stop, under `mcp_server_stop_reason(reason)`.
+
+    Called for each `McpServerStopped` only, so a stop is counted once (#1466).
+    """
+    PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=mcp_server_stop_reason(reason))
 
 
 def record_catalogue_retry(mcp_server: str, outcome: str) -> None:

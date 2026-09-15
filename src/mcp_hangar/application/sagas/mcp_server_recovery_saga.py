@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from ...domain.events import (
+    DELIBERATE_STOP_REASONS,
     STOPPED_BY_GIVING_UP,
     DomainEvent,
     HealthCheckFailed,
@@ -290,8 +291,10 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         # A restart scheduled before the stop would undo it.
         self._cancel_pending_restarts(mcp_server_id)
 
-        # Only clear state for intentional stops
-        if event.reason in ("shutdown", "idle", "user_request", "detection_enforcement:block"):
+        # Only clear state for intentional stops: every stop but a give-up. The
+        # stop command's reason reaches the event (#1466); a failback or a
+        # manual stop, recorded as "shutdown" before, still clears it.
+        if event.reason in DELIBERATE_STOP_REASONS:
             with self._lock:
                 self._retry_state.pop(mcp_server_id, None)
 
