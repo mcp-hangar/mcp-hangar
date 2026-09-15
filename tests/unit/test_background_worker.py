@@ -18,6 +18,11 @@ def _make_provider(state: ProviderState, health_tracker: HealthTracker | None = 
     return provider
 
 
+def _one_turn(worker: BackgroundWorker):
+    """Let `worker._loop()` run one cycle: the first wait times out, the second raises."""
+    return patch.object(worker._stopped, "wait", side_effect=[False, StopIteration])
+
+
 class TestBackgroundWorkerHealthCheckScheduling:
     """Tests for state-aware health check scheduling in BackgroundWorker."""
 
@@ -137,8 +142,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         # (not affected by state-aware health check scheduling)
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
-    def test_loop_skips_cold_in_health_check_mode(self, mock_sleep, mock_observe):
+    def test_loop_skips_cold_in_health_check_mode(self, mock_observe):
         """Integration: _loop skips COLD providers for health_check task."""
         cold_provider = _make_provider(ProviderState.COLD)
         ready_provider = _make_provider(ProviderState.READY)
@@ -151,7 +155,8 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker.running = True
 
         try:
-            worker._loop()
+            with _one_turn(worker):
+                worker._loop()
         except StopIteration:
             pass
 
@@ -159,8 +164,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         ready_provider.health_check.assert_called_once()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
-    def test_loop_skips_initializing_in_health_check_mode(self, mock_sleep, mock_observe):
+    def test_loop_skips_initializing_in_health_check_mode(self, mock_observe):
         """Integration: _loop skips INITIALIZING providers for health_check task."""
         init_provider = _make_provider(ProviderState.INITIALIZING)
         providers = {"init-one": init_provider}
@@ -169,15 +173,15 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker.running = True
 
         try:
-            worker._loop()
+            with _one_turn(worker):
+                worker._loop()
         except StopIteration:
             pass
 
         init_provider.health_check.assert_not_called()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
-    def test_loop_sets_next_check_at_after_health_check(self, mock_sleep, mock_observe):
+    def test_loop_sets_next_check_at_after_health_check(self, mock_observe):
         """Integration: _loop sets _next_check_at after checking a READY provider."""
         provider = _make_provider(ProviderState.READY)
         providers = {"ready-one": provider}
@@ -186,7 +190,8 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker.running = True
 
         try:
-            worker._loop()
+            with _one_turn(worker):
+                worker._loop()
         except StopIteration:
             pass
 
@@ -194,8 +199,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         assert worker._next_check_at["ready-one"] > time.time()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
-    def test_loop_respects_next_check_at_timing(self, mock_sleep, mock_observe):
+    def test_loop_respects_next_check_at_timing(self, mock_observe):
         """Integration: _loop skips providers whose next_check_at is in the future."""
         provider = _make_provider(ProviderState.READY)
         providers = {"future-one": provider}
@@ -206,7 +210,8 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker._next_check_at["future-one"] = time.time() + 3600
 
         try:
-            worker._loop()
+            with _one_turn(worker):
+                worker._loop()
         except StopIteration:
             pass
 

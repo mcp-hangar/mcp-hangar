@@ -47,6 +47,16 @@ in the same check as that check's `HealthCheckFailed`, and whoever counts
 failures must then count only one of the two.
 """
 
+STOPPED_BY_GIVING_UP = "max_retries_exceeded"
+"""The `McpServerStopped.reason` of a server the recovery saga gave up on (#1360).
+
+A give-up closes the connection, as a stop does, and is recorded as a stop, so
+`mcp_hangar_mcp_server_stops_total` counts it apart from an idle reap or an
+operator's stop. The move to DEAD is recorded right after it: a stop replays to
+COLD, and the move that follows leaves the stream, and the state gauge, at DEAD.
+The value is the one the stop counter already carried for a give-up.
+"""
+
 
 @dataclass
 class McpServerStateChanged(DomainEvent):

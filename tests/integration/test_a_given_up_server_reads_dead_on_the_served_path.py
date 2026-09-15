@@ -139,6 +139,8 @@ def test_the_saga_retries_then_gives_up(run, server):
     # just before it hears that degrade.
     assert len(restarts) == DEGRADES_BEFORE_GIVING_UP - 1, events
     assert max(restarts) < dead_at, "a restart after the give-up: the saga revived what it gave up on"
+    # Recorded as a stop with its own reason, right before the move to dead (#1360).
+    assert events[dead_at - 1] == ["stopped", "max_retries_exceeded"], events
     assert run["dead"][server]["stops"] == {"max_retries_exceeded": 1.0, "shutdown": 0.0}
 
 

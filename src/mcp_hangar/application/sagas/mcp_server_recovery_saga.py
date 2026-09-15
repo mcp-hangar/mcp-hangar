@@ -9,7 +9,14 @@ import time
 
 from typing import Any
 
-from ...domain.events import DomainEvent, HealthCheckFailed, McpServerDegraded, McpServerStarted, McpServerStopped
+from ...domain.events import (
+    STOPPED_BY_GIVING_UP,
+    DomainEvent,
+    HealthCheckFailed,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStopped,
+)
 from ...domain.exceptions import CannotStartMcpServerError
 from ...application.ports.saga import EventTriggeredSaga, ISagaManager
 from ...logging_config import get_logger
@@ -159,7 +166,7 @@ class McpServerRecoverySaga(EventTriggeredSaga):
             # A restart still waiting to fire would start the server again after
             # this, and giving up means only a deliberate start or a call does.
             self._cancel_pending_restarts(mcp_server_id)
-            return [GiveUpOnMcpServerCommand(mcp_server_id=mcp_server_id, reason="max_retries_exceeded")]
+            return [GiveUpOnMcpServerCommand(mcp_server_id=mcp_server_id, reason=STOPPED_BY_GIVING_UP)]
 
         logger.info(
             f"McpServer {mcp_server_id} degraded, scheduling retry {retries}/{self._max_retries} in {backoff:.1f}s"

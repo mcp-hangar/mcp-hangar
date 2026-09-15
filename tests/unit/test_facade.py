@@ -1,6 +1,7 @@
 """Tests for Hangar facade and HangarConfig builder."""
 
 import asyncio
+import contextlib
 import importlib
 import inspect
 from types import SimpleNamespace
@@ -30,6 +31,7 @@ from mcp_hangar.facade import (
 )
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import prepare_config
+from mcp_hangar.server.lifecycle import ServerLifecycle
 
 #: The package, not the `bootstrap` function `mcp_hangar.server` re-exports under the same name.
 bootstrap_package = importlib.import_module("mcp_hangar.server.bootstrap")
@@ -618,6 +620,133 @@ class TestHangarRunsDiscovery:
         await hangar.stop()
         context.shutdown.assert_called_once()
         assert hangar._executor._shutdown is True
+
+
+class _RecordingWorker:
+    """A background worker that counts its starts, stops and waits."""
+
+    def __init__(self, task: str) -> None:
+        self.task = task
+        self.starts = 0
+        self.stops = 0
+        self.joins = 0
+
+    def start(self) -> None:
+        self.starts += 1
+
+    def stop(self) -> None:
+        self.stops += 1
+
+    def join(self, timeout_s: float | None = None) -> bool:
+        self.joins += 1
+        return True
+
+
+#: The workers `bootstrap()` builds for a config file with the defaults.
+_WORKER_TASKS = ["gc", "health_check", "metrics_snapshot", "config_reload"]
+
+
+def _workers() -> list[_RecordingWorker]:
+    return [_RecordingWorker(task) for task in _WORKER_TASKS]
+
+
+def _context_with(workers: list[_RecordingWorker]) -> Any:
+    """A real `ApplicationContext`, so `stop()` reaches the workers through its `shutdown()`."""
+    runtime = MagicMock()
+    runtime.repository.get_all.return_value = {}
+    return bootstrap_package.ApplicationContext(
+        runtime=runtime,
+        mcp_server=MagicMock(),
+        background_workers=list(workers),
+        discovery_orchestrator=None,
+        config={},
+    )
+
+
+@contextlib.contextmanager
+def _booting(context: Any):
+    """`bootstrap()` hands the facade *context*; the process-wide closers are left alone."""
+    with (
+        patch.object(bootstrap_package, "bootstrap", return_value=context),
+        patch.object(bootstrap_package, "close_what_bootstrap_started"),
+    ):
+        yield
+
+
+def _builder_hangar() -> Hangar:
+    return Hangar.from_builder(HangarConfig().add_mcp_server("math", command=["python"]).build())
+
+
+class TestHangarRunsTheBackgroundWorkers:
+    """`Hangar.start()` starts the workers `serve` starts, and `stop()` stops them (#1435).
+
+    Under the facade the GC and health-check workers `bootstrap()` built were
+    never started, so an idle server was never stopped and none was health
+    checked. The facade and `ServerLifecycle` now start them through one
+    function. Real threads, a real idle server and a real health check are in
+    `tests/integration/test_the_facade_runs_the_background_workers.py`.
+    """
+
+    async def test_start_starts_each_worker_once_and_stop_stops_it(self):
+        workers = _workers()
+        hangar = _builder_hangar()
+
+        with _booting(_context_with(workers)):
+            await hangar.start()
+            await hangar.start()  # a second start does nothing
+            assert [(w.starts, w.stops) for w in workers] == [(1, 0)] * len(workers)
+
+            await hangar.stop()
+            await hangar.stop()  # a second stop does nothing
+
+        assert [(w.starts, w.stops, w.joins) for w in workers] == [(1, 1, 1)] * len(workers)
+
+    def test_the_sync_facade_starts_and_stops_them_too(self):
+        workers = _workers()
+        hangar = SyncHangar(_builder_hangar())
+
+        with _booting(_context_with(workers)):
+            with hangar:
+                hangar.start()  # a second start does nothing
+                assert [(w.starts, w.stops) for w in workers] == [(1, 0)] * len(workers)
+            hangar.stop()  # a second stop does nothing
+
+        assert [(w.starts, w.stops, w.joins) for w in workers] == [(1, 1, 1)] * len(workers)
+
+    async def test_a_worker_that_fails_to_start_shuts_the_context_down(self):
+        workers = _workers()
+        workers[1].start = Mock(side_effect=RuntimeError("no start"))  # type: ignore[method-assign]
+        hangar = _builder_hangar()
+
+        with _booting(_context_with(workers)), pytest.raises(RuntimeError, match="no start"):
+            await hangar.start()
+
+        assert hangar._started is False
+        assert hangar._context is None
+        # The worker that did start is stopped with the others, and a caller
+        # that stops anyway does not stop them a second time.
+        assert workers[0].starts == 1
+        assert [w.stops for w in workers] == [1] * len(workers)
+        await hangar.stop()
+        assert [w.stops for w in workers] == [1] * len(workers)
+
+    async def test_serve_and_the_facade_start_the_same_workers(self):
+        served, embedded = _workers(), _workers()
+
+        lifecycle = ServerLifecycle(_context_with(served))
+        with patch.object(lifecycle, "_warm_up"):
+            lifecycle.start()
+
+        hangar = _builder_hangar()
+        with _booting(_context_with(embedded)):
+            await hangar.start()
+            await hangar.stop()
+
+        def started(workers: list[_RecordingWorker]) -> list[str]:
+            return [w.task for w in workers if w.starts == 1]
+
+        assert started(served) == _WORKER_TASKS
+        assert started(embedded) == started(served)
 
 
 class TestHangarNotStarted:

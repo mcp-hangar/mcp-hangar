@@ -110,7 +110,9 @@ def test_the_server_refused_each_restart_before_its_backoff_ran_out(run):
 def test_the_saga_gives_up_after_its_budget_and_the_server_reads_dead(run):
     dead = run["dead"]
 
-    assert [SERVER, "state", "dead", "given_up"] in run["events"]
+    # Recorded as a stop with its own reason, right before the move to dead (#1360).
+    stop_at = run["events"].index([SERVER, "stopped", "max_retries_exceeded"])
+    assert run["events"][stop_at + 1] == [SERVER, "state", "dead", "given_up"]
     assert (dead["domain_state"], dead["state"], dead["up"]) == ("dead", 4.0, 0.0)
     assert dead["stops"] == {"max_retries_exceeded": 1.0, "shutdown": 0.0}
 

@@ -29,6 +29,7 @@ from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import http_graceful_shutdown_timeout, load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
+from .bootstrap.workers import start_background_workers
 from .catalogue_readiness import CatalogueRetry
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
@@ -80,8 +81,8 @@ def stop_discovery_loop(orchestrator: Any, loop: asyncio.AbstractEventLoop, thre
     finish, and a retained loop kept the process alive after it returned.
 
     The sources hear of the stop first, from this thread: one can be blocked
-    on the loop's own thread (the docker source waits out its connection
-    backoff there), and nothing scheduled on the loop runs until it returns.
+    on the loop's own thread, and nothing scheduled on the loop runs until it
+    returns.
     """
     try:
         orchestrator.request_stop()
@@ -381,14 +382,8 @@ class ServerLifecycle:
         if tailer is not None:
             tailer.start()
 
-        # Start background workers
-        for worker in self._context.background_workers:
-            worker.start()
-
-        logger.info(
-            "background_workers_started",
-            workers=[w.task for w in self._context.background_workers],
-        )
+        # The `Hangar` facade starts them through the same function (#1435).
+        start_background_workers(self._context.background_workers)
 
         self._start_discovery()
 
