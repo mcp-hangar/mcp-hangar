@@ -252,6 +252,7 @@ class TestMcpToolCarriesIds:
         source = _FakeSource("docker")
         orchestrator = _orchestrator_with(source)
 
+        from mcp_hangar.server import validation
         from mcp_hangar.server.tools import discovery as tools
 
         mcp = _FakeMCP()
@@ -259,7 +260,7 @@ class TestMcpToolCarriesIds:
         hangar_sources = mcp.tools["hangar_sources"]
 
         with patch.object(tools, "get_context", return_value=_ToolCtx(orchestrator)):
-            with patch.object(tools, "check_rate_limit", lambda *_a, **_k: None):
+            with patch.object(validation, "charge_tool", lambda *_a, **_k: None):
                 out = await hangar_sources()
 
         docker = next(s for s in out["sources"] if s["source_type"] == "docker")

@@ -189,8 +189,11 @@ class FrontDoor:
         return response.text
 
 
-def _runtime(endpoint: str) -> Any:
-    """The fleet: one remote upstream, the two commands the invoke path sends, the projection handler."""
+def _runtime(endpoint: str, also: tuple[str, ...] = ()) -> Any:
+    """The fleet: one remote upstream, the two commands the invoke path sends, the projection handler.
+
+    Each id in *also* is one more server on the same upstream, registered cold.
+    """
     from mcp_hangar.application.commands import InvokeToolCommand, StartMcpServerCommand
     from mcp_hangar.application.commands.handlers import InvokeToolHandler, StartMcpServerHandler
     from mcp_hangar.application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
@@ -209,6 +212,8 @@ def _runtime(endpoint: str) -> Any:
     projection = ToolProjectionPopulationHandler(repository=runtime.repository)
     runtime.event_bus.subscribe(McpServerStarted, projection.handle, kind=HandlerKind.LOCAL_VIEW)
     runtime.repository.add(SERVER, McpServer(mcp_server_id=SERVER, mode="remote", endpoint=endpoint))
+    for server_id in also:
+        runtime.repository.add(server_id, McpServer(mcp_server_id=server_id, mode="remote", endpoint=endpoint))
     init_context(runtime)
     bus.send(StartMcpServerCommand(mcp_server_id=SERVER))
     return runtime
@@ -238,13 +243,15 @@ def front_door(
     policies: dict[str, tuple[str, ...]] | None = None,
     *,
     topology: str = "front_door",
+    also: tuple[str, ...] = (),
 ) -> Iterator[FrontDoor]:
     """A served front door over one upstream exposing *tools*, each tenant with an API key.
 
     *policies* maps a tenant to its allow-list on the upstream; a tenant without
     one is allowed everything. *topology* serves the same gateway in the
     default ``egress`` instead, where the upstream is reached through
-    ``hangar_call``, for a test that compares the two surfaces.
+    ``hangar_call``, for a test that compares the two surfaces. Each id in
+    *also* is one more server on the same upstream, registered cold.
     """
     from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
     from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
@@ -266,7 +273,7 @@ def front_door(
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     runtime = None
     try:
-        runtime = _runtime(f"http://127.0.0.1:{upstream.server_address[1]}/mcp")
+        runtime = _runtime(f"http://127.0.0.1:{upstream.server_address[1]}/mcp", also)
         discovered = sorted(projection.tool for projection in get_tool_projection_registry().all())
         assert discovered == sorted(tools), f"the upstream's catalogue did not reach the registry: {discovered}"
 

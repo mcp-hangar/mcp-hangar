@@ -19,7 +19,7 @@ from ...domain.services import get_tool_access_resolver
 from ...metrics import TOOLS_FILTERED_TOTAL
 from ..context import get_context
 from ..validation import (
-    check_rate_limit,
+    charged_by_the_command_bus,
     not_rate_limited,
     tool_error_hook,
     tool_error_mapper,
@@ -201,8 +201,10 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
     @mcp.tool(name="hangar_tools")
     @mcp_tool_wrapper(
         tool_name="hangar_tools",
-        rate_limit_key=lambda mcp_server: f"hangar_tools:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_tools",
+        # Every listing that does work sends `StartMcpServerCommand`, which the
+        # command bus charges. The rest read tools declared in the config (#1481).
+        check_rate_limit=charged_by_the_command_bus,
         validate=validate_mcp_server_id_input,
         error_mapper=tool_error_mapper,
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
@@ -358,8 +360,9 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
     @mcp.tool(name="hangar_warm")
     @mcp_tool_wrapper(
         tool_name="hangar_warm",
-        rate_limit_key=lambda mcp_servers="": "hangar_warm",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_warm",
+        # Each start it sends is charged by the command bus (#1481).
+        check_rate_limit=charged_by_the_command_bus,
         validate=None,
         error_mapper=tool_error_mapper,
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
