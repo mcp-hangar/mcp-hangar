@@ -9,6 +9,7 @@ from typing import Any
 
 from ....application.tasks.tool_pin_context import CurrentToolPin
 from ....domain.value_objects.identity import IdentityContext
+from .member_health import MemberOutcome
 
 # =============================================================================
 # Configuration Constants
@@ -134,6 +135,9 @@ class CallResult:
     # MAIN-LOOP seam (relay_seam.py, run by hangar_call and the front door's flat
     # call) can govern the relay; None on every other path.
     relay_capture: "RelayCapture | None" = None
+    # What a failed invocation says about the group member that took it
+    # (#1409). Set where the executor caught the error; None on every other path.
+    member_outcome: MemberOutcome | None = None
 
 
 @dataclass
