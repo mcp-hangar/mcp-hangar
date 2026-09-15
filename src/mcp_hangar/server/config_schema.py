@@ -138,10 +138,12 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # `audit.enabled` (#1327), read by `bootstrap/observability._parse_observability_config`.
     "observability": frozenset({"audit", "langfuse", "tracing"}),
     "persistence": frozenset({"backend", "postgresql", "sqlite"}),
-    # The command-bus limit, read by `bootstrap/runtime.resolve_rate_limit_config`.
-    # There is a second `rate_limit` nested under `auth`; both spellings are live
-    # and the only thing that tells them apart is which one you nested it in.
-    "rate_limit": frozenset({"burst", "rps"}),
+    # The command-bus limit, read by `bootstrap/runtime.resolve_rate_limit_config`,
+    # and `per_caller` (#1471), read by `infrastructure/caller_rate_limit.parse_per_caller`,
+    # which checks its own keys. There is a second `rate_limit` nested under `auth`;
+    # both spellings are live and the only thing that tells them apart is which
+    # one you nested it in.
+    "rate_limit": frozenset({"burst", "per_caller", "rps"}),
     "relay_tasks_enabled": None,  # a bool, not a section
     # `max_per_tenant` (#1146), read by `config._init_resource_links_from_config`.
     "resource_links": frozenset({"max_per_tenant"}),
