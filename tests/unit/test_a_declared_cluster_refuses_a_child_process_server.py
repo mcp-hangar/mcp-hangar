@@ -20,12 +20,18 @@ from __future__ import annotations
 
 import pytest
 
+from mcp_hangar.domain.exceptions import ConfigurationError
+from mcp_hangar.domain.value_objects import McpServerMode
 from mcp_hangar.server.bootstrap.persistence import (
     LocalModeInDeclaredClusterError,
     refuse_local_modes_in_a_declared_cluster,
 )
+from mcp_hangar.server.config import load_config
 
 CLUSTER = {"lease_ttl_s": 15}
+REMOTE = {"mode": "remote", "endpoint": "http://x/mcp"}
+IMAGE = "example/server:1"
+COMMAND = ["python", "-m", "some.server"]
 
 
 def _config(servers: dict, *, cluster: bool = True) -> dict:
@@ -35,13 +41,36 @@ def _config(servers: dict, *, cluster: bool = True) -> dict:
     return config
 
 
-class TestADeclaredClusterRefusesThem:
-    @pytest.mark.parametrize("mode", ["subprocess", "docker", "container"])
-    def test_every_child_process_mode(self, mode: str) -> None:
-        with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
-            refuse_local_modes_in_a_declared_cluster(_config({"tools": {"mode": mode}}))
+def _group(*members: dict) -> dict:
+    return {"mode": "group", "members": list(members)}
 
-        assert excinfo.value.offenders == [("tools", mode)]
+
+def _offenders(servers: dict) -> list[tuple[str, str]]:
+    with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
+        refuse_local_modes_in_a_declared_cluster(_config(servers))
+    return excinfo.value.offenders
+
+
+def _load_as_bootstrap_does(config: dict) -> None:
+    # Bootstrap asks this check first, then builds the servers.
+    refuse_local_modes_in_a_declared_cluster(config)
+    load_config(config["mcp_servers"])
+
+
+class TestADeclaredClusterRefusesThem:
+    @pytest.mark.parametrize("mode", ["subprocess", "docker", "container", "podman"])
+    def test_every_child_process_mode(self, mode: str) -> None:
+        assert _offenders({"tools": {"mode": mode}}) == [("tools", mode)]
+
+    def test_every_mode_but_remote_and_group_is_refused(self) -> None:
+        # So a local mode added to `McpServerMode` cannot be forgotten here.
+        local = [m.value for m in McpServerMode if m not in (McpServerMode.REMOTE, McpServerMode.GROUP)]
+
+        assert sorted(server for server, _ in _offenders({m: {"mode": m} for m in local})) == sorted(local)
+
+    def test_a_server_with_no_mode_is_the_subprocess_the_loader_builds(self) -> None:
+        # `build_config` defaults a missing mode to `subprocess`, endpoint or not.
+        assert _offenders({"x": {"endpoint": "http://x/mcp"}}) == [("x", "subprocess")]
 
     def test_the_message_names_the_server_and_the_mode_that_works(self) -> None:
         with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
@@ -54,22 +83,60 @@ class TestADeclaredClusterRefusesThem:
 
     def test_every_offender_at_once(self) -> None:
         # Fixing these one restart at a time is the experience this refuses to ship.
-        config = _config(
+        offenders = _offenders(
             {
                 "a": {"mode": "subprocess"},
-                "b": {"mode": "remote", "endpoint": "http://x/mcp"},
+                "b": REMOTE,
                 "c": {"mode": "docker"},
+                "g": _group({"id": "a"}, {"id": "i", "mode": "podman"}),
             }
         )
 
-        with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
-            refuse_local_modes_in_a_declared_cluster(config)
-
-        assert {server for server, _ in excinfo.value.offenders} == {"a", "c"}
+        assert offenders == [("a", "subprocess"), ("c", "docker"), ("g/i", "podman")]
 
     def test_the_mode_is_matched_however_it_is_spelled(self) -> None:
         with pytest.raises(LocalModeInDeclaredClusterError):
             refuse_local_modes_in_a_declared_cluster(_config({"x": {"mode": " Subprocess "}}))
+
+
+class TestAGroupMemberIsJudgedAsTheLoaderBuildsIt:
+    @pytest.mark.parametrize("member", [{"id": "m", "mode": "docker", "image": IMAGE}, {"id": "m", "command": COMMAND}])
+    def test_an_inline_local_member_is_named_under_its_group(self, member: dict) -> None:
+        assert [server for server, _ in _offenders({"g": _group(member)})] == ["g/m"]
+
+    def test_a_group_of_remote_members_loads(self) -> None:
+        refuse_local_modes_in_a_declared_cluster(
+            _config({"r": REMOTE, "g": _group({"id": "r"}, {"id": "i", **REMOTE})})
+        )
+
+    def test_a_member_defined_at_top_level_is_reported_once_in_any_order(self) -> None:
+        servers = {"g": _group({"id": "t"}), "t": {"mode": "subprocess"}, "h": _group({"id": "t"})}
+
+        assert _offenders(servers) == [("t", "subprocess")]
+
+    def test_a_group_listed_before_a_remote_server_of_that_id_is_accepted(self) -> None:
+        # `build_config` builds every top-level server before any group, so the
+        # member is the remote `t` below, whatever the order in the file.
+        refuse_local_modes_in_a_declared_cluster(_config({"g": _group({"id": "t"}), "t": REMOTE}))
+
+    def test_an_inline_member_two_groups_share_is_reported_once(self) -> None:
+        member = {"id": "m", "mode": "docker", "image": IMAGE}
+
+        assert _offenders({"g": _group(member), "h": _group(member)}) == [("g/m", "docker")]
+
+
+class TestAMemberThatNamesNoServerIsTheLoadersToRefuse:
+    def test_a_typo_in_a_member_id_reads_as_the_loader_s_refusal(self) -> None:
+        # `{"id": "x"}` with no server `x` is not a local mode, it is a typo, and
+        # a cluster error would send the operator to the wrong problem.
+        with pytest.raises(ConfigurationError, match=r"Group 'g' member 'x' names no server"):
+            _load_as_bootstrap_does(_config({"g": _group({"id": "x"})}))
+
+    def test_an_inline_member_with_a_command_is_still_named_under_its_group(self) -> None:
+        with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
+            _load_as_bootstrap_does(_config({"g": _group({"id": "x", "command": COMMAND})}))
+
+        assert excinfo.value.offenders == [("g/x", "subprocess")]
 
 
 class TestWithoutTheDeclarationNothingChanges:
@@ -79,8 +146,11 @@ class TestWithoutTheDeclarationNothingChanges:
         # take away a working deployment for a peer that does not exist.
         refuse_local_modes_in_a_declared_cluster(_config({"tools": {"mode": "subprocess"}}, cluster=False))
 
+    def test_a_single_gateway_keeps_its_inline_group_members(self) -> None:
+        refuse_local_modes_in_a_declared_cluster(_config({"g": _group({"id": "m", "mode": "podman"})}, cluster=False))
+
     def test_a_cluster_of_remote_servers_is_the_supported_shape(self) -> None:
-        refuse_local_modes_in_a_declared_cluster(_config({"tools": {"mode": "remote", "endpoint": "http://x/mcp"}}))
+        refuse_local_modes_in_a_declared_cluster(_config({"tools": REMOTE}))
 
     def test_no_servers_at_all(self) -> None:
         refuse_local_modes_in_a_declared_cluster({"coordination": CLUSTER})
@@ -93,8 +163,8 @@ class TestWithoutTheDeclarationNothingChanges:
         # schema error into a confusing one about clusters.
         refuse_local_modes_in_a_declared_cluster({"coordination": CLUSTER, "mcp_servers": ["not", "a", "map"]})
 
-    def test_a_server_with_no_mode_is_left_to_the_schema(self) -> None:
-        refuse_local_modes_in_a_declared_cluster(_config({"x": {"endpoint": "http://x/mcp"}}))
+    def test_a_malformed_members_block_is_not_this_check_s_business(self) -> None:
+        refuse_local_modes_in_a_declared_cluster(_config({"g": {"mode": "group", "members": "nope"}}))
 
 
 class TestItRunsBeforeTheBackendIsBuilt:
