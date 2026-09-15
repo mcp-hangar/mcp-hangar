@@ -213,7 +213,7 @@ class TestTheProjection:
     def test_a_member_inherits_its_group_block(self, registry, handlers, monkeypatch) -> None:
         """A group is a governed scope; a block declared there must not be dead
         config just because the projection iterates members (#1038)."""
-        monkeypatch.setattr(flat_tool_projection, "_member_to_group", lambda: {SERVER: "the-group"})
+        monkeypatch.setattr(flat_tool_projection, "_member_to_groups", lambda: {SERVER: ("the-group",)})
         set_header_exposure_policy("the-group", HeaderExposurePolicy(SECRETY, "withdraw"))
 
         names = {tool.name for tool in _list(handlers).tools}
