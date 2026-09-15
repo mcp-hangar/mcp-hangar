@@ -426,3 +426,15 @@ class DiscoveryService:
                 await source.stop()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: single source stop failure must not prevent others
                 logger.error(f"Failed to stop source {source.source_type}: {e}")
+
+    def request_stop(self) -> None:
+        """Tell every source a stop is coming. Safe from any thread.
+
+        See `DiscoverySource.request_stop`: it runs before `stop()` is scheduled,
+        so a source blocking discovery's loop can end its wait.
+        """
+        for source in list(self._sources.values()):
+            try:
+                source.request_stop()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one source's failure must not keep the stop from the others
+                logger.error(f"Failed to request stop of source {source.source_type}: {e}")

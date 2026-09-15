@@ -227,6 +227,19 @@ class DiscoverySource(ABC):
         """
         pass
 
+    def request_stop(self) -> None:
+        """Say a stop is coming (optional hook), from whichever thread is stopping.
+
+        Synchronous, and callable from a thread other than the one discovery
+        runs on, on purpose. It is called before `stop()` is scheduled on
+        discovery's loop: a source that blocks that loop's thread, for example
+        by waiting out a connection backoff, keeps `stop()` from running until
+        the wait ends. Override it to end such a wait, for example by setting
+        the `threading.Event` the wait is on. It must not block and must not
+        touch the event loop.
+        """
+        pass
+
     def policy_violation(self, mcp_server: DiscoveredMcpServer) -> "SourcePolicyViolation | None":
         """This source's own reason to refuse something it discovered.
 
