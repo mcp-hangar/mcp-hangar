@@ -116,8 +116,10 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     (`catalogue_readiness`). That is not a warm-backend rule, and it does not bring #599 back. It
     asks whether a server was projected **once**, and a projection outlives the
     server's stop, so an idle or failed backend never makes a ready replica not
-    ready again. With no list, or in ``egress``, the body has no ``catalogue``
-    field and nothing here changed.
+    ready again. And it is bounded: once ``retry_for_s`` has passed since the
+    configuration was first applied, readiness stops looking at the catalogue
+    and this is today's rule again. With no list, or in ``egress``, the body has
+    no ``catalogue`` field and nothing here changed.
 
     Extracted from the endpoint closure so the decision is unit-testable; the
     bug lived in a closure nothing could reach.
@@ -131,7 +133,7 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     durability = get_event_store_durability_status()
     event_store_ok = durability is None or not durability.degraded
     catalogue = catalogue_readiness(repository)
-    catalogue_ok = catalogue is None or bool(catalogue["complete"])
+    catalogue_ok = catalogue is None or not catalogue["holds_readiness"]
 
     body: dict[str, Any] = {
         "status": "healthy" if event_store_ok and catalogue_ok else "unhealthy",

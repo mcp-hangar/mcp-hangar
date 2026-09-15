@@ -27,13 +27,15 @@ class Command(ABC):
 class StartMcpServerCommand(Command):
     """Command to start a mcp_server.
 
-    ``deliberate`` is True for every start that is asked for on purpose: an
-    operator's, a saga's, a call's cold start. A deliberate start revives a
-    ``dead`` server at once, whatever it died of (#1361). False starts the server
-    the way a call does instead (``ensure_ready(by_call=True)``): a dead server
-    waits out its backoff, and a capability-blocked one is refused. The front
-    door's catalogue retry is the one sender of False (#1446): it must not
-    revive what the lifecycle stopped.
+    ``deliberate`` is True for a start that is asked for on purpose: an
+    operator's (``hangar_start``, the REST start) or a saga's. A deliberate start
+    revives a ``dead`` server at once, whatever it died of (#1361). False starts
+    the server the way a call does (``ensure_ready(by_call=True)``): a dead
+    server waits out its backoff, and a capability-blocked one is refused. Two
+    senders use False: a call's cold start in the batch executor, which follows
+    the call rules even if the server changed after the executor checked it, and
+    the front door's catalogue retry (#1446), which must not revive what the
+    lifecycle stopped.
     """
 
     mcp_server_id: str

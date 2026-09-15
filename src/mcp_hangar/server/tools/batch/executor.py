@@ -1707,7 +1707,9 @@ class BatchExecutor:
             try:
                 self._single_flight.do(
                     p.target_server_id,
-                    lambda: p.ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=p.target_server_id)),
+                    lambda: p.ctx.command_bus.send(
+                        StartMcpServerCommand(mcp_server_id=p.target_server_id, deliberate=False)
+                    ),
                 )
                 cs_span.set_attribute("cold_start.result", "success")
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch

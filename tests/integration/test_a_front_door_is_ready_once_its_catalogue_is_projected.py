@@ -4,21 +4,25 @@
 real ``bootstrap()``, ``ServerLifecycle.start()`` with its workers, its front-door
 warm-up and the catalogue retry after it, real upstream processes broken on
 purpose, and ``ServerLifecycle.shutdown()``. ``/health/ready`` and ``/metrics``
-are asked over HTTP.
+are asked over HTTP. The same at every default setting, long enough for the
+recovery saga to give up, is
+``test_readiness_falls_back_after_the_retry_window_at_default_settings.py``.
 
-The decision it pins (maintainer, on #1446: option 3):
+The decision it pins (maintainer, on #1446: option 3, and the follow-up after
+the review of #1451):
 
-- A front-door replica whose required backend is down at boot is not ready, and
-  says what is missing. It becomes ready without a restart once the retry
-  projects that backend.
+- A front-door replica whose required backend is down at boot is not ready. It
+  becomes ready without a restart once the retry projects that backend. The
+  retry never starts it inside the server's own backoff.
 - The retry never starts a server that is dead for ``capability_blocked`` or
-  ``given_up``. The replica stays not ready and names the reason. That is the
-  intended answer: it cannot serve the catalogue it was told to, and bringing
-  either back is an operator's deliberate start.
+  ``given_up``. When nothing else is left it ends early, as ``blocked``;
+  readiness holds for the rest of the window, then falls back to today's rule.
 - The retry never starts a server stopped for being idle, and a ready replica
   stays ready through an idle stop and through a later outage.
 - The retry stops at shutdown.
 - In ``egress`` the same configuration changes nothing.
+- The readiness endpoint is unauthenticated, so it reports counts; no body it
+  answers names a server or a dead reason.
 """
 
 from __future__ import annotations
@@ -33,11 +37,16 @@ from typing import Any
 import pytest
 
 HARNESS = Path(__file__).with_name("_catalogue_readiness_harness.py")
-MODES = ("recover", "blocked", "egress")
+MODES = ("recover", "blocked", "shutdown", "egress")
 
-# As `_catalogue_readiness_harness.py` names them.
+# As `_catalogue_readiness_harness.py` names and sets them.
 IDLE, LATE = "svc-idle", "svc-late"
-BLOCKED, GIVEN_UP, DOWN = "svc-blocked", "svc-given-up", "svc-down"
+BLOCKED, GIVEN_UP = "svc-blocked", "svc-given-up"
+DOWN = "svc-down"
+LATE_BACKOFF_S = 5.0
+BLOCKED_WINDOW_S = 20
+#: Clock slack between the middleware's timestamps and the tracker's.
+SLACK_S = 0.1
 
 
 def _run(mode: str, tmp: Path) -> dict[str, Any]:
@@ -80,7 +89,7 @@ def egress(runs):
 
 
 # ----------------------------------------------------------------------------
-# A backend down at boot
+# A backend down at boot, every threshold at its default
 # ----------------------------------------------------------------------------
 
 
@@ -91,6 +100,7 @@ def test_a_replica_whose_required_backend_is_down_at_boot_is_not_ready(recover):
     assert ready["body"]["status"] == "unhealthy"
     assert ready["body"]["catalogue"] == {
         "complete": False,
+        "holds_readiness": True,
         "required": 2,
         "projected": 1,
         "missing_count": 1,
@@ -115,6 +125,22 @@ def test_it_becomes_ready_once_the_retry_projects_the_backend(recover):
     assert retries.get("projected") == 1.0, "the backend came back through something other than the retry"
 
 
+def test_the_retry_never_starts_a_server_inside_its_backoff(recover):
+    # svc-late's backoff is pinned above the retry's 2s spacing. An attempt made
+    # while `can_retry()` is false would come sooner than that after a failure,
+    # or be refused by the server: neither may happen.
+    starts = recover["late_starts_timed"]  # [deliberate, outcome, sent_at, ended_at]
+    [warm_up, *retried] = starts
+
+    assert warm_up[:2] == [True, "failed"], starts
+    assert retried and all(deliberate is False for deliberate, *_ in retried), starts
+    assert all(outcome != "refused" for _, outcome, *_ in retried), f"sent inside the backoff: {starts}"
+    for previous, attempt in zip(starts, retried, strict=False):
+        assert previous[1] == "failed", starts
+        gap = attempt[2] - previous[3]
+        assert gap >= LATE_BACKOFF_S - SLACK_S, f"an attempt {gap:.2f}s after a failure, backoff {LATE_BACKOFF_S}s"
+
+
 def test_an_idle_stopped_server_is_not_started_again(recover):
     # svc-idle was projected at boot and stopped for being idle while the
     # retry was still working on svc-late. #1429's reconciler restarted it.
@@ -135,50 +161,60 @@ def test_a_ready_replica_stays_ready_through_an_idle_stop_and_a_later_outage(rec
 
 
 # ----------------------------------------------------------------------------
-# Servers the retry must leave alone, and shutdown
+# Servers the retry must leave alone, and the window
 # ----------------------------------------------------------------------------
 
 
 def test_it_is_seen_dead_for_both_reasons(blocked):
-    assert blocked["dead"] == {BLOCKED: ["dead", "capability_blocked"], GIVEN_UP: ["dead", "given_up"]}
+    assert blocked["dead"]["states"] == {BLOCKED: ["dead", "capability_blocked"], GIVEN_UP: ["dead", "given_up"]}
 
 
-def test_a_capability_blocked_or_given_up_server_is_never_started_by_the_retry(blocked):
-    window = blocked["window"]
+def test_the_retry_ends_early_and_readiness_holds_for_the_rest_of_the_window(blocked):
+    held = blocked["held"]["ready"]
 
-    assert window["states"][BLOCKED] == ["dead", "capability_blocked"]
-    assert window["states"][GIVEN_UP] == ["dead", "given_up"], "revived after its upstream came back"
-    assert blocked["retries"] == {BLOCKED: {}, GIVEN_UP: {}}
-    assert blocked["blocked_launches"] == 1, "the blocked upstream was launched again"
-    assert blocked["given_up_starts"] == 0
-    assert blocked["given_up_ever_served"] is False
-
-
-def test_the_retry_was_running_all_along(blocked):
-    # Not a trivial pass: in the same window it kept trying the one server it may start.
-    assert blocked["window"]["down_attempts"] >= 1
-    assert blocked["window"]["ready"]["body"]["catalogue"]["retry"] == "running"
-
-
-def test_readiness_stays_503_and_says_why(blocked):
-    ready = blocked["window"]["ready"]
-
-    assert ready["status"] == 503
-    assert ready["body"]["catalogue"] == {
+    assert held["at"] < BLOCKED_WINDOW_S, "the window ended before the check could run"
+    assert held["status"] == 503
+    assert held["body"]["catalogue"] == {
         "complete": False,
-        "required": 3,
+        "holds_readiness": True,
+        "required": 2,
         "projected": 0,
-        "missing_count": 3,
+        "missing_count": 2,
         "not_retried_count": 2,
-        "retry": "running",
+        "retry": "blocked",
     }
 
 
-def test_the_retry_stops_at_shutdown(blocked):
-    after = blocked["after_shutdown"]
+def test_readiness_falls_back_once_the_window_ends(blocked):
+    fallback = blocked["fallback"]
 
-    assert after["down_attempts"] == 0, "a start after shutdown"
-    assert after["ready"]["body"]["catalogue"]["retry"] == "stopped"
+    assert fallback["status"] == 200, fallback
+    assert fallback["at"] >= BLOCKED_WINDOW_S
+    assert fallback["body"]["status"] == "healthy"
+    catalogue = fallback["body"]["catalogue"]
+    assert (catalogue["holds_readiness"], catalogue["complete"], catalogue["retry"]) == (False, False, "blocked")
+
+
+def test_a_capability_blocked_or_given_up_server_is_never_started_by_the_retry(blocked):
+    assert blocked["held"]["states"] == {BLOCKED: ["dead", "capability_blocked"], GIVEN_UP: ["dead", "given_up"]}
+    assert blocked["retries"] == {BLOCKED: {}, GIVEN_UP: {}}
+    assert blocked["blocked_launches"] == 1, "the blocked upstream was launched again"
+    assert blocked["given_up_starts"] == 0
+    assert blocked["given_up_ever_served"] is False, "revived after its upstream came back"
+
+
+# ----------------------------------------------------------------------------
+# Shutdown
+# ----------------------------------------------------------------------------
+
+
+def test_the_retry_stops_at_shutdown(runs):
+    shutdown = runs["shutdown"]
+
+    assert shutdown["before"]["attempts"] >= 2
+    assert shutdown["before"]["ready"]["body"]["catalogue"]["retry"] == "running"
+    assert shutdown["after"]["attempts_since"] == 0, "a start after shutdown"
+    assert shutdown["after"]["ready"]["body"]["catalogue"]["retry"] == "stopped"
 
 
 # ----------------------------------------------------------------------------
@@ -211,8 +247,10 @@ def test_no_readiness_body_names_a_server_or_a_dead_reason(runs):
         runs["recover"]["while_late"]["ready"],
         runs["recover"]["recovered"]["ready"],
         runs["recover"]["after_outage"]["ready"],
-        runs["blocked"]["window"]["ready"],
-        runs["blocked"]["after_shutdown"]["ready"],
+        runs["blocked"]["held"]["ready"],
+        runs["blocked"]["fallback"],
+        runs["shutdown"]["before"]["ready"],
+        runs["shutdown"]["after"]["ready"],
         runs["egress"]["boot"],
         runs["egress"]["later"],
     ]

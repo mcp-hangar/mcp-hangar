@@ -17,37 +17,45 @@ projected before it is ready::
 
 ## What readiness waits for, and for how long
 
-Until every required server has been projected **once** on this replica,
-``/health/ready`` answers 503. After that, readiness
-never looks at the catalogue again: a projection is not removed when a server
-stops, so a later outage or an idle stop cannot take the replica out of the
-Service. That is what keeps #599 fixed. An idle gateway with every backend cold
-is still ready, because being ready here means "was projected", not "is warm".
+``retry_for_s`` is a window, opened when this process first applies its
+configuration and never moved by a reload. Inside it, ``/health/ready`` answers
+503 until every required server has been projected **once** on this replica.
+When all of them have been, or when the window ends, readiness stops looking at
+the catalogue for good and goes back to today's rule. So a replica is held out
+of the Service for at most ``retry_for_s``: a required server that never comes
+back, or that the lifecycle gave up on, cannot hold it forever.
 
-``/health/ready`` answers without authentication, so its ``catalogue`` field
-carries counts and the retry's state, never a server id or a dead reason. The
-ids and reasons go where operators already look: a ``required_catalogue_waiting``
-log line each time they change, the retry's own log lines, and ``hangar_health``.
+A projection is not removed when a server stops, so a later outage or an idle
+stop never takes a ready replica out of the Service. That is what keeps #599
+fixed: an idle gateway with every backend cold is still ready, because being
+ready here means "was projected", not "is warm".
 
 A group id is required as a group: it is satisfied once **any one** of its
-members has been projected, since that member's tools are the group's.
+members has been projected, since that member's tools are the group's. A group
+member defined only inline, in the group's ``members``, can be named too.
+
+``/health/ready`` answers without authentication, so its ``catalogue`` field
+carries counts and state, never a server id or a dead reason. The ids and
+reasons go where operators already look: a ``required_catalogue_waiting`` log
+line each time they change, the retry's own log lines, and ``hangar_health``.
+Both keep reporting what is missing after the window has ended.
 
 ## The retry
 
 The boot warm-up starts every server once. A required server it could not start
 is retried by ``CatalogueRetry``, on the warm-up's thread once the warm-up is
-done, for at most ``retry_for_s`` seconds (600 by default; 0 turns it off). It
-does not fight the server lifecycle, which is how #1429 failed:
+done, until the list is met or the window ends. It does not fight the server
+lifecycle, which is how #1429 failed:
 
 - It starts a server the way a call does, not the way ``hangar_start`` does
   (``StartMcpServerCommand(deliberate=False)``). A dead server then waits out
   its own backoff, which is also checked before the command is sent, and a
   capability-blocked one is refused.
 - It never starts a server that is ``dead`` for ``given_up`` or
-  ``capability_blocked``. Readiness stays 503 and the log names the reason: the replica
-  cannot serve the catalogue it was told to, and only an operator can decide
-  that server should run again, by starting it deliberately or by taking it off
-  the list.
+  ``capability_blocked``: only an operator can decide that server should run
+  again, by starting it deliberately or by taking it off the list. When nothing
+  it may start is left, it ends early, as ``blocked``; readiness still waits for
+  the rest of the window, for such a deliberate start.
 - It leaves a ``degraded`` server to the recovery saga, which either restarts it
   or gives up on it.
 - It only ever starts servers this replica has never projected. An idle stop
@@ -58,11 +66,22 @@ does not fight the server lifecycle, which is how #1429 failed:
   one path that publishes a start late: a group starting its members directly,
   whose ``McpServerStarted`` is published by the GC worker in the same sweep as
   an idle stop.
-- It stops for a server once that server is projected, stops altogether once
-  the list is satisfied, and stops at shutdown.
+- It stops for a server once that server is projected, stops starting a
+  group's other members once one of them is, and stops altogether once the
+  list is met, when the window ends, when a reload removes the list, and at
+  shutdown. Each way it ends is a final state; none of them reads ``running``.
 
 Every attempt writes one log line, naming the error type and never the error
 text, and one sample of ``mcp_hangar_catalogue_retries_total``.
+
+## What the configuration refuses
+
+An id that is not a server or group in ``mcp_servers``, a group with no members,
+an unknown key, and a ``retry_for_s`` that is not a number above 0. And, where
+several replicas take the management lease -- a ``coordination:`` block, or a
+shared storage backend -- a required server that runs in a local mode: only the
+lease holder may start one (``LocalModeNotOwnedError``), so a replica that does
+not hold the lease could never project it.
 
 ## Egress
 
@@ -81,16 +100,17 @@ import time
 from typing import Any
 
 from ..application.commands import StartMcpServerCommand
-from ..application.read_models.tool_projection import get_tool_projection_registry
+from ..application.read_models.tool_projection import get_tool_projection_registry, ToolProjectionRegistry
 from ..domain.exceptions import CannotStartMcpServerError, ConfigurationError
 from ..domain.model.mcp_server import DEAD_CAPABILITY_BLOCKED, DEAD_GIVEN_UP
 from ..domain.services.tool_access_resolver import is_front_door
+from ..infrastructure.launchers import LOCAL_MODES
 from ..logging_config import get_logger
 from ..metrics import record_catalogue_retry
 
 logger = get_logger(__name__)
 
-#: How long the retry runs after the warm-up, unless `retry_for_s` says otherwise.
+#: How long readiness may wait for the list, and the retry may run, unless `retry_for_s` says otherwise.
 DEFAULT_RETRY_FOR_S = 600.0
 #: How often the retry looks again at what is still missing.
 RETRY_POLL_S = 1.0
@@ -102,6 +122,9 @@ STOP_JOIN_S = 5.0
 #: Why-dead reasons the retry never starts a server for. Only an operator's
 #: deliberate start brings one of these back.
 NOT_RETRIED = frozenset({DEAD_GIVEN_UP, DEAD_CAPABILITY_BLOCKED})
+
+#: The one built-in storage backend that is local to one process (`registry.is_shared`).
+_LOCAL_BACKENDS = frozenset({"sqlite"})
 
 _WHERE = "tool_access.required_catalogue"
 _KEYS = frozenset({"servers", "retry_for_s"})
@@ -127,10 +150,11 @@ def required_catalogue(full_config: Mapping[str, Any]) -> RequiredCatalogue | No
     """``tool_access.required_catalogue``, checked against ``mcp_servers``. Absent means None.
 
     Raises:
-        ConfigurationError: If the block is malformed, carries a key nothing
-            reads, or names something that is not in ``mcp_servers``. A name that
-            can never be projected would hold readiness at 503 forever, so it is
-            refused here instead.
+        ConfigurationError: If the block is malformed or carries a key nothing
+            reads; if it names something that is not a server or group in
+            ``mcp_servers``, or a group with no members, which could never be
+            projected; or if it requires a local-mode server where only the
+            lease holder may start one.
     """
     tool_access = full_config.get("tool_access")
     block = tool_access.get("required_catalogue") if isinstance(tool_access, dict) else None
@@ -150,56 +174,147 @@ def required_catalogue(full_config: Mapping[str, Any]) -> RequiredCatalogue | No
         )
     servers = full_config.get("mcp_servers")
     specs: Mapping[str, Any] = servers if isinstance(servers, dict) else {}
-    requirements = tuple(_requirement(name, specs) for name in dict.fromkeys(names))
+    known = _known_servers(specs)
+    requirements = tuple(_requirement(name, specs, known) for name in dict.fromkeys(names))
+    _refuse_what_only_the_lease_holder_starts(full_config, requirements, known)
     return RequiredCatalogue(requirements=requirements, retry_for_s=_retry_for_s(block))
 
 
-def _requirement(name: str, specs: Mapping[str, Any]) -> Requirement:
-    if name not in specs:
+def _is_group(spec: Any) -> bool:
+    return isinstance(spec, dict) and spec.get("mode") == "group"
+
+
+def _members(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    raw = spec.get("members")
+    return [
+        member for member in (raw if isinstance(raw, list) else []) if isinstance(member, dict) and member.get("id")
+    ]
+
+
+def _known_servers(specs: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Every server id the configuration builds, with its spec.
+
+    The top-level servers, and a group member defined only inline in its group,
+    which the loader builds from the member's own spec. A top-level spec wins,
+    as it does in the loader.
+    """
+    known: dict[str, Mapping[str, Any]] = {
+        str(server_id): (spec if isinstance(spec, dict) else {})
+        for server_id, spec in specs.items()
+        if not _is_group(spec)
+    }
+    for spec in specs.values():
+        if _is_group(spec):
+            for member in _members(spec):
+                known.setdefault(str(member["id"]), member)
+    return known
+
+
+def _requirement(name: str, specs: Mapping[str, Any], known: Mapping[str, Any]) -> Requirement:
+    spec = specs.get(name)
+    if isinstance(spec, dict) and _is_group(spec):
+        members = tuple(str(member["id"]) for member in _members(spec))
+        if not members:
+            raise ConfigurationError(
+                f"{_WHERE}.servers names group {name!r}, which has no members, so nothing could ever satisfy it."
+            )
+        return Requirement(name=name, servers=members)
+    if name not in known:
         raise ConfigurationError(
-            f"{_WHERE}.servers names {name!r}, which is not in mcp_servers. A replica could never "
-            f"project it, so readiness would stay 503. Known ids: {sorted(specs)}."
+            f"{_WHERE}.servers names {name!r}, which is not a server or group in mcp_servers. A replica "
+            f"could never project it. Known ids: {sorted(set(known) | set(specs))}."
         )
-    spec = specs[name]
-    if not (isinstance(spec, dict) and spec.get("mode") == "group"):
-        return Requirement(name=name, servers=(name,))
-    raw_members = spec.get("members")
-    members = tuple(
-        str(member["id"])
-        for member in (raw_members if isinstance(raw_members, list) else [])
-        if isinstance(member, dict) and member.get("id")
-    )
-    if not members:
+    return Requirement(name=name, servers=(name,))
+
+
+def _lease_is_taken(full_config: Mapping[str, Any]) -> str | None:
+    """Why only one replica may start a local-mode server here, or None when every replica may.
+
+    A ``coordination:`` block declares a cluster. A storage backend other than
+    ``sqlite`` is shared, and a shared backend is what gives this gateway a
+    management lease (`bootstrap.coordination.init_lease_keeper`). A backend a
+    plugin registers is treated as shared too: that refuses a list a follower
+    might not be able to meet, rather than accepting one it cannot.
+    """
+    if "coordination" in full_config:
+        return "declares a cluster (`coordination:`)"
+    persistence = full_config.get("persistence")
+    backend = persistence.get("backend") if isinstance(persistence, dict) else None
+    if backend is not None and str(backend) not in _LOCAL_BACKENDS:
+        return f"persists through the shared `{backend}` backend"
+    return None
+
+
+def _is_local(spec: Mapping[str, Any]) -> bool:
+    return str(spec.get("mode", "subprocess")).strip().lower() in LOCAL_MODES
+
+
+def _refuse_what_only_the_lease_holder_starts(
+    full_config: Mapping[str, Any], requirements: tuple[Requirement, ...], known: Mapping[str, Mapping[str, Any]]
+) -> None:
+    """Refuse a requirement no replica but the lease holder could ever meet (#1446).
+
+    A group is refused only when every member is local: a remote member is one
+    any replica can start.
+    """
+    why = _lease_is_taken(full_config)
+    if why is None:
+        return
+    offenders = [
+        requirement.name
+        for requirement in requirements
+        if all(_is_local(known.get(server_id, {})) for server_id in requirement.servers)
+    ]
+    if offenders:
         raise ConfigurationError(
-            f"{_WHERE}.servers names group {name!r}, which has no members, so nothing could ever satisfy it."
+            f"{_WHERE}.servers requires {offenders}, which run in a local mode ({sorted(LOCAL_MODES)}), and this "
+            f"gateway {why}. Only the instance holding the management lease may start a local-mode server, so a "
+            "replica that does not hold it could never project one. Use `remote` mode for a server every replica "
+            "must serve, or take it off the list."
         )
-    return Requirement(name=name, servers=members)
 
 
 def _retry_for_s(block: Mapping[str, Any]) -> float:
     raw = block.get("retry_for_s", DEFAULT_RETRY_FOR_S)
     # `True` is an int to isinstance; a flag here is a mistake, not a duration.
-    if isinstance(raw, bool) or not isinstance(raw, int | float) or raw < 0:
+    if isinstance(raw, bool) or not isinstance(raw, int | float) or raw <= 0:
         raise ConfigurationError(
-            f"Invalid {_WHERE}.retry_for_s {raw!r}. It must be a number of seconds, 0 or more "
-            "(0 turns the retry off); omit it for the default."
+            f"Invalid {_WHERE}.retry_for_s {raw!r}. It must be a number of seconds above 0: how long readiness "
+            f"may wait for the list, and the retry may run. Omit it for the default; to not wait at all, omit {_WHERE}."
         )
     return float(raw)
 
 
-class _Gate:
-    """The process's required catalogue, and whether it has been projected yet.
+def _met(requirement: Requirement, registry: ToolProjectionRegistry) -> bool:
+    return any(registry.was_projected(server_id) for server_id in requirement.servers)
 
-    Complete is a latch: once every requirement has been met, nothing makes this
-    replica not ready again, a reload included. A process that booted with no
-    list is complete from the start, so a reload that adds one does not take a
-    serving replica out of the Service. A reload before completion replaces the
-    list, and one that removes it releases the wait.
+
+@dataclass(frozen=True)
+class _Snapshot:
+    """The list in force, what it is missing, and what that means for readiness."""
+
+    required: RequiredCatalogue
+    missing: list[Requirement]
+    not_retried: dict[str, str]
+    holds_readiness: bool
+    retry: str
+
+
+class _Gate:
+    """The process's required catalogue, its window, and whether it has been projected.
+
+    The window opens when this process first applies its configuration, with
+    that configuration's ``retry_for_s`` (none at all when it has no list), and
+    nothing moves it. Readiness waits only inside it, and only until the list
+    has been met once: meeting it is a latch. A reload replaces the list,
+    removes it, or adds one, and each is reported; none of them holds readiness
+    outside the window, or after the latch.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._required: RequiredCatalogue | None = None
+        self._window_ends_at: float | None = None
         self._complete = False
         self._retry = "not_started"
         # What `observe` last logged, so a probe every few seconds logs a change once.
@@ -207,10 +322,9 @@ class _Gate:
 
     def configure(self, required: RequiredCatalogue | None) -> None:
         with self._lock:
-            if self._complete:
-                return
+            if self._window_ends_at is None:
+                self._window_ends_at = time.monotonic() + (required.retry_for_s if required is not None else 0.0)
             self._required = required
-            self._complete = required is None
 
     def required(self) -> RequiredCatalogue | None:
         with self._lock:
@@ -220,73 +334,92 @@ class _Gate:
         with self._lock:
             self._retry = state
 
-    def unsatisfied(self) -> list[Requirement]:
-        """The requirements no projection has met yet; empty once complete."""
+    def window_closed(self) -> bool:
         with self._lock:
-            required, complete = self._required, self._complete
-        if required is None or complete:
-            return []
-        registry = get_tool_projection_registry()
-        missing = [r for r in required.requirements if not any(registry.was_projected(s) for s in r.servers)]
-        if not missing:
-            with self._lock:
-                newly = not self._complete
-                self._complete = True
-            if newly:
-                logger.info("required_catalogue_projected", required=[r.name for r in required.requirements])
-        return missing
+            return self._window_ends_at is None or time.monotonic() >= self._window_ends_at
 
-    def observe(self, repository: Any) -> tuple[list[Requirement], dict[str, str]]:
-        """What is missing, and each server the retry will not start and why.
+    def observe(self, repository: Any) -> _Snapshot | None:
+        """The list in force and what it is missing; None when there is none.
 
         Logged, with the ids and dead reasons and never error text, each time
-        either changes. That line is where an operator reads them: the readiness
-        endpoint is unauthenticated, so it reports counts.
+        any of it changes. That line is where an operator reads the ids: the
+        readiness endpoint is unauthenticated, so it reports counts.
         """
-        missing = self.unsatisfied()
-        not_retried = _not_retried(repository, missing) if missing else {}
-        seen = (tuple(requirement.name for requirement in missing), tuple(sorted(not_retried.items())))
-        with self._lock:
-            changed = bool(missing) and seen != self._logged
-            self._logged = seen
-            retry = self._retry
-        if changed:
-            logger.warning("required_catalogue_waiting", missing=list(seen[0]), not_retried=not_retried, retry=retry)
-        return missing, not_retried
-
-    def readiness(self, repository: Any) -> dict[str, Any] | None:
-        """The ``catalogue`` field of ``/health/ready``: counts and state, no ids. None when no list is in force."""
         required = self.required()
         if required is None:
             return None
-        missing, not_retried = self.observe(repository)
+        registry = get_tool_projection_registry()
+        missing = [requirement for requirement in required.requirements if not _met(requirement, registry)]
+        not_retried = _not_retried(repository, missing) if missing else {}
+        now = time.monotonic()
         with self._lock:
-            retry = self._retry
-        total = len(required.requirements)
+            newly_complete = not missing and not self._complete
+            self._complete = self._complete or not missing
+            window_open = self._window_ends_at is not None and now < self._window_ends_at
+            holds = bool(missing) and not self._complete and window_open
+            retry = _reported(self._retry, missing, not_retried, window_open)
+            snapshot = _Snapshot(required, missing, not_retried, holds, retry)
+            seen = (tuple(r.name for r in missing), tuple(sorted(not_retried.items())), holds, retry)
+            changed = bool(missing) and seen != self._logged
+            self._logged = seen
+        if newly_complete:
+            logger.info("required_catalogue_projected", required=[r.name for r in required.requirements])
+        if changed:
+            logger.warning(
+                "required_catalogue_waiting",
+                missing=list(seen[0]),
+                not_retried=not_retried,
+                holds_readiness=holds,
+                retry=snapshot.retry,
+            )
+        return snapshot
+
+    def readiness(self, repository: Any) -> dict[str, Any] | None:
+        """The ``catalogue`` field of ``/health/ready``: counts and state, no ids. None when no list is in force."""
+        snapshot = self.observe(repository)
+        if snapshot is None:
+            return None
+        total = len(snapshot.required.requirements)
         return {
-            "complete": not missing,
+            "complete": not snapshot.missing,
+            "holds_readiness": snapshot.holds_readiness,
             "required": total,
-            "projected": total - len(missing),
-            "missing_count": len(missing),
-            "not_retried_count": len(not_retried),
-            "retry": retry,
+            "projected": total - len(snapshot.missing),
+            "missing_count": len(snapshot.missing),
+            "not_retried_count": len(snapshot.not_retried),
+            "retry": snapshot.retry,
         }
 
     def detail(self, repository: Any) -> dict[str, Any] | None:
         """The same, with the ids and dead reasons, for a surface that authenticates its caller."""
-        required = self.required()
-        if required is None:
+        snapshot = self.observe(repository)
+        if snapshot is None:
             return None
-        missing, not_retried = self.observe(repository)
-        with self._lock:
-            retry = self._retry
         return {
-            "complete": not missing,
-            "required": [requirement.name for requirement in required.requirements],
-            "missing": [requirement.name for requirement in missing],
-            "not_retried": not_retried,
-            "retry": retry,
+            "complete": not snapshot.missing,
+            "holds_readiness": snapshot.holds_readiness,
+            "required": [requirement.name for requirement in snapshot.required.requirements],
+            "missing": [requirement.name for requirement in snapshot.missing],
+            "not_retried": snapshot.not_retried,
+            "retry": snapshot.retry,
         }
+
+
+def _reported(retry: str, missing: list[Requirement], not_retried: dict[str, str], window_open: bool) -> str:
+    """The retry's state as reported: final from the moment it is decided, not from the retry's next pass.
+
+    The retry notices the window's end, or that nothing it may start is left,
+    on its next pass, up to ``RETRY_POLL_S`` later. It starts nothing in
+    between -- each pass checks both before any attempt -- so the report does
+    not wait for it, and never reads ``running`` when there is nothing to run.
+    """
+    if retry != "running" or not missing:
+        return retry
+    if not window_open:
+        return "exhausted"
+    if set(_candidates(missing)) <= set(not_retried):
+        return "blocked"
+    return retry
 
 
 def _not_retried(repository: Any, missing: list[Requirement]) -> dict[str, str]:
@@ -324,13 +457,13 @@ def catalogue_detail(repository: Any) -> dict[str, Any] | None:
 
 
 def reset() -> None:
-    """Forget the list and the latch. For tests, and for a re-bootstrapped process."""
+    """Forget the list, the window and the latch. For tests, and for a re-bootstrapped process."""
     global _gate
     _gate = _Gate()
 
 
 class CatalogueRetry:
-    """Retry, within bounds, the required servers the boot warm-up could not project.
+    """Retry, within the window, the required servers the boot warm-up could not project.
 
     ``run`` is called on the warm-up's thread after the warm-up, and returns at
     once unless this is a front door with a list in force. See the module
@@ -354,48 +487,65 @@ class CatalogueRetry:
             thread.join(timeout)
 
     def run(self) -> None:
-        """Retry until the list is projected, ``retry_for_s`` has passed, or ``stop`` is called."""
-        required = _gate.required()
-        if required is None or self._stop.is_set() or not is_front_door():
-            return
-        if required.retry_for_s <= 0:
-            _gate.set_retry("off")
+        """Retry until the list is met, nothing is left it may start, the window ends, or ``stop``."""
+        if _gate.required() is None or self._stop.is_set() or not is_front_door():
             return
         self._thread = threading.current_thread()
         _gate.set_retry("running")
+        final = "failed"
         try:
-            _gate.set_retry(self._loop(time.monotonic() + required.retry_for_s))
+            final = self._loop()
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the retry ends in a final state, never `running` with no thread
+            logger.error("required_catalogue_retry_failed", error_type=type(e).__name__)
         finally:
+            _gate.set_retry(final)
             self._thread = None
 
-    def _loop(self, deadline: float) -> str:
+    def _loop(self) -> str:
         """The retry itself; returns how it ended."""
         while not self._stop.is_set():
-            # `observe`, not `unsatisfied`: the waiting line is logged even when nothing probes readiness.
-            missing, _ = _gate.observe(self._runtime.repository)
-            if not missing:
-                return "finished"
-            if time.monotonic() >= deadline:
-                logger.warning(
-                    "required_catalogue_retry_exhausted",
-                    missing=[requirement.name for requirement in missing],
-                    attempts=dict(self._attempts),
-                )
-                return "exhausted"
-            for server_id in _candidates(missing):
-                if self._stop.is_set():
-                    break
-                if self._due(server_id):
-                    self._attempt(server_id)
+            try:
+                ended = self._pass()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one failed pass must not end the retry for good
+                logger.warning("required_catalogue_retry_error", error_type=type(e).__name__)
+                ended = None
+            if ended is not None:
+                return ended
             self._stop.wait(self._poll_s)
         return "stopped"
 
+    def _pass(self) -> str | None:
+        """One look at the list and one round of due attempts: how the retry ended, or None to go on."""
+        snapshot = _gate.observe(self._runtime.repository)
+        if snapshot is None:
+            return "stopped"  # a reload removed the list
+        if not snapshot.missing:
+            return "finished"
+        missing = [requirement.name for requirement in snapshot.missing]
+        if _gate.window_closed():
+            logger.warning("required_catalogue_retry_exhausted", missing=missing, attempts=dict(self._attempts))
+            return "exhausted"
+        if set(_candidates(snapshot.missing)) <= set(snapshot.not_retried):
+            logger.warning("required_catalogue_retry_blocked", missing=missing, not_retried=snapshot.not_retried)
+            return "blocked"
+        registry = get_tool_projection_registry()
+        tried: set[str] = set()
+        for requirement in snapshot.missing:
+            for server_id in requirement.servers:
+                if self._stop.is_set():
+                    return None
+                # Met by an attempt earlier in this pass: a group's other members are not started.
+                if _met(requirement, registry):
+                    break
+                if server_id not in tried and self._due(server_id):
+                    self._attempt(server_id)
+                tried.add(server_id)
+        return None
+
     def _due(self, server_id: str) -> bool:
-        """Whether to start ``server_id`` now. Never for a projected server; see the module docstring."""
+        """Whether to start ``server_id`` now: its spacing, then its state and backoff (`_retryable`)."""
         now = time.monotonic()
         if now < self._next_at.setdefault(server_id, now + self._spacing_s):
-            return False
-        if get_tool_projection_registry().was_projected(server_id):
             return False
         server = self._runtime.repository.get(server_id)
         return server is not None and _retryable(server)
