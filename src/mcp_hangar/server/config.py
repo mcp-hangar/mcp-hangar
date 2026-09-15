@@ -9,6 +9,7 @@ startup so the rest of the server observes the same mcp_server state.
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+import copy
 from dataclasses import dataclass, field
 import functools
 import os
@@ -81,8 +82,12 @@ class _StagedConfig:
     servers: dict[str, McpServer] = field(default_factory=dict)
     groups: dict[str, McpServerGroup] = field(default_factory=dict)
     #: The spec each server in `servers` was built from: a top-level entry, or
-    #: a group's inline member entry. What a reload diffs against.
+    #: a group's inline member entry.
     specs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: What each server in `servers` was built with: the `McpServer` arguments
+    #: its spec gives, every default applied. A later reload keeps the running
+    #: server only when it would build it with the same ones (#1426).
+    built_with: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: The REST endpoint's stored policies, read when a reload is prepared so
     #: that a store that cannot be read refuses the reload. None: no store.
     stored_policies: list[Any] | None = None
@@ -125,7 +130,7 @@ class _StagedConfig:
         if replace:
             _BUILT_FROM.clear()
         _BUILT_FROM.update(
-            {sid: (self.specs[sid], server) for sid, server in self.servers.items() if sid in self.specs}
+            {sid: (self.built_with[sid], server) for sid, server in self.servers.items() if sid in self.built_with}
         )
         for group_id, group in self.groups.items():
             GROUPS[group_id] = group
@@ -140,20 +145,30 @@ class _StagedConfig:
                 del GROUPS[group_id]
 
 
-#: Each server a configuration built, with the spec it was built from. A reload
-#: keeps the running server only when the file declares it exactly so (#1424).
+#: Each server a configuration built, with the `McpServer` arguments it was
+#: built with. A reload keeps the running server only when the file would build
+#: it with the same ones (#1424, #1426).
 _BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
 
 
-def _kept_or_built(mcp_server_id: str, spec_dict: dict[str, Any], built: McpServer) -> McpServer:
-    """The running server, when the file declares it exactly as it was built; *built* otherwise.
+def _kept_or_built(mcp_server_id: str, built_with: dict[str, Any], built: McpServer) -> McpServer:
+    """The running server, when the file would build it with the arguments it was built with; *built* otherwise.
 
     A reload used to put a fresh copy of every server in the repository and
     stop only the ones it counted as changed. An unchanged running server was
     replaced without a stop: its process kept running outside idle timeout, GC
     and shutdown, and the next call started a second one (#1424). Only the
-    object built from this very spec, and still the running one, is kept;
-    anything else is replaced, and the reload stops what it replaces.
+    object built with these very arguments, and still the running one, is
+    kept; anything else is replaced, and the reload stops what it replaces.
+
+    The arguments, not the spec text: every default is applied, so a default
+    left out and the same value spelled out are one server (#1426). And only
+    what the server is built from. A server's `tools` access block, `access`,
+    `tool_access`, `tool_projection` and `header_exposure` go to the policy,
+    projection and header-exposure registries, and a group member entry's
+    `weight` and `priority` to its group. The configuration swaps all of those
+    in whether or not it keeps the server, so changing one keeps the server
+    running and still takes effect.
 
     Still the running one means as configured, too. The REST update endpoint
     rewrites a running server's `env`, `description` and intervals in place,
@@ -162,7 +177,7 @@ def _kept_or_built(mcp_server_id: str, spec_dict: dict[str, Any], built: McpServ
     replaced by one built from the file.
     """
     previous = _BUILT_FROM.get(mcp_server_id)
-    if previous is None or previous[0] != spec_dict:
+    if previous is None or previous[0] != built_with:
         return built
     running = _mcp_server_repository().get(mcp_server_id)
     if running is not previous[1] or _runtime_editable(running) != _runtime_editable(built):
@@ -972,34 +987,39 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             hint="Add a 'capabilities' block to declare resource requirements",
         )
 
-    mcp_server = McpServer(
-        mcp_server_id=mcp_server_id,
-        mode=spec_dict.get("mode", "subprocess"),
-        command=spec_dict.get("command"),
-        image=spec_dict.get("image"),
-        endpoint=spec_dict.get("endpoint"),
-        env=spec_dict.get("env", {}),
-        idle_ttl_s=spec_dict.get("idle_ttl_s", 300),
-        health_check_interval_s=spec_dict.get("health_check_interval_s", 60),
-        max_consecutive_failures=spec_dict.get("max_consecutive_failures", 3),
-        volumes=spec_dict.get("volumes", []),
-        build=spec_dict.get("build"),
-        resources=spec_dict.get("resources", {"memory": "512m", "cpu": "1.0"}),
-        network=spec_dict.get("network") or spec_dict.get("network_mode", "none"),
-        read_only=spec_dict.get("read_only", True),
-        user=user,
-        container_command=spec_dict.get("command"),  # For docker mode: override entrypoint
-        container_args=spec_dict.get("args"),  # For docker mode: override CMD
-        description=spec_dict.get("description"),
-        tools=tools,
+    # Everything the server is built from, and nothing else: a reload keeps the
+    # running server when these are unchanged (#1426).
+    built_with: dict[str, Any] = {
+        "mode": spec_dict.get("mode", "subprocess"),
+        "command": spec_dict.get("command"),
+        "image": spec_dict.get("image"),
+        "endpoint": spec_dict.get("endpoint"),
+        "env": spec_dict.get("env", {}),
+        "idle_ttl_s": spec_dict.get("idle_ttl_s", 300),
+        "health_check_interval_s": spec_dict.get("health_check_interval_s", 60),
+        "max_consecutive_failures": spec_dict.get("max_consecutive_failures", 3),
+        "volumes": spec_dict.get("volumes", []),
+        "build": spec_dict.get("build"),
+        "resources": spec_dict.get("resources", {"memory": "512m", "cpu": "1.0"}),
+        "network": spec_dict.get("network") or spec_dict.get("network_mode", "none"),
+        "read_only": spec_dict.get("read_only", True),
+        "user": user,
+        "container_command": spec_dict.get("command"),  # For docker mode: override entrypoint
+        "container_args": spec_dict.get("args"),  # For docker mode: override CMD
+        "description": spec_dict.get("description"),
+        "tools": tools,
         # HTTP transport configuration
-        auth=auth_config,
-        tls=spec_dict.get("tls"),
-        http=spec_dict.get("http"),
+        "auth": auth_config,
+        "tls": spec_dict.get("tls"),
+        "http": spec_dict.get("http"),
         # Capability declarations
-        capabilities=capabilities,
+        "capabilities": capabilities,
+    }
+    # A copy, so nothing the server does with its arguments changes what it is compared by.
+    _staged_config().built_with[mcp_server_id] = copy.deepcopy(built_with)
+    mcp_server = _kept_or_built(
+        mcp_server_id, _staged_config().built_with[mcp_server_id], McpServer(mcp_server_id=mcp_server_id, **built_with)
     )
-    mcp_server = _kept_or_built(mcp_server_id, spec_dict, mcp_server)
     _staged_config().servers[mcp_server_id] = mcp_server
     _staged_config().specs[mcp_server_id] = spec_dict
 
