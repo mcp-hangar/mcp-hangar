@@ -130,6 +130,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # condition is a property of the request, not of one upstream.
     "headers": frozenset({"param_validation"}),
     "hot_loading": frozenset({"cache", "enabled", "registry"}),
+    # `graceful_shutdown_timeout_s` (#1447), read by `config.http_graceful_shutdown_timeout`
+    # for `serve --http`, which hands it to uvicorn.
+    "http": frozenset({"graceful_shutdown_timeout_s"}),
     "interceptors": frozenset({"validators"}),
     "logging": frozenset({"file", "json_format", "level"}),
     # `audit.enabled` (#1327), read by `bootstrap/observability._parse_observability_config`.

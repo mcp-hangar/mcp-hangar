@@ -22,11 +22,12 @@ from typing import Any
 
 import yaml
 
+from ..errors import bounded_error_type
 from ..logging_config import get_logger, setup_logging
 from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
-from .config import load_config_from_file
+from .config import http_graceful_shutdown_timeout, load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
 from .catalogue_readiness import CatalogueRetry
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
@@ -220,7 +221,12 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
                 warmed += 1
             except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
                 failed += 1
-                logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+                # The type only: a start failure's text can carry what the upstream printed.
+                logger.warning(
+                    "front_door_warmup_failed",
+                    mcp_server_id=mcp_server_id,
+                    error_type=bounded_error_type(type(e).__qualname__),
+                )
     finally:
         # In `finally`: a warm-up that dies must not leave every later listing
         # waiting out the full deadline for something that will never finish.
@@ -458,7 +464,17 @@ class ServerLifecycle:
                 message=message,
             )
 
-        logger.info("starting_http_server", host=host, port=port)
+        # Checked at bootstrap, so this cannot raise for a configuration that
+        # booted. None is uvicorn's own default: in-flight requests are waited
+        # for without a bound, and it is logged as null so the bound in force
+        # is visible either way (#1447).
+        graceful_shutdown_timeout_s = http_graceful_shutdown_timeout(self._context.config)
+        logger.info(
+            "starting_http_server",
+            host=host,
+            port=port,
+            graceful_shutdown_timeout_s=graceful_shutdown_timeout_s,
+        )
 
         # Update FastMCP settings for HTTP mode. FastMCP (SDK v1) carries
         # host/port on .settings; MCPServer (SDK v2) exposes a Settings object
@@ -625,6 +641,10 @@ class ServerLifecycle:
             # `MCP_TRUSTED_PROXIES` (`TrustedProxyResolver`) is now the one
             # decision, applied by the auth middleware and the identity bridge.
             proxy_headers=False,
+            # `http.graceful_shutdown_timeout_s`: how long a stop waits for the
+            # requests in flight before cancelling them. Unset passes None,
+            # which is uvicorn's own default, so nothing changes (#1447).
+            timeout_graceful_shutdown=graceful_shutdown_timeout_s,
         )
 
         async def run_server():

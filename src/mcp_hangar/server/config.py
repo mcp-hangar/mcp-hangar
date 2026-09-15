@@ -1481,6 +1481,52 @@ def _validator_specs(full_config: dict[str, Any]) -> list[dict[str, Any]] | None
     return None
 
 
+def http_graceful_shutdown_timeout(full_config: dict[str, Any]) -> int | None:
+    """``http.graceful_shutdown_timeout_s``, checked (#1447). Absent means uvicorn's default.
+
+    ::
+
+        http:
+          graceful_shutdown_timeout_s: 90
+
+    How long ``serve --http`` waits, once it is told to stop, for the requests
+    already in flight to finish before it cancels them. uvicorn's own default is
+    ``None``: it waits as long as they take, so the only bound is whatever ends
+    the process -- in Kubernetes, the kubelet's SIGKILL at the end of the pod's
+    grace period. Absent keeps exactly that, so nobody's behaviour changes on
+    upgrade.
+
+    Read when the HTTP server starts, and passed to uvicorn then. A reload
+    checks the value, so a bad one refuses the reload like any other section,
+    but the running server keeps the bound it started with until it restarts.
+
+    Whole seconds: uvicorn declares the option as ``int | None``, and a pod's
+    ``terminationGracePeriodSeconds``, which has to exceed it, is counted in
+    whole seconds too. ``True`` is an ``int`` to ``isinstance`` and is refused
+    explicitly -- ``graceful_shutdown_timeout_s: yes`` is not a bound of 1.
+
+    Raises:
+        ConfigurationError: If ``http`` is not a mapping, or the key is present
+            and not a positive integer.
+    """
+    section = full_config.get("http")
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigurationError(f"Invalid http section {section!r}. It must be a mapping.")
+
+    raw = section.get("graceful_shutdown_timeout_s")
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise ConfigurationError(
+            f"Invalid http.graceful_shutdown_timeout_s {raw!r}. It must be a positive whole number of "
+            "seconds; omit the key entirely to keep uvicorn's default, which waits for in-flight "
+            "requests without a bound."
+        )
+    return raw
+
+
 #: Every process-wide section, in the order startup has always applied them:
 #: the concurrency manager before the executor that reads it, and before the
 #: servers set their own limits on it. A reload applies the same list (#1424);
@@ -1517,6 +1563,8 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     _param_validation_required(full_config)
     _max_links_per_tenant(full_config)
     _ui_resource_policies(full_config)
+    # Checked, not applied: `run_http` reads it when the server starts (#1447).
+    http_graceful_shutdown_timeout(full_config)
     try:
         _concurrency_limits(full_config)
     except (TypeError, ValueError) as e:

@@ -40,6 +40,7 @@ from mcp_hangar.fastmcp_server import resource_link_read_through
 from mcp_hangar.fastmcp_server.flat_tool_projection import param_validation_required, set_param_validation_required
 from mcp_hangar.server import config_schema
 from mcp_hangar.server.bootstrap import ApplicationContext
+from mcp_hangar.server.config import http_graceful_shutdown_timeout
 from mcp_hangar.server.config_schema import ConfigSchemaError
 from mcp_hangar.server.context import get_context
 from mcp_hangar.server.state import get_runtime
@@ -82,6 +83,7 @@ def _config() -> dict[str, Any]:
         },
         "headers": {"param_validation": {"required": True}},
         "hot_loading": {"enabled": False},
+        "http": {"graceful_shutdown_timeout_s": 45},
         "interceptors": {"validators": [{"type": "payload_size", "max_bytes": 64}]},
         "logging": {"level": "DEBUG"},
         "observability": {"tracing": {"enabled": False}},
@@ -140,6 +142,8 @@ PROBES: dict[str, Callable[[ApplicationContext], Any]] = {
     ),
     "headers": lambda context: param_validation_required(),
     "hot_loading": _from_context_config("hot_loading"),
+    # What `run_http` hands uvicorn when it builds its Config (#1447).
+    "http": lambda context: http_graceful_shutdown_timeout(context.config),
     "interceptors": lambda context: {"small": _verdict(1), "large": _verdict(200)},
     # Applied by neither bootstrap path: `mcp-hangar serve` reads it from the
     # file before it calls `bootstrap()`.
@@ -171,6 +175,7 @@ APPLIED: dict[str, Any] = {
     "auth": True,
     "execution": (7, 3, {TENANT: {"max_concurrency": 2, "rps": 5.0, "burst": 4}}),
     "headers": True,
+    "http": 45,
     "interceptors": {"small": True, "large": False},
     "resource_links": 17,
     "tool_access": "front_door",
