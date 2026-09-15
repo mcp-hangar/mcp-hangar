@@ -49,7 +49,9 @@ def _unknown_key_warnings(logs: list[dict[str, Any]]) -> list[str]:
 
 
 def test_rules_is_not_an_allowed_key():
-    assert SECTIONS["tool_access"] == frozenset({"mode"})
+    # `required_catalogue` was added with a reader (#1446); `rules` never had one.
+    assert SECTIONS["tool_access"] == frozenset({"mode", "required_catalogue"})
+    assert "rules" not in SECTIONS["tool_access"]
 
 
 def test_the_message_names_the_key_and_says_it_was_never_read():
@@ -77,7 +79,7 @@ def test_a_typo_beside_it_is_still_reported():
 
     assert len(problems) == 2
     assert problems[0].startswith(NAMED)
-    assert problems[1].startswith("tool_access has unknown key(s) ['mdoe']; allowed keys: ['mode']")
+    assert problems[1].startswith("tool_access has unknown key(s) ['mdoe']; allowed keys: ['mode', 'required_catalogue']")
 
 
 def test_a_file_that_sets_it_loads_with_a_warning(tmp_path, monkeypatch):

@@ -151,11 +151,18 @@ def _rpc_error_type(error: dict[str, Any]) -> str:
     return str(code) if type(code) is int else OTHER_ERROR_TYPE
 
 
+#: The two reasons `ensure_ready()` gives a call it will not start the server
+#: for. The batch executor codes such a refusal by them, the way its own check
+#: codes the same two conditions (#1446).
+START_REFUSED_NOT_REVIVED_BY_CALLS = "a capability block is not revived by a call; start it explicitly"
+START_REFUSED_IN_BACKOFF = "backoff not elapsed"
+
+
 def _start_refusal(reason: str, time_left: float) -> str:
     """What `ensure_ready()` tells a caller it would not start the server for."""
     if reason == "not_revived_by_calls":
-        return "a capability block is not revived by a call; start it explicitly"
-    return f"backoff not elapsed, retry in {time_left:.1f}s"
+        return START_REFUSED_NOT_REVIVED_BY_CALLS
+    return f"{START_REFUSED_IN_BACKOFF}, retry in {time_left:.1f}s"
 
 
 class McpServer(AggregateRoot):

@@ -28,6 +28,7 @@ from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
+from .catalogue_readiness import CatalogueRetry
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 logger = get_logger(__name__)
@@ -108,19 +109,34 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     non-durable in-memory store while a durable driver was configured. That one
     is a real "do not send me writes I cannot audit" condition.
 
+    And, on a front door with ``tool_access.required_catalogue``, a replica
+    whose boot warm-up has not yet projected every server on that list (#1446):
+    the ``catalogue`` field counts what is missing. This endpoint answers
+    without authentication, so it carries counts only, and the ids are logged
+    (`catalogue_readiness`). That is not a warm-backend rule, and it does not bring #599 back. It
+    asks whether a server was projected **once**, and a projection outlives the
+    server's stop, so an idle or failed backend never makes a ready replica not
+    ready again. And it is bounded: once ``retry_for_s`` has passed since the
+    configuration was first applied, readiness stops looking at the catalogue
+    and this is today's rule again. With no list, or in ``egress``, the body has
+    no ``catalogue`` field and nothing here changed.
+
     Extracted from the endpoint closure so the decision is unit-testable; the
     bug lived in a closure nothing could reach.
     """
     from ..observability.health import get_event_store_durability_status
+    from .catalogue_readiness import catalogue_readiness
 
     ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
     total_count = repository.count()
 
     durability = get_event_store_durability_status()
     event_store_ok = durability is None or not durability.degraded
+    catalogue = catalogue_readiness(repository)
+    catalogue_ok = catalogue is None or not catalogue["holds_readiness"]
 
     body: dict[str, Any] = {
-        "status": "healthy" if event_store_ok else "unhealthy",
+        "status": "healthy" if event_store_ok and catalogue_ok else "unhealthy",
         "ready_mcp_servers": ready_count,
         "total_mcp_servers": total_count,
     }
@@ -131,7 +147,9 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
             "durable": durability.durable,
             "detail": durability.detail,
         }
-    return body, (200 if event_store_ok else 503)
+    if catalogue is not None:
+        body["catalogue"] = catalogue
+    return body, (200 if event_store_ok and catalogue_ok else 503)
 
 
 def warm_the_front_door_catalogue(runtime: Any) -> None:
@@ -164,10 +182,13 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     until the GC worker's next sweep happened to publish -- which is exactly how
     group members come to be projected today, up to 30s late and by accident.
 
-    A backend that fails here stays cold and unprojected: the state it would have
-    been in anyway, logged per server, and reported by the empty-projection metric
-    (#887). Warming is deliberately not retried -- a backend that is down at boot
-    is down, and the fleet is warmed again on the next restart.
+    A backend that fails here stays unprojected: the state it would have been in
+    anyway, logged per server, and reported by the empty-projection metric
+    (#887). This warm-up is not retried. A server named in
+    ``tool_access.required_catalogue`` is, by `catalogue_readiness.CatalogueRetry`,
+    which runs after this on the same thread and within the bounds that module
+    sets out (#1446); every other server that is down at boot stays down until a
+    call starts it or the fleet is warmed again on the next restart.
 
     Args:
         runtime: The runtime holding the fleet and the command bus.
@@ -312,6 +333,7 @@ class ServerLifecycle:
         self._shutdown_requested = False
         self._discovery_loop: asyncio.AbstractEventLoop | None = None
         self._discovery_thread: threading.Thread | None = None
+        self._catalogue_retry = CatalogueRetry(context.runtime)
 
     @property
     def is_running(self) -> bool:
@@ -365,11 +387,20 @@ class ServerLifecycle:
         # The front door serves a short list until this finishes, which is the
         # bounded version of serving an empty one forever (#878, #885, #886).
         threading.Thread(
-            target=warm_the_front_door_catalogue,
-            args=(self._context.runtime,),
+            target=self._warm_up,
             name="mcp-hangar-front-door-warmup",
             daemon=True,
         ).start()
+
+    def _warm_up(self) -> None:
+        """Warm the front door's catalogue, then retry the required servers it missed (#1446).
+
+        One thread for both: the retry starts where the warm-up ends, and each
+        returns at once where it does not apply (``egress``, or no
+        ``tool_access.required_catalogue``).
+        """
+        warm_the_front_door_catalogue(self._context.runtime)
+        self._catalogue_retry.run()
 
     def _start_discovery(self) -> None:
         """Start discovery on a dedicated long-lived event loop."""
@@ -636,6 +667,10 @@ class ServerLifecycle:
 
         self._shutdown_requested = True
         logger.info("server_lifecycle_shutdown_start")
+
+        # Before anything below stops a server, for the reason the scheduled
+        # commands are cancelled next: the catalogue retry would start it again.
+        self._catalogue_retry.stop()
 
         # First: a retry a saga scheduled would otherwise fire while the servers
         # below are being stopped, and start one again (#1389). The context

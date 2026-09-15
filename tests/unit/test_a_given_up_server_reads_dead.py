@@ -534,7 +534,8 @@ def test_the_batch_starts_a_target_that_is_not_running(state):
     assert BatchExecutor()._gate_cold_start(_pipeline(ctx, state)) is None
 
     [command] = [c.args[0] for c in ctx.command_bus.send.call_args_list]
-    assert command == StartMcpServerCommand(mcp_server_id="svc")
+    # A call's cold start follows the call rules (#1446): not a deliberate start.
+    assert command == StartMcpServerCommand(mcp_server_id="svc", deliberate=False)
 
 
 def test_the_batch_circuit_breaker_lets_a_call_through_to_a_dead_target_once_its_backoff_has_passed():
