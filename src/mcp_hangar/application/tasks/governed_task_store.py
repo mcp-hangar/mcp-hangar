@@ -97,6 +97,9 @@ class TaskEntry:
             ``tasks/result`` reconstruction; empty when unknown.
         relayed_at: LOCAL relay ISO-8601 timestamp. This is Hangar's own clock
             and is NEVER surfaced as the upstream ``created_at``.
+        mcp_server_id: The id the call that created the task named, a group or a
+            server. Empty when the registration did not say.
+        tool_name: The tool that call named. Empty when the registration did not say.
     """
 
     snapshot: Task
@@ -105,6 +108,8 @@ class TaskEntry:
     correlation_id: str = ""
     original_result_type: str = ""
     relayed_at: str = ""
+    mcp_server_id: str = ""
+    tool_name: str = ""
 
 
 class GovernedTaskStore:
@@ -188,8 +193,15 @@ class GovernedTaskStore:
         target_server_id: str,
         task: Task,
         expected_owner: TaskOwner,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
     ) -> TaskOwner:
         """Record a relayed task in the ledger, binding owner + pinned digest.
+
+        ``mcp_server_id`` and ``tool_name`` are the call that created the task.
+        Its follow-ups are checked against that tool's current access (#1473),
+        and a task registered without them is refused everything but a cancel
+        and a status.
 
         The owner is derived from the current request identity; it MUST agree
         (on tenant) with ``expected_owner`` computed by the caller, otherwise the
@@ -222,6 +234,8 @@ class GovernedTaskStore:
                 correlation_id="",
                 original_result_type="",
                 relayed_at=relayed_at,
+                mcp_server_id=mcp_server_id or "",
+                tool_name=tool_name,
             )
         logger.debug(
             "governed_task_relayed",
@@ -276,6 +290,8 @@ class GovernedTaskStore:
                 target_server_id=target_server_id,
                 task=task,
                 expected_owner=expected_owner,
+                mcp_server_id=mcp_server_id,
+                tool_name=tool_name,
             )
             # 2. Populate the provenance fields register_relayed_task left empty.
             entry = self._tasks[key]
@@ -352,6 +368,18 @@ class GovernedTaskStore:
             items = list(self._tasks.items())
         own = [entry.snapshot for key, entry in items if self._registry.authorize(key, caller)]
         return own, None
+
+    def task_tool(self, key: TaskKey) -> tuple[str, str] | None:
+        """The ``(mcp_server_id, tool_name)`` of the call that created ``key``, or ``None``.
+
+        ``None`` when the task is gone or was registered without its tool.
+        Callers authorize ``key`` first, as for every other read.
+        """
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+        if entry is None or not entry.mcp_server_id or not entry.tool_name:
+            return None
+        return entry.mcp_server_id, entry.tool_name
 
     def find_owned_key(self, task_id: str, caller: TaskOwner | None = None) -> TaskKey | None:
         """Resolve the composite :data:`TaskKey` for a ``task_id`` the caller owns.

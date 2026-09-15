@@ -112,6 +112,8 @@ def _register_pinned(store: GovernedTaskStore, task_id: str, pinned: str) -> tup
             target_server_id=_SERVER,
             task=task,
             expected_owner=TaskOwner("tenant-a", "alice"),
+            mcp_server_id=_SERVER,
+            tool_name="tool",
         )
     return (_SERVER, task_id)
 
@@ -213,6 +215,8 @@ def test_no_pin_is_never_gated(store: GovernedTaskStore, fake_registry: Any, eve
             target_server_id=_SERVER,
             task=task,
             expected_owner=TaskOwner("tenant-a", "alice"),
+            mcp_server_id=_SERVER,
+            tool_name="tool",
         )
     key = (_SERVER, "T1")
 

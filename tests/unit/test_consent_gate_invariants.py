@@ -159,7 +159,13 @@ def _spy_gate(order: list[str] | None = None, **kw: Any) -> TaskConsentGate:
 def _register(store: GovernedTaskStore, server: str, task_id: str, tenant: str, principal: str) -> None:
     with _as(tenant, principal):
         task = store.mint_from_upstream(_upstream_task(task_id))
-        store.register_relayed_task(target_server_id=server, task=task, expected_owner=TaskOwner(tenant, principal))
+        store.register_relayed_task(
+            target_server_id=server,
+            task=task,
+            expected_owner=TaskOwner(tenant, principal),
+            mcp_server_id=server,
+            tool_name="tool",
+        )
 
 
 def _register_corr(
