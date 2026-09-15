@@ -54,6 +54,11 @@ class CallSpec:
     max_retries: int = 1  # Default: no retries (single attempt)
     metadata: dict[str, str] | None = None  # W3C TraceContext headers (traceparent, tracestate)
     progress_token: str | None = None  # Minted upstream progress token (#883)
+    #: The caller takes the whole result: neither the per-call size cap nor the
+    #: configured batch truncation cuts it, and no continuation is stored for
+    #: it. Set by the facade's ``invoke``, which returns results whole and has
+    #: no way to fetch a continuation (#1453).
+    whole_result: bool = False
 
 
 @dataclass
