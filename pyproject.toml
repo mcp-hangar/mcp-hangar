@@ -332,7 +332,10 @@ drift_allowance = 3.0
   # 89.5 -> 90.5 when tests/unit/test_approval_span_result.py began closing the
   # approval loops in teardown (#1389), which runs _close_approval_loops -- until
   # then reached only at exit, where nothing measures it: 93.04 on 3.11.
-  "server/tools/batch/executor.py" = 92.0
+  # 92.0 -> 94.0 with the per-tenant budget's tests (#1445), which drive the
+  # budget gate, the token refund in _run_gates and the slot step: 95.34 on
+  # 3.11, past the allowance. Set under that by more than the CI swing above.
+  "server/tools/batch/executor.py" = 94.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
