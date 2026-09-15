@@ -14,6 +14,23 @@ from .metrics import observe_health_check, record_error, record_gc_cycle, record
 
 logger = get_logger(__name__)
 
+
+def _join_thread(thread: threading.Thread | None, timeout_s: float | None) -> bool:
+    """Wait up to *timeout_s* for *thread* to end.
+
+    Returns:
+        True once it is not running: it ended, or it was never started. False
+        if it is still running, or if it is the calling thread, which cannot
+        wait for itself.
+    """
+    if thread is None or thread.ident is None:
+        return True
+    if thread is threading.current_thread():
+        return False
+    thread.join(timeout_s)
+    return not thread.is_alive()
+
+
 # Optional watchdog import
 try:
     from watchdog.events import FileSystemEventHandler
@@ -63,6 +80,9 @@ class BackgroundWorker:
         self._event_bus = event_bus or get_event_bus()
         self.thread = threading.Thread(target=self._loop, daemon=True, name=f"worker-{task}")
         self.running = False
+        # Waited on between cycles rather than slept through, so `stop()` ends
+        # the thread at once and not up to a whole interval later (#1435).
+        self._stopped = threading.Event()
         self._next_check_at: dict[str, float] = {}
 
     def start(self):
@@ -76,9 +96,18 @@ class BackgroundWorker:
         logger.info("background_worker_started", task=self.task, interval_s=self.interval_s)
 
     def stop(self):
-        """Stop the background worker thread."""
+        """Signal the worker thread to stop. Does not block; `join()` waits for it."""
         self.running = False
+        self._stopped.set()
         logger.info("background_worker_stopped", task=self.task)
+
+    def join(self, timeout_s: float | None = None) -> bool:
+        """Wait up to *timeout_s* for the worker thread to end after `stop()`.
+
+        Returns:
+            True once the thread is not running, including when it never started.
+        """
+        return _join_thread(self.thread, timeout_s)
 
     def _publish_events(self, mcp_server: McpServerRuntime) -> None:
         """Publish all collected events from a mcp_server.
@@ -96,9 +125,7 @@ class BackgroundWorker:
 
     def _loop(self):
         """Main worker loop."""
-        while self.running:
-            time.sleep(self.interval_s)
-
+        while self.running and not self._stopped.wait(self.interval_s):
             start_time = time.perf_counter()
             gc_collected = {"idle": 0, "dead": 0}
 
@@ -222,6 +249,8 @@ class ConfigReloadWorker:
 
         self.thread: threading.Thread | None = None
         self.running = False
+        # Waited on between polls, so `stop()` ends the polling thread at once.
+        self._stopped = threading.Event()
         self._observer: Any | None = None
         self._last_mtime: float | None = None
 
@@ -247,6 +276,7 @@ class ConfigReloadWorker:
             return
 
         self.running = True
+        self._stopped.clear()
 
         # Here rather than at import: only a hot reload that wanted watchdog has
         # a reason to hear it is missing, and by now logging is configured.
@@ -271,6 +301,7 @@ class ConfigReloadWorker:
             return
 
         self.running = False
+        self._stopped.set()
 
         if self._observer:
             self._observer.stop()
@@ -278,6 +309,16 @@ class ConfigReloadWorker:
             self._observer = None
 
         logger.info("config_reload_worker_stopped")
+
+    def join(self, timeout_s: float | None = None) -> bool:
+        """Wait up to *timeout_s* for the polling thread to end after `stop()`.
+
+        The watchdog observer is joined by `stop()` itself.
+
+        Returns:
+            True once no polling thread is running, including when none started.
+        """
+        return _join_thread(self.thread, timeout_s)
 
     def _start_watchdog(self):
         """Start watchdog-based file monitoring."""
@@ -341,9 +382,7 @@ class ConfigReloadWorker:
         """Polling loop that checks mtime periodically."""
         assert self.config_path is not None
         assert self._last_mtime is not None
-        while self.running:
-            time.sleep(self.interval_s)
-
+        while self.running and not self._stopped.wait(self.interval_s):
             try:
                 if not self.config_path.exists():
                     logger.warning("config_file_disappeared", config_path=str(self.config_path))
@@ -424,7 +463,10 @@ class MetricsSnapshotWorker:
         self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-metrics-snapshot")
 
     def start(self) -> None:
-        """Start the background snapshot worker."""
+        """Start the background snapshot worker. A second call does nothing."""
+        if self.running:
+            logger.warning("metrics_snapshot_worker_already_running")
+            return
         self.running = True
         self.thread.start()
         logger.info("metrics_snapshot_worker_started", interval_s=self.interval_s)
@@ -434,6 +476,14 @@ class MetricsSnapshotWorker:
         self.running = False
         self._stopped.set()
         logger.info("metrics_snapshot_worker_stopped")
+
+    def join(self, timeout_s: float | None = None) -> bool:
+        """Wait up to *timeout_s* for the worker thread to end after `stop()`.
+
+        Returns:
+            True once the thread is not running, including when it never started.
+        """
+        return _join_thread(self.thread, timeout_s)
 
     def _loop(self) -> None:
         """Main worker loop."""
