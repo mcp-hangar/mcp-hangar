@@ -155,7 +155,13 @@ def tasks():
     token = identity_context_var.set(IdentityContext(caller=owner))
     try:
         task = store.mint_from_upstream(_upstream_task())
-        store.register_relayed_task(target_server_id="S1", task=task, expected_owner=TaskOwner("t1", "svc:agent"))
+        store.register_relayed_task(
+            target_server_id="S1",
+            task=task,
+            expected_owner=TaskOwner("t1", "svc:agent"),
+            mcp_server_id="S1",
+            tool_name="tool",
+        )
     finally:
         identity_context_var.reset(token)
 
