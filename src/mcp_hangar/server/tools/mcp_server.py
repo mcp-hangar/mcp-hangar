@@ -18,7 +18,13 @@ from ...context import get_identity_context
 from ...domain.services import get_tool_access_resolver
 from ...metrics import TOOLS_FILTERED_TOTAL
 from ..context import get_context
-from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
+from ..validation import (
+    check_rate_limit,
+    not_rate_limited,
+    tool_error_hook,
+    tool_error_mapper,
+    validate_mcp_server_id_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +259,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
     @mcp_tool_wrapper(
         tool_name="hangar_details",
         rate_limit_key=lambda mcp_server: f"hangar_details:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        check_rate_limit=not_rate_limited,
         validate=validate_mcp_server_id_input,
         error_mapper=tool_error_mapper,
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, cast, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
@@ -19,7 +19,8 @@ from ..domain.contracts.persistence import IAuditRepository, IMcpServerConfigRep
 from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
 from ..domain.security.input_validator import InputValidator
 from ..domain.security.rate_limiter import get_rate_limiter, InMemoryRateLimiter, RateLimitConfig
-from ..infrastructure.command_bus import CommandBus, get_command_bus
+from ..infrastructure.caller_rate_limit import configure_caller_rate_limit, parse_per_caller
+from ..infrastructure.command_bus import CommandBus, get_command_bus, RateLimitMiddleware
 from ..infrastructure.event_bus import EventBus, get_event_bus
 from ..infrastructure.persistence import (
     Database,
@@ -228,6 +229,34 @@ def apply_rate_limit_config(
     object.__setattr__(runtime, "rate_limit_config", effective)
 
     return effective
+
+
+def install_command_bus_rate_limit(
+    runtime: Runtime,
+    full_config: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[RateLimitConfig, RateLimitConfig | None]:
+    """Put the ``rate_limit`` section in force on the command bus of *runtime* (#1471).
+
+    ``rps`` and ``burst`` are the budget every caller shares, one per command
+    type, as before. ``per_caller``, when set, gives each caller a budget of
+    its own under it (``infrastructure/caller_rate_limit``). Adds the
+    middleware that charges every command to them. Startup calls this, and so
+    do the tests that serve the app, so both run the same wiring.
+
+    Returns:
+        The shared budget, and each caller's or ``None``.
+
+    Raises:
+        ValueError: ``per_caller`` is malformed. Nothing has been changed.
+    """
+    section = full_config.get("rate_limit")
+    per_caller = parse_per_caller(section.get("per_caller") if isinstance(section, dict) else None)
+    shared = apply_rate_limit_config(runtime, full_config, env=env)
+    configure_caller_rate_limit(per_caller)
+    runtime.command_bus.add_middleware(RateLimitMiddleware(rate_limiter=cast(Any, runtime.rate_limiter)))
+    return shared, per_caller
 
 
 def create_runtime(

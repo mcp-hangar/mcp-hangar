@@ -137,6 +137,17 @@ class TokenBucket:
                 wait_time = needed / self.rate
                 return False, wait_time
 
+    def give_back(self, tokens: int = 1) -> None:
+        """Return the tokens of a call that was refused after it took them, up to the capacity."""
+        with self._lock:
+            self.tokens = min(float(self.capacity), self.tokens + tokens)
+
+    def is_full(self) -> bool:
+        """Whether the bucket has refilled. A new one starts full, so dropping a full one changes no answer."""
+        with self._lock:
+            self._refill()
+            return self.tokens >= self.capacity
+
     def peek(self) -> tuple[int, float]:
         """
         Check current state without consuming.

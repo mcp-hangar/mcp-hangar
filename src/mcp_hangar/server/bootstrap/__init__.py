@@ -25,7 +25,7 @@ import socket
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from mcp_hangar import __version__
 from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
@@ -540,22 +540,19 @@ def bootstrap(
     # Initialize saga with persistence
     init_saga(full_config)
 
-    # Apply config.yaml rate_limit overrides (config takes precedence over env)
-    from ...bootstrap.runtime import apply_rate_limit_config
+    # The command bus's rate limit: the budget every caller shares, config.yaml
+    # over env, and `rate_limit.per_caller`, each caller's own under it (#1471).
+    from ...bootstrap.runtime import install_command_bus_rate_limit
 
-    apply_rate_limit_config(runtime, full_config)
+    shared, per_caller = install_command_bus_rate_limit(runtime, full_config)
 
     logger.info(
         "security_config_loaded",
-        rate_limit_rps=runtime.rate_limit_config.requests_per_second,
-        burst_size=runtime.rate_limit_config.burst_size,
+        rate_limit_rps=shared.requests_per_second,
+        burst_size=shared.burst_size,
+        per_caller_rps=per_caller.requests_per_second if per_caller is not None else None,
+        per_caller_burst=per_caller.burst_size if per_caller is not None else None,
     )
-
-    # Add rate limit middleware to command bus
-    from ...infrastructure.command_bus import RateLimitMiddleware
-
-    rate_limit_mw = RateLimitMiddleware(rate_limiter=cast(Any, runtime.rate_limiter))
-    runtime.command_bus.add_middleware(rate_limit_mw)
 
     # Deprecation warning for legacy license key env var
     if os.environ.get("HANGAR_LICENSE_KEY"):
