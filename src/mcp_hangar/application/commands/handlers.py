@@ -10,7 +10,7 @@ from ...domain.exceptions import McpServerNotFoundError, ToolInvocationError
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
-from ...metrics import observe_tool_call, record_error, record_mcp_server_start, record_mcp_server_stop
+from ...metrics import mcp_server_stop_reason, observe_tool_call, record_error, record_mcp_server_start
 from ..ports.bus import ICommandBus
 from ..ports.config_loader import IConfigLoader
 from .commands import (
@@ -119,14 +119,18 @@ class StopMcpServerHandler(BaseMcpServerHandler):
 
     def handle(self, command: StopMcpServerCommand) -> dict[str, Any]:
         """
-        Stop a mcp_server.
+        Stop a mcp_server, recording the stop under the command's reason.
+
+        Not counted here: the stop counter counts the `McpServerStopped` the
+        stop records, once, under that reason (#1466). A reason outside the
+        counter's closed set, which only a REST stop body can supply, is
+        recorded as `manual`; the answer repeats the reason as given.
 
         Returns:
             Confirmation dict
         """
         mcp_server = self._get_mcp_server(command.mcp_server_id)
-        mcp_server.shutdown()
-        record_mcp_server_stop(command.mcp_server_id, reason=command.reason or "manual")
+        mcp_server.shutdown(reason=mcp_server_stop_reason(command.reason))
         self._publish_events(mcp_server)
 
         return {"stopped": command.mcp_server_id, "reason": command.reason}

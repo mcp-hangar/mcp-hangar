@@ -17,7 +17,7 @@ import pytest
 from mcp_hangar import metrics as m
 from mcp_hangar.application.commands import StopMcpServerCommand
 from mcp_hangar.application.commands.handlers import StopMcpServerHandler
-from mcp_hangar.domain.events import STOPPED_BY_GIVING_UP
+from mcp_hangar.domain.events import DELIBERATE_STOP_REASONS, STOPPED_BY_GIVING_UP
 
 
 def _sid() -> str:
@@ -52,7 +52,7 @@ def test_any_other_reason_is_counted_as_manual(reason):
     assert _stops(sid) == {"manual": 1.0}
 
 
-def test_a_rest_stop_with_its_own_reason_is_counted_as_manual_and_answered_as_given():
+def test_a_rest_stop_with_its_own_reason_is_recorded_as_manual_and_answered_as_given():
     sid = _sid()
     server = Mock(mcp_server_id=sid)
     server.collect_events.return_value = []
@@ -61,8 +61,9 @@ def test_a_rest_stop_with_its_own_reason_is_counted_as_manual_and_answered_as_gi
     result = handler.handle(StopMcpServerCommand(mcp_server_id=sid, reason="maintenance window"))
 
     assert result == {"stopped": sid, "reason": "maintenance window"}
-    server.shutdown.assert_called_once_with()
-    assert _stops(sid) == {"manual": 1.0}
+    # Recorded as `manual`, and counted from that stop's event, not here (#1466).
+    server.shutdown.assert_called_once_with(reason="manual")
+    assert _stops(sid) == {}
 
 
 def test_the_reasons_hangar_records_are_all_listed():
@@ -73,6 +74,9 @@ def test_the_reasons_hangar_records_are_all_listed():
         m.MCP_SERVER_STOP_REASONS
     )
     assert m.MCP_SERVER_STOP_REASON_OTHER in m.MCP_SERVER_STOP_REASONS
+    # Every stop is made on purpose or is a give-up; the saga and the alert
+    # handler tell them apart by these (#1466).
+    assert set(m.MCP_SERVER_STOP_REASONS) == {*DELIBERATE_STOP_REASONS, STOPPED_BY_GIVING_UP}
 
 
 def test_the_help_line_lists_every_reason():

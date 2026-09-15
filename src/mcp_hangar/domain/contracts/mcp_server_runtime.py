@@ -86,8 +86,8 @@ class SupportsMcpServerLifecycle(Protocol):
         """
         ...
 
-    def shutdown(self) -> None:
-        """Stop mcp_server and release resources."""
+    def shutdown(self, reason: str = "shutdown") -> None:
+        """Stop mcp_server and release resources, recording the stop under ``reason``."""
         ...
 
     def give_up(self, reason: str) -> bool:
