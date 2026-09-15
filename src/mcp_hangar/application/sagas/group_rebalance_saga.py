@@ -139,13 +139,14 @@ class GroupRebalanceSaga(EventTriggeredSaga):
                 group.report_success(mcp_server_id)
 
         elif isinstance(event, McpServerStopped):
-            # Not a failure. A stop carries one of two reasons, and the gateway
-            # or an operator chose both: "idle" is the GC reaping an unused
-            # server, "shutdown" is every explicit stop (hangar_stop, reload,
-            # unload, delete, a group's stop_all, process exit). A crashed
-            # process emits no stop at all. Counted as a failure, one idle reap
-            # could take a cold member out of rotation, where nothing selects,
-            # health-checks or starts it again.
+            # Not a failure. "idle" is the GC reaping an unused server,
+            # "shutdown" is every explicit stop (hangar_stop, reload, unload,
+            # delete, a group's stop_all, process exit). A give-up is a stop too
+            # (#1360), and the move to DEAD recorded right after it is what
+            # takes the member out of rotation, below. A crashed process emits
+            # no stop at all. Counted as a failure, one idle reap could take a
+            # cold member out of rotation, where nothing selects, health-checks
+            # or starts it again.
             logger.info(f"Member {mcp_server_id} stopped in group {group_id}: {event.reason}")
 
         elif isinstance(event, McpServerDegraded):
