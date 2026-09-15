@@ -32,8 +32,8 @@ reader does not spend the afternoon re-deriving them:
 The one apparent collision is rate limiting, and it is not one:
 `RateLimitLockout` is an auth-lockout domain event (per source IP, published by
 `auth/infrastructure/rate_limiter.py`), while `log_rate_limit_exceeded` reports
-request-rate rejection from `check_rate_limit()` -- a function that is itself
-deprecated in favour of command-bus middleware. Different occurrences, so the
+request-rate rejection from `server/validation.charge_tool()`, the budget of a
+tool whose work never reaches the command bus. Different occurrences, so the
 two cannot disagree about the same one.
 
 What the investigation DID find: of the four sinks, only `LogSecuritySink` is

@@ -4,7 +4,7 @@ This module provides validation functions that use the ApplicationContext
 for accessing rate limiter and security handler, following DIP.
 """
 
-import warnings
+from dataclasses import dataclass
 
 from .. import metrics as prometheus_metrics
 from ..application.mcp.tooling import ToolErrorPayload
@@ -18,24 +18,19 @@ from ..infrastructure.caller_rate_limit import charge
 from .context import get_context
 
 
-def check_rate_limit(key: str = "global") -> None:
-    """Check rate limit and raise exception if exceeded.
+def charge_tool(tool_name: str) -> None:
+    """Charge one call of *tool_name* to its caller's budget and the shared one.
 
-    .. deprecated::
-        Rate limiting is now enforced at the command bus middleware layer
-        via RateLimitMiddleware. This function will be removed in a future version.
+    For the work a tool does without the command bus, which charges every
+    command it dispatches. The budget is keyed by the tool alone, never by the
+    server or group a call names, so naming more of them buys no more calls
+    (#1481). Gets the rate limiter from the application context (DIP).
 
-    Gets rate limiter from application context (DIP). Charges the call to its
-    caller's budget and the shared one, as the command bus does (#1471).
-    Updates Prometheus metrics when rate limit is hit.
+    Raises:
+        RateLimitExceeded: When either budget is used up.
     """
-    warnings.warn(
-        "check_rate_limit() is deprecated. Rate limiting is enforced at command bus middleware.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     ctx = get_context()
-    refusal = charge(ctx.rate_limiter, key)
+    refusal = charge(ctx.rate_limiter, tool_name)
     if refusal is not None:
         # Update Prometheus metrics
         prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
@@ -45,6 +40,28 @@ def check_rate_limit(key: str = "global") -> None:
             window_seconds=refusal.window_seconds,
         )
         raise refusal
+
+
+@dataclass(frozen=True)
+class RateLimited:
+    """The rate-limit check of a tool whose work never reaches the command bus.
+
+    Every call of `tool_name` is charged to the one budget named after it,
+    whatever key the wrapper computes from its arguments.
+    """
+
+    tool_name: str
+
+    def __call__(self, _key: str) -> None:
+        charge_tool(self.tool_name)
+
+
+def charged_by_the_command_bus(key: str) -> None:
+    """The rate-limit check of a tool whose work is a command: the command bus charges it.
+
+    Charging the call here as well would be a second budget for the same work
+    (#1481). A branch that does its work without the bus calls `charge_tool`.
+    """
 
 
 #: The listing and inspection tools. They read state and change nothing, so no

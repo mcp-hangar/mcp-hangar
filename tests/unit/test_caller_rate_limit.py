@@ -41,7 +41,7 @@ from mcp_hangar.infrastructure.caller_rate_limit import (
 from mcp_hangar.infrastructure.command_bus import CommandBus, RateLimitMiddleware
 from mcp_hangar.server import validation
 from mcp_hangar.server.api.middleware import error_handler
-from mcp_hangar.server.validation import READ_ONLY_TOOLS, not_rate_limited
+from mcp_hangar.server.validation import charged_by_the_command_bus, not_rate_limited, RateLimited, READ_ONLY_TOOLS
 
 #: Tokens per second: nothing refills while a test runs.
 NEVER = 0.001
@@ -373,7 +373,41 @@ class TestTheCommandBus:
         assert runtime.rate_limit_config.burst_size != 1
 
 
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def _registered(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Every `hangar_*` tool the wrapper registers: its rate-limit check, and its function unwrapped."""
+    from mcp_hangar.server.tools import continuation, discovery, groups, hangar, health, mcp_server
+
+    checks: dict[str, Any] = {}
+    functions: dict[str, Any] = {}
+
+    def recorder(*, tool_name: str, check_rate_limit: Any, **_: Any) -> Any:
+        checks[tool_name] = check_rate_limit
+
+        def keep(func: Any) -> Any:
+            functions[tool_name] = func
+            return func
+
+        return keep
+
+    stub = SimpleNamespace(tool=lambda *_a, **_k: lambda func: func)
+    for module, register in (
+        (groups, groups.register_group_tools),
+        (hangar, hangar.register_hangar_tools),
+        (hangar, hangar.register_load_tools),
+        (mcp_server, mcp_server.register_mcp_server_tools),
+        (health, health.register_health_tools),
+        (discovery, discovery.register_discovery_tools),
+        (continuation, continuation.register_continuation_tools),
+    ):
+        monkeypatch.setattr(module, "mcp_tool_wrapper", recorder)
+        register(stub)
+    return checks, functions
+
+
+#: The tools whose work is a command the command bus charges (#1481).
+CHARGED_BY_THE_BUS = frozenset({"hangar_reload_config", "hangar_start", "hangar_stop", "hangar_tools", "hangar_warm"})
+
+
 class TestTheToolLevelCheck:
     def test_it_charges_each_caller_on_its_own(self, monkeypatch: pytest.MonkeyPatch):
         security = Mock()
@@ -385,51 +419,82 @@ class TestTheToolLevelCheck:
         _per_caller(burst=1)
 
         with _as(_caller(*A)):
-            validation.check_rate_limit("hangar_start:s")
-            with pytest.raises(RateLimitExceeded, match="this caller's rate limit for hangar_start:s") as refused:
-                validation.check_rate_limit("hangar_start:s")
+            validation.charge_tool("hangar_load")
+            with pytest.raises(RateLimitExceeded, match="this caller's rate limit for hangar_load") as refused:
+                validation.charge_tool("hangar_load")
         with _as(_caller(*B)):
-            validation.check_rate_limit("hangar_start:s")
+            validation.charge_tool("hangar_load")
 
         security.log_rate_limit_exceeded.assert_called_once_with(limit=1, window_seconds=refused.value.window_seconds)
 
     def test_the_read_only_tools_are_the_ones_registered_without_a_limit(self, monkeypatch: pytest.MonkeyPatch):
-        from mcp_hangar.server.tools import discovery, groups, hangar, health, mcp_server
-
-        checks: dict[str, Any] = {}
-
-        def recorder(*, tool_name: str, check_rate_limit: Any, **_: Any) -> Any:
-            checks[tool_name] = check_rate_limit
-            return lambda func: func
-
-        stub = SimpleNamespace(tool=lambda *_a, **_k: lambda func: func)
-        for module, register in (
-            (groups, groups.register_group_tools),
-            (hangar, hangar.register_hangar_tools),
-            (hangar, hangar.register_load_tools),
-            (mcp_server, mcp_server.register_mcp_server_tools),
-            (health, health.register_health_tools),
-            (discovery, discovery.register_discovery_tools),
-        ):
-            monkeypatch.setattr(module, "mcp_tool_wrapper", recorder)
-            register(stub)
+        checks, _ = _registered(monkeypatch)
 
         assert checks.keys() >= READ_ONLY_TOOLS
         assert {name for name, check in checks.items() if check is not_rate_limited} == READ_ONLY_TOOLS
         assert not_rate_limited("hangar_list") is None
 
+    def test_every_other_tool_has_one_budget(self, monkeypatch: pytest.MonkeyPatch):
+        """At the command bus when its work is a command, else one named after the tool (#1481)."""
+        checks, _ = _registered(monkeypatch)
+        own = {name: check for name, check in checks.items() if isinstance(check, RateLimited)}
+
+        assert {name for name, check in checks.items() if check is charged_by_the_command_bus} == CHARGED_BY_THE_BUS
+        assert all(check.tool_name == name for name, check in own.items())
+        assert set(checks) == READ_ONLY_TOOLS | CHARGED_BY_THE_BUS | set(own)
+        assert charged_by_the_command_bus("hangar_start") is None
+
+    def test_a_tool_budget_is_one_whichever_id_a_call_names(self, monkeypatch: pytest.MonkeyPatch):
+        checks, _ = _registered(monkeypatch)
+        monkeypatch.setattr(
+            validation, "get_context", lambda: SimpleNamespace(rate_limiter=_shared(burst=100), security_handler=Mock())
+        )
+        _per_caller(burst=1)
+
+        with _as(_caller(*A)):
+            checks["hangar_approve"]("hangar_approve:one")
+            with pytest.raises(RateLimitExceeded, match="this caller's rate limit for hangar_approve is used up"):
+                checks["hangar_approve"]("hangar_approve:two")
+
+    @pytest.mark.parametrize(("tool", "does"), [("hangar_start", "start_all"), ("hangar_stop", "stop_all")])
+    def test_a_group_is_charged_at_the_tool_and_a_server_is_not(
+        self, monkeypatch: pytest.MonkeyPatch, tool: str, does: str
+    ):
+        """A group starts and stops its members itself, never through the command bus."""
+        from mcp_hangar.server.tools import hangar
+
+        _, functions = _registered(monkeypatch)
+        group = SimpleNamespace(
+            state=SimpleNamespace(value="ready"),
+            healthy_count=1,
+            members_in_rotation_count=1,
+            total_count=1,
+            **{does: Mock(return_value=1)},
+        )
+        fleet = SimpleNamespace(
+            group_exists=lambda name: name == "pool",
+            get_group=lambda _name: group,
+            mcp_server_exists=lambda name: name == "store",
+            command_bus=SimpleNamespace(send=Mock(return_value={"state": "ready"})),
+        )
+        monkeypatch.setattr(hangar, "get_context", lambda: fleet)
+        shared = _shared(burst=1)
+        monkeypatch.setattr(
+            validation, "get_context", lambda: SimpleNamespace(rate_limiter=shared, security_handler=Mock())
+        )
+
+        for _ in range(3):
+            functions[tool]("store")
+        functions[tool]("pool")
+        with pytest.raises(RateLimitExceeded, match=f"the rate limit all callers share for {tool} is used up"):
+            functions[tool]("pool")
+
+        assert fleet.command_bus.send.call_count == 3
+        assert getattr(group, does).call_count == 1
+
     def test_hangar_sources_is_charged(self, monkeypatch: pytest.MonkeyPatch):
         """It runs every discovery source's health check, a call out of Hangar (#1479)."""
-        from mcp_hangar.server.tools import discovery
-
-        checks: dict[str, Any] = {}
-
-        def recorder(*, tool_name: str, check_rate_limit: Any, **_: Any) -> Any:
-            checks[tool_name] = check_rate_limit
-            return lambda func: func
-
-        monkeypatch.setattr(discovery, "mcp_tool_wrapper", recorder)
-        discovery.register_discovery_tools(SimpleNamespace(tool=lambda *_a, **_k: lambda func: func))
+        checks, _ = _registered(monkeypatch)
         shared = _shared(burst=1)
         monkeypatch.setattr(
             validation, "get_context", lambda: SimpleNamespace(rate_limiter=shared, security_handler=Mock())

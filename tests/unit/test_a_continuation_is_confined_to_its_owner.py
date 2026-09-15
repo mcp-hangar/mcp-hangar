@@ -185,8 +185,10 @@ def served(monkeypatch):
     from mcp_hangar.server.bootstrap import build_serving_mcp_server
 
     # The rate limiter is process state shared across the suite, and it is not
-    # what is under test. The wrapper captures this callable at registration.
-    monkeypatch.setattr(continuation_module, "check_rate_limit", lambda _key: None)
+    # what is under test. The check registered for each tool charges through it.
+    from mcp_hangar.server import validation
+
+    monkeypatch.setattr(validation, "charge_tool", lambda _tool_name: None)
     server = build_serving_mcp_server()
     set_tool_authorizer(authorize_tool)
     tools = {
