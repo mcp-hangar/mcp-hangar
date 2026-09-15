@@ -11,6 +11,9 @@ authorization gate added to ``hangar_call``:
 - principal with ``tool:invoke`` -> ALLOW (reaches the executor).
 - mixed batch -> only the unauthorized tools are denied; the rest execute.
 
+The facade's ``invoke`` takes the same gate through ``call_as`` (#1453), for a
+caller the embedder names instead of one on a request.
+
 The tests mock ``get_context``/authz and the batch executor -- they deliberately
 do NOT call ``bootstrap()`` (which registers process-global command handlers and
 clashes across the suite).
@@ -19,9 +22,13 @@ clashes across the suite).
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import mcp_hangar.server.tools.batch as batch_mod
+from mcp_hangar.context import get_identity_context, identity_context_var
 from mcp_hangar.domain.exceptions import AccessDeniedError
-from mcp_hangar.server.tools.batch import hangar_call
+from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
+from mcp_hangar.server.tools.batch import call_as, hangar_call
 from mcp_hangar.server.tools.batch.models import BatchResult, CallResult
 
 
@@ -163,6 +170,8 @@ def test_principal_with_tool_invoke_allowed() -> None:
     assert result["succeeded"] == 1
     assert result["results"][0]["success"] is True
     executor.execute.assert_called_once()
+    # hangar_call's results are still cut by the size cap and truncation (#1453).
+    assert executor.execute.call_args.kwargs["calls"][0].whole_result is False
 
 
 def test_mixed_batch_denies_only_unauthorized_tool() -> None:
@@ -193,3 +202,106 @@ def test_mixed_batch_denies_only_unauthorized_tool() -> None:
     _, kwargs = executor.execute.call_args
     assert len(kwargs["calls"]) == 1
     assert kwargs["calls"][0].tool == "safe"
+
+
+# --- the facade's `invoke` (#1453) -----------------------------------------------
+#
+# `call_as` is `hangar_call`'s path for a caller the embedder names: the
+# principal is authorized as a request's is, and bound as the caller's identity,
+# tenant included, while the executor runs.
+
+
+def _identity_seeing_executor():
+    """An executor stub that succeeds, and the caller identity bound each time it ran."""
+    executor = _make_executor()
+    succeed = executor.execute.side_effect
+    seen = []
+
+    def _execute(**kwargs):
+        seen.append(get_identity_context())
+        return succeed(**kwargs)
+
+    executor.execute.side_effect = _execute
+    return executor, seen
+
+
+def _tenant_caller() -> Principal:
+    return Principal(id=PrincipalId("agent-a"), type=PrincipalType.SERVICE_ACCOUNT, tenant_id="tenant:a")
+
+
+def test_call_as_an_anonymous_caller_is_denied_where_auth_is_configured() -> None:
+    authz = MagicMock()
+    executor = _make_executor()
+    with _patched(authz_middleware=authz, executor=executor):
+        result = call_as(Principal.anonymous(), "svc", "do_thing", {})
+
+    (call,) = result["results"]
+    assert (call["error_type"], call["error"]) == ("AuthorizationDenied", "Authentication required to invoke tools")
+    executor.execute.assert_not_called()
+    authz.authorize.assert_not_called()
+    # Every call was denied, so the executor never ran: the identity bound for
+    # it is released all the same. A facade worker thread is reused.
+    assert identity_context_var.get() is None
+
+
+def test_call_as_refuses_the_system_principal_before_anything_runs() -> None:
+    """Authorization grants the system principal everything, so it may not be the caller."""
+    authz = MagicMock()
+    executor = _make_executor()
+    with (
+        _patched(authz_middleware=authz, executor=executor),
+        pytest.raises(ValueError, match="system principal"),
+    ):
+        call_as(Principal.system(), "svc", "do_thing", {})
+
+    executor.execute.assert_not_called()
+    authz.authorize.assert_not_called()
+    assert identity_context_var.get() is None
+
+
+def test_call_as_an_anonymous_caller_carries_no_tenant_where_auth_is_off() -> None:
+    executor, seen = _identity_seeing_executor()
+    with _patched(authz_middleware=None, executor=executor):
+        result = call_as(Principal.anonymous(), "svc", "do_thing", {})
+
+    assert result["results"][0]["success"] is True
+    (identity,) = seen
+    assert (identity.caller.principal_type, identity.caller.tenant_id) == ("anonymous", None)
+
+
+def test_call_as_authorizes_the_principal_and_binds_its_tenant() -> None:
+    authz = MagicMock()
+    authz.authorize.return_value = None
+    executor, seen = _identity_seeing_executor()
+    caller = _tenant_caller()
+    with _patched(authz_middleware=authz, executor=executor):
+        result = call_as(caller, "svc", "do_thing", {"x": 1}, timeout=12.0)
+
+    assert result["results"][0]["success"] is True
+    assert authz.authorize.call_args.kwargs == {
+        "principal": caller,
+        "action": "invoke",
+        "resource_type": "tool",
+        "resource_id": "do_thing",
+    }
+    (identity,) = seen
+    assert (identity.caller.user_id, identity.caller.tenant_id) == ("agent-a", "tenant:a")
+    # Released once the call returns: a facade worker thread is reused.
+    assert identity_context_var.get() is None
+    (spec,) = executor.execute.call_args.kwargs["calls"]
+    assert (spec.mcp_server, spec.tool, spec.arguments) == ("svc", "do_thing", {"x": 1})
+    # The facade returns results whole, as it always has.
+    assert spec.whole_result is True
+    assert executor.execute.call_args.kwargs["global_timeout"] == 12.0
+
+
+def test_call_as_a_principal_lacking_tool_invoke_is_denied() -> None:
+    authz = MagicMock()
+    authz.authorize.side_effect = AccessDeniedError(principal_id="agent-a", action="invoke", resource="tool")
+    executor = _make_executor()
+    with _patched(authz_middleware=authz, executor=executor):
+        result = call_as(_tenant_caller(), "svc", "dangerous", {})
+
+    assert result["results"][0]["error_type"] == "AuthorizationDenied"
+    executor.execute.assert_not_called()
+    assert identity_context_var.get() is None
