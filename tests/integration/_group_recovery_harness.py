@@ -1,8 +1,10 @@
 """Bootstrap Hangar, then drive a group through failure, recovery and idle reaping (#1355, #1390).
 
 Run as a script, in its own interpreter, by
-``test_a_passing_health_check_returns_a_member_to_rotation.py`` and
-``test_scattered_health_check_failures_do_not_open_a_group_circuit.py``:
+``test_a_passing_health_check_returns_a_member_to_rotation.py``,
+``test_scattered_health_check_failures_do_not_open_a_group_circuit.py``,
+``test_each_replica_exposes_its_group_circuit.py`` and
+``test_a_caller_error_does_not_count_against_a_group_member.py``:
 ``python _group_recovery_harness.py <mode> <out.json>``. Not collected by pytest.
 
 A separate process because ``bootstrap()`` fills process-global state -- the
@@ -22,7 +24,9 @@ its calls, so the test can show that recovery did not come from it.
 Modes:
 
 - ``single``: a one-member group, driven out by failing calls, then left to the
-  health-check worker.
+  health-check worker. A call fails because the upstream does: it answers every
+  ``tools/call`` with a server error while a flag file exists. Before #1409 a
+  division by zero stood in for that, and a caller's error no longer counts.
 - ``pair``: the same with two members, where only the first can pass a health
   check. The second is shut down, standing for an upstream that is still down.
 - ``idle``: two members with a one-second idle TTL, reaped by the GC worker and
@@ -32,6 +36,13 @@ Modes:
   health check sends, fails while a flag file exists. The harness sets the flag
   for the next check as it hears each one, so the order does not depend on
   timing.
+- ``caller``: a one-member group sent, over and over, calls whose errors the
+  caller caused: a division by zero, arguments the tool cannot read, and a sum
+  the tool reports as ``isError``. Then the upstream fails two calls (#1409).
+- ``rate_limited``: a one-member group behind a command-bus rate limit that
+  admits one call. The calls after it are refused by Hangar, before the member
+  is asked (#1409). The rate limit refuses ``hangar_group_list`` too, so this
+  mode reads the group in this process.
 
 ``single`` and ``pair`` also scrape ``mcp_hangar_group_circuit_open`` from the
 endpoint ``serve --http`` mounts at ``/metrics`` (#1357). They scrape right after
@@ -59,7 +70,14 @@ ENVELOPE = {
 }
 
 GROUP = "math-pool"
-MEMBERS = {"single": ["math-a"], "pair": ["math-a", "math-b"], "idle": ["math-a", "math-b"], "scattered": ["math-a"]}
+MEMBERS = {
+    "single": ["math-a"],
+    "pair": ["math-a", "math-b"],
+    "idle": ["math-a", "math-b"],
+    "scattered": ["math-a"],
+    "caller": ["math-a"],
+    "rate_limited": ["math-a"],
+}
 #: The member whose upstream is healthy again by the time the worker runs.
 RECOVERING = "math-a"
 #: How long the health worker gets: a pass lands about a second after it starts.
@@ -76,6 +94,18 @@ SCATTERED = ("fail", "fail", "pass", "fail", "fail", "pass", "fail", "fail", "fa
 SCATTERED_DEADLINE_S = 30.0
 #: The gauge ``single`` and ``pair`` scrape (#1357).
 METRIC = "mcp_hangar_group_circuit_open"
+#: Caller mode: calls whose errors the caller caused, and what the upstream answers.
+CALLER_ERRORS = {
+    # A JSON-RPC error with the application code -1.
+    "application_error": ("divide", {"a": 1, "b": 0}),
+    # Invalid params (-32602): the tool cannot read what it was sent.
+    "invalid_params": ("divide", {"a": 1}),
+    # A result with isError: true.
+    "tool_error": ("power", {"base": 0, "exponent": -1}),
+}
+#: Caller and rate-limited modes: how many times each refused call is sent.
+#: Two counted failures would take the member out and open the circuit.
+REPEATS = 3
 
 
 def _server(mode: str, flag: Path) -> dict[str, Any]:
@@ -84,6 +114,8 @@ def _server(mode: str, flag: Path) -> dict[str, Any]:
         spec["idle_ttl_s"] = 1
     if mode == "scattered":
         spec["env"] = {"MOCK_TOOLS_LIST_FAILS_WHILE": str(flag)}
+    elif mode != "idle":
+        spec["env"] = {"MOCK_TOOLS_CALL_FAILS_WHILE": str(flag)}
     return spec
 
 
@@ -130,7 +162,11 @@ def _config(mode: str, flag: Path) -> dict[str, Any]:
         "circuit_breaker": {"failure_threshold": 2},
         "members": [{"id": member, "priority": rank} for rank, member in enumerate(members, start=1)],
     }
-    return {"mcp_servers": servers}
+    config: dict[str, Any] = {"mcp_servers": servers}
+    if mode == "rate_limited":
+        # The command bus admits one command of each type, then one per 1000s.
+        config["rate_limit"] = {"rps": 0.001, "burst": 1}
+    return config
 
 
 def _tool(client: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -195,7 +231,7 @@ def _worker(context: Any, task: str) -> Any:
 
 
 def _recover(
-    context: Any, client: Any, metrics: Any, report: dict[str, Any], mode: str, passed: dict[str, int]
+    context: Any, client: Any, metrics: Any, report: dict[str, Any], mode: str, passed: dict[str, int], flag: Path
 ) -> None:
     """Fail every member out through calls, then let the health worker run."""
     from mcp_hangar.server.state import GROUPS
@@ -205,12 +241,15 @@ def _recover(
     report["metric"]["before"] = _gauge(metrics)
     # Priority routing sends each call to the first member still in rotation,
     # so two failures per member drive every one of them out. After each, the
-    # gauge, and the circuit as `hangar_group_list` reports it.
+    # gauge, and the circuit as `hangar_group_list` reports it. The upstreams
+    # fail every call while the flag exists: they are up and not working.
     report["calls"]["failures"] = []
     report["metric"]["failures"] = []
+    flag.touch()
     for _ in range(2 * len(members)):
-        report["calls"]["failures"].append(_call(client, "divide", {"a": 1, "b": 0}))
+        report["calls"]["failures"].append(_call(client, "add", {"a": 1, "b": 2}))
         report["metric"]["failures"].append({"gauge": _gauge(metrics), "circuit_open": _status(client)["circuit_open"]})
+    flag.unlink()
     report["status"]["tripped"] = _status(client)
     report["calls"]["refused"] = _call(client, "add", {"a": 1, "b": 2})
     report["metric"]["tripped"] = _gauge(metrics)
@@ -294,6 +333,47 @@ def _scattered(context: Any, client: Any, report: dict[str, Any], checks: list[d
     report["checks"] = list(checks)
 
 
+def _step(client: Any, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """One call through the group, and the group as ``hangar_group_list`` reports it after."""
+    return {"call": _call(client, tool, arguments), "status": _status(client)}
+
+
+def _caller(client: Any, report: dict[str, Any], flag: Path) -> None:
+    """Send the calls whose errors the caller caused, then let the upstream fail two (#1409)."""
+    report["calls"]["before"] = _call(client, "add", {"a": 1, "b": 2})
+    report["caller"] = {
+        kind: [_step(client, tool, arguments) for _ in range(REPEATS)]
+        for kind, (tool, arguments) in CALLER_ERRORS.items()
+    }
+    flag.touch()
+    report["failures"] = [_step(client, "add", {"a": 1, "b": 2}) for _ in range(2)]
+    flag.unlink()
+    report["calls"]["refused"] = _call(client, "add", {"a": 1, "b": 2})
+
+
+def _group_state() -> dict[str, Any]:
+    """The fields of ``hangar_group_list`` the tests read, from the group in this process."""
+    from mcp_hangar.server.state import GROUPS
+
+    group = GROUPS[GROUP]
+    member = group.get_member(RECOVERING)
+    return {
+        "members": [
+            {"id": RECOVERING, "in_rotation": member.in_rotation, "consecutive_failures": member.consecutive_failures}
+        ],
+        "circuit_open": group.circuit_open,
+        "healthy_count": group.healthy_count,
+    }
+
+
+def _rate_limited(client: Any, report: dict[str, Any]) -> None:
+    """One call the rate limit admits, then calls it refuses (#1409)."""
+    report["calls"]["before"] = _call(client, "add", {"a": 1, "b": 2})
+    report["refused"] = [
+        {"call": _call(client, "add", {"a": 1, "b": 2}), "status": _group_state()} for _ in range(REPEATS)
+    ]
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
@@ -319,7 +399,7 @@ def main(mode: str, out: Path) -> None:
 
     McpServerGroup.rebalance = counted_rebalance  # type: ignore[method-assign]
 
-    flag = out.parent / "tools-list-fails"
+    flag = out.parent / "upstream-fails"
     context = bootstrap(config_dict=_config(mode, flag))
 
     passed: dict[str, int] = {}
@@ -348,8 +428,12 @@ def main(mode: str, out: Path) -> None:
             _idle(context, client, report, stopped)
         elif mode == "scattered":
             _scattered(context, client, report, checks, flag)
+        elif mode == "caller":
+            _caller(client, report, flag)
+        elif mode == "rate_limited":
+            _rate_limited(client, report)
         else:
-            _recover(context, client, metrics, report, mode, passed)
+            _recover(context, client, metrics, report, mode, passed, flag)
 
     # Taken before the servers below are shut down, which is not under test.
     report["health_checks_passed"] = dict(passed)

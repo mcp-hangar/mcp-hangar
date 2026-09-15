@@ -141,15 +141,24 @@ def _tool_call_params(tool_name: str, arguments: dict[str, Any], progress_token:
     return params
 
 
+def _rpc_error_code(error: dict[str, Any]) -> int | None:
+    """An upstream JSON-RPC error's code, or None when it is not an integer.
+
+    The spec's code is an integer. Anything else the upstream sent in its place
+    is not copied.
+    """
+    code = error.get("code")
+    return code if type(code) is int else None
+
+
 def _rpc_error_type(error: dict[str, Any]) -> str:
     """``ToolInvocationFailed.error_type`` for an upstream JSON-RPC error: its code, or ``_OTHER``.
 
-    The spec's code is an integer. Anything else the upstream sent in its place
-    is not copied: ``error_type`` is the bounded classifier that summary logs,
-    the security log and audit records carry (GHSA-qwq2-7g49-jxc6).
+    ``error_type`` is the bounded classifier that summary logs, the security log
+    and audit records carry (GHSA-qwq2-7g49-jxc6).
     """
-    code = error.get("code")
-    return str(code) if type(code) is int else OTHER_ERROR_TYPE
+    code = _rpc_error_code(error)
+    return str(code) if code is not None else OTHER_ERROR_TYPE
 
 
 #: The two reasons `ensure_ready()` gives a call it will not start the server
@@ -1839,7 +1848,13 @@ class McpServer(AggregateRoot):
                 raise ToolInvocationError(
                     self.mcp_server_id,
                     f"tool_error: {error_msg}",
-                    {"tool_name": tool_name, "correlation_id": correlation_id},
+                    {
+                        "tool_name": tool_name,
+                        "correlation_id": correlation_id,
+                        # Whether the error answers the request or reports a broken
+                        # exchange: a group reads it to judge the member (#1409).
+                        "jsonrpc_code": _rpc_error_code(response["error"]),
+                    },
                 )
 
             result = response.get("result", {})
