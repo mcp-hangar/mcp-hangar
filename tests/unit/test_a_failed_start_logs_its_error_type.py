@@ -150,9 +150,9 @@ class TestAGroup:
         _assert_logged_by_type(logs, "group_member_start_failed", "McpServerStartError")
 
     def test_the_rebalance_saga_logs_a_degraded_member_without_its_reason(self) -> None:
-        # McpServerDegraded carries the failed start's message as its reason,
-        # and no error type to log in its place: the line names the member,
-        # the group and the failure count.
+        # The line names the member, the group and the failure count, not the
+        # reason: an event recorded by an earlier release carries the failed
+        # start's message there (#1472 records the error type instead).
         saga = GroupRebalanceSaga(group_lookup=lambda _member_id: "calculators")
 
         with capture_logs() as logs:
