@@ -140,8 +140,9 @@ class GroupRebalanceSaga(EventTriggeredSaga):
 
         elif isinstance(event, McpServerStopped):
             # Not a failure. "idle" is the GC reaping an unused server,
-            # "shutdown" is every explicit stop (hangar_stop, reload, unload,
-            # delete, a group's stop_all, process exit). A give-up is a stop too
+            # "shutdown" a reload, unload or delete, a group's stop_all or
+            # process exit, and the stop command's own reason an operator's
+            # stop, a failback or a block (#1466). A give-up is a stop too
             # (#1360), and the move to DEAD recorded right after it is what
             # takes the member out of rotation, below. A crashed process emits
             # no stop at all. Counted as a failure, one idle reap could take a

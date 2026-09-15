@@ -2172,10 +2172,15 @@ class McpServer(AggregateRoot):
 
             return False
 
-    def shutdown(self) -> None:
-        """Explicit shutdown (public API). Thread-safe."""
+    def shutdown(self, reason: str = "shutdown") -> None:
+        """Explicit shutdown (public API). Thread-safe.
+
+        ``reason`` is the recorded ``McpServerStopped.reason``. The stop command
+        passes its own, so an operator's stop, a failback or a block is not
+        recorded as ``shutdown`` (#1466).
+        """
         with self._lock:
-            self._shutdown_internal(reason="shutdown")
+            self._shutdown_internal(reason=reason)
 
     def stop(self) -> None:
         """Stop the mcp_server. Alias for shutdown(). Thread-safe."""

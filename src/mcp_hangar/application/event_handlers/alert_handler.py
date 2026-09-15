@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 
-from ...domain.events import DomainEvent, HealthCheckFailed, McpServerDegraded, McpServerStopped, ToolInvocationFailed
+from ...domain.events import (
+    DELIBERATE_STOP_REASONS,
+    DomainEvent,
+    HealthCheckFailed,
+    McpServerDegraded,
+    McpServerStopped,
+    ToolInvocationFailed,
+)
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -124,8 +131,9 @@ class AlertEventHandler:
 
     def _handle_stopped(self, event: McpServerStopped) -> None:
         """Handle mcp_server stopped event."""
-        # Only alert for unexpected stops (not shutdown or idle)
-        if event.reason not in ("shutdown", "idle"):
+        # Only alert for unexpected stops, such as a give-up: not an idle reap,
+        # Hangar's own shutdown, or a stop through the stop command (#1466).
+        if event.reason not in DELIBERATE_STOP_REASONS:
             alert = Alert(
                 level="warning",
                 message=f"McpServer stopped unexpectedly: {event.reason}",

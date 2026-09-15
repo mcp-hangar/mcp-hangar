@@ -114,12 +114,189 @@ class TestProviderLimits:
             cm.set_mcp_server_limit("api", -5)
 
     def test_update_provider_limit(self):
-        """Updating a provider limit replaces the semaphore."""
+        """Updating a provider limit changes it in place."""
         cm = ConcurrencyManager(default_mcp_server_limit=10)
         cm.set_mcp_server_limit("api", 5)
         assert cm.get_mcp_server_limit("api") == 5
         cm.set_mcp_server_limit("api", 20)
         assert cm.get_mcp_server_limit("api") == 20
+
+
+# ---------------------------------------------------------------------------
+# Limits changed while calls hold slots (#1432)
+# ---------------------------------------------------------------------------
+
+
+class _Holder:
+    """Calls that hold their slots on a manager until each is released."""
+
+    def __init__(self, cm: ConcurrencyManager) -> None:
+        self._cm = cm
+        self._threads: list[threading.Thread] = []
+
+    def hold(self, mcp_server_id: str) -> threading.Event:
+        """Start a call and wait until it holds its slots. Set the returned event to release it."""
+        entered, release = threading.Event(), threading.Event()
+
+        def run() -> None:
+            with self._cm.acquire(mcp_server_id):
+                entered.set()
+                release.wait(10)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self._threads.append(thread)
+        assert entered.wait(5), f"a call to {mcp_server_id} did not get its slot"
+        return release
+
+    def waiting(self, mcp_server_id: str) -> threading.Event:
+        """Start a call that may have to wait. The returned event is set once it holds its slots."""
+        entered = threading.Event()
+
+        def run() -> None:
+            with self._cm.acquire(mcp_server_id):
+                entered.set()
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self._threads.append(thread)
+        return entered
+
+    def join(self) -> None:
+        for thread in self._threads:
+            thread.join(5)
+            assert not thread.is_alive()
+
+
+class _InterruptedWait:
+    """A limiter condition whose wait is interrupted, as by KeyboardInterrupt."""
+
+    def __init__(self, condition: threading.Condition) -> None:
+        self._condition = condition
+
+    def wait(self) -> None:
+        raise KeyboardInterrupt
+
+    def notify(self, n: int = 1) -> None:
+        self._condition.notify(n)
+
+    def notify_all(self) -> None:
+        self._condition.notify_all()
+
+
+class TestLimitsChangeInPlace:
+    """A changed limit applies to new calls; a call in flight keeps its slot (#1432)."""
+
+    def test_calls_in_flight_keep_their_slots_through_a_changed_a_kept_and_a_removed_limit(self):
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=5)
+        cm.set_mcp_server_limits({"keep": 2, "change": 2, "drop": 2})
+        holder = _Holder(cm)
+        releases = [holder.hold(sid) for sid in ("keep", "keep", "change", "change", "drop")]
+
+        # What a reload of a file that keeps `keep`, lowers `change` and deletes `drop` applies.
+        cm.set_limits(10, 5)
+        cm.set_mcp_server_limits({"keep": 2, "change": 1}, replace=True)
+
+        assert [cm.in_flight(sid) for sid in (None, "keep", "change", "drop")] == [5, 2, 2, 1]
+        assert [cm.get_mcp_server_limit(sid) for sid in ("keep", "change", "drop")] == [2, 1, 5]
+
+        for release in releases:
+            release.set()
+        holder.join()
+        assert [cm.in_flight(sid) for sid in (None, "keep", "change", "drop")] == [0, 0, 0, 0]
+        assert cm._limiters == {}, "a limiter is dropped once its calls have released"
+
+    def test_a_lowered_limit_admits_no_new_call_until_the_running_ones_are_below_it(self):
+        cm = ConcurrencyManager(global_limit=10)
+        cm.set_mcp_server_limit("api", 2)
+        holder = _Holder(cm)
+        first, second = holder.hold("api"), holder.hold("api")
+
+        cm.set_mcp_server_limit("api", 1)
+        waiter = holder.waiting("api")
+        assert not waiter.wait(0.2)
+
+        first.set()
+        assert not waiter.wait(0.2), "one call still runs, and the limit is 1"
+        second.set()
+        assert waiter.wait(5)
+        holder.join()
+        assert cm.in_flight() == 0
+
+    def test_a_kept_limit_counts_the_running_calls(self):
+        cm = ConcurrencyManager(global_limit=10)
+        cm.set_mcp_server_limit("api", 1)
+        holder = _Holder(cm)
+        release = holder.hold("api")
+
+        cm.set_mcp_server_limits({"api": 1}, replace=True)
+        waiter = holder.waiting("api")
+        assert not waiter.wait(0.2)
+
+        release.set()
+        assert waiter.wait(5)
+        holder.join()
+
+    def test_a_raised_limit_lets_a_waiting_call_in(self):
+        cm = ConcurrencyManager(global_limit=10)
+        cm.set_mcp_server_limit("api", 1)
+        holder = _Holder(cm)
+        release = holder.hold("api")
+        waiter = holder.waiting("api")
+        assert not waiter.wait(0.2)
+
+        cm.set_mcp_server_limit("api", 2)
+        assert waiter.wait(5), "the raised limit has a free slot"
+        release.set()
+        holder.join()
+        assert cm.in_flight() == 0
+
+    def test_a_lowered_global_limit_counts_the_running_calls(self):
+        cm = ConcurrencyManager(global_limit=2, default_mcp_server_limit=0)
+        holder = _Holder(cm)
+        releases = [holder.hold("a"), holder.hold("b")]
+
+        cm.set_limits(1, 0)
+        waiter = holder.waiting("c")
+        assert not waiter.wait(0.2)
+
+        releases[0].set()
+        assert not waiter.wait(0.2), "one call still runs, and the global limit is 1"
+        releases[1].set()
+        assert waiter.wait(5)
+        holder.join()
+        assert cm.global_limit == 1
+        assert cm.in_flight() == 0
+
+    def test_a_negative_limit_changes_nothing(self):
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=5)
+        cm.set_mcp_server_limit("api", 2)
+
+        with pytest.raises(ValueError, match="global_limit must be >= 0"):
+            cm.set_limits(-1, 5)
+        with pytest.raises(ValueError, match="limit must be >= 0"):
+            cm.set_mcp_server_limits({"other": 3, "api": -1}, replace=True)
+
+        assert (cm.global_limit, cm.default_mcp_server_limit) == (10, 5)
+        assert (cm.get_mcp_server_limit("api"), cm.get_mcp_server_limit("other")) == (2, 5)
+
+    def test_an_interrupted_wait_leaks_no_slot(self):
+        cm = ConcurrencyManager(global_limit=10)
+        cm.set_mcp_server_limit("api", 1)
+        holder = _Holder(cm)
+        release = holder.hold("api")
+        limiter = cm._limiters["api"]
+        limiter.ready = _InterruptedWait(limiter.ready)  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt):
+            with cm.acquire("api"):
+                pass
+
+        assert (cm.in_flight(), cm.in_flight("api"), limiter.waiting) == (1, 1, 0)
+        release.set()
+        holder.join()
+        assert cm.in_flight() == 0
+        assert cm._limiters == {}
 
 
 # ---------------------------------------------------------------------------
