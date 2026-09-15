@@ -12,6 +12,7 @@ from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER, stream_id_for
 from ..ports.bus import IQueryBus
 from ..read_models import HealthInfo, McpServerDetails, McpServerSummary, SystemMetrics, ToolInfo
+from ..read_models.mcp_server_views import dead_info
 from .queries import (
     GetMcpServerHealthQuery,
     GetL7PolicyQuery,
@@ -131,6 +132,7 @@ class ListMcpServersHandler(BaseQueryHandler):
                 health_status=self._get_health_status(mcp_server),
                 description=mcp_server.description,
                 tools_predefined=mcp_server.tools_predefined,
+                dead=dead_info(mcp_server, state),
             )
             result.append(summary)
 
@@ -151,16 +153,18 @@ class GetMcpServerHandler(BaseQueryHandler):
 
         tools = [self._build_tool_info(t) for t in mcp_server.tools]
         health = self._build_health_info(mcp_server)
+        state = mcp_server.state.value
 
         return McpServerDetails(
             mcp_server_id=query.mcp_server_id,
-            state=mcp_server.state.value,
+            state=state,
             mode=mcp_server.mode.value,
             is_alive=mcp_server.is_alive,
             tools=tools,
             health=health,
             idle_time=mcp_server.idle_time,
             meta=mcp_server.meta,
+            dead=dead_info(mcp_server, state),
         )
 
 

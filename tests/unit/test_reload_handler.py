@@ -149,25 +149,6 @@ class TestReloadConfigurationHandler:
         """Should detect and remove deleted providers."""
         # Create existing provider
         existing_provider = Mock(spec=McpServer)
-        existing_provider._mode = Mock(value="subprocess")
-        existing_provider._command = ["old", "command"]
-        existing_provider._image = None
-        existing_provider._endpoint = None
-        existing_provider._env = {}
-        existing_provider._idle_ttl = Mock(seconds=300)
-        existing_provider._health_check_interval = Mock(seconds=60)
-        existing_provider._health = Mock(max_consecutive_failures=3)
-        existing_provider._volumes = []
-        existing_provider._build = None
-        existing_provider._resources = {}
-        existing_provider._network = "none"
-        existing_provider._read_only = True
-        existing_provider._user = None
-        existing_provider._description = None
-        existing_provider._tools = Mock(to_dict=lambda: None)
-        existing_provider._auth_config = None
-        existing_provider._tls_config = None
-        existing_provider._http_config = None
         existing_provider.stop.return_value = None
 
         mock_repository.get_all.return_value = {"old-provider": existing_provider}
@@ -201,25 +182,6 @@ class TestReloadConfigurationHandler:
         """Should detect providers with changed configuration."""
         # Create existing provider with old config
         existing_provider = Mock(spec=McpServer)
-        existing_provider._mode = Mock(value="subprocess")
-        existing_provider._command = ["old", "command"]
-        existing_provider._image = None
-        existing_provider._endpoint = None
-        existing_provider._env = {"OLD_ENV": "value"}
-        existing_provider._idle_ttl = Mock(seconds=300)
-        existing_provider._health_check_interval = Mock(seconds=60)
-        existing_provider._health = Mock(max_consecutive_failures=3)
-        existing_provider._volumes = []
-        existing_provider._build = None
-        existing_provider._resources = {}
-        existing_provider._network = "none"
-        existing_provider._read_only = True
-        existing_provider._user = None
-        existing_provider._description = None
-        existing_provider._tools = Mock(to_dict=lambda: None)
-        existing_provider._auth_config = None
-        existing_provider._tls_config = None
-        existing_provider._http_config = None
         existing_provider.stop.return_value = None
 
         mock_repository.get_all.return_value = {"test-provider": existing_provider}
@@ -273,8 +235,6 @@ class TestReloadConfigurationHandler:
                     "mode": "subprocess",
                     "command": ["python", "-m", "test_server"],
                     "idle_ttl_s": 300,
-                    # Spelled out: an omitted `resources` reads as changed on every reload (#1426).
-                    "resources": {"memory": "512m", "cpu": "1.0"},
                 }
             }
         }
@@ -304,25 +264,6 @@ class TestReloadConfigurationHandler:
         """Reload uses the supported shutdown lifecycle API."""
         # Create existing provider
         existing_provider = Mock(spec=McpServer)
-        existing_provider._mode = Mock(value="subprocess")
-        existing_provider._command = ["old", "command"]
-        existing_provider._image = None
-        existing_provider._endpoint = None
-        existing_provider._env = {}
-        existing_provider._idle_ttl = Mock(seconds=300)
-        existing_provider._health_check_interval = Mock(seconds=60)
-        existing_provider._health = Mock(max_consecutive_failures=3)
-        existing_provider._volumes = []
-        existing_provider._build = None
-        existing_provider._resources = {}
-        existing_provider._network = "none"
-        existing_provider._read_only = True
-        existing_provider._user = None
-        existing_provider._description = None
-        existing_provider._tools = Mock(to_dict=lambda: None)
-        existing_provider._auth_config = None
-        existing_provider._tls_config = None
-        existing_provider._http_config = None
         existing_provider.stop.return_value = None
         existing_provider.shutdown.return_value = None
 
@@ -353,25 +294,6 @@ class TestReloadConfigurationHandler:
     def test_reload_fails_when_existing_provider_cannot_shutdown(self, handler, mock_repository, mock_event_bus):
         """A failed shutdown must not be reported as a successful reload."""
         existing_provider = Mock(spec=McpServer)
-        existing_provider._mode = Mock(value="subprocess")
-        existing_provider._command = ["old", "command"]
-        existing_provider._image = None
-        existing_provider._endpoint = None
-        existing_provider._env = {}
-        existing_provider._idle_ttl = Mock(seconds=300)
-        existing_provider._health_check_interval = Mock(seconds=60)
-        existing_provider._health = Mock(max_consecutive_failures=3)
-        existing_provider._volumes = []
-        existing_provider._build = None
-        existing_provider._resources = {}
-        existing_provider._network = "none"
-        existing_provider._read_only = True
-        existing_provider._user = None
-        existing_provider._description = None
-        existing_provider._tools = Mock(to_dict=lambda: None)
-        existing_provider._auth_config = None
-        existing_provider._tls_config = None
-        existing_provider._http_config = None
         existing_provider.shutdown.side_effect = RuntimeError("process did not exit")
 
         mock_repository.get_all.return_value = {"old-provider": existing_provider}

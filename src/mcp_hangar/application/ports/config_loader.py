@@ -21,8 +21,14 @@ class PreparedServers(Protocol):
     def keeps(self, mcp_server_id: str, running: Any) -> bool:
         """Whether the new configuration keeps *running* as that server, rather than replacing it.
 
+        It keeps a server the file would build with the same settings, every
+        default applied, and that still reads as configured. Governance the
+        server declares, and its place in a group, are not among the settings:
+        they are swapped in whether or not it is kept.
+
         A running server it does not keep is replaced when it is committed, so
-        a reload must stop it first.
+        a reload must stop it first. One it keeps must not be stopped: the
+        commit puts that same object back.
         """
         ...
 
