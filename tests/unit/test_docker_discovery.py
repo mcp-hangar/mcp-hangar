@@ -4,6 +4,8 @@ Tests DockerDiscoverySource automatic reconnection with exponential
 backoff when Docker daemon connection is lost.
 """
 
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,6 +34,11 @@ def mock_docker(_mock_docker_available):
     return _mock_docker_available
 
 
+def _no_backoff(source):
+    """Skip the retry backoff: the wait returns at once, with no stop requested."""
+    return patch.object(source._stop_requested, "wait", return_value=False)
+
+
 class TestEnsureClientRetry:
     """Tests for _ensure_client() retry with exponential backoff."""
 
@@ -47,7 +54,7 @@ class TestEnsureClientRetry:
 
         source = DockerDiscoverySource(max_retries=3, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             with pytest.raises(DockerException, match="Failed to connect.*3 attempts"):
                 source._ensure_client()
 
@@ -68,7 +75,7 @@ class TestEnsureClientRetry:
 
         source = DockerDiscoverySource(max_retries=5, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             source._ensure_client()
 
         assert source._client is ok_client
@@ -85,7 +92,7 @@ class TestEnsureClientRetry:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             with pytest.raises(DockerException, match="Failed to connect.*2 attempts"):
                 source._ensure_client()
 
@@ -124,10 +131,7 @@ class TestBackoffTiming:
         )
 
         sleep_calls = []
-        with patch(
-            "mcp_hangar.infrastructure.discovery.docker_source.time.sleep",
-            side_effect=lambda t: sleep_calls.append(t),
-        ):
+        with patch.object(source._stop_requested, "wait", side_effect=lambda t: sleep_calls.append(t)):
             with pytest.raises(DockerException):
                 source._ensure_client()
 
@@ -159,10 +163,7 @@ class TestBackoffTiming:
         )
 
         sleep_calls = []
-        with patch(
-            "mcp_hangar.infrastructure.discovery.docker_source.time.sleep",
-            side_effect=lambda t: sleep_calls.append(t),
-        ):
+        with patch.object(source._stop_requested, "wait", side_effect=lambda t: sleep_calls.append(t)):
             with pytest.raises(DockerException):
                 source._ensure_client()
 
@@ -187,7 +188,7 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             result = await source.discover()
 
         assert result == []
@@ -208,7 +209,7 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             result = await source.discover()
 
         # Should have reset client to None for reconnection on next call
@@ -247,14 +248,14 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             result1 = await source.discover()
 
         assert result1 == []
 
         # Second call: reconnect and succeed
         mock_docker.from_env.side_effect = [ok_client]
-        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
+        with _no_backoff(source):
             result2 = await source.discover()
 
         assert len(result2) == 1
@@ -663,3 +664,104 @@ class TestInitConfiguration:
         assert source._max_retries == 10
         assert source._initial_backoff_s == 0.5
         assert source._max_backoff_s == 60.0
+
+
+class TestAStopEndsTheRetryWait:
+    """A stop reaches a connection retry that is waiting out its backoff (#1436).
+
+    The retry runs on discovery's loop thread, so while it waits nothing else
+    on that loop runs, the orchestrator's stop() included. The stop reaches it
+    from the stopping thread, through request_stop(). Each backoff here is 30 s,
+    so a wait that ran its course would fail the timing assertions.
+    """
+
+    def test_request_stop_ends_the_wait_and_the_retries(self, mock_docker):
+        from docker.errors import DockerException
+
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        attempted = threading.Event()
+
+        def unreachable():
+            attempted.set()
+            raise DockerException("Connection refused")
+
+        mock_docker.from_env.side_effect = unreachable
+        source = DockerDiscoverySource(max_retries=5, initial_backoff_s=30.0)
+        raised: list[Exception] = []
+
+        def connect():
+            try:
+                source._ensure_client()
+            except DockerException as e:
+                raised.append(e)
+
+        worker = threading.Thread(target=connect)
+        worker.start()
+        assert attempted.wait(5)
+
+        started = time.monotonic()
+        source.request_stop()
+        worker.join(5)
+
+        assert not worker.is_alive()
+        assert time.monotonic() - started < 1.0
+        assert len(raised) == 1
+        assert "stopping" in str(raised[0])
+        # No attempt after the stop.
+        assert mock_docker.from_env.call_count == 1
+
+    async def test_a_stopped_source_connects_again_only_once_started(self, mock_docker):
+        from docker.errors import DockerException
+
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        client = MagicMock()
+        mock_docker.from_env.return_value = client
+        source = DockerDiscoverySource(initial_backoff_s=30.0)
+
+        await source.stop()
+        with pytest.raises(DockerException, match="stopping"):
+            source._ensure_client()
+        assert await source.discover() == []
+        mock_docker.from_env.assert_not_called()
+
+        await source.start()
+        assert source._client is client
+
+    def test_stopping_discovery_returns_while_docker_is_unreachable(self, mock_docker):
+        """The served stop path: the loop is blocked in the backoff when the stop comes."""
+        from docker.errors import DockerException
+
+        from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryConfig, DiscoveryOrchestrator
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+        from mcp_hangar.server.lifecycle import start_discovery_loop, stop_discovery_loop
+
+        # Docker answers the start, then goes away: the first cycle loses the
+        # connection and the next one retries into the backoff.
+        lost = MagicMock()
+        lost.containers.list.side_effect = DockerException("Connection lost")
+        answers = iter([lost])
+        retrying = threading.Event()
+
+        def from_env():
+            client = next(answers, None)
+            if client is not None:
+                return client
+            retrying.set()
+            raise DockerException("Connection refused")
+
+        mock_docker.from_env.side_effect = from_env
+        orchestrator = DiscoveryOrchestrator(DiscoveryConfig(refresh_interval_s=0))
+        orchestrator.add_source(DockerDiscoverySource(initial_backoff_s=30.0))
+
+        loop, thread = start_discovery_loop(orchestrator)
+        try:
+            assert retrying.wait(5)
+        finally:
+            started = time.monotonic()
+            stop_discovery_loop(orchestrator, loop, thread)
+
+        assert time.monotonic() - started < 1.0
+        assert not thread.is_alive()
+        assert orchestrator.get_stats()["running"] is False

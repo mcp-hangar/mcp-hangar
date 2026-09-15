@@ -312,6 +312,16 @@ class DiscoveryOrchestrator:
 
         logger.info("Discovery orchestrator stopped")
 
+    def request_stop(self) -> None:
+        """Tell the sources a stop is coming, from the thread that is stopping.
+
+        Synchronous on purpose. `stop_discovery_loop` calls it before it
+        schedules `stop()` on discovery's loop, because a source can block that
+        loop's thread (the docker source waits out its connection backoff
+        there), and then `stop()` cannot run until the wait ends (#1436).
+        """
+        self._discovery_service.request_stop()
+
     async def _discovery_loop(self) -> None:
         """Main discovery loop.
 
