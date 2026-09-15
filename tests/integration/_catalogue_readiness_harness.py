@@ -192,6 +192,11 @@ def _recover(probe: Probe, repository: Any, work: Path, lifecycle: Any, report: 
     # svc-late's upstream comes back. Nothing but the retry starts it.
     (work / f"{LATE}.down").unlink()
     _wait(lambda: probe.ready()["status"] == 200)
+    # Readiness turns 200 when the start's `McpServerStarted` is projected, which
+    # is inside the retry's attempt, before the attempt records its outcome
+    # (#1475). The retry reports a final state on its next pass, after that
+    # sample and on the same thread, so the metric is read once it has.
+    _wait(lambda: probe.catalogue().get("retry") != "running")
     report["recovered"] = {"ready": probe.ready(), "late_retries": probe.retries(LATE)}
 
     # A later outage: svc-late's process dies and will not come back.

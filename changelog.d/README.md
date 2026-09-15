@@ -44,8 +44,8 @@ Write it for a reader upgrading, not for a reviewer: what changed, what breaks,
 what to do about it. A multi-paragraph fragment is fine -- continuation lines
 are indented into the bullet automatically.
 
-A breaking change is described here **and** gets a section in `UPGRADE.md`
-naming the old and new form. The commit itself never carries `!` or a
+A breaking change is described here **and** gets an upgrade note in
+`upgrade.d/` naming the old and new form (see `upgrade.d/README.md`). The commit itself never carries `!` or a
 `BREAKING CHANGE:` footer (see `AGENTS.md`).
 
 ## Release summary
