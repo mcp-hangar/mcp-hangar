@@ -361,9 +361,12 @@ class TestADirectCallStaysDirect:
 
 
 class TestThePostHoldRecheck:
-    """The re-check after an approval hold asks the member's groups too (#1039's rule)."""
+    """The re-check after an approval hold asks the member's groups too (#1039's rule).
 
-    def _revalidate(self, *, owning_groups: tuple[str, ...]) -> object:
+    The groups that own the member now, read with the policy (#1488).
+    """
+
+    def _revalidate(self) -> object:
         return BatchExecutor()._revalidate_after_hold(
             CallSpec(index=0, call_id="c-1", mcp_server=_MEMBER, tool=_TOOL, arguments={}),
             get_tool_access_resolver(),
@@ -374,21 +377,26 @@ class TestThePostHoldRecheck:
             _TENANT,
             lambda _projection, _pin: None,
             target_server_id=_MEMBER,
-            owning_groups=owning_groups,
         )
 
-    def test_a_deny_added_to_the_group_during_the_hold_refuses(self) -> None:
+    def test_a_deny_added_to_the_group_during_the_hold_refuses(self, world) -> None:
         get_tool_access_resolver().set_group_policy(_GROUP, ToolAccessPolicy(deny_list=(_TOOL,)))
 
-        refusal = self._revalidate(owning_groups=(_GROUP,))
+        refusal = self._revalidate()
 
         assert refusal is not None
         assert refusal.error_type == "ToolAccessDenied"
 
-    def test_a_call_the_group_still_allows_dispatches(self) -> None:
+    def test_a_call_the_group_still_allows_dispatches(self, world) -> None:
         get_tool_access_resolver().set_group_policy(_GROUP, ToolAccessPolicy(deny_list=("something_else",)))
 
-        assert self._revalidate(owning_groups=(_GROUP,)) is None
+        assert self._revalidate() is None
+
+    def test_a_member_moved_out_of_the_group_during_the_hold_is_not_held_to_it(self, world) -> None:
+        get_tool_access_resolver().set_group_policy(_GROUP, ToolAccessPolicy(deny_list=(_TOOL,)))
+        world.groups[_GROUP].remove_member(_MEMBER)
+
+        assert self._revalidate() is None
 
 
 class TestTheHangarCallTool:

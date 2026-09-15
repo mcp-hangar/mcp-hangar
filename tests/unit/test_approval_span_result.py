@@ -330,11 +330,11 @@ def test_a_label_that_cannot_be_worked_out_does_not_decide_the_call(sdk) -> None
     real_rule = BatchExecutor._l7_approval_rule
     reads: list[Any] = []
 
-    def fails_on_the_label_read(self: BatchExecutor, call: Any, ctx: Any) -> str | None:
+    def fails_on_the_label_read(self: BatchExecutor, call: Any, ctx: Any, **kwargs: Any) -> str | None:
         reads.append(call)
         if len(reads) > 1:
             raise RuntimeError("policy unreadable")
-        return real_rule(self, call, ctx)
+        return real_rule(self, call, ctx, **kwargs)
 
     with patch.object(BatchExecutor, "_l7_approval_rule", fails_on_the_label_read):
         result = _gate(ctx, tracer)
@@ -362,9 +362,9 @@ def test_with_tracing_off_the_label_costs_no_policy_read(tracer_kind: str) -> No
     real_rule = BatchExecutor._l7_approval_rule
     reads: list[str] = []
 
-    def counted(self: BatchExecutor, call: Any, ctx: Any) -> str | None:
+    def counted(self: BatchExecutor, call: Any, ctx: Any, **kwargs: Any) -> str | None:
         reads.append(call.tool)
-        return real_rule(self, call, ctx)
+        return real_rule(self, call, ctx, **kwargs)
 
     with patch.object(BatchExecutor, "_l7_approval_rule", counted):
         result = _execute(_executor_ctx(approval_gate=None, servers=servers, command_bus=bus), tracer)

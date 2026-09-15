@@ -13,6 +13,12 @@ A call's decisions include a tool call's (#1431): the executor's decision
 for `hangar_call` -- access, withdrawal and pins together -- and the front
 door's listing and routing.
 
+The servers and the groups, with each group's membership, are swapped in the
+same set (#1488). The files move a server from one group to the other and
+rebuild it, and the server the previous file built carries an L7 egress
+policy: a call to it reads the groups that own it, and the L7 policy it is
+routed on, with the overlays.
+
 The two files below differ in every overlay, and each test checks a call
 against both of them: the one the reload replaces and the one it puts in force.
 """
@@ -33,6 +39,7 @@ from mcp_hangar.application.read_models.tool_projection import (
 )
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.policies import header_exposure
+from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies, get_header_exposure_policy
 from mcp_hangar.domain.services.governance_overlays import read_as_one_set, swapping
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
@@ -45,6 +52,10 @@ from mcp_hangar.server.tools.batch import executor
 SERVER = "store"
 GROUP = "g"
 MEMBER = "m1"
+OTHER_GROUP = "g2"
+OTHER_MEMBER = "m2"
+#: A server the reload moves from `g` to `g2`, and rebuilds.
+MOVER = "mover"
 TENANT = "tenant:a"
 
 
@@ -53,41 +64,50 @@ def _server(**extra: Any) -> dict[str, Any]:
     return {"mode": "subprocess", "command": ["python", "-c", "pass"], **extra}
 
 
-def _file(*, deny: str, withdrawn: str, pin: str, exposure: str, group_deny: str) -> dict[str, Any]:
+def _file(*, deny: str, withdrawn: str, pin: str, exposure: str, group_deny: str, mover_in: str) -> dict[str, Any]:
+    members: dict[str, list[dict[str, Any]]] = {
+        GROUP: [{"id": MEMBER, **_server()}],
+        OTHER_GROUP: [{"id": OTHER_MEMBER, **_server()}],
+    }
+    members[mover_in].append({"id": MOVER})
     return {
         SERVER: _server(
             tools={"deny_list": [deny]},
             tool_projection={"withdrawn": [withdrawn], "pins": {"p": pin}},
             header_exposure={"deny_annotated": [exposure]},
         ),
+        # Built from another command in each file, so a reload replaces it.
+        MOVER: {"mode": "subprocess", "command": ["python", "-c", f"pass  # in {mover_in}"]},
         GROUP: {
             "mode": "group",
             "auto_start": False,
             "tools": {"deny_list": [group_deny]},
-            "members": [{"id": MEMBER, **_server()}],
+            "members": members[GROUP],
         },
+        OTHER_GROUP: {"mode": "group", "auto_start": False, "members": members[OTHER_GROUP]},
     }
 
 
 #: The file in force. Moving `t` from the deny list to the withdrawals is the
 #: edit where a mix shows: the new policy with the old withdrawals allows `t`.
-OLD = _file(deny="t", withdrawn="w", pin="a" * 64, exposure="*old*", group_deny="ga")
-#: The file a reload puts in force.
-NEW = _file(deny="u", withdrawn="t", pin="b" * 64, exposure="*new*", group_deny="gb")
+#: `mover` is in `g`, which denies `ga`.
+OLD = _file(deny="t", withdrawn="w", pin="a" * 64, exposure="*old*", group_deny="ga", mover_in=GROUP)
+#: The file a reload puts in force. `mover` is in `g2`, and `g` denies `gb`
+#: instead: the new policies with the old membership allow `mover` `ga`.
+NEW = _file(deny="u", withdrawn="t", pin="b" * 64, exposure="*new*", group_deny="gb", mover_in=OTHER_GROUP)
 
 
 def _tool_call(mcp_server: str, tool: str) -> Any:
     """The decision the executor makes for a `hangar_call` of *tool* on *mcp_server*, read as it is."""
-    owners = executor._groups_owning(mcp_server)
     return executor._decide_governance(
         get_tool_access_resolver(),
         get_tool_projection_registry(),
         mcp_server,
         tool,
         TENANT,
-        executor._policy_scopes(mcp_server, False, mcp_server, owners),
+        is_group=False,
         target_server_id=mcp_server,
-        owning_groups=owners,
+        servers=get_runtime().repository,
     )
 
 
@@ -96,13 +116,17 @@ def _decisions() -> tuple[Any, ...]:
 
     Then what a tool call decides from them (#1431): `hangar_call`'s access,
     withdrawal and pins, for a server and for a group member, and the front
-    door's flat map, which is both its listing and its routing.
+    door's flat map, which is both its listing and its routing. Then, for the
+    server a reload moves between groups (#1488), the groups `hangar_call`
+    reads as owning it, its access, and whether it carries an L7 policy, and
+    the front door's access.
     """
     resolver = get_tool_access_resolver()
     registry = get_tool_projection_registry()
     pin = registry.resolve_pin(SERVER, "p", None)
     exposure = get_header_exposure_policy(SERVER)
     call, pinned, member = _tool_call(SERVER, "t"), _tool_call(SERVER, "p"), _tool_call(MEMBER, "ga")
+    mover = _tool_call(MOVER, "ga")
     return (
         resolver.is_tool_allowed(SERVER, "t"),
         resolver.is_tool_allowed(SERVER, "u"),
@@ -116,6 +140,8 @@ def _decisions() -> tuple[Any, ...]:
         tuple(pin.sha256 for _scope, pin, _mode in pinned.pins),
         member.allowed,
         tuple(sorted(flat_tool_projection._flat_map_now(TENANT))),
+        (mover.owning_groups, mover.allowed, mover.l7_policy is not None),
+        is_governed_allowed(MOVER, "ga", kind="tool", tenant_id=TENANT),
     )
 
 
@@ -125,7 +151,7 @@ def _reset() -> None:
     clear_header_exposure_policies()
     server_config._BUILT_FROM.clear()
     repository = get_runtime().repository
-    for mcp_server_id in (SERVER, MEMBER):
+    for mcp_server_id in (SERVER, MEMBER, OTHER_MEMBER, MOVER):
         if repository.exists(mcp_server_id):
             repository.remove(mcp_server_id)
     GROUPS.clear()
@@ -150,6 +176,9 @@ def files() -> Any:
         SERVER, [ToolSchema(name=name, description=name, input_schema={}) for name in ("t", "u", "w")]
     )
     old, new = server_config.build_config(OLD), server_config.build_config(NEW)
+    assert old.servers[MOVER] is not new.servers[MOVER], "each file builds its own `mover`"
+    # As the REST endpoint sets it: on the running server, not in the file.
+    old.servers[MOVER].set_l7_policy(L7Policy())
     decided_under_old = _decisions()
     new.commit(replace=True)
     decided_under_new = _decisions()
@@ -208,8 +237,20 @@ def test_a_decision_that_straddles_a_reload_is_made_again(files: _Files) -> None
     assert runs == [True, False], "the first run took the old withdrawals with the new policy, and was made again"
 
 
-def test_no_call_sees_a_mix_while_reloads_swap_between_two_files(files: _Files) -> None:
+def test_no_call_sees_a_mix_while_reloads_swap_between_two_files(
+    files: _Files, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Callers read every overlay in a loop while reloads swap between the two files."""
+    # A moment after each server a reload puts in force, so the callers also
+    # read while the servers and groups are swapped, not only the overlays (#1488).
+    repository = get_runtime().repository
+    add = repository.add
+
+    def add_then_yield(*args: Any, **kwargs: Any) -> None:
+        add(*args, **kwargs)
+        time.sleep(0.0001)
+
+    monkeypatch.setattr(repository, "add", add_then_yield)
     stop = threading.Event()
     seen: list[list[tuple[Any, ...]]] = [[] for _ in range(4)]
 
