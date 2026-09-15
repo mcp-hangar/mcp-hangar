@@ -25,7 +25,7 @@ import os
 from pathlib import Path
 import platform
 import random
-import time
+import threading
 from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
@@ -145,6 +145,10 @@ class DockerDiscoverySource(DiscoverySource):
         self._initial_backoff_s = initial_backoff_s
         self._max_backoff_s = max_backoff_s
         self._known_container_ids: set[str] = set()
+        #: Set by request_stop() and stop(), cleared by start(). The retry
+        #: backoff waits on it: the retry runs on discovery's loop thread, so a
+        #: stop can only reach it from the stopping thread (#1436).
+        self._stop_requested = threading.Event()
 
     def _ensure_client(self) -> None:
         """Ensure Docker client is connected, retrying with backoff on failure."""
@@ -156,6 +160,8 @@ class DockerDiscoverySource(DiscoverySource):
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries):
+            if self._stop_requested.is_set():
+                break
             try:
                 socket = self._socket_path or find_container_socket()
 
@@ -188,7 +194,12 @@ class DockerDiscoverySource(DiscoverySource):
                         backoff_s=sleep_time,
                         error=str(e),
                     )
-                    time.sleep(sleep_time)
+                    if self._stop_requested.wait(sleep_time):
+                        break
+
+        if self._stop_requested.is_set():
+            logger.info("docker_connection_abandoned_on_stop", last_error=str(last_error))
+            raise DockerException("Docker discovery is stopping: connection attempts abandoned")
 
         logger.error(
             "docker_connection_exhausted",
@@ -426,12 +437,21 @@ class DockerDiscoverySource(DiscoverySource):
             logger.warning(f"Container runtime health check failed: {type(e).__name__}: {e}")
             return False
 
+    def request_stop(self) -> None:
+        """End a connection retry's backoff wait, and the retries after it.
+
+        Safe from any thread. Until `start()` runs again, connecting is refused.
+        """
+        self._stop_requested.set()
+
     async def start(self) -> None:
         """Start discovery source."""
+        self._stop_requested.clear()
         self._ensure_client()
 
     async def stop(self) -> None:
         """Stop discovery source."""
+        self._stop_requested.set()
         if self._client:
             try:
                 self._client.close()
