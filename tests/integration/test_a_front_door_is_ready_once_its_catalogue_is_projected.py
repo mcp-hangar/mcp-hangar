@@ -120,6 +120,8 @@ def test_it_becomes_ready_once_the_retry_projects_the_backend(recover):
     assert ready["status"] == 200, ready
     catalogue = ready["body"]["catalogue"]
     assert (catalogue["complete"], catalogue["projected"], catalogue["missing_count"]) == (True, 2, 0)
+    # Read once the retry has ended, so its last attempt has been recorded (#1475).
+    assert catalogue["retry"] == "finished", catalogue
     retries = recover["recovered"]["late_retries"]
     assert retries.get("failed", 0) >= 1, retries
     assert retries.get("projected") == 1.0, "the backend came back through something other than the retry"
