@@ -64,6 +64,9 @@ class Upstream(BaseHTTPRequestHandler):
 
     tools: ClassVar[tuple[str, ...]] = ()
     called: ClassVar[list[str]] = []
+    #: A tool named here is answered only once its event is set, so a test can
+    #: keep a call in flight. The call is recorded in `called` when it arrives.
+    holds: ClassVar[dict[str, threading.Event]] = {}
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
@@ -77,6 +80,9 @@ class Upstream(BaseHTTPRequestHandler):
         params = request.get("params") or {}
         if method == "tools/call":
             self.called.append(params.get("name"))
+            hold = self.holds.get(params.get("name"))
+            if hold is not None:
+                hold.wait(timeout=30)
         definitions = [
             {"name": name, "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}}
             for name in self.tools
@@ -255,7 +261,7 @@ def front_door(
     for tenant, allowed in (policies or {}).items():
         resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
 
-    handler: type[Upstream] = type("_ThisUpstream", (Upstream,), {"tools": tools, "called": []})
+    handler: type[Upstream] = type("_ThisUpstream", (Upstream,), {"tools": tools, "called": [], "holds": {}})
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     runtime = None
