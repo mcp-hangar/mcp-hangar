@@ -79,8 +79,13 @@ def stop_discovery_loop(orchestrator: Any, loop: asyncio.AbstractEventLoop, thre
 
     A failed cleanup is logged and the loop is stopped anyway: shutdown has to
     finish, and a retained loop kept the process alive after it returned.
+
+    The sources hear of the stop first, from this thread: one can be blocked
+    on the loop's own thread (the docker source waits out its connection
+    backoff there), and nothing scheduled on the loop runs until it returns.
     """
     try:
+        orchestrator.request_stop()
         asyncio.run_coroutine_threadsafe(orchestrator.stop(), loop).result()
     except Exception as e:  # noqa: BLE001 -- shutdown must continue after discovery cleanup failure
         logger.warning("discovery_orchestrator_stop_failed", error=str(e))

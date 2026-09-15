@@ -154,10 +154,7 @@ def _discovery(out: Path) -> dict[str, Any]:
     orchestrator = context.discovery_orchestrator
     registry = context.discovery_registry
 
-    # Not stopped. With Docker unreachable, the docker source's first cycle
-    # retries with a blocking backoff on discovery's loop, and a stop would wait
-    # it out. The `filesystem` mode is the one that stops.
-    return {
+    report = {
         "directory": str(directory),
         "config": context.config["discovery"],
         "held": sorted(source.source_type for source in orchestrator.get_sources()),
@@ -168,6 +165,10 @@ def _discovery(out: Path) -> dict[str, Any]:
         "running": orchestrator.get_stats()["running"],
         "kubernetes_stand_in": stand_in,
     }
+    # With Docker unreachable the docker source may be waiting out a connection
+    # backoff on discovery's loop; the stop ends that wait (#1436).
+    hangar.stop()
+    return report
 
 
 def _discovery_thread_alive() -> bool:
