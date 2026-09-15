@@ -13,4 +13,5 @@ three shapes passed it:
 The refused modes are now the launcher's `LOCAL_MODES`, the set it refuses to
 start on a replica that does not hold the lease. A member whose id names a
 top-level server is that server, wherever the group is in the file, and is
-checked once, as that server.
+checked once, as that server. A member entry that names no server and does not
+say how to run one is left to the loader, which refuses it as naming no server.

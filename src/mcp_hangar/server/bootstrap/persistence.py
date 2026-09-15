@@ -34,6 +34,7 @@ from typing import Any
 from mcp_hangar.infrastructure.launchers import LOCAL_MODES
 from mcp_hangar.infrastructure.persistence.registry import PersistenceBackend, create_backend
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.server.config import _defines_a_server
 
 logger = get_logger(__name__)
 
@@ -257,7 +258,9 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
     server, wherever the group is in the file, and is checked once, as that
     entry. Any other member is built from its own entry, so its own mode decides
     and it is named `<group>/<member>`. An inline member two groups share is one
-    server, reported once.
+    server, reported once. A member entry that names no server and does not say
+    how to run one (`_defines_a_server`) is skipped: the loader refuses it as
+    naming no server, which is what a typo in a member id should read as.
 
     Args:
         config: Full configuration. `coordination` is what makes this a cluster;
@@ -285,6 +288,8 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
         for member in members if isinstance(members, list) else []:
             member_id = str(member.get("id") or "") if isinstance(member, dict) else ""
             if not member_id or (member_id in specs and member_id not in groups) or member_id in inline:
+                continue
+            if not _defines_a_server(member):
                 continue
             inline.add(member_id)
             if _is_local(member_mode := _mode_of(member)):

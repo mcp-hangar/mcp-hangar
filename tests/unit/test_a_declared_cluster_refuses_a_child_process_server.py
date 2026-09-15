@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import pytest
 
+from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.value_objects import McpServerMode
 from mcp_hangar.server.bootstrap.persistence import (
     LocalModeInDeclaredClusterError,
     refuse_local_modes_in_a_declared_cluster,
 )
+from mcp_hangar.server.config import load_config
 
 CLUSTER = {"lease_ttl_s": 15}
 REMOTE = {"mode": "remote", "endpoint": "http://x/mcp"}
+IMAGE = "example/server:1"
+COMMAND = ["python", "-m", "some.server"]
 
 
 def _config(servers: dict, *, cluster: bool = True) -> dict:
@@ -45,6 +49,12 @@ def _offenders(servers: dict) -> list[tuple[str, str]]:
     with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
         refuse_local_modes_in_a_declared_cluster(_config(servers))
     return excinfo.value.offenders
+
+
+def _load_as_bootstrap_does(config: dict) -> None:
+    # Bootstrap asks this check first, then builds the servers.
+    refuse_local_modes_in_a_declared_cluster(config)
+    load_config(config["mcp_servers"])
 
 
 class TestADeclaredClusterRefusesThem:
@@ -90,7 +100,7 @@ class TestADeclaredClusterRefusesThem:
 
 
 class TestAGroupMemberIsJudgedAsTheLoaderBuildsIt:
-    @pytest.mark.parametrize("member", [{"id": "m", "mode": "docker"}, {"id": "m", "command": ["python", "-m", "x"]}])
+    @pytest.mark.parametrize("member", [{"id": "m", "mode": "docker", "image": IMAGE}, {"id": "m", "command": COMMAND}])
     def test_an_inline_local_member_is_named_under_its_group(self, member: dict) -> None:
         assert [server for server, _ in _offenders({"g": _group(member)})] == ["g/m"]
 
@@ -110,9 +120,23 @@ class TestAGroupMemberIsJudgedAsTheLoaderBuildsIt:
         refuse_local_modes_in_a_declared_cluster(_config({"g": _group({"id": "t"}), "t": REMOTE}))
 
     def test_an_inline_member_two_groups_share_is_reported_once(self) -> None:
-        member = {"id": "m", "mode": "docker"}
+        member = {"id": "m", "mode": "docker", "image": IMAGE}
 
         assert _offenders({"g": _group(member), "h": _group(member)}) == [("g/m", "docker")]
+
+
+class TestAMemberThatNamesNoServerIsTheLoadersToRefuse:
+    def test_a_typo_in_a_member_id_reads_as_the_loader_s_refusal(self) -> None:
+        # `{"id": "x"}` with no server `x` is not a local mode, it is a typo, and
+        # a cluster error would send the operator to the wrong problem.
+        with pytest.raises(ConfigurationError, match=r"Group 'g' member 'x' names no server"):
+            _load_as_bootstrap_does(_config({"g": _group({"id": "x"})}))
+
+    def test_an_inline_member_with_a_command_is_still_named_under_its_group(self) -> None:
+        with pytest.raises(LocalModeInDeclaredClusterError) as excinfo:
+            _load_as_bootstrap_does(_config({"g": _group({"id": "x", "command": COMMAND})}))
+
+        assert excinfo.value.offenders == [("g/x", "subprocess")]
 
 
 class TestWithoutTheDeclarationNothingChanges:
