@@ -85,6 +85,7 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services import progress_relay
+from ..domain.services.governance_overlays import read_as_one_set
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
 from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
 from .catalogue_warmup import is_warming, wait_for_catalogue
@@ -307,10 +308,25 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
     )
 
 
-def _build_flat_map(
+def _build_flat_map(tenant_id: str | None) -> dict[str, tuple[str, str]]:
+    """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*, against one configuration (#1431).
+
+    The listing and a flat call's routing both come from here. Each entry reads
+    the withdrawals, the access policies and the `header_exposure` blocks, and
+    a reload swaps those one after another. Built through `read_as_one_set`,
+    the map is one configuration's, never a mix of two: a reload that moves a
+    control from `tools.deny_list: [t]` to `tool_projection.withdrawn: [t]`
+    cannot list or route `t` while it swaps. `_flat_map_now` has the rules. Its
+    only effects are logging and the verdict caches, which report a schema
+    once however often it is asked about, so it can be built again.
+    """
+    return read_as_one_set(functools.partial(_flat_map_now, tenant_id))
+
+
+def _flat_map_now(
     tenant_id: str | None,
 ) -> dict[str, tuple[str, str]]:
-    """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*.
+    """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*. Through `_build_flat_map`.
 
     Rules applied:
     1. Only tools that are active (not withdrawn) for *tenant_id*.
