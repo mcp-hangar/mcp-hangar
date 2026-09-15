@@ -1202,7 +1202,9 @@ def _init_required_catalogue_from_config(full_config: dict[str, Any]) -> None:
 
     The servers a front-door replica must have projected once before
     ``/health/ready`` answers 200, for at most ``retry_for_s`` after the
-    configuration is first applied; see `server/catalogue_readiness.py`. Absent
+    configuration is first applied. The window counts from that first apply,
+    before the rest of boot and the warm-up, so ``retry_for_s`` must cover
+    those too; see `server/catalogue_readiness.py`. Absent
     means readiness keeps today's rule. In ``egress`` the block is checked, so a
     name that is not in ``mcp_servers`` is refused there too, and then not
     applied: readiness there does not depend on backends.

@@ -824,9 +824,124 @@ class TestACallsColdStartFollowsTheCallRules:
 
         refusal = BatchExecutor()._gate_cold_start(pipeline)
 
-        assert refusal is not None and refusal.error_type == "McpServerStartError"
+        # The code the executor's own check gives a capability block, not a failed start.
+        assert refusal is not None and refusal.error_type == "CannotStartMcpServerError"
         assert (fleet.server.state.value, fleet.server.dead_reason_snapshot) == ("dead", DEAD_CAPABILITY_BLOCKED)
         assert fleet.upstreams == [], "the blocked server was launched"
+
+
+class TestARefusedColdStartIsCodedAsTheExecutorsOwnRefusal:
+    def test_a_server_back_in_its_backoff_is_refused_as_the_circuit_breaker_refuses_it(self) -> None:
+        # The executor's check drew its jitter and passed; the server's own
+        # draw said no. The call used to fail as `McpServerStartError`.
+        from mcp_hangar.server.tools.batch.executor import BatchExecutor
+
+        fleet = _Fleet()
+        launches: list[str] = []
+
+        def broken() -> Any:
+            launches.append("launch")
+            raise OSError("connection refused")
+
+        fleet.server._create_client = broken  # type: ignore[method-assign]
+        with pytest.raises(Exception):  # noqa: B017 -- any start failure: what matters is the backoff it leaves
+            fleet.bus.send(StartMcpServerCommand(mcp_server_id=fleet.sid))
+        pipeline = _pipeline(SimpleNamespace(command_bus=fleet.bus), "cold")  # the read that passed
+
+        refusal = BatchExecutor()._gate_cold_start(pipeline)
+
+        assert refusal is not None and refusal.error_type == "CircuitBreakerOpen", refusal
+        assert "retry in" in (refusal.error or "")
+        assert launches == ["launch"], "started inside its backoff"
+
+    def test_it_counts_against_a_group_member_as_the_executors_own_refusal_does(self) -> None:
+        from mcp_hangar.server.tools.batch.executor import BatchExecutor
+
+        fleet = _Fleet()
+        with fleet.server._lock:
+            fleet.server._mark_dead(DEAD_CAPABILITY_BLOCKED)
+        pipeline = _pipeline(SimpleNamespace(command_bus=fleet.bus), "cold")
+        pipeline.is_group = True
+        pipeline.group_obj = MagicMock()
+
+        BatchExecutor()._gate_cold_start(pipeline)
+
+        pipeline.group_obj.report_failure.assert_called_once_with("svc")
+
+
+@pytest.mark.parametrize("backend", ["SQLite", " sqlite ", "", None])
+def test_a_backend_the_loader_reads_as_local_or_absent_takes_no_lease(backend: str | None) -> None:
+    # As `bootstrap.persistence.select_backend` reads it: case-blind, and empty is none.
+    assert required_catalogue({**_config("payments"), "persistence": {"backend": backend}}) is not None
+
+
+@pytest.mark.parametrize("backend", ["PostgreSQL", " postgresql "])
+def test_a_shared_backend_is_recognised_in_any_spelling(backend: str) -> None:
+    with pytest.raises(ConfigurationError, match="shared `postgresql` backend"):
+        required_catalogue({**_config("payments"), "persistence": {"backend": backend}})
+
+
+class TestAWindowShorterThanBootAndTheWarmUp:
+    def test_each_missing_server_still_gets_one_attempt(self) -> None:
+        _front_door(_server_req("payments"), _server_req("search"), retry_for_s=SHORT_WINDOW_S)
+        _outlive_the_window()  # boot and the warm-up took longer than the window
+        bus = _CommandBus(fails={"search": RuntimeError("down")})
+        runtime = _runtime(bus, payments=_server("cold"), search=_server("dead", "start_failed"))
+
+        with _Running(CatalogueRetry(runtime, **FAST)) as running:
+            running.thread.join(5.0)
+            assert not running.thread.is_alive()
+
+        assert (bus.starts("payments"), bus.starts("search")) == (1, 1), "one attempt each, and no more"
+        assert _retry_state() == "exhausted"
+        assert build_readiness_report(runtime.repository)[1] == 200, "the window bounds readiness all the same"
+
+    def test_that_attempt_still_waits_out_the_backoff(self) -> None:
+        _front_door(_server_req("payments"), retry_for_s=SHORT_WINDOW_S)
+        _outlive_the_window()
+        bus = _CommandBus()
+        backoff = {"over": False}
+        server = _server("dead", "start_failed")
+        server.health = SimpleNamespace(can_retry=lambda: backoff["over"])
+        runtime = _runtime(bus, payments=server)
+
+        with _Running(CatalogueRetry(runtime, **FAST)) as running:
+            time.sleep(0.2)
+            assert bus.sent == [] and running.thread.is_alive()
+            body, status = build_readiness_report(runtime.repository)
+            assert (status, body["catalogue"]["retry"]) == (200, "running"), "owed an attempt, and not held"
+            backoff["over"] = True
+            running.thread.join(5.0)
+
+        assert (bus.starts("payments"), _retry_state()) == (1, "finished")
+
+    def test_servers_it_may_not_start_are_owed_nothing(self) -> None:
+        _front_door(_server_req("payments"), retry_for_s=SHORT_WINDOW_S)
+        _outlive_the_window()
+        bus = _CommandBus()
+
+        CatalogueRetry(_runtime(bus, payments=_server("dead", "given_up")), **FAST).run()
+
+        assert (bus.sent, _retry_state()) == ([], "exhausted")
+
+
+def test_a_readiness_check_that_raises_falls_back_to_todays_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_required_catalogue(_required(_server_req("payments")))
+
+    def boom(repository: Any) -> Any:
+        raise RuntimeError("repository said: token=sk-live-do-not-log")
+
+    monkeypatch.setattr(catalogue_readiness._gate, "observe", boom)
+
+    with capture_logs() as logs:
+        answers = [build_readiness_report(_Repository(payments=_server("cold"))) for _ in range(3)]
+
+    for body, status in answers:
+        assert status == 200
+        assert "catalogue" not in body
+    failures = [entry for entry in logs if entry["event"] == "required_catalogue_readiness_failed"]
+    assert [entry["error_type"] for entry in failures] == ["RuntimeError"], "logged once, by type"
+    assert "sk-live" not in repr(logs)
 
 
 def test_shutdown_stops_the_retry() -> None:

@@ -39,7 +39,12 @@ from ....application.read_models.tool_projection import get_tool_projection_regi
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
-from ....domain.model.mcp_server import DEAD_NOT_REVIVED_BY_CALLS
+from ....domain.model.mcp_server import (
+    DEAD_NOT_REVIVED_BY_CALLS,
+    START_REFUSED_IN_BACKOFF,
+    START_REFUSED_NOT_REVIVED_BY_CALLS,
+)
+from ....domain.exceptions import CannotStartMcpServerError
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
@@ -1602,6 +1607,21 @@ class BatchExecutor:
             p.group_obj.report_failure(p.target_server_id)
         return refusal
 
+    @staticmethod
+    def _refused_start(p: "_CallPipeline", e: CannotStartMcpServerError) -> CallResult:
+        """A call's start the server refused, coded as `_refuse_dead_target` codes the same condition."""
+        if e.reason == START_REFUSED_NOT_REVIVED_BY_CALLS:
+            return p.refuse(
+                "A capability block is not revived by a call; start it explicitly", "CannotStartMcpServerError"
+            )
+        if e.reason.startswith(START_REFUSED_IN_BACKOFF):
+            BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
+            return p.refuse(
+                f"Circuit breaker open (too many consecutive failures); retry in {e.time_until_retry:.1f}s",
+                "CircuitBreakerOpen",
+            )
+        return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
+
     def _gate_validators(self, p: "_CallPipeline") -> CallResult | None:
         """Interceptor validators, fail-closed BEFORE prompting for approval.
 
@@ -1712,6 +1732,12 @@ class BatchExecutor:
                     ),
                 )
                 cs_span.set_attribute("cold_start.result", "success")
+            except CannotStartMcpServerError as e:
+                # The server's own check refused the start after this gate's
+                # passed: each draws the backoff's jitter afresh, or the server
+                # was blocked in between. Not a failed start (#1446).
+                cs_span.set_attribute("cold_start.result", "refused")
+                return self._fail_group_member(p, self._refused_start(p, e))
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)

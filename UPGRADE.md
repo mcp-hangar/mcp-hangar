@@ -60,6 +60,10 @@ tool_access:
   been, or when the window ends, readiness stops depending on the catalogue
   and goes back to today's rule. A replica is held out of the Service for at
   most `retry_for_s`, even if a listed backend never comes back.
+- The window counts from that first apply, before the rest of boot and the
+  warm-up, so set `retry_for_s` to cover boot plus the warm-up. If they
+  outlast it, the retry still gives each missing server one attempt before it
+  ends; readiness does not wait for that attempt.
 - The readiness endpoint is unauthenticated, so its `catalogue` field reports
   counts and state only: `complete`, `holds_readiness`, `required`,
   `projected`, `missing_count`, `not_retried_count`, and `retry`.
@@ -96,6 +100,11 @@ tool_access:
     whose members all are. Only the replica holding the management lease may
     start one, so the others could never project it. Use `remote` mode for a
     server every replica must serve.
+  - A persistence backend registered by a plugin is treated as shared, so a
+    local-mode server is refused there too, as a precaution.
+  - A single-replica deployment on a shared backend, such as `postgresql`,
+    cannot require a local-mode server either: the configuration cannot know
+    how many replicas will run it.
 
   In `egress` it is checked and then ignored.
 - A reload checks the block like any other key, and never moves the window.
@@ -109,7 +118,10 @@ tool_access:
 **A call's cold start now follows the call rules**, in every topology. The
 batch executor starts a cold or dead server as a call, not as a deliberate
 start, so a server that became capability-blocked, or went back into its
-backoff, after the executor checked it is not started by the call.
+backoff, after the executor checked it is not started by the call. The call
+is refused with the code the executor's own check gives the same condition:
+`CircuitBreakerOpen` inside a backoff, `CannotStartMcpServerError` for a
+capability block.
 
 **If readiness stays 503.** Read the `required_catalogue_waiting` log line, or
 `hangar_health`, for the ids. A server under `not_retried` is one Hangar gave up

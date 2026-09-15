@@ -25,6 +25,11 @@ the catalogue for good and goes back to today's rule. So a replica is held out
 of the Service for at most ``retry_for_s``: a required server that never comes
 back, or that the lifecycle gave up on, cannot hold it forever.
 
+The window counts from that first apply, before the rest of boot and the boot
+warm-up, so ``retry_for_s`` has to cover those too. If they outlast it, the
+retry still gives each missing server one attempt, within its backoff, before
+it ends; readiness does not wait for that attempt.
+
 A projection is not removed when a server stops, so a later outage or an idle
 stop never takes a ready replica out of the Service. That is what keeps #599
 fixed: an idle gateway with every backend cold is still ready, because being
@@ -81,7 +86,11 @@ an unknown key, and a ``retry_for_s`` that is not a number above 0. And, where
 several replicas take the management lease -- a ``coordination:`` block, or a
 shared storage backend -- a required server that runs in a local mode: only the
 lease holder may start one (``LocalModeNotOwnedError``), so a replica that does
-not hold the lease could never project it.
+not hold the lease could never project it. The backend is read as the loader
+reads it, case-blind and with an empty value meaning none. A backend a plugin
+registers is treated as shared, as a precaution, and a single replica on a
+shared backend is refused as well: a configuration cannot know how many
+replicas will run it.
 
 ## Egress
 
@@ -240,8 +249,11 @@ def _lease_is_taken(full_config: Mapping[str, Any]) -> str | None:
         return "declares a cluster (`coordination:`)"
     persistence = full_config.get("persistence")
     backend = persistence.get("backend") if isinstance(persistence, dict) else None
-    if backend is not None and str(backend) not in _LOCAL_BACKENDS:
-        return f"persists through the shared `{backend}` backend"
+    # Read as the loader reads it (`bootstrap.persistence.select_backend`): an
+    # empty value is no backend, and the name is not case-sensitive.
+    name = str(backend or "").strip().lower()
+    if name and name not in _LOCAL_BACKENDS:
+        return f"persists through the shared `{name}` backend"
     return None
 
 
@@ -317,6 +329,10 @@ class _Gate:
         self._window_ends_at: float | None = None
         self._complete = False
         self._retry = "not_started"
+        # The retry is giving a server the first attempt the window closed on.
+        self._grace = False
+        # Whether the last readiness check raised, so a failing probe logs once.
+        self._readiness_failed = False
         # What `observe` last logged, so a probe every few seconds logs a change once.
         self._logged: tuple[Any, ...] | None = None
 
@@ -330,9 +346,10 @@ class _Gate:
         with self._lock:
             return self._required
 
-    def set_retry(self, state: str) -> None:
+    def set_retry(self, state: str, *, grace: bool = False) -> None:
         with self._lock:
             self._retry = state
+            self._grace = grace
 
     def window_closed(self) -> bool:
         with self._lock:
@@ -357,7 +374,7 @@ class _Gate:
             self._complete = self._complete or not missing
             window_open = self._window_ends_at is not None and now < self._window_ends_at
             holds = bool(missing) and not self._complete and window_open
-            retry = _reported(self._retry, missing, not_retried, window_open)
+            retry = _reported(self._retry, missing, not_retried, window_open or self._grace)
             snapshot = _Snapshot(required, missing, not_retried, holds, retry)
             seen = (tuple(r.name for r in missing), tuple(sorted(not_retried.items())), holds, retry)
             changed = bool(missing) and seen != self._logged
@@ -375,8 +392,22 @@ class _Gate:
         return snapshot
 
     def readiness(self, repository: Any) -> dict[str, Any] | None:
-        """The ``catalogue`` field of ``/health/ready``: counts and state, no ids. None when no list is in force."""
-        snapshot = self.observe(repository)
+        """The ``catalogue`` field of ``/health/ready``: counts and state, no ids. None when no list is in force.
+
+        Behind a fault barrier: a check that raises answers None, which is
+        today's rule, and is logged once, by type, until a check succeeds again.
+        """
+        try:
+            snapshot = self.observe(repository)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a probe that cannot read the catalogue falls back to today's rule
+            with self._lock:
+                first = not self._readiness_failed
+                self._readiness_failed = True
+            if first:
+                logger.error("required_catalogue_readiness_failed", error_type=type(e).__name__)
+            return None
+        with self._lock:
+            self._readiness_failed = False
         if snapshot is None:
             return None
         total = len(snapshot.required.requirements)
@@ -522,25 +553,41 @@ class CatalogueRetry:
         if not snapshot.missing:
             return "finished"
         missing = [requirement.name for requirement in snapshot.missing]
+        only: set[str] | None = None
         if _gate.window_closed():
-            logger.warning("required_catalogue_retry_exhausted", missing=missing, attempts=dict(self._attempts))
-            return "exhausted"
-        if set(_candidates(snapshot.missing)) <= set(snapshot.not_retried):
+            # Boot and the warm-up can outlast the window: each missing server
+            # still gets its first attempt, within its backoff. Readiness does
+            # not wait for it.
+            only = self._owed(snapshot.missing)
+            if not only:
+                logger.warning("required_catalogue_retry_exhausted", missing=missing, attempts=dict(self._attempts))
+                return "exhausted"
+            _gate.set_retry("running", grace=True)
+        elif set(_candidates(snapshot.missing)) <= set(snapshot.not_retried):
             logger.warning("required_catalogue_retry_blocked", missing=missing, not_retried=snapshot.not_retried)
             return "blocked"
+        self._attempt_due(snapshot.missing, only)
+        return None
+
+    def _owed(self, missing: list[Requirement]) -> set[str]:
+        """The servers the window closed on before their first attempt, and that the retry may start."""
+        repository = self._runtime.repository
+        return {s for s in _candidates(missing) if not self._attempts[s] and _eligible(repository.get(s))}
+
+    def _attempt_due(self, missing: list[Requirement], only: set[str] | None) -> None:
+        """Start each due server once, of ``only`` if given; not a group's other members once one is projected."""
         registry = get_tool_projection_registry()
         tried: set[str] = set()
-        for requirement in snapshot.missing:
+        for requirement in missing:
             for server_id in requirement.servers:
                 if self._stop.is_set():
-                    return None
-                # Met by an attempt earlier in this pass: a group's other members are not started.
+                    return
+                # Met by an attempt earlier in this pass.
                 if _met(requirement, registry):
                     break
-                if server_id not in tried and self._due(server_id):
+                if server_id not in tried and (only is None or server_id in only) and self._due(server_id):
                     self._attempt(server_id)
                 tried.add(server_id)
-        return None
 
     def _due(self, server_id: str) -> bool:
         """Whether to start ``server_id`` now: its spacing, then its state and backoff (`_retryable`)."""
@@ -580,11 +627,12 @@ def _retryable(server: Any) -> bool:
     ``ready`` and ``initializing`` have a start under way, or its projection;
     ``degraded`` belongs to the recovery saga; and ``NOT_RETRIED`` to an operator.
     """
+    return _eligible(server) and (server.state.value != "dead" or bool(server.health.can_retry()))
+
+
+def _eligible(server: Any) -> bool:
+    """Whether the retry may start the server at all, its backoff aside: see `_retryable`."""
+    if server is None:
+        return False
     state = server.state.value
-    if state == "cold":
-        return True
-    if state != "dead":
-        return False
-    if getattr(server, "dead_reason_snapshot", None) in NOT_RETRIED:
-        return False
-    return bool(server.health.can_retry())
+    return state == "cold" or (state == "dead" and getattr(server, "dead_reason_snapshot", None) not in NOT_RETRIED)
