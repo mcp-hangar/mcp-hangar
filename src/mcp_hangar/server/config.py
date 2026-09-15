@@ -30,7 +30,7 @@ from ..logging_config import get_logger
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .bootstrap.group_circuit_metric import observe_group_circuit
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
-from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
+from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, get_concurrency_manager
 from .tools.batch.tenant_admission import configure_tenant_limits, parse_tenant_limits, TenantLimits
 
 if TYPE_CHECKING:
@@ -92,6 +92,10 @@ class _StagedConfig:
     #: The REST endpoint's stored policies, read when a reload is prepared so
     #: that a store that cannot be read refuses the reload. None: no store.
     stored_policies: list[Any] | None = None
+    #: Each server's and group's `max_concurrency`, put on the concurrency
+    #: manager by `commit` and not before, so a reload refused after a server
+    #: was built leaves every limit as it was (#1432).
+    concurrency_limits: dict[str, int] = field(default_factory=dict)
 
     def keeps(self, mcp_server_id: str, running: Any) -> bool:
         """Whether this configuration keeps *running* as that server, rather than replacing it."""
@@ -130,6 +134,10 @@ class _StagedConfig:
                     _replay_stored_rows(stored)
             projections.adopt_config_overlays(self.projections, replace=replace)
             adopt_header_exposure_policies(self.header_exposure, replace=replace)
+
+        # Before the servers, so a new server's first call is held to its own
+        # limit. In place: a call running on a limit keeps its slot (#1432).
+        get_concurrency_manager().set_mcp_server_limits(self.concurrency_limits, replace=replace)
 
         repository = _mcp_server_repository()
         for mcp_server_id, mcp_server in self.servers.items():
@@ -533,6 +541,8 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
 
             if mode == "group":
                 groups.append((mcp_server_id, spec_dict))
+                # A call that names the group is limited under the group's id.
+                _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
                 continue
 
             _load_mcp_server_config(mcp_server_id, spec_dict)
@@ -1105,29 +1115,39 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     _register_tool_projection_block(mcp_server_id, spec_dict.get("tool_projection"))
     _register_header_exposure_block(mcp_server_id, spec_dict.get("header_exposure"))
 
-    # Register per-mcp_server concurrency limit if specified
-    mcp_server_max_concurrency = spec_dict.get("max_concurrency")
-    if mcp_server_max_concurrency is not None:
-        from .tools.batch.concurrency import get_concurrency_manager
-
-        try:
-            cm = get_concurrency_manager()
-            cm.set_mcp_server_limit(mcp_server_id, int(mcp_server_max_concurrency))
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: concurrency config failure must not crash mcp_server setup
-            logger.warning(
-                "mcp_server_concurrency_limit_failed",
-                mcp_server_id=mcp_server_id,
-                max_concurrency=mcp_server_max_concurrency,
-                error=str(e),
-            )
+    _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
 
     logger.debug(
         "mcp_server_loaded",
         mcp_server_id=mcp_server_id,
         mode=spec_dict.get("mode", "subprocess"),
-        max_concurrency=mcp_server_max_concurrency,
+        max_concurrency=spec_dict.get("max_concurrency"),
     )
     return mcp_server
+
+
+def _stage_concurrency_limit(mcp_server_id: str, raw: Any) -> None:
+    """Stage a server's or group's `max_concurrency` for `_StagedConfig.commit` to apply.
+
+    It used to be set on the running concurrency manager while the
+    configuration was still being built, so a reload refused afterwards had
+    already changed it (#1432). A value that is not a whole number of 0 or more
+    is logged and left out, as before, and the server keeps the default limit.
+    A top-level entry's value is never wrong here: `check_process_config`
+    refuses it first.
+    """
+    if raw is None:
+        return
+    try:
+        limit = int(raw)
+        if limit < 0:
+            raise ValueError(f"limit must be >= 0, got {limit}")
+    except (TypeError, ValueError) as e:
+        logger.warning(
+            "mcp_server_concurrency_limit_failed", mcp_server_id=mcp_server_id, max_concurrency=raw, error=str(e)
+        )
+        return
+    _staged_config().concurrency_limits[mcp_server_id] = limit
 
 
 def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
@@ -1473,22 +1493,32 @@ def _ui_resource_policies(full_config: dict[str, Any]) -> "dict[str, UiResourceP
 
 
 def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
-    """Initialize the ConcurrencyManager from configuration.
+    """Put ``execution.max_concurrency`` and ``execution.default_mcp_server_concurrency`` in force.
 
-    Reads ``execution.max_concurrency`` for the global limit and
-    per-mcp_server ``max_concurrency`` values from the ``mcp_servers`` section.
+    In place, on the manager the running calls hold their slots on, so an
+    unchanged value changes nothing. Every reload, a byte-identical one from
+    the file watcher included, used to build a new manager: the calls already
+    running were counted on the old one while new calls filled the new one, up
+    to twice the limit (#1432).
 
-    Called during load_configuration before mcp_servers are loaded, so that
-    per-mcp_server limits set via _load_mcp_server_config are applied on top.
+    A server's own ``max_concurrency`` belongs to the servers' configuration,
+    which `_StagedConfig.commit` puts in force.
 
     Args:
         full_config: Full configuration dictionary.
     """
-    init_concurrency_manager(**_concurrency_limits(full_config))
+    limits = _concurrency_limits(full_config)
+    get_concurrency_manager().set_limits(limits["global_limit"], limits["default_mcp_server_limit"])
 
 
 def _concurrency_limits(full_config: dict[str, Any]) -> dict[str, Any]:
-    """The ConcurrencyManager's limits: ``execution`` and each server's ``max_concurrency``."""
+    """The concurrency limits, checked: ``execution`` and each top-level entry's ``max_concurrency``.
+
+    Raises:
+        TypeError, ValueError: If a limit is not a whole number of 0 or more.
+            A negative one used to pass this check and fail only when it was
+            applied, part-way through a reload.
+    """
     execution_config = full_config.get("execution", {})
 
     global_limit_raw = execution_config.get("max_concurrency")
@@ -1512,6 +1542,15 @@ def _concurrency_limits(full_config: dict[str, Any]) -> dict[str, Any]:
             pmc = spec.get("max_concurrency")
             if pmc is not None:
                 mcp_server_limits[mcp_server_id] = int(pmc)
+
+    named = {
+        "execution.max_concurrency": global_limit,
+        "execution.default_mcp_server_concurrency": default_mcp_server_limit,
+        **{f"mcp_servers.{sid}.max_concurrency": limit for sid, limit in mcp_server_limits.items()},
+    }
+    negative = sorted(where for where, limit in named.items() if limit < 0)
+    if negative:
+        raise ValueError(f"{', '.join(negative)} must be 0 (no limit) or more")
 
     return {
         "global_limit": global_limit,
