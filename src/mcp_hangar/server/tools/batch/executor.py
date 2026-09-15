@@ -203,6 +203,23 @@ def _run_approval_coroutine(coro: Coroutine[Any, Any, _T]) -> _T:
 _UNRESOLVED = object()
 
 
+def owners_by_member() -> dict[str, tuple[str, ...]]:
+    """Each group member's server id, mapped to the ids of every group that owns it.
+
+    The groups are in config order. Read from the ``GROUPS`` that
+    ``_gate_resolve_target`` resolves a group id against. ``hangar_call`` and
+    the front door both read group ownership from here, so the two cannot
+    disagree about which groups govern a member.
+    """
+    owners: dict[str, tuple[str, ...]] = {}
+    for group_id, group in list(GROUPS.items()):
+        for member in group.members:
+            held = owners.get(member.id, ())
+            if group_id not in held:
+                owners[member.id] = (*held, group_id)
+    return owners
+
+
 def _groups_owning(server_id: str) -> tuple[str, ...]:
     """The ids of every group *server_id* is a member of.
 
@@ -211,12 +228,19 @@ def _groups_owning(server_id: str) -> tuple[str, ...]:
     goes to that member, but the member is governed by each group that owns
     it, on top of its own policy. With several owners, deny wins: a member of
     two groups is refused a tool either group denies, withdraws or pins.
-
-    Read from the ``GROUPS`` that ``_gate_resolve_target`` resolves a group
-    id against. The front door's ``_member_to_group`` keeps one group per
-    member, so it cannot express a member of two groups.
     """
-    return tuple(group_id for group_id, group in list(GROUPS.items()) if any(m.id == server_id for m in group.members))
+    return owners_by_member().get(server_id, ())
+
+
+def member_policy_scopes(server_id: str, owning_groups: tuple[str, ...]) -> list[tuple[str, str | None, str | None]]:
+    """Every ``(server id, group id, member server id)`` a call naming *server_id* is resolved under.
+
+    The server's own scope, and one scope per group that owns it, asked as a
+    call naming that group and routed to this member is asked. A tool is
+    allowed only when every scope allows it. The front door asks these same
+    scopes for a member of several groups, which it routes to the member.
+    """
+    return [(server_id, None, None), *((group_id, group_id, server_id) for group_id in owning_groups)]
 
 
 def _withdrawn_in_scope(
@@ -353,10 +377,7 @@ class _CallPipeline:
         """
         if self.is_group:
             return [(self.call.mcp_server, self.call.mcp_server, self.target_server_id or None)]
-        return [
-            (self.call.mcp_server, None, None),
-            *((group_id, group_id, self.call.mcp_server) for group_id in self.owning_groups),
-        ]
+        return member_policy_scopes(self.call.mcp_server, self.owning_groups)
 
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
@@ -1512,8 +1533,9 @@ class BatchExecutor:
         A group member named directly is also refused a tool withdrawn on any
         group that owns it, for every tenant or for this caller's. This mirrors
         the front door's ``_withdrawal_scopes``, which asks under the member id
-        and its group, and is fail-closed. Before this, a withdrawal declared on
-        a group did not hold against a call naming a member of that group.
+        and every group that owns it, and is fail-closed. Before this, a
+        withdrawal declared on a group did not hold against a call naming a
+        member of that group.
         """
         if not _withdrawn_in_scope(p.proj_registry, p.projection, p.call.tool, p.caller_tenant_id, p.owning_groups):
             return None

@@ -91,23 +91,26 @@ fi
 
 # Give the release's upgrade notes their version, in the same commit.
 #
-# `UPGRADE.md` collects `## Next — ...` sections at PR time, next to the change
-# that motivated them, and nothing used to give them a number: eight accumulated
-# while 2.7.0, 2.8.0 and 2.9.0 shipped, so the changelog for those releases sent
-# a reader to a section headed "Next" (#983). Folding them here also means the
-# release PR is where a reviewer sees them together -- drafts written against
-# different PRs contradict each other once they land in one release.
+# An upgrade note is written at PR time, next to the change that motivated it,
+# as one fragment in `upgrade.d/` -- or, from a PR opened before that directory
+# existed, as a `## Next — ...` section of `UPGRADE.md`. Nothing used to give
+# them a number: eight accumulated while 2.7.0, 2.8.0 and 2.9.0 shipped, so the
+# changelog for those releases sent a reader to a section headed "Next" (#983).
+# Folding them here also means the release PR is where a reviewer sees them
+# together -- notes written against different PRs contradict each other once
+# they land in one release. The promoter deletes the fragments it folds, which
+# is why `upgrade.d` is diffed and staged below alongside `changelog.d`.
 if ! python3 "$promoter" promote --version "$version"; then
   echo "::error::upgrade-note promotion failed for ${version}"
   exit 1
 fi
 
-if git diff --quiet HEAD -- CHANGELOG.md changelog.d UPGRADE.md; then
+if git diff --quiet HEAD -- CHANGELOG.md changelog.d UPGRADE.md upgrade.d; then
   echo "Nothing to commit; CHANGELOG.md is already assembled for ${version}."
   exit 0
 fi
 
-git add -A CHANGELOG.md changelog.d UPGRADE.md
+git add -A CHANGELOG.md changelog.d UPGRADE.md upgrade.d
 
 # Commit as the identity that PUSHES this, not as a different bot.
 #
