@@ -4,6 +4,7 @@ Tests DockerDiscoverySource automatic reconnection with exponential
 backoff when Docker daemon connection is lost.
 """
 
+import asyncio
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -40,7 +41,7 @@ def _no_backoff(source):
 
 
 class TestEnsureClientRetry:
-    """Tests for _ensure_client() retry with exponential backoff."""
+    """Tests for the connection retry schedule, with exponential backoff."""
 
     def test_ensure_client_retries_on_failure(self, mock_docker):
         """_ensure_client() retries connection up to max_retries on failure."""
@@ -56,7 +57,7 @@ class TestEnsureClientRetry:
 
         with _no_backoff(source):
             with pytest.raises(DockerException, match="Failed to connect.*3 attempts"):
-                source._ensure_client()
+                source._connect_with_retries()
 
     def test_ensure_client_succeeds_on_retry(self, mock_docker):
         """_ensure_client() succeeds on retry after initial failure (daemon restart)."""
@@ -76,9 +77,8 @@ class TestEnsureClientRetry:
         source = DockerDiscoverySource(max_retries=5, initial_backoff_s=0.01)
 
         with _no_backoff(source):
-            source._ensure_client()
-
-        assert source._client is ok_client
+            assert source._connect_with_retries() is ok_client
+        fail_client.close.assert_called_once()
 
     def test_ensure_client_raises_after_max_retries(self, mock_docker):
         """_ensure_client() raises after exhausting max_retries."""
@@ -94,9 +94,9 @@ class TestEnsureClientRetry:
 
         with _no_backoff(source):
             with pytest.raises(DockerException, match="Failed to connect.*2 attempts"):
-                source._ensure_client()
+                source._connect_with_retries()
 
-    def test_ensure_client_skips_when_already_connected(self, mock_docker):
+    async def test_ensure_client_skips_when_already_connected(self, mock_docker):
         """_ensure_client() is a no-op when client is already connected."""
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
@@ -104,7 +104,7 @@ class TestEnsureClientRetry:
         existing_client = MagicMock()
         source._client = existing_client
 
-        source._ensure_client()
+        await source._ensure_client()
 
         assert source._client is existing_client
         # from_env should not have been called
@@ -133,7 +133,7 @@ class TestBackoffTiming:
         sleep_calls = []
         with patch.object(source._stop_requested, "wait", side_effect=lambda t: sleep_calls.append(t)):
             with pytest.raises(DockerException):
-                source._ensure_client()
+                source._connect_with_retries()
 
         # Should have (max_retries - 1) sleeps = 4
         assert len(sleep_calls) == 4
@@ -165,7 +165,7 @@ class TestBackoffTiming:
         sleep_calls = []
         with patch.object(source._stop_requested, "wait", side_effect=lambda t: sleep_calls.append(t)):
             with pytest.raises(DockerException):
-                source._ensure_client()
+                source._connect_with_retries()
 
         # After reaching max (5s), all subsequent should be capped
         for s in sleep_calls:
@@ -262,62 +262,6 @@ class TestDiscoverReconnection:
         assert result2[0].name == "test-provider"
 
 
-class TestReconnect:
-    """Tests for _reconnect() method."""
-
-    def test_reconnect_closes_old_client(self, mock_docker):
-        """_reconnect() closes old client before creating new one."""
-        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
-
-        old_client = MagicMock()
-        new_client = MagicMock()
-        new_client.ping.return_value = True
-
-        mock_docker.from_env.return_value = new_client
-
-        source = DockerDiscoverySource(max_retries=1, initial_backoff_s=0.01)
-        source._client = old_client
-
-        source._reconnect()
-
-        old_client.close.assert_called_once()
-        assert source._client is new_client
-
-    def test_reconnect_handles_close_error(self, mock_docker):
-        """_reconnect() handles error during old client close gracefully."""
-        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
-
-        old_client = MagicMock()
-        old_client.close.side_effect = RuntimeError("Socket already closed")
-
-        new_client = MagicMock()
-        new_client.ping.return_value = True
-        mock_docker.from_env.return_value = new_client
-
-        source = DockerDiscoverySource(max_retries=1, initial_backoff_s=0.01)
-        source._client = old_client
-
-        # Should not raise despite close() error
-        source._reconnect()
-
-        assert source._client is new_client
-
-    def test_reconnect_with_no_existing_client(self, mock_docker):
-        """_reconnect() works when no existing client."""
-        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
-
-        new_client = MagicMock()
-        new_client.ping.return_value = True
-        mock_docker.from_env.return_value = new_client
-
-        source = DockerDiscoverySource(max_retries=1, initial_backoff_s=0.01)
-        assert source._client is None
-
-        source._reconnect()
-
-        assert source._client is new_client
-
-
 class TestContainerIdTracking:
     """Tests for container ID tracking to prevent duplicates."""
 
@@ -386,18 +330,38 @@ class TestHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_true_when_healthy(self, mock_docker):
-        """health_check() returns True when Docker daemon is accessible."""
+        """health_check() returns True once discovery has reached the daemon."""
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_client = MagicMock()
         mock_client.ping.return_value = True
+        mock_client.containers.list.return_value = []
         mock_docker.from_env.return_value = mock_client
 
         source = DockerDiscoverySource(max_retries=1, initial_backoff_s=0.01)
 
-        result = await source.health_check()
+        assert await source.health_check() is False  # nothing known yet
+        await source.discover()
 
-        assert result is True
+        assert await source.health_check() is True
+
+    @pytest.mark.asyncio
+    async def test_health_check_reports_a_lost_connection(self, mock_docker):
+        """A scan that loses the daemon turns health_check() False, without a probe of its own."""
+        from docker.errors import DockerException
+
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        mock_client = MagicMock()
+        mock_client.containers.list.side_effect = DockerException("Connection lost")
+        mock_docker.from_env.return_value = mock_client
+        source = DockerDiscoverySource(max_retries=1, initial_backoff_s=0.01)
+
+        await source.discover()
+        pings = mock_client.ping.call_count
+
+        assert await source.health_check() is False
+        assert mock_client.ping.call_count == pings
 
 
 def _make_http_container(
@@ -649,6 +613,7 @@ class TestInitConfiguration:
         assert source._max_retries == 5
         assert source._initial_backoff_s == 1.0
         assert source._max_backoff_s == 30.0
+        assert source._connect_timeout_s == 5.0
         assert source._known_container_ids == set()
 
     def test_custom_reconnection_params(self, mock_docker):
@@ -682,7 +647,7 @@ class TestAStopEndsTheRetryWait:
 
         attempted = threading.Event()
 
-        def unreachable():
+        def unreachable(**kwargs):
             attempted.set()
             raise DockerException("Connection refused")
 
@@ -692,7 +657,7 @@ class TestAStopEndsTheRetryWait:
 
         def connect():
             try:
-                source._ensure_client()
+                source._connect_with_retries()
             except DockerException as e:
                 raised.append(e)
 
@@ -722,11 +687,12 @@ class TestAStopEndsTheRetryWait:
 
         await source.stop()
         with pytest.raises(DockerException, match="stopping"):
-            source._ensure_client()
+            await source._ensure_client()
         assert await source.discover() == []
         mock_docker.from_env.assert_not_called()
 
         await source.start()
+        await source.discover()
         assert source._client is client
 
     def test_stopping_discovery_returns_while_docker_is_unreachable(self, mock_docker):
@@ -744,7 +710,7 @@ class TestAStopEndsTheRetryWait:
         answers = iter([lost])
         retrying = threading.Event()
 
-        def from_env():
+        def from_env(**kwargs):
             client = next(answers, None)
             if client is not None:
                 return client
@@ -765,3 +731,194 @@ class TestAStopEndsTheRetryWait:
         assert time.monotonic() - started < 1.0
         assert not thread.is_alive()
         assert orchestrator.get_stats()["running"] is False
+
+
+def _labeled_container():
+    container = MagicMock()
+    container.id = "abc123def456789"
+    container.name = "test-provider"
+    container.status = "running"
+    container.labels = {
+        "mcp.hangar.enabled": "true",
+        "mcp.hangar.name": "test-provider",
+        "mcp.hangar.mode": "container",
+    }
+    container.image = MagicMock()
+    container.image.tags = ["test:latest"]
+    container.image.id = "sha256:abc123def456"
+    return container
+
+
+class _HangingDaemon:
+    """A `docker.from_env` that hangs until released, like a TCP DOCKER_HOST that never answers.
+
+    It records the thread it hangs on, so a test can see that thread end. It
+    gives up after 5 s on its own, so a regression fails instead of hanging.
+    """
+
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.threads: list[threading.Thread] = []
+        self.client = MagicMock()
+
+    def __call__(self, **kwargs):
+        self.threads.append(threading.current_thread())
+        self.entered.set()
+        self.release.wait(5)
+        return self.client
+
+    def finish(self):
+        self.release.set()
+        for thread in self.threads:
+            thread.join(5)
+            assert not thread.is_alive()
+
+
+class TestDockerDoesNotHoldUpStartOrStop:
+    """Connecting runs off discovery's loop, and a stop abandons it (#1464)."""
+
+    async def test_start_returns_while_docker_is_unreachable(self, mock_docker):
+        from docker.errors import DockerException
+
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        mock_docker.from_env.side_effect = DockerException("Connection refused")
+        source = DockerDiscoverySource(initial_backoff_s=30.0)
+
+        started = time.monotonic()
+        await source.start()
+        assert time.monotonic() - started < 1.0
+
+        connecting = source._connecting
+        assert connecting is not None
+        await source.stop()
+        # The stop ended the 30 s backoff on the connection's thread.
+        with pytest.raises(DockerException, match="stopping"):
+            connecting.result(timeout=1)
+
+    def test_each_attempt_has_the_connect_timeout_and_the_client_keeps_its_default(self, mock_docker):
+        from docker.constants import DEFAULT_TIMEOUT_SECONDS
+
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        client = MagicMock()
+        mock_docker.from_env.return_value = client
+        source = DockerDiscoverySource(connect_timeout_s=2.5)
+
+        assert source._connect_with_retries() is client
+        mock_docker.from_env.assert_called_once_with(timeout=2.5)
+        assert client.api.timeout == DEFAULT_TIMEOUT_SECONDS
+
+        with patch(
+            "mcp_hangar.infrastructure.discovery.docker_source.find_container_socket",
+            return_value="/run/test/docker.sock",
+        ):
+            source._connect_with_retries()
+        mock_docker.DockerClient.assert_called_once_with(base_url="unix:///run/test/docker.sock", timeout=2.5)
+
+    async def test_a_stop_abandons_an_attempt_the_daemon_never_answers(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        daemon = _HangingDaemon()
+        mock_docker.from_env.side_effect = daemon
+        source = DockerDiscoverySource(initial_backoff_s=30.0)
+        try:
+            await source.start()
+            scan = asyncio.create_task(source.discover())
+            assert await asyncio.to_thread(daemon.entered.wait, 5)
+
+            started = time.monotonic()
+            await source.stop()
+            assert time.monotonic() - started < 1.0
+            assert daemon.threads[0].is_alive()  # still in the attempt
+        finally:
+            daemon.finish()
+
+        # The scan that was waiting gets nothing, and the client the abandoned
+        # attempt produced after all is closed, not kept.
+        assert await asyncio.wait_for(scan, 1) == []
+        daemon.client.close.assert_called_once()
+        assert source._client is None
+        assert mock_docker.from_env.call_count == 1
+
+    async def test_a_reachable_docker_is_discovered_by_the_first_scan_after_start(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        client = MagicMock()
+        client.containers.list.return_value = [_labeled_container()]
+        mock_docker.from_env.return_value = client
+        source = DockerDiscoverySource()
+
+        await source.start()
+        found = await source.discover()
+
+        assert [server.name for server in found] == ["test-provider"]
+        assert source._client is client
+        assert await source.health_check() is True
+        mock_docker.from_env.assert_called_once()
+
+    def test_serving_starts_answers_status_and_stops_during_an_attempt_that_hangs(self, mock_docker):
+        """The served path: a real orchestrator on start_discovery_loop, Docker never answering."""
+        from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryConfig, DiscoveryOrchestrator
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+        from mcp_hangar.server.lifecycle import start_discovery_loop, stop_discovery_loop
+
+        daemon = _HangingDaemon()
+        mock_docker.from_env.side_effect = daemon
+        orchestrator = DiscoveryOrchestrator(DiscoveryConfig(refresh_interval_s=0))
+        orchestrator.add_source(DockerDiscoverySource(initial_backoff_s=30.0))
+
+        try:
+            started = time.monotonic()
+            loop, thread = start_discovery_loop(orchestrator)
+            assert time.monotonic() - started < 1.0
+            assert daemon.entered.wait(5)
+
+            # The listing runs on the serving loop; here, a loop of this thread's own.
+            started = time.monotonic()
+            statuses = asyncio.run(orchestrator.get_sources_status())
+            assert time.monotonic() - started < 1.0
+            assert [(s["source_type"], s["is_healthy"]) for s in statuses] == [("docker", False)]
+
+            started = time.monotonic()
+            stop_discovery_loop(orchestrator, loop, thread)
+            assert time.monotonic() - started < 1.0
+            assert not thread.is_alive()
+            assert orchestrator.get_stats()["running"] is False
+            assert daemon.threads[0].is_alive()  # abandoned mid-attempt
+        finally:
+            daemon.finish()
+
+        daemon.client.close.assert_called_once()
+
+    def test_serving_discovers_a_reachable_docker_in_the_first_cycle(self, mock_docker):
+        from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryConfig, DiscoveryOrchestrator
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+        from mcp_hangar.server.lifecycle import start_discovery_loop, stop_discovery_loop
+
+        client = MagicMock()
+        scanned = threading.Event()
+
+        def list_containers(**kwargs):
+            scanned.set()
+            return [_labeled_container()]
+
+        client.containers.list.side_effect = list_containers
+        mock_docker.from_env.return_value = client
+        # One cycle only: the next is an hour away.
+        orchestrator = DiscoveryOrchestrator(DiscoveryConfig(refresh_interval_s=3600))
+        orchestrator.add_source(DockerDiscoverySource())
+
+        loop, thread = start_discovery_loop(orchestrator)
+        try:
+            assert scanned.wait(5)
+            deadline = time.monotonic() + 5
+            while orchestrator.get_stats()["last_cycle"] is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            statuses = asyncio.run_coroutine_threadsafe(orchestrator.get_sources_status(), loop).result(5)
+        finally:
+            stop_discovery_loop(orchestrator, loop, thread)
+
+        assert [(s["source_type"], s["is_healthy"], s["mcp_servers_count"]) for s in statuses] == [("docker", True, 1)]
+        client.close.assert_called_once()

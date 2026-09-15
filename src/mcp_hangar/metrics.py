@@ -581,10 +581,37 @@ PROVIDER_STARTS_TOTAL = Counter(
     labels=["mcp_server", "result"],  # result: success, failure
 )
 
+#: Every value of the `reason` label on `mcp_hangar_mcp_server_stops_total`
+#: (#1360). A closed set, so a rule such as `reason!="idle"` is written against
+#: a known list, and the metric's HELP line carries it:
+#:
+#: - `idle`: the GC stopped a server unused past its idle TTL.
+#: - `shutdown`: a running server was stopped: hangar_stop, the REST stop, a
+#:   reload, unload or delete, a group's stop_all, process exit. A stop through
+#:   the stop command is also counted under the command's reason, below.
+#: - `user_request`: hangar_stop, or the REST stop without a reason.
+#: - `manual`: the REST stop with an empty reason, or one not in this list.
+#: - `failback`, `compensation`: the failover saga stopped a backup.
+#: - `detection_enforcement:block`: a detection rule, or the REST block, stopped it.
+#: - `max_retries_exceeded`: the recovery saga gave up on the server, which is
+#:   now `dead` (`STOPPED_BY_GIVING_UP` in `domain.events`).
+MCP_SERVER_STOP_REASONS = (
+    "idle",
+    "shutdown",
+    "user_request",
+    "manual",
+    "failback",
+    "compensation",
+    "detection_enforcement:block",
+    "max_retries_exceeded",
+)
+#: What a reason outside `MCP_SERVER_STOP_REASONS` is counted as.
+MCP_SERVER_STOP_REASON_OTHER = "manual"
+
 PROVIDER_STOPS_TOTAL = Counter(
     name="mcp_hangar_mcp_server_stops",
-    description="Total number of mcp_server stops",
-    labels=["mcp_server", "reason"],  # reason: idle, manual, error, gc
+    description="Total number of mcp_server stops, by reason: " + ", ".join(MCP_SERVER_STOP_REASONS),
+    labels=["mcp_server", "reason"],
 )
 
 PROVIDER_COLD_START_SECONDS = Histogram(
@@ -1543,8 +1570,15 @@ def record_mcp_server_start(mcp_server: str, success: bool):
 
 
 def record_mcp_server_stop(mcp_server: str, reason: str):
-    """Record a mcp_server stop."""
-    PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=reason)
+    """Record a mcp_server stop, under one of `MCP_SERVER_STOP_REASONS`.
+
+    Any other reason is counted as `manual`: the REST stop takes its reason from
+    the request body, and the label stays the closed set its HELP line lists.
+    Compared against the tuple, not a set: the body can hold a value that does
+    not hash.
+    """
+    label = reason if reason in MCP_SERVER_STOP_REASONS else MCP_SERVER_STOP_REASON_OTHER
+    PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=label)
 
 
 def record_catalogue_retry(mcp_server: str, outcome: str) -> None:

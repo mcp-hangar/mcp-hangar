@@ -23,6 +23,23 @@ server under `mcp_servers` and name it by its id. If this is one gateway,
 remove the `coordination:` block. A configuration without `coordination:` is
 unaffected.
 
+## Next — docker discovery no longer waits for Docker
+
+With docker discovery enabled and Docker unreachable, `serve` and
+`Hangar.start()` no longer wait out the docker source's connection retries, and
+a stop no longer waits for a connection attempt in flight. **Nothing needs
+changing.** Two things read differently:
+
+- **The docker source's `is_healthy`** in `GET /discovery/sources` and
+  `hangar_sources` reports whether discovery's last connection or scan reached
+  Docker. It no longer connects and pings from the request. It is `false` until
+  the first connection completes, and it follows a Docker that goes away or
+  comes back at the next discovery cycle, not at the next listing.
+- **Each connection attempt times out sooner.** Its requests, the API version
+  check and the ping, time out after 5 s instead of the Docker client's 60 s.
+  A Docker that takes longer than that to answer is treated as unreachable.
+  Calls after the connection keep the client's default timeout.
+
 ## Next — a group member is judged by its own health
 
 A call through a group used to count against the member that took it whenever
@@ -269,6 +286,59 @@ otherwise readiness falls back when the window ends.
 after it starts. A failing readiness probe does not restart a pod, but a
 rollout waits for it, so keep the Deployment's `progressDeadlineSeconds` above
 `retry_for_s`.
+
+## Next — giving up on a server is recorded as a stop
+
+When the recovery saga gives up on a server, the server now records
+`McpServerStopped` with `reason: max_retries_exceeded`, and right after it the
+`McpServerStateChanged` that moves it to `dead`. The server still ends `dead`,
+live and when its stream is replayed.
+
+- `mcp_hangar_mcp_server_stops_total{reason="max_retries_exceeded"}` counts
+  each give-up once, as in 2.20.0. It is now counted from the event, the way
+  `idle` and `shutdown` are. To alert on a give-up, use
+  `increase(mcp_hangar_mcp_server_stops_total{reason="max_retries_exceeded"}[1h]) > 0`.
+  A `reason!="idle"` rule also matches every operator stop.
+- The `reason` label is a closed set, and the metric's HELP line lists it:
+  `idle`, `shutdown`, `user_request`, `manual`, `failback`, `compensation`,
+  `detection_enforcement:block` and `max_retries_exceeded`. A REST stop whose
+  body names any other reason is now counted as `manual`. The response still
+  returns the reason it was given.
+- The audit log and the event store hold the new `McpServerStopped` record. A
+  consumer that reads every `McpServerStopped` as `cold` should read the state
+  change that follows it.
+- The alert handler's warning for an unexpected stop now fires on a give-up.
+- A failover whose backup is given up on ends, as it does when the backup is
+  stopped. The primary's recovery no longer schedules a failback stop that
+  would have turned the dead backup `cold`.
+
+## Next — the Python facade stops idle servers and health-checks them
+
+`Hangar` and `SyncHangar` now start the background workers `mcp-hangar serve`
+starts, and stop them on `stop()` or at the end of the `async with` or `with`
+block. No code change is needed, but an embedded gateway now does what a served
+one does:
+
+- A server idle for longer than its `idle_ttl_s` is stopped by the GC worker,
+  which runs every 30 seconds. `HangarConfig.add_mcp_server()` defaults
+  `idle_ttl_s` to 300. The next call starts the server again, and pays its
+  start-up time. To keep a server running for the life of the host, give it a
+  larger `idle_ttl_s`, up to 86400.
+- Every running server is health checked by the health-check worker, every 60
+  seconds, so a failing server is noticed, and one that recovers is returned
+  to rotation, without a call.
+- The metrics snapshot worker records metrics history under `./data`, as it
+  does under `serve`.
+- A facade started from a config file, `Hangar.from_config()` or
+  `SyncHangar.from_config()`, watches that file, and a change to it reloads the
+  configuration. To keep the file from being reloaded, set:
+
+  ```yaml
+  config_reload:
+    enabled: false
+  ```
+
+`stop()` now waits for the workers' threads to end, up to 10 seconds in total.
 
 ## Upgrade to 2.20.0
 

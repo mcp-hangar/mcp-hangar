@@ -21,6 +21,8 @@ Label Reference:
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
 """
 
+import asyncio
+from concurrent.futures import Future
 import os
 from pathlib import Path
 import platform
@@ -38,12 +40,14 @@ logger = get_logger(__name__)
 # Optional Docker dependency (works with Podman too via Docker API compatibility)
 try:
     import docker
+    from docker.constants import DEFAULT_TIMEOUT_SECONDS
     from docker.errors import DockerException
 
     DOCKER_AVAILABLE = True
 except ImportError:
     DOCKER_AVAILABLE = False
     DockerException = Exception
+    DEFAULT_TIMEOUT_SECONDS = 60
     docker = None  # optional dependency: module unavailable
 
 
@@ -105,11 +109,34 @@ def find_container_socket() -> str | None:
     return None
 
 
+_ABANDONED = "Docker discovery is stopping: connection attempts abandoned"
+
+
+def _close_quietly(client: Any) -> None:
+    """Close a docker client, ignoring whatever closing it raises."""
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup of a client nobody keeps
+        pass
+
+
+def _close_unclaimed(connecting: "Future[Any]") -> None:
+    """Close the client a connection abandoned by a stop produced after all, if it did."""
+    if not connecting.cancelled() and connecting.exception() is None:
+        _close_quietly(connecting.result())
+
+
 class DockerDiscoverySource(DiscoverySource):
     """Discover MCP mcp_servers from Docker/Podman containers.
 
     Works with both Docker and Podman through Docker API compatibility.
     Podman provides Docker-compatible API on its socket.
+
+    Connecting never holds up discovery's event loop (#1464). The connection
+    retry schedule runs on a daemon thread of its own: `start()` begins it and
+    returns, and `discover()` awaits it without blocking the loop, so a stop
+    runs at once, even during an attempt that the runtime never answers. The
+    client, `self._client`, is only touched on the loop that runs discovery.
     """
 
     LABEL_PREFIX = "mcp.hangar."
@@ -122,6 +149,7 @@ class DockerDiscoverySource(DiscoverySource):
         max_retries: int = 5,
         initial_backoff_s: float = 1.0,
         max_backoff_s: float = 30.0,
+        connect_timeout_s: float = 5.0,
     ):
         """Initialize discovery source.
 
@@ -132,6 +160,9 @@ class DockerDiscoverySource(DiscoverySource):
             max_retries: Maximum connection retry attempts
             initial_backoff_s: Initial backoff delay in seconds
             max_backoff_s: Maximum backoff delay cap in seconds
+            connect_timeout_s: Timeout of each request a connection attempt
+                makes, instead of the client's default of 60 s. A connected
+                client gets the default back.
         """
         super().__init__(mode)
 
@@ -140,46 +171,66 @@ class DockerDiscoverySource(DiscoverySource):
 
         self._socket_path = socket_path
         self._default_ttl = default_ttl
-        self._client: Any = None  # docker.DockerClient when available
+        self._client: Any = None  # docker.DockerClient when available; touched only on discovery's loop
         self._max_retries = max_retries
         self._initial_backoff_s = initial_backoff_s
         self._max_backoff_s = max_backoff_s
+        self._connect_timeout_s = connect_timeout_s
         self._known_container_ids: set[str] = set()
         #: Set by request_stop() and stop(), cleared by start(). The retry
-        #: backoff waits on it: the retry runs on discovery's loop thread, so a
-        #: stop can only reach it from the stopping thread (#1436).
+        #: backoff waits on it, on the connection's own thread (#1436).
         self._stop_requested = threading.Event()
+        #: The connection retry schedule in flight, if one is.
+        self._connecting: Future[Any] | None = None
+        #: Whether the runtime answered the last connection or scan. What
+        #: health_check() reports; it reads, never connects.
+        self._reachable = False
 
-    def _ensure_client(self) -> None:
-        """Ensure Docker client is connected, retrying with backoff on failure."""
-        if self._client is not None:
-            return
+    def _connect_once(self, attempt: int) -> Any:
+        """Make one connection attempt, and return a client whose ping answered.
 
+        Each request the attempt makes has `connect_timeout_s` instead of the
+        client's default of 60 s: the API version the client asks for when it
+        is built, then the ping. The connected client gets the default back,
+        so discovery's own calls time out exactly as before.
+        """
         assert docker is not None  # guaranteed by __init__ DOCKER_AVAILABLE check
 
+        socket = self._socket_path or find_container_socket()
+        if socket:
+            logger.info("docker_connecting", socket=socket, attempt=attempt + 1)
+            client = docker.DockerClient(base_url=f"unix://{socket}", timeout=self._connect_timeout_s)
+        else:
+            logger.info("docker_connecting_from_env", attempt=attempt + 1)
+            client = docker.from_env(timeout=self._connect_timeout_s)
+
+        try:
+            client.ping()
+        except Exception:
+            _close_quietly(client)
+            raise
+        client.api.timeout = DEFAULT_TIMEOUT_SECONDS
+        return client
+
+    def _connect_with_retries(self) -> Any:
+        """Run the connection retry schedule, and return the connected client.
+
+        Runs on the thread `_start_connecting` starts, never on discovery's
+        loop. A stop ends the backoff wait between attempts, and no further
+        attempt is made (#1436).
+        """
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries):
             if self._stop_requested.is_set():
                 break
             try:
-                socket = self._socket_path or find_container_socket()
-
-                if socket:
-                    logger.info("docker_connecting", socket=socket, attempt=attempt + 1)
-                    self._client = docker.DockerClient(base_url=f"unix://{socket}")
-                else:
-                    logger.info("docker_connecting_from_env", attempt=attempt + 1)
-                    self._client = docker.from_env()
-
-                # Verify connection works
-                self._client.ping()
+                client = self._connect_once(attempt)
                 logger.info("docker_connected", attempt=attempt + 1)
-                return
+                return client
 
             except (DockerException, OSError, ConnectionError) as e:
                 last_error = e
-                self._client = None  # Reset on failure
                 if attempt < self._max_retries - 1:
                     delay = min(
                         self._max_backoff_s,
@@ -199,7 +250,7 @@ class DockerDiscoverySource(DiscoverySource):
 
         if self._stop_requested.is_set():
             logger.info("docker_connection_abandoned_on_stop", last_error=str(last_error))
-            raise DockerException("Docker discovery is stopping: connection attempts abandoned")
+            raise DockerException(_ABANDONED)
 
         logger.error(
             "docker_connection_exhausted",
@@ -208,16 +259,56 @@ class DockerDiscoverySource(DiscoverySource):
         )
         raise DockerException(f"Failed to connect to Docker after {self._max_retries} attempts: {last_error}")
 
-    def _reconnect(self) -> None:
-        """Force reconnection by closing existing client and retrying."""
-        if self._client:
-            try:
-                self._client.close()
-            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup before reconnect
-                pass
-            self._client = None
+    def _start_connecting(self) -> "Future[Any]":
+        """Start the retry schedule on a thread of its own, and return its future.
 
-        self._ensure_client()
+        The thread is a daemon, so one that a stop leaves in an attempt never
+        keeps the process alive. Each request of that attempt is bounded by
+        `connect_timeout_s`, and after it the stop ends the schedule.
+        """
+        connecting: Future[Any] = Future()
+        # Running from the start, so a cancelled awaiter cannot cancel the
+        # connection for another one awaiting it.
+        connecting.set_running_or_notify_cancel()
+
+        def run() -> None:
+            try:
+                connecting.set_result(self._connect_with_retries())
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: handed to whoever awaits the connection
+                connecting.set_exception(e)
+
+        threading.Thread(target=run, name="mcp-hangar-docker-connect", daemon=True).start()
+        self._connecting = connecting
+        return connecting
+
+    async def _ensure_client(self) -> None:
+        """Connect, unless connected, without holding up discovery's loop.
+
+        The schedule runs on its own thread and this awaits it, so the loop is
+        free while Docker is unreachable. A stop runs at once: it cancels the
+        task awaiting here, and the attempt in flight finishes on its thread.
+        """
+        if self._client is not None:
+            return
+        if self._stop_requested.is_set():
+            raise DockerException(_ABANDONED)
+
+        connecting = self._connecting or self._start_connecting()
+        try:
+            client = await asyncio.wrap_future(connecting)
+        except (DockerException, OSError, ConnectionError):
+            self._reachable = False
+            raise
+        finally:
+            if self._connecting is connecting and connecting.done():
+                self._connecting = None
+
+        if self._stop_requested.is_set():
+            # Stopped while this waited: stop() took the connection over and
+            # closes the client it produced.
+            raise DockerException(_ABANDONED)
+        self._client = client
+        self._reachable = True
 
     @property
     def source_type(self) -> str:
@@ -226,7 +317,7 @@ class DockerDiscoverySource(DiscoverySource):
     async def discover(self) -> list[DiscoveredMcpServer]:
         """Discover mcp_servers from container labels with automatic reconnection."""
         try:
-            self._ensure_client()
+            await self._ensure_client()
         except (DockerException, OSError, ConnectionError) as e:
             logger.error("docker_discovery_connection_failed", error=str(e))
             return []  # Graceful degradation
@@ -250,6 +341,7 @@ class DockerDiscoverySource(DiscoverySource):
                     await self.on_mcp_server_discovered(mcp_server)
 
             self._known_container_ids = current_ids
+            self._reachable = True
             logger.debug(
                 "docker_discovery_complete",
                 mcp_servers_found=len(mcp_servers),
@@ -259,6 +351,7 @@ class DockerDiscoverySource(DiscoverySource):
         except (DockerException, OSError, ConnectionError) as e:
             logger.warning("docker_discovery_lost_connection", error=str(e))
             self._client = None  # Force reconnection on next call
+            self._reachable = False
             return []  # Graceful degradation -- next discover() will reconnect
 
         return mcp_servers
@@ -419,41 +512,46 @@ class DockerDiscoverySource(DiscoverySource):
         return None
 
     async def health_check(self) -> bool:
-        """Check if container runtime is accessible.
+        """Report whether the runtime answered when discovery last reached it.
+
+        No I/O. The source listing (`GET /discovery/sources`, `hangar_sources`)
+        calls this on the event loop serving that request, not on discovery's.
+        It used to connect and ping from there: while Docker was unreachable
+        that held up the serving loop for the whole retry schedule, and it set
+        the client discovery's thread was using (#1464).
 
         Returns:
-            True if Docker/Podman is accessible, False otherwise.
+            True if the last connection or scan reached Docker/Podman. False
+            before the first one, after one failed, and once stopped.
         """
-        try:
-            self._ensure_client()
-            self._client.ping()
-            return True
-        except (OSError, ConnectionError, RuntimeError, TimeoutError) as e:
-            logger.warning(f"Container runtime health check failed: {e}")
-            return False
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: health check returns unhealthy on error
-            # Docker client can raise various exceptions depending on version
-            # Log and return False for any connection-related failure
-            logger.warning(f"Container runtime health check failed: {type(e).__name__}: {e}")
-            return False
+        return self._reachable
 
     def request_stop(self) -> None:
-        """End a connection retry's backoff wait, and the retries after it.
+        """End the connection schedule: its backoff wait ends, and no attempt follows.
 
         Safe from any thread. Until `start()` runs again, connecting is refused.
         """
         self._stop_requested.set()
 
     async def start(self) -> None:
-        """Start discovery source."""
+        """Start discovery source: begin connecting, without waiting for it.
+
+        The first `discover()` awaits that same connection, so a reachable
+        runtime is still scanned in the first discovery cycle.
+        """
         self._stop_requested.clear()
-        self._ensure_client()
+        if self._client is None and self._connecting is None:
+            self._start_connecting()
 
     async def stop(self) -> None:
-        """Stop discovery source."""
+        """Stop discovery source, without waiting for a connection attempt in flight."""
         self._stop_requested.set()
-        if self._client:
-            try:
-                self._client.close()
-            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup on close
-                pass
+        self._reachable = False
+        connecting, self._connecting = self._connecting, None
+        if connecting is not None:
+            # Left to finish on its own thread; a client it produces after all
+            # is closed rather than kept.
+            connecting.add_done_callback(_close_unclaimed)
+        if self._client is not None:
+            _close_quietly(self._client)
+            self._client = None

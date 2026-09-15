@@ -31,6 +31,7 @@ from mcp_hangar.application.commands.handlers import GiveUpOnMcpServerHandler, S
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
+    STOPPED_BY_GIVING_UP,
     DomainEvent,
     HealthCheckPassed,
     McpServerDegraded,
@@ -47,6 +48,7 @@ from mcp_hangar.gc import BackgroundWorker
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
+from mcp_hangar.infrastructure.saga_manager import SagaManager
 from mcp_hangar.stream_ids import MCP_SERVER
 
 DEAD = McpServerState.DEAD
@@ -175,7 +177,11 @@ class TestGivingUp:
         assert fleet.upstreams[-1].closed
         events = fleet.publish()
         assert _state_changes(events) == [("degraded", "dead")]
-        assert not [e for e in events if isinstance(e, McpServerStopped)], "a give-up is not a stop: stops read cold"
+        # A stop with its own reason (#1360), then the move to DEAD: the order
+        # a replay and the state gauge need to end at DEAD, not at a stop's COLD.
+        assert [type(e) for e in events] == [McpServerStopped, McpServerStateChanged]
+        [stop] = [e for e in events if isinstance(e, McpServerStopped)]
+        assert stop.reason == STOPPED_BY_GIVING_UP == "max_retries_exceeded"
 
     @pytest.mark.parametrize("state", ["cold", "ready", "dead"])
     def test_leaves_any_other_state_alone(self, state):
@@ -206,12 +212,48 @@ class TestGivingUp:
 
     def test_keeps_the_stop_count_it_had_and_loses_the_false_one(self):
         # It was a stop: counted once under the saga's reason by the handler,
-        # and once more as "shutdown" from the event the stop published.
+        # and once more as "shutdown" from the event the stop published. Now
+        # its own stop event is the one count (#1360).
         fleet = _Fleet()
         fleet.dead()
 
         assert _gauge(m.PROVIDER_STOPS_TOTAL, fleet.sid, reason="max_retries_exceeded") == 1.0
         assert _gauge(m.PROVIDER_STOPS_TOTAL, fleet.sid, reason="shutdown") is None
+
+    def test_health_checks_past_the_threshold_end_in_a_stop_under_its_own_reason(self):
+        # The whole path (#1360): failing checks degrade the server, the
+        # recovery saga -- with no retries to spend -- gives up, and the stop
+        # counter tells that apart from an idle reap or an operator's stop.
+        fleet = _Fleet(max_consecutive_failures=2)
+        manager = SagaManager(command_bus=fleet.bus, event_bus=fleet.events)
+        manager.register_event_saga(McpServerRecoverySaga(max_retries=0, saga_manager=manager))
+        fleet.start()
+        fleet.upstreams[-1].failing = True
+
+        checks = 0
+        while fleet.server.state is McpServerState.READY:
+            fleet.server.health_check()
+            checks += 1
+        fleet.publish()
+
+        assert checks == 2, "one past the last check it survived: max_consecutive_failures"
+        assert fleet.server.state is DEAD
+        assert fleet.server.dead_reason_snapshot == "given_up"
+        assert _gauge(m.PROVIDER_STOPS_TOTAL, fleet.sid, reason="max_retries_exceeded") == 1.0
+        for other in ("idle", "shutdown", "manual", "user_request"):
+            assert _gauge(m.PROVIDER_STOPS_TOTAL, fleet.sid, reason=other) is None, other
+        assert _scraped("mcp_hangar_mcp_server_state", fleet.sid) == 4.0
+
+    def test_its_stream_replays_to_dead(self):
+        # The stop replays to COLD; the move to DEAD after it wins.
+        fleet = _Fleet()
+        fleet.dead()
+
+        restored = McpServer(mcp_server_id=fleet.sid, mode="subprocess", command=["unused"], metrics_publisher=Mock())
+        restored.restore_from_events(fleet.published)
+
+        assert restored.state is DEAD
+        assert restored.dead_reason_snapshot == "given_up"
 
 
 class TestTheOtherWaysIn:
@@ -307,7 +349,7 @@ class TestTheWayOut:
         worker.running = True
         checks_before = _gauge(m.HEALTH_CHECK_TOTAL, fleet.sid, result="unhealthy")
 
-        with patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration]), pytest.raises(StopIteration):
+        with patch.object(worker._stopped, "wait", side_effect=[False, StopIteration]), pytest.raises(StopIteration):
             worker._loop()
 
         fleet.server.health_check.assert_not_called()
