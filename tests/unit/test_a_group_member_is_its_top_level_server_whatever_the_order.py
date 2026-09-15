@@ -161,3 +161,33 @@ class TestAMemberNamingNoServer:
         first, second = (staged.groups[group_id].get_member("m2") for group_id in (GROUP, "other"))
         assert first is not None and second is not None
         assert first.mcp_server is second.mcp_server is staged.servers["m2"]
+
+
+def _both_orders(member: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{GROUP: _group(member), "solo": TOP_LEVEL}, {"solo": TOP_LEVEL, GROUP: _group(member)}]
+
+
+class TestTheCheckReadsWhatTheLoaderReads:
+    """An inline member needs exactly what `_load_mcp_server_config` builds its kind of server from."""
+
+    def test_the_container_alias_is_checked_as_docker(self) -> None:
+        for config in _both_orders({"id": "m2", "mode": "container"}):
+            with pytest.raises(ConfigurationError, match=r"Group 'pool' member 'm2' names no server"):
+                build_config(config)
+
+        for config in _both_orders({"id": "m2", "mode": "container", "image": "example/server:1"}):
+            staged = build_config(config)
+            member = staged.groups[GROUP].get_member("m2")
+            assert member is not None and member.mcp_server is staged.servers["m2"]
+
+    def test_a_remote_member_with_only_url_is_refused(self) -> None:
+        """The loader reads `endpoint`, never `url`: such a member loaded with no address, the silent #1437 case."""
+        for config in _both_orders({"id": "m2", "mode": "remote", "url": "http://127.0.0.1:9/mcp"}):
+            with pytest.raises(ConfigurationError, match=r"Group 'pool' member 'm2' names no server"):
+                build_config(config)
+
+    def test_a_mode_that_does_not_normalise_is_left_to_the_server_check(self) -> None:
+        """As on main: the server refuses a mode `McpServerMode.normalize` does not know."""
+        for config in _both_orders({"id": "m2", "mode": "Docker", "image": "example/server:1"}):
+            with pytest.raises(ValueError, match="not a valid McpServerMode"):
+                build_config(config)

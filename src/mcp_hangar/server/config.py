@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast, ParamSpec, TypeVar
 import yaml
 
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
-from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
+from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
@@ -537,12 +537,13 @@ def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
 #: about the server: the only keys read when the member is a declared server.
 _MEMBER_ENTRY_KEYS = frozenset({"id", "weight", "priority", "tools"})
 
-#: What an inline member entry must set to be a server of its own, by mode (#1437).
-_RUNS_WITH: dict[str, tuple[str, ...]] = {
-    "subprocess": ("command",),
-    "docker": ("image", "build"),
-    "container": ("image", "build"),
-    "remote": ("endpoint",),
+#: What an inline member entry must set to be a server of its own, by mode: the
+#: fields `_load_mcp_server_config` builds each kind of server from (#1437).
+_RUNS_WITH: dict[McpServerMode, tuple[str, ...]] = {
+    McpServerMode.SUBPROCESS: ("command",),
+    McpServerMode.DOCKER: ("image", "build"),
+    McpServerMode.CONTAINER: ("image", "build"),
+    McpServerMode.REMOTE: ("endpoint",),
 }
 _RUNS_WITH_HINT = "subprocess needs 'command', docker needs 'image' or 'build', remote needs 'endpoint'"
 
@@ -550,9 +551,16 @@ _RUNS_WITH_HINT = "subprocess needs 'command', docker needs 'image' or 'build', 
 def _defines_a_server(member_spec: dict[str, Any]) -> bool:
     """Whether a member entry says how to run its server, so it can be built from the entry alone.
 
-    A mode this does not know is left to the server's own checks.
+    The mode is read as the server reads it, with `McpServerMode.normalize`. A
+    mode that does not normalise is left to the server's own check, which
+    refuses it. `url` is not read: the loader builds a remote server from
+    `endpoint` alone, so a member with only `url` would have no address.
     """
-    required = _RUNS_WITH.get(member_spec.get("mode", "subprocess"))
+    try:
+        mode = McpServerMode.normalize(member_spec.get("mode", "subprocess"))
+    except (ValueError, TypeError):
+        return True
+    required = _RUNS_WITH.get(mode)
     return required is None or any(member_spec.get(key) for key in required)
 
 
