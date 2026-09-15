@@ -1,46 +1,5 @@
 # Upgrading MCP Hangar
 
-## Next — `block` and `quarantine` stop a server whose tools drift
-
-A server with `capabilities.enforcement_mode` set to `block` or `quarantine`
-whose upstream serves a tool that is not in `capabilities.tools.expected_tools`
-now serves nothing. Before, block mode detected the drift and marked the server
-`dead`, but the call that started it still ran the tool it asked for, and the
-upstream process was left running. Quarantine did not act on the drift at all
-and served the server as `alert` does.
-
-What happens now, in both modes:
-
-- The start that finds the drift fails with `CapabilityBlockedError`. Hangar
-  closes its connection, records `CapabilityViolationDetected`, and moves the
-  server to `dead` for a capability block (`capability_blocked`). It records no
-  `McpServerStarted`. Quarantine also records `McpServerCapabilityQuarantined`.
-- No call starts the server again: every later call to any of its tools,
-  declared ones included, is refused with `CannotStartMcpServerError`. The
-  recovery saga does not retry it, and a group does not put it in rotation.
-- A tool that appears after a clean start, through a refresh or
-  `tools/list_changed`, blocks the server in the same way at its next call.
-  Hangar closes the connection at once, so a call already in flight on it
-  fails.
-- `alert` mode is unchanged.
-
-If you set `quarantine` expecting it to keep serving, as it did, it no longer
-does: use `alert` for that.
-
-The error does not name the undeclared tools, because the caller it reaches is
-not the operator who has to act on them. The `capability_drift_detected`
-warning and the `CapabilityViolationDetected` event name them.
-
-**To bring a blocked server back**, fix the upstream or add the tool to
-`expected_tools`, then start the server deliberately: `hangar_start`,
-`hangar_warm` naming it, or a start through the REST API. That start checks the
-tools again, and fails the same way while they still drift. A stop leaves the
-server `cold`, and the next start, a call's included, checks them too.
-
-**Prompts, resources and task relays** to a server now need it to be `ready`,
-the same as a tool call. Before, they were forwarded to any server with a live
-connection, a `degraded` one included.
-
 ## Next — a front door can wait for its catalogue before it is ready
 
 Opt-in: nothing changes unless you add `tool_access.required_catalogue`, and it
@@ -134,7 +93,50 @@ after it starts. A failing readiness probe does not restart a pod, but a
 rollout waits for it, so keep the Deployment's `progressDeadlineSeconds` above
 `retry_for_s`.
 
-## Next — egress calls are governed with their group and tenant scope
+## Upgrade to 2.20.0
+
+### `block` and `quarantine` stop a server whose tools drift
+
+A server with `capabilities.enforcement_mode` set to `block` or `quarantine`
+whose upstream serves a tool that is not in `capabilities.tools.expected_tools`
+now serves nothing. Before, block mode detected the drift and marked the server
+`dead`, but the call that started it still ran the tool it asked for, and the
+upstream process was left running. Quarantine did not act on the drift at all
+and served the server as `alert` does.
+
+What happens now, in both modes:
+
+- The start that finds the drift fails with `CapabilityBlockedError`. Hangar
+  closes its connection, records `CapabilityViolationDetected`, and moves the
+  server to `dead` for a capability block (`capability_blocked`). It records no
+  `McpServerStarted`. Quarantine also records `McpServerCapabilityQuarantined`.
+- No call starts the server again: every later call to any of its tools,
+  declared ones included, is refused with `CannotStartMcpServerError`. The
+  recovery saga does not retry it, and a group does not put it in rotation.
+- A tool that appears after a clean start, through a refresh or
+  `tools/list_changed`, blocks the server in the same way at its next call.
+  Hangar closes the connection at once, so a call already in flight on it
+  fails.
+- `alert` mode is unchanged.
+
+If you set `quarantine` expecting it to keep serving, as it did, it no longer
+does: use `alert` for that.
+
+The error does not name the undeclared tools, because the caller it reaches is
+not the operator who has to act on them. The `capability_drift_detected`
+warning and the `CapabilityViolationDetected` event name them.
+
+**To bring a blocked server back**, fix the upstream or add the tool to
+`expected_tools`, then start the server deliberately: `hangar_start`,
+`hangar_warm` naming it, or a start through the REST API. That start checks the
+tools again, and fails the same way while they still drift. A stop leaves the
+server `cold`, and the next start, a call's included, checks them too.
+
+**Prompts, resources and task relays** to a server now need it to be `ready`,
+the same as a tool call. Before, they were forwarded to any server with a live
+connection, a `degraded` one included.
+
+### egress calls are governed with their group and tenant scope
 
 A `hangar_call` that names a group member by its own server id, instead of
 naming the group, is now governed by that group. Before,
@@ -197,7 +199,7 @@ approved. Before, it ran.
 Calls that name a group are governed as before, apart from their approval lists.
 So are servers that are in no group.
 
-## Next — a continuation answers only the caller that made the call
+### a continuation answers only the caller that made the call
 
 With response truncation on (`truncation.enabled`), the rest of a truncated
 `hangar_call` result is kept in the continuation cache.
@@ -240,7 +242,7 @@ on an older version still serves any continuation to any caller that holds its
 id, and returns a value written by an upgraded replica with the owner in front
 of the payload.
 
-## Next — `tool_access.rules` is refused as a key nothing reads
+### `tool_access.rules` is refused as a key nothing reads
 
 `tool_access.rules` was never read. The config schema listed it next to
 `tool_access.mode`, so a `rules:` block passed `mcp-hangar config check` and
@@ -265,7 +267,7 @@ Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
 and deny lists of a server, a group and a group member, and `tool_access.mode`
 still selects the `egress` or `front_door` topology.
 
-## Next — a reload applies the whole configuration, and keeps the topology mode
+### a reload applies the whole configuration, and keeps the topology mode
 
 This affects every configuration reload: `POST /api/config/reload`,
 `hangar_reload_config`, SIGHUP, and the config file watcher.
@@ -330,7 +332,7 @@ reload never finds them empty. A reload builds and checks every server and
 group before it stops any, so a bad block refuses the reload and changes
 nothing.
 
-## Next — a config dict gets every setting it passes
+### a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
 embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
@@ -373,7 +375,7 @@ that calls `enable_discovery()`, or adds a server with `mode="remote"` and
 applied. They now log `unknown_config_key`, and under strict mode the boot
 refuses.
 
-## Next — remote servers and discovery from the builder take effect
+### remote servers and discovery from the builder take effect
 
 This affects code that builds its configuration with `HangarConfig` and runs it
 with `Hangar.from_builder()`. Code that calls `Hangar.from_config()` on a file
@@ -415,7 +417,7 @@ on a key the gateway does not read. `to_dict()` no longer includes
 setting. `HangarConfigData` no longer has `gc_interval_s` or
 `health_check_interval_s`.
 
-## Next — a server Hangar gives up on reads `dead`, not `cold`
+### a server Hangar gives up on reads `dead`, not `cold`
 
 When the recovery saga runs out of retries, the server now goes to `dead`.
 Before, giving up was a stop, so the server went to `cold`: the state of a
@@ -544,7 +546,7 @@ upgrading. The flat spelling
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
 
-## Next — a group's `healthy_count` counts members that are `ready`
+### a group's `healthy_count` counts members that are `ready`
 
 A group's `healthy_count` used to count every member in rotation that was not
 `dead`, `cold` ones included. It now counts the members that are `ready` and in
