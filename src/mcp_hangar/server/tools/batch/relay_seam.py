@@ -7,6 +7,11 @@ only captures it. Nothing reaches the governed task store until this runs, so a
 path that skips it hands its caller a handle no ``tasks/*`` method can find.
 That is what the flat call did until #1394.
 
+An upstream answers with a task in one of two shapes, and :func:`upstream_task`
+reads both, so they are captured and governed alike (#1405). A task goes only to
+a caller that can poll it. Any other caller is refused here, before anything is
+recorded, because ``tasks/*`` would refuse it the task anyway.
+
 It lives apart from ``hangar_call`` so the flat call can reach it. The flat
 projection imports it lazily, for the import cycle the batch package is in (#894).
 """
@@ -14,15 +19,57 @@ projection imports it lazily, for the import cycle the batch package is in (#894
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from ....application.tasks.tool_pin_context import reset_current_tool_pin, set_current_tool_pin
-from ....context import identity_context_var
+from ....context import caller_polls_tasks_var, identity_context_var
 from ....domain.services.task_ownership import TaskOwner
 from ....logging_config import get_logger
+from ....tasks_wire import EXTENSION_ID
 from ...context import get_context
 from .models import CallResult
 
 logger = get_logger(__name__)
+
+#: SEP-2663's names for the two task fields the ledger stores under SEP-1686's.
+_FLAT_TO_LEDGER = {"ttlMs": "ttl", "pollIntervalMs": "pollInterval"}
+
+#: What a caller that cannot poll a task is told instead of being handed one.
+_CANNOT_POLL = (
+    "Upstream answered with a task, and this caller cannot poll one: it did not "
+    f"declare the {EXTENSION_ID} extension, or its protocol revision has no tasks/*. "
+    "The task was not handed over."
+)
+
+
+def upstream_task(result: Any) -> dict[str, Any] | None:
+    """The task an upstream ``tools/call`` answered with, or ``None`` for any other result.
+
+    An upstream answers in one of two shapes, and both are the same task:
+
+    * the current flat ``CreateTaskResult`` (SEP-2663, 2026-07-28): the task's
+      fields at the top level, marked ``resultType: "task"``;
+    * the older nested one (SEP-1686, 2025-11-25): the task under a ``task``
+      key.
+
+    Returned in the field names the ledger stores, which are the older ones:
+    ``ttlMs`` and ``pollIntervalMs`` become ``ttl`` and ``pollInterval``. The
+    worker's capture, the seam's registration and the flat call's task result
+    all read a task through this, so the three agree on what one is. A malformed
+    task is still returned; registering it fails closed.
+    """
+    if not isinstance(result, dict):
+        return None
+    if result.get("resultType") == "task":
+        task = {key: value for key, value in result.items() if key not in ("resultType", "_meta")}
+        for flat, ledger in _FLAT_TO_LEDGER.items():
+            if flat in task:
+                task.setdefault(ledger, task.pop(flat))
+        return task
+    nested = result.get("task")
+    if isinstance(nested, dict) and any(key in nested for key in ("taskId", "task_id", "id", "status")):
+        return nested
+    return None
 
 
 def govern_relayed_tasks(executed: list[CallResult]) -> None:
@@ -38,6 +85,9 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
     Outcomes per captured result:
       - store absent (kill-switch off / no app ctx) -> safety: rewrite to the
         TaskRelayNotSupported rejection (never hand back an ungoverned handle).
+      - the caller cannot poll a task (``caller_polls_tasks_var``, #1405) ->
+        rewrite to a ``TasksNotNegotiated`` refusal. Nothing is recorded: no
+        ``tasks/*`` call of this caller's could ever reach the task.
       - mint/register/emit fails -> rewrite to a DISTINCT
         ``TaskRelayRegistrationFailed`` failure; ``relay_and_govern``'s atomic
         rollback guarantees zero governed state survives.
@@ -52,6 +102,8 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
         store = getattr(get_context(), "governed_task_store", None)
     except Exception:  # noqa: BLE001 -- no app context (stdio/local): treat as kill-switch off
         store = None
+    # Read on the request path, where the task relay's middleware bound it.
+    caller_polls = caller_polls_tasks_var.get()
 
     for i, r in enumerate(executed):
         capture = r.relay_capture
@@ -75,6 +127,23 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
             )
             continue
 
+        if not caller_polls:
+            logger.info(
+                "task_relay_refused_caller_cannot_poll",
+                call_id=r.call_id,
+                mcp_server=capture.logical_mcp_server,
+                tool=capture.tool,
+            )
+            executed[i] = CallResult(
+                index=r.index,
+                call_id=r.call_id,
+                success=False,
+                error=_CANNOT_POLL,
+                error_type="TasksNotNegotiated",
+                elapsed_ms=r.elapsed_ms,
+            )
+            continue
+
         seam_start = time.perf_counter()
         # Re-bind the CAPTURED request context (identity + digest pin) for the
         # duration of the governed relay, then always restore it.
@@ -82,13 +151,12 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
         _pin_token = set_current_tool_pin(capture.pin) if capture.pin is not None else None
         try:
             try:
-                # capture.upstream is the raw upstream ``CreateTaskResult``
-                # (``{"task": {...}}``) -- byte-identical to what the client will
-                # receive. ``mint_from_upstream`` mints from the FLAT task object,
-                # so unwrap the ``task`` member here (a non-dict / missing member
-                # is malformed -> fail closed via mint's ValueError).
-                _task_obj = capture.upstream.get("task") if isinstance(capture.upstream, dict) else None
-                task = store.mint_from_upstream(_task_obj if isinstance(_task_obj, dict) else {})
+                # capture.upstream is the raw upstream task result, in either
+                # shape -- byte-identical to what the client will receive.
+                # ``mint_from_upstream`` mints from the task object alone, in the
+                # ledger's field names, which is what ``upstream_task`` returns
+                # (a malformed one fails closed via mint's ValueError).
+                task = store.mint_from_upstream(upstream_task(capture.upstream) or {})
             except ValueError as exc:
                 # Fail-closed extraction: a malformed/idless upstream task handle.
                 # TODO(P3.4): increment a relay-registration-failure metric counter.

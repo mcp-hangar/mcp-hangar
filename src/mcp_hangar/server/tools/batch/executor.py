@@ -65,6 +65,7 @@ from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .member_health import member_outcome, MemberOutcome
+from .relay_seam import upstream_task
 from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
 from .tenant_admission import CONCURRENCY, get_tenant_admission, Grant, NO_BUDGET, RATE, Refusal, Reservation
 
@@ -140,20 +141,12 @@ def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
 def _is_task_result(result: dict[str, Any]) -> bool:
     """Return True if an upstream ``tools/call`` result is an MCP task handle.
 
-    An ``mcp.types.CreateTaskResult`` carries a ``task`` object (a ``Task`` with
-    ``taskId``/``status``) and NO ``content`` -- distinct from a normal
-    ``CallToolResult`` which carries ``content``. So the upstream result is a
-    task result iff it contains a ``task`` object bearing a task id or status.
-
-    Defensive: accepts an arbitrary dict, tolerates a non-dict ``task`` value or
-    a malformed shape, and only returns True for the task-handle shape.
+    In either shape an upstream sends one: the current flat ``resultType: "task"``
+    result, or the older nested ``{"task": {...}}``. The relay seam's
+    :func:`~.relay_seam.upstream_task` decides, so what is captured here is what
+    the seam registers (#1405).
     """
-    if not isinstance(result, dict):
-        return False
-    task = result.get("task")
-    if not isinstance(task, dict):
-        return False
-    return any(key in task for key in ("taskId", "task_id", "id", "status"))
+    return upstream_task(result) is not None
 
 
 #: Per worker thread: the approval id the gate granted for the call this thread
