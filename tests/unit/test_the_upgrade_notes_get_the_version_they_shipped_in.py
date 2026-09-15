@@ -326,3 +326,19 @@ def test_the_real_guide_claims_no_version_past_the_released_one():
     claimed = [tuple(int(p) for p in m) for m in re.findall(r"^## Upgrade to (\d+)\.(\d+)\.(\d+)", text, re.M)]
     ahead = sorted(v for v in claimed if v > released_key)
     assert not ahead, f"UPGRADE.md claims {ahead}, released is {released_key}"
+
+
+def test_every_fragment_in_the_repo_parses() -> None:
+    """A malformed fragment fails the PR that adds it, not the release PR that folds it."""
+    fragments = read_fragments(ROOT / "upgrade.d")
+    headlines = [headline for _, headline, _ in fragments]
+    assert len(headlines) == len(set(headlines)), f"two fragments share a headline: {headlines}"
+
+
+def test_upgrade_md_holds_no_next_section() -> None:
+    """A note goes in `upgrade.d/`: a `## Next` section in `UPGRADE.md` conflicts with every other PR's."""
+    drafts, _ = split_drafts((ROOT / "UPGRADE.md").read_text(encoding="utf-8"))
+    assert not drafts, (
+        "UPGRADE.md has `## Next` sections; move each into upgrade.d/<issue>-<slug>.md "
+        f"with `### <headline>` as its first line: {[headline for headline, _ in drafts]}"
+    )

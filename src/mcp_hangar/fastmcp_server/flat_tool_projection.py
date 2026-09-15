@@ -179,15 +179,35 @@ def build_projected_list_cache_meta(tenant_id: str | None) -> dict[str, Any]:
     }
 
 
+def _member_to_groups() -> dict[str, tuple[str, ...]]:
+    """Map each group member's server id to every group that owns it, in config order.
+
+    The same map ``hangar_call`` governs a member named directly by: it is
+    read from the executor, so the two paths cannot disagree about which
+    groups own a member. Imported lazily for the reason `_groups` gives.
+    """
+    from ..server.tools.batch.executor import owners_by_member
+
+    return owners_by_member()
+
+
 def _member_to_group() -> dict[str, str]:
-    """Map each group member's server id to its owning group id.
+    """Map each member of exactly one group to that group: the id the front door routes it through.
 
     Group members are interchangeable by definition, so the flat projection
-    must treat them as ONE logical server: policy keys on the group id (the
-    same key ``BatchExecutor._gate_tool_access`` uses) and dispatch goes to
-    the group so member selection stays with the group's strategy (#857).
+    treats a member of one group as that ONE logical server: dispatch goes to
+    the group so member selection stays with the group's strategy (#857), and
+    prompts, resources and the listing's metrics collapse it the same way.
+
+    A member of several groups is left out, so it routes to ITSELF. No one
+    group's selection strategy can speak for it, and a call naming the member
+    is the call ``hangar_call`` governs by every group that owns it: its own
+    policy, each group's policy, withdrawals and pins, deny wins.
+
+    Governance does not read this map: it reads every owner, from
+    `_member_to_groups`.
     """
-    return {member.id: group.id for group in _groups().values() for member in group.members}
+    return {member: owners[0] for member, owners in _member_to_groups().items() if len(owners) == 1}
 
 
 def _groups() -> dict[str, Any]:
@@ -207,11 +227,12 @@ def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
     and the surfaces that ask about a group (prompts, resources) ask under the
     group id alone, so a member's declaration was previously invisible to them.
 
-    For a MEMBER id it is symmetric: the member itself and its owning group,
-    via `_member_to_group()` (the same collapse `is_governed_allowed` already
-    uses for the access-policy half below). Without this half a `withdrawn:`
-    declared on the group was written under the group id and never consulted,
-    because listing and calling always ask under the member id.
+    For a MEMBER id it is symmetric: the member itself and every group that
+    owns it, via `_member_to_groups()`, so a member of several groups is
+    withdrawn by a withdrawal on any of them, as ``hangar_call`` withdraws it.
+    Without this half a `withdrawn:` declared on the group was written under
+    the group id and never consulted, because listing and calling always ask
+    under the member id.
 
     For anything else -- a plain server id -- it is the id itself, which is
     what every caller had.
@@ -219,8 +240,34 @@ def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
     group = _groups().get(mcp_server)
     if group is not None:
         return (mcp_server, *(member.id for member in group.members))
-    owner = _member_to_group().get(mcp_server)
-    return (mcp_server, owner) if owner else (mcp_server,)
+    return (mcp_server, *_member_to_groups().get(mcp_server, ()))
+
+
+def _policy_scopes(mcp_server: str) -> list[tuple[str, str | None, str | None]]:
+    """Every ``(server id, group id, member server id)`` the access policy is asked under for *mcp_server*.
+
+    The scopes of the call the front door makes for it, so a tool shown here is
+    one that call is allowed:
+
+    * a member of one group routes through its group: the group's scope, with
+      this member as the one the group routes to;
+    * a member of several groups routes to itself: the scopes ``hangar_call``
+      asks for a member named directly, its own and one per owning group;
+    * a group id (what `_upstream_ids` hands the prompts and resources
+      surfaces, having collapsed the member) is the group's scope. Which member
+      answers is not known yet, so a member policy cannot be applied (#1036);
+    * anything else is its own scope.
+    """
+    owners = _member_to_groups().get(mcp_server, ())
+    if len(owners) > 1:
+        from ..server.tools.batch.executor import member_policy_scopes
+
+        return member_policy_scopes(mcp_server, owners)
+    if owners:
+        return [(owners[0], owners[0], mcp_server)]
+    if mcp_server in _groups():
+        return [(mcp_server, mcp_server, None)]
+    return [(mcp_server, None, None)]
 
 
 def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:
@@ -230,8 +277,9 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
     resources alike. Both halves of the tool answer, applied per kind:
 
     * the withdrawal overlay (config or runtime, per tenant or for all), and
-    * the effective access policy from the one resolver, with a group member
-      checked against its GROUP the way ``_build_flat_map`` has always done it.
+    * the effective access policy from the one resolver, asked under every
+      scope `_policy_scopes` names. A group member is checked against each
+      group that owns it, and deny wins, as ``hangar_call`` checks it.
 
     Listing and fetching call this same function, so a thing that was not shown
     cannot be fetched and a thing that was shown can be -- and neither surface
@@ -250,25 +298,12 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
                     "withdrawn_by_group_member scope=%s asked_as=%s kind=%s name=%s", scope, mcp_server, kind, name
                 )
             return False
-    # Both spellings of one scope resolve to the group: a MEMBER id (how the tool
-    # projection is keyed) and the GROUP id itself (what `_upstream_ids` hands the
-    # prompts and resources surfaces, having already collapsed the member). Without
-    # the second half a group `access:` policy is registered and never read (#1036).
-    owner_group = _member_to_group().get(mcp_server)
-    # When *mcp_server* is a member id we know which member answers; when it is
-    # the group id (`_upstream_ids` has already collapsed the member for the
-    # prompts and resources surfaces) we do not, and the group-level policy is
-    # the whole answer -- a member policy cannot be applied to a member that has
-    # not been chosen yet.
-    member_server_id = mcp_server if owner_group else None
-    owner_group = owner_group or (mcp_server if mcp_server in _groups() else None)
-    return get_tool_access_resolver().is_allowed(
-        owner_group or mcp_server,
-        name,
-        kind=kind,
-        group_id=owner_group,
-        member_id=tenant_id,
-        member_server_id=member_server_id,
+    resolver = get_tool_access_resolver()
+    return all(
+        resolver.is_allowed(
+            server_id, name, kind=kind, group_id=group_id, member_id=tenant_id, member_server_id=member_server_id
+        )
+        for server_id, group_id, member_server_id in _policy_scopes(mcp_server)
     )
 
 
@@ -313,10 +348,11 @@ def _build_flat_map(
         if resolved.is_withdrawn_for(tenant_id):
             continue
 
-        # Drop tools denied by policy. A group member is checked against the
-        # GROUP policy -- the same check `_gate_tool_access` applies at call
-        # time, so a tool shown here is the tool that check will allow. Shared
-        # with the prompts and resources surfaces since #1028.
+        # Drop tools denied by policy. A group member is checked against every
+        # group that owns it -- the same checks `_gate_tool_access` applies to
+        # the call this entry routes to, so a tool shown here is the tool that
+        # check will allow. Shared with the prompts and resources surfaces
+        # since #1028.
         owner_group = group_of.get(mcp_server)
         if not is_governed_allowed(mcp_server, tool_name, kind="tool", tenant_id=tenant_id):
             continue
@@ -422,10 +458,16 @@ def _denied_header_exposure(proj: Any) -> str | None:
 
     The schema is never edited; see `_invalid_header_annotation`.
     """
-    policy = get_header_exposure_policy(proj.mcp_server) or _group_exposure_policy(proj.mcp_server)
-    if policy is None or not policy:
-        return None
+    own = get_header_exposure_policy(proj.mcp_server)
+    for policy in [own] if own else _group_exposure_policies(proj.mcp_server):
+        reason = _exposure_verdict(proj, policy)
+        if reason is not None:
+            return reason
+    return None
 
+
+def _exposure_verdict(proj: Any, policy: Any) -> str | None:
+    """What one `header_exposure` block says about this tool: see `_denied_header_exposure`."""
     # Keyed on the policy VALUE, not its identity: a reload rebuilds the block,
     # and a recycled id() would answer for a policy that no longer exists.
     key = (proj.mcp_server, proj.tool, proj.digest.sha256, policy)
@@ -449,10 +491,14 @@ def _denied_header_exposure(proj: Any) -> str | None:
     return reason if policy.on_violation == "withdraw" else None
 
 
-def _group_exposure_policy(mcp_server: str) -> Any:
-    """A member inherits the block its group declared (#1038 scope shape)."""
-    group = _member_to_group().get(mcp_server)
-    return get_header_exposure_policy(group) if group else None
+def _group_exposure_policies(mcp_server: str) -> list[Any]:
+    """A member inherits the block each group that owns it declared (#1038 scope shape).
+
+    A member of several groups is held to every one of them: the tool is
+    withheld when any of their blocks withholds it.
+    """
+    blocks = (get_header_exposure_policy(group) for group in _member_to_groups().get(mcp_server, ()))
+    return [block for block in blocks if block]
 
 
 def _build_mcp_tool_list(
@@ -1080,9 +1126,12 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
             raise _not_found_error(name)
 
         mcp_server_id, tool_name = flat_map[name]
-        # A group member dispatches through its GROUP so member selection stays
-        # with the group's strategy (round-robin, canary, health) -- the
-        # executor resolves the group id to a concrete member itself (#857).
+        # A member of one group dispatches through its GROUP so member
+        # selection stays with the group's strategy (round-robin, canary,
+        # health) -- the executor resolves the group id to a concrete member
+        # itself (#857). A member of several groups dispatches to itself, and
+        # the executor governs it by every group that owns it, as it governs
+        # `hangar_call` naming that member. See `_member_to_group`.
         mcp_server_id = _member_to_group().get(mcp_server_id, mcp_server_id)
 
         # Relay the caller's progressToken (#883): the upstream is asked with a
