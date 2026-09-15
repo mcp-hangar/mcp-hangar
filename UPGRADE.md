@@ -1,5 +1,26 @@
 # Upgrading MCP Hangar
 
+## Next — a cluster refuses mode-less servers and local inline group members
+
+A configuration with a `coordination:` block is refused at startup when it
+declares a server that runs as a child process of one gateway, because only the
+replica holding the management lease can run it. The check read only top-level
+`mcp_servers` entries whose `mode` was written as `subprocess`, `docker` or
+`container`. It now also refuses:
+
+- a server with no `mode`. The loader builds it as `subprocess`, with or
+  without an `endpoint`;
+- a group member whose entry in the group's `members:` list has a local or
+  missing `mode`, when the member is not a server already defined above the
+  group under `mcp_servers`. The error names it `<group>/<member>`;
+- `mode: podman`. That configuration already failed to load, later, with
+  `'podman' is not a valid McpServerMode`.
+
+To fix a refused configuration, give each server it names `mode: remote` and an
+`endpoint`. For a group member, do that in the member's entry, or define the
+server under `mcp_servers` above the group. If this is one gateway, remove the
+`coordination:` block. A configuration without `coordination:` is unaffected.
+
 ## Upgrade to 2.20.0
 
 ### `block` and `quarantine` stop a server whose tools drift

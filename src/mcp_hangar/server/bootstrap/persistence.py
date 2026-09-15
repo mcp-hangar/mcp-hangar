@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcp_hangar.infrastructure.launchers import LOCAL_MODES
 from mcp_hangar.infrastructure.persistence.registry import PersistenceBackend, create_backend
 from mcp_hangar.logging_config import get_logger
 
@@ -192,7 +193,8 @@ class ClusterNeedsASelectedBackendError(RuntimeError):
 class LocalModeInDeclaredClusterError(RuntimeError):
     """A declared cluster carries a server it can only run on one replica.
 
-    `subprocess`, `docker` and `container` attach a child process's stdio to
+    `subprocess`, `docker`, `container` and `podman` -- and a server with no
+    `mode`, which is built as `subprocess` -- attach a child process's stdio to
     **one** gateway. Registering such a server through the API is already
     refused where storage is shareable, and launching one on a follower is
     refused again -- but a server declared in `config.yaml` goes through
@@ -224,11 +226,23 @@ class LocalModeInDeclaredClusterError(RuntimeError):
         )
 
 
-#: The modes that run a server as a child process of one gateway. Kept next to
-#: the refusal rather than imported from the launcher package: this check runs
-#: on configuration, before any launcher exists, and the domain vocabulary for
-#: "local" is a value object the config has not been parsed into yet.
-_CHILD_PROCESS_MODES: frozenset[str] = frozenset({"subprocess", "docker", "container"})
+#: The modes that run a server as a child process of one gateway: the set the
+#: launcher refuses to start on a replica that does not hold the lease, so the
+#: refusal at load and the refusal at launch cannot disagree. It names `podman`,
+#: which `McpServerMode` has no member for.
+_CHILD_PROCESS_MODES: frozenset[str] = LOCAL_MODES
+
+#: What the loader builds a server whose spec names no mode as (`build_config`,
+#: `McpServerConfig.from_dict`).
+_DEFAULT_MODE = "subprocess"
+
+
+def _mode_of(spec: dict[str, Any]) -> str:
+    return str(spec.get("mode", _DEFAULT_MODE))
+
+
+def _is_local(mode: str) -> bool:
+    return mode.strip().lower() in _CHILD_PROCESS_MODES
 
 
 def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = None) -> None:
@@ -236,6 +250,13 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
 
     Every offender at once, because fixing them one restart at a time is the
     experience this codebase keeps refusing to ship.
+
+    Reads the servers the way `build_config` builds them, in document order. A
+    server with no `mode` is the `subprocess` the loader builds. A group member
+    is the top-level server of that id only if that server was built before the
+    group; otherwise `_load_group_members` builds it from the member's own
+    entry, so it is judged by that entry and named `<group>/<member>`. A server
+    built once is reported once.
 
     Args:
         config: Full configuration. `coordination` is what makes this a cluster;
@@ -250,11 +271,25 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
     servers = config.get("mcp_servers") or {}
     if not isinstance(servers, dict):
         return
-    offenders = [
-        (str(server_id), str(spec.get("mode")))
-        for server_id, spec in servers.items()
-        if isinstance(spec, dict) and str(spec.get("mode", "")).strip().lower() in _CHILD_PROCESS_MODES
-    ]
+    offenders: list[tuple[str, str]] = []
+    built: set[str] = set()
+    for server_id, spec in servers.items():
+        if not isinstance(spec, dict):
+            continue
+        mode = _mode_of(spec)
+        if mode.strip().lower() != "group":
+            built.add(str(server_id))
+            if _is_local(mode):
+                offenders.append((str(server_id), mode))
+            continue
+        members = spec.get("members")
+        for member in members if isinstance(members, list) else []:
+            member_id = member.get("id") if isinstance(member, dict) else None
+            if not member_id or str(member_id) in built:
+                continue
+            built.add(str(member_id))
+            if _is_local(member_mode := _mode_of(member)):
+                offenders.append((f"{server_id}/{member_id}", member_mode))
     if offenders:
         raise LocalModeInDeclaredClusterError(offenders)
 
