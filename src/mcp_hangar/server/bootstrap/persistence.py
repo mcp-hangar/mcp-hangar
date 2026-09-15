@@ -251,12 +251,13 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
     Every offender at once, because fixing them one restart at a time is the
     experience this codebase keeps refusing to ship.
 
-    Reads the servers the way `build_config` builds them, in document order. A
-    server with no `mode` is the `subprocess` the loader builds. A group member
-    is the top-level server of that id only if that server was built before the
-    group; otherwise `_load_group_members` builds it from the member's own
-    entry, so it is judged by that entry and named `<group>/<member>`. A server
-    built once is reported once.
+    Reads the servers the way `build_config` builds them: every top-level server
+    first, then the groups. A server with no `mode` is the `subprocess` the
+    loader builds. A group member whose id names a top-level server is that
+    server, wherever the group is in the file, and is checked once, as that
+    entry. Any other member is built from its own entry, so its own mode decides
+    and it is named `<group>/<member>`. An inline member two groups share is one
+    server, reported once.
 
     Args:
         config: Full configuration. `coordination` is what makes this a cluster;
@@ -271,25 +272,23 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
     servers = config.get("mcp_servers") or {}
     if not isinstance(servers, dict):
         return
-    offenders: list[tuple[str, str]] = []
-    built: set[str] = set()
-    for server_id, spec in servers.items():
-        if not isinstance(spec, dict):
-            continue
-        mode = _mode_of(spec)
-        if mode.strip().lower() != "group":
-            built.add(str(server_id))
-            if _is_local(mode):
-                offenders.append((str(server_id), mode))
-            continue
+    specs = {str(server_id): spec for server_id, spec in servers.items() if isinstance(spec, dict)}
+    groups = {server_id: spec for server_id, spec in specs.items() if _mode_of(spec).strip().lower() == "group"}
+    offenders = [
+        (server_id, _mode_of(spec))
+        for server_id, spec in specs.items()
+        if server_id not in groups and _is_local(_mode_of(spec))
+    ]
+    inline: set[str] = set()
+    for group_id, spec in groups.items():
         members = spec.get("members")
         for member in members if isinstance(members, list) else []:
-            member_id = member.get("id") if isinstance(member, dict) else None
-            if not member_id or str(member_id) in built:
+            member_id = str(member.get("id") or "") if isinstance(member, dict) else ""
+            if not member_id or (member_id in specs and member_id not in groups) or member_id in inline:
                 continue
-            built.add(str(member_id))
+            inline.add(member_id)
             if _is_local(member_mode := _mode_of(member)):
-                offenders.append((f"{server_id}/{member_id}", member_mode))
+                offenders.append((f"{group_id}/{member_id}", member_mode))
     if offenders:
         raise LocalModeInDeclaredClusterError(offenders)
 

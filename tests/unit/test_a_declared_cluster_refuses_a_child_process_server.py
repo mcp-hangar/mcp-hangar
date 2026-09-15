@@ -99,15 +99,20 @@ class TestAGroupMemberIsJudgedAsTheLoaderBuildsIt:
             _config({"r": REMOTE, "g": _group({"id": "r"}, {"id": "i", **REMOTE})})
         )
 
-    def test_a_member_defined_at_top_level_is_reported_once(self) -> None:
-        servers = {"t": {"mode": "subprocess"}, "g": _group({"id": "t"}), "h": _group({"id": "t"})}
+    def test_a_member_defined_at_top_level_is_reported_once_in_any_order(self) -> None:
+        servers = {"g": _group({"id": "t"}), "t": {"mode": "subprocess"}, "h": _group({"id": "t"})}
 
         assert _offenders(servers) == [("t", "subprocess")]
 
-    def test_a_group_listed_before_its_member_builds_it_from_the_member_entry(self) -> None:
-        # `_load_group_members` reuses only a server already built, so this group
-        # gets a `subprocess` built from `{"id": "t"}`, not the remote `t` below.
-        assert _offenders({"g": _group({"id": "t"}), "t": REMOTE}) == [("g/t", "subprocess")]
+    def test_a_group_listed_before_a_remote_server_of_that_id_is_accepted(self) -> None:
+        # `build_config` builds every top-level server before any group, so the
+        # member is the remote `t` below, whatever the order in the file.
+        refuse_local_modes_in_a_declared_cluster(_config({"g": _group({"id": "t"}), "t": REMOTE}))
+
+    def test_an_inline_member_two_groups_share_is_reported_once(self) -> None:
+        member = {"id": "m", "mode": "docker"}
+
+        assert _offenders({"g": _group(member), "h": _group(member)}) == [("g/m", "docker")]
 
 
 class TestWithoutTheDeclarationNothingChanges:
