@@ -17,6 +17,7 @@ from ...application.commands import (
 )
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ...application.queries import ListMcpServersQuery
+from ...application.read_models.mcp_server_views import REVIVED_BY_START, DeadInfo, dead_dict, dead_info
 from ...domain.exceptions import (
     MissingSecretsError,
     McpServerNotHotLoadedError,
@@ -84,6 +85,7 @@ def hangar_list(state_filter: str | None = None) -> dict:
                 "ephemeral": metadata.ephemeral,
                 "loaded_at": metadata.loaded_at.isoformat(),
                 "lifetime_seconds": round(metadata.lifetime_seconds(), 1),
+                "dead": dead_dict(dead_info(mcp_server, mcp_server_state)),
             }
         )
 
@@ -128,7 +130,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     tools_count: int,
                     health_status: str,
                     tools_predefined: bool,
-                    description?: str
+                    description?: str,
+                    dead: {reason, since, retry_allowed_at, revived_by} | null
                 }],
                 groups: [{group_id, state, strategy, healthy_count, total_members, ...}],
                 runtime_mcp_servers: [{
@@ -138,9 +141,13 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     verified: bool,
                     ephemeral: bool,
                     loaded_at: str,
-                    lifetime_seconds: float
+                    lifetime_seconds: float,
+                    dead: {reason, since, retry_allowed_at, revived_by} | null
                 }]
             }
+            dead is what hangar_details reports: null unless state is "dead",
+            then why it is dead ("given_up", "crashed", "start_failed" or
+            "capability_blocked"), since when, and what starts it again.
 
         Example:
             hangar_list()
@@ -315,7 +322,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
 
         Returns:
             {
-                mcp_servers: [{id: str, indicator: str, state: str, mode: str, last_used?: str}],
+                mcp_servers: [{id: str, indicator: str, state: str, mode: str, note?: str, dead: object | null}],
                 groups: [{
                     id: str,
                     indicator: str,
@@ -325,7 +332,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     total_members: int,
                     circuit_open: bool
                 }],
-                runtime_mcp_servers: [{id: str, indicator: str, state: str, source: str, verified: bool}],
+                runtime_mcp_servers: [{
+                    id: str, indicator: str, state: str, source: str, verified: bool, dead: object | null
+                }],
                 summary: {healthy_mcp_servers: int, total_mcp_servers: int, uptime: str, uptime_seconds: float},
                 replica: {instance_id: str, uptime_seconds: float, uptime: str},
                 scope: "replica",
@@ -334,6 +343,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             }
             summary.uptime and summary.uptime_seconds are the answering replica's
             uptime, the same values as replica.uptime and replica.uptime_seconds.
+            dead is what hangar_details reports: null unless state is "dead".
+            A dead server's note names its reason and what starts it again.
             Two vocabularies, kept apart, each in its own section of `formatted`:
             servers (and runtime_mcp_servers) have a lifecycle state, with
             indicators [READY], [COLD], [STARTING] (state "initializing"),
@@ -371,11 +382,12 @@ def hangar_status() -> dict:
             "indicator": _get_status_indicator(state),
             "state": state,
             "mode": summary.mode,
+            "dead": dead_dict(summary.dead),
         }
         if state == "cold":
             mcp_server_info["note"] = "Will start on first request"
         elif state == "dead":
-            mcp_server_info["note"] = "Failed: hangar_start starts it again"
+            mcp_server_info["note"] = _dead_note(summary.dead)
         mcp_servers_status.append(mcp_server_info)
 
     groups_status = [
@@ -399,6 +411,7 @@ def hangar_status() -> dict:
             "source": server.metadata.source,
             "verified": server.metadata.verified,
             "hot_loaded": True,
+            "dead": dead_dict(server.dead),
         }
         for server in view.hot_loaded
     ]
@@ -429,6 +442,15 @@ def hangar_status() -> dict:
             view.instance_id,
         ),
     }
+
+
+def _dead_note(dead: DeadInfo | None) -> str:
+    """The note for a dead server: why, and what starts it again (#1418)."""
+    if dead is None:
+        return "Failed: hangar_start starts it again"
+    if dead.revived_by == REVIVED_BY_START:
+        return f"Failed ({dead.reason}): only hangar_start starts it again"
+    return f"Failed ({dead.reason}): hangar_start, or a call after its backoff, starts it again"
 
 
 #: One indicator per server lifecycle state, keyed by the enum. `initializing`

@@ -37,8 +37,12 @@ class ReloadConfigurationHandler(CommandHandler):
     - every process-wide section: `execution`, `headers.param_validation`,
       `resource_links`, `interceptors` and `ui_resources`. A section deleted
       from the file goes back to its default;
-    - `mcp_servers`: adds new servers, removes deleted ones, restarts modified
-      ones and keeps unchanged ones;
+    - `mcp_servers`: adds new servers, removes deleted ones, restarts the ones
+      whose server settings changed, and keeps every other one running: the
+      same object, with its process, sessions, health and circuit state. What
+      counts as changed is `PreparedServers.keeps`: a policy, pin, withdrawal,
+      `header_exposure` or group-membership change alone restarts nothing, and
+      takes effect all the same (#1426);
     - the groups, and the tool-access policies, withdrawals, pins and
       `header_exposure` blocks the servers declare, swapped in rather than
       cleared and registered again, so no call is resolved without them. The
@@ -223,21 +227,23 @@ class ReloadConfigurationHandler(CommandHandler):
         A running server the new configuration does not keep is being replaced,
         so it counts as updated and is stopped. Replacing it without a stop left
         its process running with nothing to stop it (#1424).
+
+        And a server it keeps is unchanged, and never stopped: the commit puts
+        that very object back. The diff used to run a check of its own, on part
+        of the spec, and counted a server whose file left `resources` out as
+        changed on every reload. It stopped it, and the commit put the stopped
+        server back (#1426).
         """
-        new_specs = prepared.specs
-        new_ids = set(new_specs)
+        new_ids = set(prepared.specs)
         current_ids = set(current)
 
         updated: list[str] = []
         unchanged: list[str] = []
         for mcp_server_id in sorted(new_ids & current_ids):
-            running = current[mcp_server_id]
-            old_spec = self._get_mcp_server_spec(running)
-            replaced = not prepared.keeps(mcp_server_id, running)
-            if replaced or self._config_differs(old_spec, new_specs[mcp_server_id]):
-                updated.append(mcp_server_id)
-            else:
+            if prepared.keeps(mcp_server_id, current[mcp_server_id]):
                 unchanged.append(mcp_server_id)
+            else:
+                updated.append(mcp_server_id)
 
         diff = _ServerDiff(
             added=sorted(new_ids - current_ids),
@@ -297,112 +303,3 @@ class ReloadConfigurationHandler(CommandHandler):
             error_type=type(error).__name__,
             duration_ms=duration_ms,
         )
-
-    def _get_mcp_server_spec(self, mcp_server) -> dict[str, Any]:
-        """Extract configuration spec from mcp_server aggregate.
-
-        Args:
-            mcp_server: McpServer aggregate instance.
-
-        Returns:
-            Dictionary with mcp_server configuration.
-        """
-        return {
-            "mode": mcp_server._mode.value if hasattr(mcp_server._mode, "value") else str(mcp_server._mode),
-            "command": mcp_server._command,
-            "image": mcp_server._image,
-            "endpoint": mcp_server._endpoint,
-            "env": mcp_server._env,
-            "idle_ttl_s": mcp_server._idle_ttl.seconds
-            if hasattr(mcp_server._idle_ttl, "seconds")
-            else mcp_server._idle_ttl,
-            "health_check_interval_s": (
-                mcp_server._health_check_interval.seconds
-                if hasattr(mcp_server._health_check_interval, "seconds")
-                else 60
-            ),
-            "max_consecutive_failures": (
-                mcp_server._health.max_consecutive_failures
-                if hasattr(mcp_server._health, "max_consecutive_failures")
-                else 3
-            ),
-            "volumes": mcp_server._volumes,
-            "build": mcp_server._build,
-            "resources": mcp_server._resources,
-            "network": mcp_server._network,
-            "read_only": mcp_server._read_only,
-            "user": mcp_server._user,
-            "description": mcp_server._description,
-            "tools": mcp_server._tools.to_dict() if hasattr(mcp_server._tools, "to_dict") else None,
-            "auth": mcp_server._auth_config,
-            "tls": mcp_server._tls_config,
-            "http": mcp_server._http_config,
-        }
-
-    def _config_differs(self, old_spec: dict[str, Any], new_spec: dict[str, Any]) -> bool:
-        """Check if two mcp_server configurations differ significantly.
-
-        Args:
-            old_spec: Old mcp_server configuration.
-            new_spec: New mcp_server configuration.
-
-        Returns:
-            True if configurations differ, False otherwise.
-        """
-        # Default values for mcp_server fields
-        DEFAULTS = {
-            "idle_ttl_s": 300,
-            "health_check_interval_s": 60,
-            "max_consecutive_failures": 3,
-            "network": "none",
-            "read_only": True,
-        }
-
-        # Compare key fields that affect mcp_server behavior
-        key_fields = [
-            "mode",
-            "command",
-            "image",
-            "endpoint",
-            "env",
-            "idle_ttl_s",
-            "health_check_interval_s",
-            "max_consecutive_failures",
-            "volumes",
-            "build",
-            "resources",
-            "network",
-            "user",
-        ]
-
-        for field in key_fields:
-            old_value = old_spec.get(field)
-            new_value = new_spec.get(field)
-
-            # Normalize empty values for env (None, {}, etc.)
-            if field in ("env", "resources"):
-                old_value = old_value or {}
-                new_value = new_value or {}
-
-            # Normalize empty lists/None
-            if field in ("volumes", "command"):
-                old_value = old_value or []
-                new_value = new_value or []
-
-            # Normalize default values - None in new_spec means use default
-            if field in DEFAULTS:
-                if new_value is None:
-                    new_value = DEFAULTS[field]
-                if old_value is None:
-                    old_value = DEFAULTS[field]
-
-            if old_value != new_value:
-                logger.debug(
-                    "config_field_differs",
-                    field=field,
-                    old=old_value,
-                    new=new_value,
-                )
-                return True
-
-        return False

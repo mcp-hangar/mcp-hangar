@@ -285,7 +285,8 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 tools: [{name, description, inputSchema}],
                 health: {consecutive_failures: int, last_check: str, ...},
                 idle_time: float,
-                meta: object
+                meta: object,
+                dead: {reason, since, retry_allowed_at, revived_by} | null
             }
             Group: {
                 group_id: str,
@@ -303,6 +304,14 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             A group is the same dict GET /api/groups/{id} returns. healthy_count
             counts members that are ready and in rotation;
             members_in_rotation_count counts members in rotation in any state.
+            dead is null unless state is "dead". reason is "given_up",
+            "crashed", "start_failed" or "capability_blocked" ("unknown" only
+            for a server restored from an older record). since is when it went
+            dead; retry_allowed_at is when its backoff ends at the latest, or
+            null when no call starts it or no backoff applies (ISO 8601 UTC).
+            revived_by is "call_or_start" (hangar_start, or a call after the
+            backoff) or "start" (only hangar_start, for capability_blocked).
+            Never upstream error text.
             Error: ValueError with "unknown_mcp_server: <id>"
 
         Example:
