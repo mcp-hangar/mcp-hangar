@@ -1,5 +1,6 @@
 """McpServer aggregate root - the main domain entity."""
 
+from dataclasses import dataclass
 import threading
 import time
 from typing import Any, TYPE_CHECKING, cast
@@ -100,6 +101,10 @@ _REFUSING_MODES = frozenset({"block", "quarantine"})
 # was configured with. Bulk warm-ups -- the front door's at boot, hangar_warm()
 # with no names -- skip every DEAD server, and hangar_tools lists one without
 # starting it.
+#
+# `dead_status()` reports the reason, with when the server went DEAD, to
+# hangar_details, hangar_list, hangar_status and the REST server endpoints
+# (#1418). The values are part of that API: rename none of them.
 DEAD_GIVEN_UP = "given_up"
 DEAD_CRASHED = "crashed"
 DEAD_START_FAILED = "start_failed"
@@ -109,6 +114,39 @@ DEAD_CAPABILITY_BLOCKED = "capability_blocked"
 DEAD_NOT_ROUTED_BY_GROUPS = frozenset({DEAD_GIVEN_UP, DEAD_CAPABILITY_BLOCKED})
 #: Why-dead reasons a call does not revive: only a deliberate start does.
 DEAD_NOT_REVIVED_BY_CALLS = frozenset({DEAD_CAPABILITY_BLOCKED})
+#: Every why-dead reason. `dead_status()` reports one of these, or `DEAD_UNKNOWN`.
+DEAD_REASONS = frozenset({DEAD_GIVEN_UP, DEAD_CRASHED, DEAD_START_FAILED, DEAD_CAPABILITY_BLOCKED})
+#: What `dead_status()` reports for a DEAD server whose reason is not one of
+#: `DEAD_REASONS`: one restored from a record written before the reason was kept.
+DEAD_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class DeadStatus:
+    """Why a server is DEAD, since when, and when a call may start it again (#1418).
+
+    What the read surfaces report. Every field is a bounded value or a time,
+    never text an upstream sent.
+
+    Attributes:
+        reason: One of `DEAD_REASONS`, or `DEAD_UNKNOWN`.
+        since: When it went DEAD, in epoch seconds; None if that was not recorded.
+        retry_allowed_at: When its backoff has ended at the latest, jitter
+            included, in epoch seconds. From then on a call is not refused for
+            backoff; it may be earlier. A time in the past means a call may
+            start it now. None when no call starts it (`DEAD_NOT_REVIVED_BY_CALLS`)
+            or no failure is recorded, so no backoff applies.
+    """
+
+    reason: str
+    since: float | None
+    retry_allowed_at: float | None
+
+    @property
+    def revived_by_call(self) -> bool:
+        """Whether a call may start it again, or only a deliberate start."""
+        return self.reason not in DEAD_NOT_REVIVED_BY_CALLS
+
 
 # Valid state transitions. DEAD -> INITIALIZING is the way out of DEAD, through
 # `ensure_ready()`.
@@ -302,6 +340,8 @@ class McpServer(AggregateRoot):
         self._state = McpServerState.COLD
         # Why it is DEAD, while it is: one of the DEAD_* constants.
         self._dead_reason: str | None = None
+        # When it went DEAD, while it is: the time of the event that moved it.
+        self._dead_at: float | None = None
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
         # Typed by the port rather than Any: the domain's whole use of a launched
@@ -514,6 +554,24 @@ class McpServer(AggregateRoot):
         """Why it is DEAD (a ``DEAD_*`` constant), or None when it is not; read as `state_snapshot` is."""
         return self._dead_reason if self._state is McpServerState.DEAD else None
 
+    def dead_status(self) -> DeadStatus | None:
+        """Why it is DEAD, since when, and when a call may start it again; None when it is not DEAD.
+
+        What `hangar_details`, `hangar_list`, `hangar_status` and the REST
+        server endpoints report (#1418). Read under the lock, so the reason,
+        the time and the backoff describe one moment.
+
+        Thread-safe.
+        """
+        with self._lock:
+            if self._state is not McpServerState.DEAD:
+                return None
+            reason = self._dead_reason
+            if reason is None or reason not in DEAD_REASONS:
+                reason = DEAD_UNKNOWN
+            retry_at = None if reason in DEAD_NOT_REVIVED_BY_CALLS else self._health.backoff_ends_by()
+            return DeadStatus(reason=reason, since=self._dead_at, retry_allowed_at=retry_at)
+
     @property
     def health(self) -> HealthTracker:
         """Health tracker."""
@@ -640,14 +698,14 @@ class McpServer(AggregateRoot):
         self._state = McpServerState.DEAD
         self._dead_reason = reason
         self._increment_version()
-        self._record_event(
-            McpServerStateChanged(
-                mcp_server_id=self.mcp_server_id,
-                old_state=str(old_state.value),
-                new_state=str(McpServerState.DEAD.value),
-                dead_reason=reason,
-            )
+        event = McpServerStateChanged(
+            mcp_server_id=self.mcp_server_id,
+            old_state=str(old_state.value),
+            new_state=str(McpServerState.DEAD.value),
+            dead_reason=reason,
         )
+        self._dead_at = event.occurred_at
+        self._record_event(event)
 
     def _can_start(self, by_call: bool = False) -> tuple:
         """
@@ -2429,6 +2487,7 @@ class McpServer(AggregateRoot):
         self._state = McpServerState(event.new_state)
         # A stream written before the reason existed has none: not given up.
         self._dead_reason = event.dead_reason if self._state is McpServerState.DEAD else None
+        self._dead_at = event.occurred_at if self._state is McpServerState.DEAD else None
 
     def _replay_tool_completed(self, event: "ToolInvocationCompleted") -> None:
         self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)

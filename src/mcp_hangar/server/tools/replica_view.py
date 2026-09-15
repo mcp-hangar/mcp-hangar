@@ -35,6 +35,7 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
+from ...application.read_models.mcp_server_views import DeadInfo, dead_info
 from ...domain.events import current_instance_id
 from ...infrastructure.runtime_store import LoadMetadata
 from ..context import get_context
@@ -63,6 +64,8 @@ class ConfiguredServer:
     mcp_server_id: str
     state: str
     mode: str
+    #: Why it is dead, while it is; the same `dead` `hangar_details` reports (#1418).
+    dead: DeadInfo | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,22 @@ class HotLoadedServer:
     mcp_server_id: str
     state: str
     metadata: LoadMetadata
+    #: Why it is dead, while it is (#1418).
+    dead: DeadInfo | None = None
+
+
+def _configured(mcp_server_id: str, server: Any) -> ConfiguredServer:
+    state = server.state.value
+    return ConfiguredServer(
+        mcp_server_id=mcp_server_id, state=state, mode=server.mode.value, dead=dead_info(server, state)
+    )
+
+
+def _hot_loaded(server: Any, metadata: LoadMetadata) -> HotLoadedServer:
+    state = server.state.value if hasattr(server, "state") else "unknown"
+    return HotLoadedServer(
+        mcp_server_id=str(server.mcp_server_id), state=state, metadata=metadata, dead=dead_info(server, state)
+    )
 
 
 @dataclass(frozen=True)
@@ -172,18 +191,8 @@ def observe_replica() -> ReplicaView:
     from ..state import get_runtime_mcp_servers
 
     ctx = get_context()
-    configured = tuple(
-        ConfiguredServer(mcp_server_id=mcp_server_id, state=server.state.value, mode=server.mode.value)
-        for mcp_server_id, server in ctx.repository.get_all().items()
-    )
-    hot_loaded = tuple(
-        HotLoadedServer(
-            mcp_server_id=str(server.mcp_server_id),
-            state=server.state.value if hasattr(server, "state") else "unknown",
-            metadata=metadata,
-        )
-        for server, metadata in get_runtime_mcp_servers().list_all()
-    )
+    configured = tuple(_configured(mcp_server_id, server) for mcp_server_id, server in ctx.repository.get_all().items())
+    hot_loaded = tuple(_hot_loaded(server, metadata) for server, metadata in get_runtime_mcp_servers().list_all())
     groups = tuple(_group_view(group_id, group.to_status_dict()) for group_id, group in ctx.groups.items())
     return ReplicaView(
         instance_id=current_instance_id(),
