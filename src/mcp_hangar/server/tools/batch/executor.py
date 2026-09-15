@@ -9,16 +9,16 @@ Provides parallel execution of batch invocations with:
 - Response truncation
 """
 
+from collections.abc import Coroutine
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from contextlib import ExitStack
 import asyncio
-import atexit
 import contextvars
 from dataclasses import dataclass, replace
 import json
 import threading
 import time
-from typing import Any, cast, Literal
+from typing import Any, cast, Literal, TypeVar
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
@@ -150,40 +150,47 @@ def _is_task_result(result: dict[str, Any]) -> bool:
     return any(key in task for key in ("taskId", "task_id", "id", "status"))
 
 
+#: Per worker thread: the approval id the gate granted for the call this thread
+#: is running, read at dispatch. Holds no event loop -- see
+#: `_run_approval_coroutine`.
 _approval_loop_local = threading.local()
-_all_approval_loops: set[asyncio.AbstractEventLoop] = set()
+
+_T = TypeVar("_T")
 
 
-def _get_approval_loop() -> asyncio.AbstractEventLoop:
-    """Return a thread-local event loop for synchronous approval gate calls.
+def _run_approval_coroutine(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run one approval-gate coroutine to completion on an event loop of its own.
 
-    A fresh loop is created on first access per thread and reused for the
-    thread's lifetime. ThreadPoolExecutor reuses worker threads, so amortizes
-    loop setup cost across all approval-gated calls in that thread.
+    The loop is torn down before this returns, however the coroutine ends:
+    pending tasks cancelled, async generators closed, the default executor
+    shut down and its thread joined, and the loop closed with its selector.
+    The default executor is where `ApprovalHoldRegistry.wait_slice` waits,
+    through `asyncio.to_thread`.
 
-    Cross-loop signaling rationale (preserved from original design):
-    The hold_registry uses threading.Event (not asyncio.Event) for resolve()
-    notifications, because resolve() runs on FastMCP's main loop while
-    check() awaits here on a different per-thread loop. Loop reuse does not
-    change this -- threading.Event remains the correct signaling primitive.
+    Before #1452 the loop was kept per worker thread and closed only at
+    interpreter exit. `execute()` builds a new ThreadPoolExecutor per batch,
+    so nearly every held call ran on a fresh thread and left its loop behind,
+    with the loop's file descriptors and an idle `asyncio_0` thread, for the
+    life of the process.
+
+    A loop per run rather than one shared, long-lived loop: the gate's
+    coroutines read storage and send deliveries that may block, and every
+    hold waits in the loop's default executor. On one shared loop a slow call
+    would stall every other held call, and the default executor's worker cap
+    would queue their waits past their slices. A loop of its own keeps each
+    hold as isolated as it was. The cost is one new selector per run, paid
+    only by a call that is actually held for a human, or revalidated after one.
+
+    Cross-loop signalling is unchanged: the hold registry uses
+    `threading.Event`, not `asyncio.Event`, because `resolve()` runs on
+    FastMCP's main loop while `check()` waits here on a different loop.
+
+    `loop_factory` leaves the thread's current-loop slot alone, as the
+    `asyncio.new_event_loop()` this replaces did. `asyncio.run()` would set it
+    and then clear it, which a caller on the main thread would notice.
     """
-    loop = getattr(_approval_loop_local, "loop", None)
-    if loop is None or loop.is_closed():
-        loop = asyncio.new_event_loop()
-        _approval_loop_local.loop = loop
-        _all_approval_loops.add(loop)
-    return loop
-
-
-@atexit.register
-def _close_approval_loops() -> None:
-    """Close any thread-local approval gate event loops at interpreter shutdown."""
-    for loop in list(_all_approval_loops):
-        try:
-            if not loop.is_closed():
-                loop.close()
-        except Exception:  # noqa: BLE001 -- best-effort shutdown
-            pass
+    with asyncio.Runner(loop_factory=asyncio.new_event_loop) as runner:
+        return runner.run(coro)
 
 
 #: Sentinel: "not looked up yet", distinct from a genuine "no such projection".
@@ -606,10 +613,10 @@ class BatchExecutor:
         )
 
         try:
-            # ApprovalGateService.check() is async; we run it on a thread-local
-            # event loop reused across calls in this worker thread. We cannot
-            # use the main FastMCP loop because hangar_call() blocks it. See
-            # _get_approval_loop() for the cross-loop signaling rationale.
+            # ApprovalGateService.check() is async; we run it on an event loop
+            # of its own, closed when the wait ends. We cannot use the main
+            # FastMCP loop because hangar_call() blocks it. See
+            # _run_approval_coroutine() for the cross-loop signaling rationale.
             # Bind the caller's tenant and identity onto the approval so the
             # resolve/list surfaces can be scoped to them. Without this, an
             # approver in one tenant can see and resolve another tenant's
@@ -619,8 +626,7 @@ class BatchExecutor:
             _tenant_id = _caller.tenant_id if _caller is not None else None
             _requested_by = (_caller.user_id or _caller.agent_id) if _caller is not None else None
 
-            thread_loop = _get_approval_loop()
-            result = thread_loop.run_until_complete(
+            result = _run_approval_coroutine(
                 gate_service.check(
                     mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
@@ -717,9 +723,7 @@ class BatchExecutor:
         gate_service = getattr(ctx, "approval_gate", None)
         if gate_service is not None and hasattr(gate_service, "revalidate"):
             try:
-                reason = _get_approval_loop().run_until_complete(
-                    gate_service.revalidate(approval_id, call.arguments or {})
-                )
+                reason = _run_approval_coroutine(gate_service.revalidate(approval_id, call.arguments or {}))
             except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
                 # Fail closed: an approval we cannot re-verify is not an
                 # approval we can act on.

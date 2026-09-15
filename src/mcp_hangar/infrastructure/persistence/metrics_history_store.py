@@ -62,9 +62,13 @@ class MetricsHistoryStore(IMetricsHistoryStore):
     - :meth:`query` — retrieve points filtered by mcp_server, metric, and time range.
     - :meth:`prune` — delete rows older than the retention window.
 
-    Thread-safety: relies on :class:`SQLiteConnectionFactory` which uses
-    thread-local connections (one connection per thread).  All writes are
-    serialised by a ``threading.Lock`` to avoid ``SQLITE_BUSY`` under bursts.
+    Thread-safety: each method does all of its work -- execute, fetch every
+    row, commit -- inside one :meth:`SQLiteConnectionFactory.get_connection`
+    block. For the default in-memory database the factory has a single
+    connection that every thread shares, and it holds its lock for the whole
+    block, so calls from different threads, reads included, run one at a time.
+    A file-backed store gets one connection per thread, with no lock, and
+    SQLite's own file locking (WAL, ``busy_timeout``) orders the writes.
 
     Args:
         config: SQLite configuration.  Defaults to in-memory (useful for tests).
