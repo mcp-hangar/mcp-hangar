@@ -80,6 +80,12 @@ def serialize_execution_config() -> dict[str, Any]:
             section["max_concurrency"] = manager.global_limit
         if manager.default_mcp_server_limit != 0:
             section["default_mcp_server_concurrency"] = manager.default_mcp_server_limit
+        # The budgets in force (#1445), so an exported file keeps them.
+        from .tools.batch.tenant_admission import get_tenant_admission
+
+        tenant_limits = get_tenant_admission().limits
+        if tenant_limits:
+            section["tenant_limits"] = {tenant: limits.as_config() for tenant, limits in tenant_limits.items()}
         return section
     except Exception:  # noqa: BLE001 -- fault-barrier: concurrency unavailable should not break serializer
         return {}
