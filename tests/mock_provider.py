@@ -113,7 +113,64 @@ def _tools_list_response(request_id):
     }
 
 
-def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extending
+def _result(request_id, result):
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _error(request_id, code, message):
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _call_tool(request_id, tool_name, arguments):
+    """One tool's answer.
+
+    Raises ``KeyError`` or ``TypeError`` for arguments the tool cannot read, and
+    ``ArithmeticError`` for a sum it cannot do.
+    """
+    if tool_name == "add":
+        return _result(request_id, {"result": arguments["a"] + arguments["b"]})
+    if tool_name == "subtract":
+        return _result(request_id, {"result": arguments["a"] - arguments["b"]})
+    if tool_name == "multiply":
+        return _result(request_id, {"result": arguments["a"] * arguments["b"]})
+    if tool_name == "divide":
+        if arguments["b"] == 0:
+            return _error(request_id, -1, "division by zero")
+        return _result(request_id, {"result": arguments["a"] / arguments["b"]})
+    if tool_name == "power":
+        return _result(request_id, {"result": arguments["base"] ** arguments["exponent"]})
+    if tool_name == "echo":
+        return _result(request_id, {"message": arguments["message"]})
+    if tool_name == "error":
+        return _error(request_id, -1, "Intentional error for testing")
+    return _error(request_id, -32601, f"Unknown tool: {tool_name}")
+
+
+def _tools_call_response(request_id, params):
+    """Answer ``tools/call``.
+
+    While ``MOCK_TOOLS_CALL_FAILS_WHILE`` names a file that exists, every call
+    fails with a JSON-RPC server error (-32000): the upstream is up and not
+    working. That is how tests/integration/_group_recovery_harness.py fails a
+    group member.
+
+    Otherwise the tool answers. Arguments it cannot read answer invalid params
+    (-32602). An arithmetic error, such as ``power`` of 0 to a negative
+    exponent, is the tool's own error: a result with ``isError: true``. A
+    division by zero keeps its JSON-RPC error with the application code -1.
+    """
+    flag = os.environ.get("MOCK_TOOLS_CALL_FAILS_WHILE")
+    if flag and os.path.exists(flag):
+        return _error(request_id, -32000, "tools/call failing")
+    try:
+        return _call_tool(request_id, params.get("name"), params.get("arguments", {}))
+    except (KeyError, TypeError) as e:
+        return _error(request_id, -32602, f"Invalid params: {e!r}")
+    except ArithmeticError as e:
+        return _result(request_id, {"content": [{"type": "text", "text": str(e)}], "isError": True})
+
+
+def main():
     """Run a simple JSON-RPC server for testing."""
     while True:
         try:
@@ -139,75 +196,7 @@ def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extendin
             elif method == "tools/list":
                 response = _tools_list_response(request_id)
             elif method == "tools/call":
-                tool_name = params.get("name")
-                arguments = params.get("arguments", {})
-
-                if tool_name == "add":
-                    result = arguments["a"] + arguments["b"]
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"result": result},
-                    }
-                elif tool_name == "subtract":
-                    result = arguments["a"] - arguments["b"]
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"result": result},
-                    }
-                elif tool_name == "multiply":
-                    result = arguments["a"] * arguments["b"]
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"result": result},
-                    }
-                elif tool_name == "divide":
-                    if arguments["b"] == 0:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {"code": -1, "message": "division by zero"},
-                        }
-                    else:
-                        result = arguments["a"] / arguments["b"]
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {"result": result},
-                        }
-                elif tool_name == "power":
-                    result = arguments["base"] ** arguments["exponent"]
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"result": result},
-                    }
-                elif tool_name == "echo":
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"message": arguments["message"]},
-                    }
-                elif tool_name == "error":
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -1,
-                            "message": "Intentional error for testing",
-                        },
-                    }
-                else:
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Unknown tool: {tool_name}",
-                        },
-                    }
+                response = _tools_call_response(request_id, params)
             elif method == "shutdown":
                 response = {"jsonrpc": "2.0", "id": request_id, "result": {}}
                 print(json.dumps(response), flush=True)
