@@ -124,8 +124,8 @@ def test_the_front_door_applies_the_member_policy_to_a_member_keyed_tool():
 
     with (
         patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
-            return_value={_MEMBER: _GROUP, _OTHER_MEMBER: _GROUP},
+            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+            return_value={_MEMBER: (_GROUP,), _OTHER_MEMBER: (_GROUP,)},
         ),
         patch("mcp_hangar.fastmcp_server.flat_tool_projection._groups", return_value={_GROUP: object()}),
     ):
