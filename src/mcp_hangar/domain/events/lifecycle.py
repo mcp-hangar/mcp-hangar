@@ -57,6 +57,23 @@ COLD, and the move that follows leaves the stream, and the state gauge, at DEAD.
 The value is the one the stop counter already carried for a give-up.
 """
 
+DELIBERATE_STOP_REASONS = (
+    "idle",
+    "shutdown",
+    "user_request",
+    "manual",
+    "failback",
+    "compensation",
+    "detection_enforcement:block",
+)
+"""The `McpServerStopped.reason` of every stop made on purpose (#1466).
+
+Every stop but a give-up (`STOPPED_BY_GIVING_UP`). The server records `idle`
+and `shutdown` by itself; the others are the stop command's reason, which
+reaches the event. The recovery saga clears retry state after such a stop, and
+the alert handler does not warn about it.
+"""
+
 
 @dataclass
 class McpServerStateChanged(DomainEvent):

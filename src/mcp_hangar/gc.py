@@ -10,7 +10,7 @@ from .domain.contracts.mcp_server_runtime import normalize_state_to_str, McpServ
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
 from .stream_ids import MCP_SERVER
-from .metrics import observe_health_check, record_error, record_gc_cycle, record_mcp_server_stop
+from .metrics import observe_health_check, record_error, record_gc_cycle
 
 logger = get_logger(__name__)
 
@@ -139,7 +139,8 @@ class BackgroundWorker:
                         if mcp_server.maybe_shutdown_idle():
                             logger.info("gc_shutdown", mcp_server_id=mcp_server_id)
                             gc_collected["idle"] += 1
-                            record_mcp_server_stop(mcp_server_id, "idle")
+                            # Counted from the McpServerStopped the reap
+                            # records, published below, and only there (#1466).
 
                     elif self.task == "health_check":
                         # State-aware health check scheduling
