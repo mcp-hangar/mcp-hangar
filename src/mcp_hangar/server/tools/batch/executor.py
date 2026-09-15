@@ -64,6 +64,7 @@ from ....retry import configured_retry_policy, retry_sync, RetryPolicy, RetryRes
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
+from .member_health import member_outcome, MemberOutcome
 from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
 from .tenant_admission import CONCURRENCY, get_tenant_admission, Grant, NO_BUDGET, RATE, Refusal, Reservation
 
@@ -1379,13 +1380,11 @@ class BatchExecutor:
         if relayed is not None:
             return relayed
 
-        # Feed the group health tracker so its circuit-breaker and member rotation
-        # react to actual invoke outcomes (enables failover on the call path, #275).
-        if pipeline.is_group and pipeline.group_obj is not None:
-            if result.success:
-                pipeline.group_obj.report_success(pipeline.target_server_id)
-            else:
-                pipeline.group_obj.report_failure(pipeline.target_server_id)
+        # Feed the group's circuit and member rotation with what the outcome says
+        # about the member (failover on the call path, #275). A failure the
+        # caller caused is not the member's (#1409).
+        failed = result.member_outcome or MemberOutcome.UNHEALTHY
+        self._report_member(pipeline, MemberOutcome.HEALTHY if result.success else failed)
         return result
 
     # -- gates ---------------------------------------------------------------
@@ -1655,13 +1654,13 @@ class BatchExecutor:
         if not p.mcp_server_obj:
             return None
         if p.mcp_server_obj.state.value == "dead":
-            return self._fail_group_member(p, self._refuse_dead_target(p))
+            return self._report_refusal(p, self._refuse_dead_target(p))
         health = getattr(p.mcp_server_obj, "health", None)
         if not (health is not None and health.should_degrade()):
             return None
         BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
         refusal = p.refuse("Circuit breaker open (too many consecutive failures)", "CircuitBreakerOpen")
-        return self._fail_group_member(p, refusal)
+        return self._report_refusal(p, refusal)
 
     def _refuse_dead_target(self, p: "_CallPipeline") -> CallResult | None:
         """Refuse a call a DEAD target may not take now; None lets the call start it.
@@ -1686,12 +1685,29 @@ class BatchExecutor:
             "CircuitBreakerOpen",
         )
 
-    @staticmethod
-    def _fail_group_member(p: "_CallPipeline", refusal: CallResult | None) -> CallResult | None:
-        """Report a refused group member to its group, as a failed invocation is (#1361)."""
-        if refusal is not None and p.is_group and p.group_obj is not None:
-            p.group_obj.report_failure(p.target_server_id)
+    @classmethod
+    def _report_refusal(
+        cls, p: "_CallPipeline", refusal: CallResult | None, cause: BaseException | None = None
+    ) -> CallResult | None:
+        """Report a refused group member to its group, as a failed invocation is (#1361).
+
+        The refusal's code decides what it says about the member, or *cause*,
+        the error behind it, when there is one: a start the command bus refused
+        for its rate limit is Hangar's refusal, not the member failing (#1409).
+        """
+        if refusal is not None:
+            cls._report_member(p, member_outcome(cause if cause is not None else refusal.error_type))
         return refusal
+
+    @staticmethod
+    def _report_member(p: "_CallPipeline", outcome: MemberOutcome) -> None:
+        """Tell a group what *outcome* says about the member that took the call (#1409)."""
+        if not (p.is_group and p.group_obj is not None):
+            return
+        if outcome is MemberOutcome.HEALTHY:
+            p.group_obj.report_success(p.target_server_id)
+        elif outcome is MemberOutcome.UNHEALTHY:
+            p.group_obj.report_failure(p.target_server_id)
 
     @staticmethod
     def _refused_start(p: "_CallPipeline", e: CannotStartMcpServerError) -> CallResult:
@@ -1822,14 +1838,15 @@ class BatchExecutor:
         invocation is what re-runs a deferred digest pin. It is judged again
         first: the approval gate can hold a call for minutes after the
         circuit-breaker gate let it through. A group member that is refused,
-        or fails to start, counts as that member's failure.
+        or fails to start, counts as that member's failure. A start Hangar
+        itself refused, for the command bus's rate limit, does not (#1409).
         """
         if not (p.mcp_server_obj and p.mcp_server_obj.state.value in ("cold", "dead")):
             return None
         if p.mcp_server_obj.state.value == "dead":
             refusal = self._refuse_dead_target(p)
             if refusal is not None:
-                return self._fail_group_member(p, refusal)
+                return self._report_refusal(p, refusal)
         with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
             cs_span.set_attribute("mcp.server.id", p.target_server_id)
             try:
@@ -1845,11 +1862,12 @@ class BatchExecutor:
                 # passed: each draws the backoff's jitter afresh, or the server
                 # was blocked in between. Not a failed start (#1446).
                 cs_span.set_attribute("cold_start.result", "refused")
-                return self._fail_group_member(p, self._refused_start(p, e))
+                return self._report_refusal(p, self._refused_start(p, e))
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)
-                return self._fail_group_member(p, p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError"))
+                refusal = p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
+                return self._report_refusal(p, refusal, cause=e)
         return None
 
     def _gate_deferred_digest_pin(self, p: "_CallPipeline") -> CallResult | None:
@@ -2043,6 +2061,7 @@ class BatchExecutor:
                     error=error_msg,
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
+                    member_outcome=member_outcome(retry_result.final_error),
                     retry_metadata=RetryMetadata(
                         attempts=retry_result.attempt_count,
                         retries=[a.error_type for a in retry_result.attempts],
@@ -2066,6 +2085,7 @@ class BatchExecutor:
                     error=str(e),
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
+                    member_outcome=member_outcome(e),
                 )
 
         # Interceptor mutators (response): transform the returned result payload
