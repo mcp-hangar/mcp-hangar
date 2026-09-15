@@ -1,5 +1,73 @@
 # Upgrading MCP Hangar
 
+## Next — the Python facade's `invoke` applies the configured controls
+
+`Hangar.invoke` and `SyncHangar.invoke` called the server directly, so none of
+the call-time controls in your configuration applied to them. They now run the
+call through the same executor as `hangar_call`: tool access and withdrawals,
+digest pins, validators and interceptors, approval, the global and per-server
+concurrency limits, and tenant budgets all apply.
+
+**Pass the caller.** `invoke` takes a new, optional `principal=`. The call is
+authorized for `tool:invoke` as an authenticated `hangar_call` caller is, by the
+roles your configuration gives that principal id and its groups. The
+principal's `tenant_id` is the tenant the per-tenant controls are applied for.
+
+```python
+from mcp_hangar import Hangar
+from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
+
+caller = Principal(
+    id=PrincipalId("agent-1"),
+    type=PrincipalType.SERVICE_ACCOUNT,
+    tenant_id="team-a",
+)
+
+async with Hangar.from_config("config.yaml") as hangar:
+    result = await hangar.invoke("math", "add", {"a": 1, "b": 2}, principal=caller)
+```
+
+`SyncHangar.invoke` takes the same `principal=`.
+
+**Without a principal, the call is an anonymous caller's**, the same as an
+unauthenticated `hangar_call`:
+
+- With authentication configured, it is refused with the code
+  `AuthorizationDenied`.
+- It carries no tenant. With `execution.tenant_limits` set, it shares the
+  budget of callers with no tenant, built from the `"*"` entry, and is refused
+  with `TenantQuotaExceeded` when there is no `"*"` entry.
+
+There is no way to make an unchecked call. If your configuration refuses
+anonymous callers, pass a principal.
+
+**What a call that does not succeed raises.**
+
+- A call a control refuses, or one that fails upstream, raises the new
+  `ToolCallFailedError`. It is a `ToolInvocationError`, so an
+  `except ToolInvocationError` still catches it. Its `code` is the `error_type`
+  that `hangar_call` reports for the same call: for example
+  `ToolAccessDeniedError`, `ToolWithdrawnError`, `ValidatorDenied`,
+  `TenantQuotaExceeded` or `CircuitBreakerOpen`. Its message is the text
+  `hangar_call` reports.
+- An upstream failure that `invoke` let through as its own exception type,
+  such as `ToolTimeoutError` or `ClientError`, is now a `ToolCallFailedError`
+  whose `code` names that type.
+- `McpServerNotFoundError`, `ToolNotFoundError` and `TimeoutError` are raised
+  as before.
+- A response over the per-call size limit (10 MB), or one cut by a
+  `truncation:` section, raises `ToolCallFailedError` with the code
+  `ResponseTruncated`. `invoke` returned the whole response before.
+
+**Also:**
+
+- `invoke` accepts a group id, as `hangar_call` does, and the call goes to the
+  member the group selects.
+- `timeout_s` still bounds the wait. The call itself is given `timeout_s`
+  clamped to 1-300 seconds, as `hangar_call` clamps its `timeout`.
+- A facade call now writes the `hangar_call` span and log lines, and is counted
+  in the batch metrics.
+
 ## Next — per-tenant execution budgets
 
 `execution.max_concurrency` bounds the whole process, so one tenant's burst

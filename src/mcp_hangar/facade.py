@@ -8,6 +8,9 @@ Example (async):
         result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
         print(result)  # {"result": 3}
 
+A call made through `invoke` is governed as `hangar_call` governs it: pass the
+caller as `principal=`, or it is made as an anonymous caller.
+
 Example (sync):
     from mcp_hangar import SyncHangar
 
@@ -34,8 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .domain.exceptions import ConfigurationError, McpServerNotFoundError
-from .domain.value_objects import McpServerMode, McpServerState
+from .domain.exceptions import ConfigurationError, McpServerNotFoundError, ToolCallFailedError, ToolNotFoundError
+from .domain.value_objects import McpServerMode, McpServerState, Principal
 from .logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -634,41 +637,63 @@ class Hangar:
         arguments: dict[str, Any] | None = None,
         *,
         timeout_s: float = 30.0,
+        principal: Principal | None = None,
     ) -> Any:
-        """Invoke a tool on a mcp_server.
+        """Invoke a tool on a mcp_server or group, governed as `hangar_call` governs it.
 
+        The call runs through the executor behind `hangar_call`, so every
+        call-time control the configuration sets applies: tool access and
+        withdrawals, digest pins, validators and interceptors, approval, the
+        global and per-server concurrency limits, and tenant budgets (#1453).
         Auto-starts the mcp_server if it's cold.
 
+        The call is made on behalf of *principal*. It is authorized for
+        `tool:invoke` as an authenticated `hangar_call` caller is, and its
+        `tenant_id` is the tenant the per-tenant controls apply to. Without
+        one, the call is an anonymous caller's, as an unauthenticated
+        `hangar_call` is: refused where authentication is configured, and
+        carrying no tenant.
+
         Args:
-            mcp_server_name: Name of the mcp_server.
+            mcp_server_name: Name of the mcp_server or group.
             tool_name: Name of the tool to invoke.
             arguments: Tool arguments (default: empty dict).
             timeout_s: Timeout in seconds (default: 30s).
+            principal: The caller (default: an anonymous caller).
 
         Returns:
             Tool result.
 
         Raises:
-            McpServerNotFoundError: If mcp_server doesn't exist.
-            ToolNotFoundError: If tool doesn't exist.
-            ToolInvocationError: If tool invocation fails.
+            ConfigurationError: If Hangar is not started.
+            McpServerNotFoundError: If no mcp_server or group has that name.
+            ToolNotFoundError: If the mcp_server does not have the tool.
+            ToolCallFailedError: If a control refused the call or the tool
+                failed. Its `code` is the `error_type` `hangar_call` reports.
             TimeoutError: If invocation times out.
 
         Example:
             result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
+
+            caller = Principal(id=PrincipalId("agent-1"), type=PrincipalType.SERVICE_ACCOUNT, tenant_id="team-a")
+            result = await hangar.invoke("math", "add", {"a": 1, "b": 2}, principal=caller)
         """
-        mcp_server = self._get_mcp_server(mcp_server_name)
+        self._ensure_started()
+        # Imported here: the batch package reaches `server.bootstrap`.
+        from .server.tools.batch import call_as
+
+        caller = principal if principal is not None else Principal.anonymous()
         loop = asyncio.get_event_loop()
 
-        # Run invoke in thread pool (McpServer is sync)
-        result = await asyncio.wait_for(
+        # Run in the thread pool: the executor blocks until the call returns.
+        batch = await asyncio.wait_for(
             loop.run_in_executor(
                 self._executor,
-                lambda: mcp_server.invoke_tool(tool_name, arguments or {}),
+                lambda: call_as(caller, mcp_server_name, tool_name, arguments or {}, timeout=timeout_s),
             ),
             timeout=timeout_s,
         )
-        return result
+        return _invoke_outcome(mcp_server_name, tool_name, batch)
 
     async def start_mcp_server(self, name: str) -> None:
         """Explicitly start a mcp_server.
@@ -801,6 +826,48 @@ class Hangar:
         return await loop.run_in_executor(self._executor, mcp_server.health_check)
 
 
+#: Failures `invoke` raised as their own types before it ran through the
+#: executor, by the `error_type` the executor reports them with.
+_RAISED_AS_BEFORE: dict[str, Any] = {
+    "McpServerNotFoundError": lambda server, tool, message: McpServerNotFoundError(mcp_server_id=server),
+    "ToolNotFoundError": lambda server, tool, message: ToolNotFoundError(server, tool),
+    "TimeoutError": lambda server, tool, message: TimeoutError(message),
+}
+
+
+def _invoke_outcome(mcp_server_name: str, tool_name: str, batch: dict[str, Any]) -> Any:
+    """The tool result of the one call `call_as` made, or the exception its failure raises.
+
+    *batch* is what `hangar_call` returns for that call.
+    """
+    for error in batch.get("validation_errors", ()):
+        if error["field"] == "mcp_server":
+            raise McpServerNotFoundError(mcp_server_id=mcp_server_name)
+        if error["field"] == "tool":
+            raise ToolNotFoundError(mcp_server_name, tool_name)
+        raise ToolCallFailedError(mcp_server_name, tool_name, "ValidationError", error["message"])
+
+    (call,) = batch["results"]
+    if not call["success"]:
+        code = call["error_type"] or "UnknownError"
+        message = call["error"] or "Tool call failed"
+        raised = _RAISED_AS_BEFORE.get(code)
+        if raised is not None:
+            raise raised(mcp_server_name, tool_name, message)
+        raise ToolCallFailedError(mcp_server_name, tool_name, code, message)
+    if call.get("truncated"):
+        # `hangar_call` hands back a cut result and a continuation. `invoke` has
+        # no way to fetch the rest, so it does not return part of a result as
+        # if it were the whole.
+        raise ToolCallFailedError(
+            mcp_server_name,
+            tool_name,
+            "ResponseTruncated",
+            f"The tool's response was truncated ({call.get('truncated_reason')}); invoke returns whole results only",
+        )
+    return call["result"]
+
+
 # --- Sync Wrapper ---
 
 
@@ -882,12 +949,15 @@ class SyncHangar:
         arguments: dict[str, Any] | None = None,
         *,
         timeout_s: float = 30.0,
+        principal: Principal | None = None,
     ) -> Any:
-        """Invoke a tool on a mcp_server.
+        """Invoke a tool on a mcp_server or group, governed as `hangar_call` governs it.
 
         See Hangar.invoke() for full documentation.
         """
-        return self._run(self._hangar.invoke(mcp_server_name, tool_name, arguments, timeout_s=timeout_s))
+        return self._run(
+            self._hangar.invoke(mcp_server_name, tool_name, arguments, timeout_s=timeout_s, principal=principal)
+        )
 
     def start_mcp_server(self, name: str) -> None:
         """Start a mcp_server."""

@@ -27,6 +27,7 @@ from mcp_hangar._sdk_compat import Context, FastMCP
 
 from ....application.services.interceptor_registry import build_validator_pipeline
 from ....context import get_identity_context, identity_context_var
+from ....domain.value_objects.identity import IdentityContext
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
 from ....observability.tracing import get_tracer
@@ -101,10 +102,19 @@ def configured_executor() -> BatchExecutor:
     return _executor
 
 
+def _request_principal(ctx: Context | None) -> Any:
+    """The principal the auth middleware left on this request (``request.state.auth``), or None."""
+    try:
+        _auth_state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
+        return getattr(getattr(_auth_state, "auth", None), "principal", None)
+    except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call path
+        return None
+
+
 def _authorize_calls(
     calls: list[dict[str, Any]],
     call_ids: list[str],
-    ctx: Context | None,
+    principal: Any,
     batch_id: str,
 ) -> dict[int, CallResult]:
     """Enforce ``tool:invoke`` authorization for each call, fail-closed.
@@ -123,7 +133,11 @@ def _authorize_calls(
     Returns a mapping of original call index -> denied ``CallResult``. Indexes
     absent from the mapping are authorized and proceed to execution.
 
-    Fully fault-barriered: a missing app/request context (stdio) leaves behavior
+    *principal* is the caller: the one on the request for ``hangar_call``
+    (None when there is none), the one the embedder names for the facade's
+    ``invoke`` (#1453).
+
+    Fully fault-barriered: a missing app context (stdio) leaves behavior
     unchanged (allow), because no authz middleware is resolvable.
     """
     # Resolve the authz middleware. A missing app context (stdio/local) or an
@@ -140,14 +154,6 @@ def _authorize_calls(
     # HTTP server is denied as anonymous, so --unsafe-no-auth cannot invoke tools).
     if authz is None or not getattr(auth_components, "enabled", False):
         return {}
-
-    # Auth IS configured: resolve the authenticated principal bridged onto the
-    # inbound request by the auth middleware (request.state.auth.principal).
-    try:
-        _auth_state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
-        principal = getattr(getattr(_auth_state, "auth", None), "principal", None)
-    except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call path
-        principal = None
 
     denied: dict[int, CallResult] = {}
 
@@ -312,6 +318,106 @@ def hangar_call(
     # whole call is an error and no partial result can be read as served.
     refuse_if_session_suspended("hangar_call", ctx)
 
+    # Bridge the authenticated caller identity into the tool-call path over
+    # streamable-HTTP. FastMCP's streamable-HTTP transport runs tool calls in
+    # a per-session task decoupled from the ASGI auth wrapper coroutine that
+    # sets identity_context_var, so that contextvar is None here for an
+    # authenticated HTTP caller. The FastMCP-injected request context, however,
+    # IS reachable, and the auth middleware stored the principal on the request
+    # (request.state.auth). Read it, and `_run_calls` sets identity_context_var
+    # so the executor -- which snapshots contextvars into its worker threads via
+    # copy_context -- sees the real tenant for per-tenant enforcement (canary
+    # routing #283, per-tenant tool withdrawal). Fully fault-barriered: stdio /
+    # no-request / unauthenticated paths leave identity as None (existing
+    # fallback unchanged). We only bridge when identity is not already bound
+    # (never override the ASGI wrapper when it did propagate).
+    identity = None
+    if get_identity_context() is None:
+        try:
+            from ....fastmcp_server.asgi import identity_for_request
+
+            # The same identity the suspension check above resolved,
+            # session id included, so the audit record names the session.
+            identity = identity_for_request(ctx)
+        except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
+            identity = None
+
+    return _run_calls(
+        calls,
+        principal=_request_principal(ctx),
+        identity=identity,
+        request_ctx=ctx,
+        max_concurrency=max_concurrency,
+        timeout=timeout,
+        fail_fast=fail_fast,
+        max_attempts=max_attempts,
+    )
+
+
+def call_as(
+    principal: Any,
+    mcp_server: str,
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Make one tool call through ``hangar_call``'s path, for a caller the embedder names (#1453).
+
+    The Python facade's ``invoke`` has no request to read a caller from, so its
+    caller is passed in. *principal* is authorized for ``tool:invoke`` as an
+    authenticated ``hangar_call`` caller is, and its tenant is bound for the
+    executor, which applies every call-time control under it. An anonymous
+    principal is governed as an unauthenticated ``hangar_call``: refused where
+    authentication is configured, and carrying no tenant.
+
+    Args:
+        principal: The caller, a ``Principal``. ``Principal.anonymous()`` for none.
+        mcp_server: The server or group to call.
+        tool: The tool to call.
+        arguments: The tool's arguments.
+        timeout: Seconds the call may take, clamped as ``hangar_call`` clamps it.
+
+    Returns:
+        What ``hangar_call`` returns for the same one call.
+    """
+    from ....fastmcp_server.asgi import _principal_to_identity_context
+
+    return _run_calls(
+        [{"mcp_server": mcp_server, "tool": tool, "arguments": arguments}],
+        principal=principal,
+        identity=_principal_to_identity_context(principal),
+        request_ctx=None,
+        max_concurrency=1,
+        timeout=timeout,
+        fail_fast=False,
+        max_attempts=1,
+    )
+
+
+def _run_calls(
+    calls: list[dict[str, Any]],
+    *,
+    principal: Any,
+    identity: IdentityContext | None,
+    request_ctx: Context | None,
+    max_concurrency: int,
+    timeout: float,
+    fail_fast: bool,
+    max_attempts: int,
+) -> dict[str, Any]:
+    """Validate, authorize and execute *calls* for one caller: the body of ``hangar_call``.
+
+    ``hangar_call`` and the facade's ``invoke`` (#1453) both run it, so a call
+    either makes meets the same validation, the same ``tool:invoke`` check and
+    the same executor, with every gate it runs.
+
+    Args:
+        principal: The caller ``_authorize_calls`` checks, or None when there is none.
+        identity: Bound as the caller's identity while the executor runs, or
+            None to leave the binding as it is.
+        request_ctx: The FastMCP request context, when there is a request.
+    """
     batch_id = str(uuid.uuid4())
 
     # Clamp max_attempts to valid range
@@ -383,7 +489,7 @@ def hangar_call(
         # execution, mirroring the REST guard. Denied calls never reach the
         # executor; authorized calls proceed. No-auth/stdio -> allow all.
         with tracer.start_as_current_span("hangar_call.authorize") as authz_span:
-            denied_by_index = _authorize_calls(calls, call_ids, ctx, batch_id)
+            denied_by_index = _authorize_calls(calls, call_ids, principal, batch_id)
             authz_span.set_attribute("authz.denied_count", len(denied_by_index))
 
         # Build call specs for the AUTHORIZED calls only. Give the executor a
@@ -407,32 +513,10 @@ def hangar_call(
             )
             exec_to_orig.append(i)
 
-        # Bridge the authenticated caller identity into the tool-call path over
-        # streamable-HTTP. FastMCP's streamable-HTTP transport runs tool calls in
-        # a per-session task decoupled from the ASGI auth wrapper coroutine that
-        # sets identity_context_var, so that contextvar is None here for an
-        # authenticated HTTP caller. The FastMCP-injected request context, however,
-        # IS reachable, and the auth middleware stored the principal on the request
-        # (request.state.auth). Read it and set identity_context_var so the executor
-        # -- which snapshots contextvars into its worker threads via copy_context --
-        # sees the real tenant for per-tenant enforcement (canary routing #283,
-        # per-tenant tool withdrawal). Fully fault-barriered: stdio / no-request /
-        # unauthenticated paths leave identity as None (existing fallback unchanged).
-        # We only bridge when identity is not already bound (never override the ASGI
-        # wrapper when it did propagate). The token is reset in finally to avoid
-        # leaking identity across calls in a reused per-session task.
-        _identity_token = None
-        if get_identity_context() is None:
-            try:
-                from ....fastmcp_server.asgi import identity_for_request
-
-                # The same identity the suspension check above resolved,
-                # session id included, so the audit record names the session.
-                _identity = identity_for_request(ctx)
-                if _identity is not None:
-                    _identity_token = identity_context_var.set(_identity)
-            except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
-                _identity_token = None
+        # The caller's identity, for the executor's worker threads (see
+        # hangar_call). The token is reset in finally to avoid leaking identity
+        # across calls in a reused per-session task or facade worker.
+        _identity_token = identity_context_var.set(identity) if identity is not None else None
 
         # Execute the authorized calls -- the executor uses ThreadPoolExecutor
         # internally for parallel call execution. If every call was denied by the
@@ -452,7 +536,7 @@ def hangar_call(
                     # params._meta over streamable-HTTP (the ApplicationContext has
                     # none). None on stdio -> defaults, unchanged. Identity bridging
                     # above (#387) is untouched.
-                    request_ctx=ctx,
+                    request_ctx=request_ctx,
                 )
             finally:
                 if _identity_token is not None:
@@ -517,6 +601,7 @@ _format_result_dict = format_result_dict
 __all__ = [
     # Main API
     "hangar_call",
+    "call_as",
     "register_batch_tools",
     "configure_interceptors",
     "configured_executor",

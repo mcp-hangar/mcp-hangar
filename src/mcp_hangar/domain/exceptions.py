@@ -281,6 +281,29 @@ class ToolInvocationError(ToolError):
         )
 
 
+class ToolCallFailedError(ToolInvocationError):
+    """Raised by the facade's ``invoke`` for a call that did not succeed (#1453).
+
+    ``invoke`` runs the call through the executor behind ``hangar_call``, so a
+    call either refused by one of the configured controls or failed upstream
+    arrives here. ``code`` is the ``error_type`` that ``hangar_call`` reports
+    for the same call. A control's refusal codes include
+    ``AuthorizationDenied``, ``ToolAccessDeniedError``, ``ToolWithdrawnError``,
+    ``ToolDigestMismatchError``, ``ValidatorDenied``, ``TenantQuotaExceeded``
+    and ``CircuitBreakerOpen``. A failure's code is the name of the exception
+    it raised. The message is the text ``hangar_call`` reports.
+    """
+
+    def __init__(self, mcp_server_id: str, tool_name: str, code: str, message: str):
+        super().__init__(
+            mcp_server_id=mcp_server_id,
+            message=message,
+            details={"tool_name": tool_name, "code": code},
+        )
+        self.tool_name = tool_name
+        self.code = code
+
+
 class ToolTimeoutError(ToolError):
     """Raised when a tool invocation times out."""
 
