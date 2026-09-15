@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast, ParamSpec, TypeVar
 import yaml
 
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
-from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
+from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
@@ -487,6 +487,12 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
     (#1424). It used to build after stopping them, and a refused block left
     a reload half-applied.
 
+    Every top-level server is built before any group, so a group member that
+    names one resolves to it whatever the order in the file (#1437). In file
+    order, a group listed before its member's server built the member from the
+    member entry alone: a server with no command, and not the one the
+    repository held under that id.
+
     Args:
         config: Dictionary mapping mcp_server IDs to mcp_server spec dictionaries
 
@@ -494,6 +500,7 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
         The built configuration; `commit` puts it in force.
     """
     with _building(_StagedConfig()) as staged:
+        groups: list[tuple[str, dict[str, Any]]] = []
         for mcp_server_id, spec_dict in config.items():
             result = validate_mcp_server_id(mcp_server_id)
             if not result.valid:
@@ -503,10 +510,13 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
             mode = spec_dict.get("mode", "subprocess")
 
             if mode == "group":
-                _load_group_config(mcp_server_id, spec_dict)
+                groups.append((mcp_server_id, spec_dict))
                 continue
 
             _load_mcp_server_config(mcp_server_id, spec_dict)
+
+        for group_id, spec_dict in groups:
+            _load_group_config(group_id, spec_dict)
     return staged
 
 
@@ -522,6 +532,37 @@ def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
             default="round_robin",
         )
         return LoadBalancerStrategy.ROUND_ROBIN
+
+
+#: What a group's member entry sets about its place in the group, rather than
+#: about the server: the only keys read when the member is a declared server.
+_MEMBER_ENTRY_KEYS = frozenset({"id", "weight", "priority", "tools"})
+
+#: What an inline member entry must set to be a server of its own, by mode: the
+#: fields `_load_mcp_server_config` builds each kind of server from (#1437).
+_RUNS_WITH: dict[McpServerMode, tuple[str, ...]] = {
+    McpServerMode.SUBPROCESS: ("command",),
+    McpServerMode.DOCKER: ("image", "build"),
+    McpServerMode.CONTAINER: ("image", "build"),
+    McpServerMode.REMOTE: ("endpoint",),
+}
+_RUNS_WITH_HINT = "subprocess needs 'command', docker needs 'image' or 'build', remote needs 'endpoint'"
+
+
+def _defines_a_server(member_spec: dict[str, Any]) -> bool:
+    """Whether a member entry says how to run its server, so it can be built from the entry alone.
+
+    The mode is read as the server reads it, with `McpServerMode.normalize`. A
+    mode that does not normalise is left to the server's own check, which
+    refuses it. `url` is not read: the loader builds a remote server from
+    `endpoint` alone, so a member with only `url` would have no address.
+    """
+    try:
+        mode = McpServerMode.normalize(member_spec.get("mode", "subprocess"))
+    except (ValueError, TypeError):
+        return True
+    required = _RUNS_WITH.get(mode)
+    return required is None or any(member_spec.get(key) for key in required)
 
 
 def _load_group_members(
@@ -546,15 +587,33 @@ def _load_group_members(
             logger.warning("skipping_invalid_member_id", member_id=member_id)
             continue
 
-        # Use the mcp_server this load already built, if the top-level
-        # mcp_servers section defines it. Only create a new one from member_spec
+        # Use the mcp_server this load already built: the top-level entry of
+        # that id, which `build_config` builds before any group (#1437), or an
+        # earlier group's inline member. Only create a new one from member_spec
         # if not found. Not the running repository: a reload builds before it
         # removes anything, and reusing the running aggregate would ignore an
         # edited inline member (#1424).
         member_mcp_server = _staged_config().servers.get(member_id)
         if member_mcp_server is None:
+            if not _defines_a_server(member_spec):
+                raise ConfigurationError(
+                    f"Group '{group_id}' member '{member_id}' names no server: mcp_servers declares no "
+                    f"'{member_id}', and the member entry does not say how to run one ({_RUNS_WITH_HINT}). "
+                    f"Declare '{member_id}' under mcp_servers, or give the member entry its own definition."
+                )
             member_mcp_server = _load_mcp_server_config(member_id, member_spec)
         else:
+            ignored = sorted(set(member_spec) - _MEMBER_ENTRY_KEYS)
+            if ignored:
+                # The file cannot mean both. The member is the server declared
+                # under that id, whatever the member entry says.
+                logger.warning(
+                    "group_member_entry_settings_ignored",
+                    group_id=group_id,
+                    member_id=member_id,
+                    ignored=ignored,
+                    reason="a server of this id is already declared; the member is that server",
+                )
             logger.debug(
                 "group_member_resolved_from_mcp_servers",
                 group_id=group_id,

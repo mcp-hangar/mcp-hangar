@@ -723,3 +723,78 @@ class TestNoCallSeesAGap:
         assert GROUPS["g"] is group
         assert set(_governance(SERVER).values()) == {True}
         assert _group_rules() == {"y_allowed": False, "gw_allowed": False}
+
+
+#: A top-level server a group names as its member, never started.
+TOP_LEVEL = {"mode": "subprocess", "command": ["python", "-c", "pass"], "description": "top-level", **RESOURCES}
+
+
+def _pool(*members: dict[str, Any]) -> dict[str, Any]:
+    return {"mode": "group", "auto_start": False, "members": list(members) or [{"id": "m1"}]}
+
+
+def _pool_member_is_the_repository_server() -> bool:
+    member = GROUPS["pool"].get_member("m1")
+    return member is not None and member.mcp_server is get_runtime().repository.get("m1")
+
+
+class TestAGroupMemberIsItsTopLevelServerWhateverTheOrder:
+    """A group listed before its member's server holds that server, after a reload too (#1437)."""
+
+    def test_a_group_before_its_server_holds_the_repository_server_after_a_reload(self, gateway: _Gateway) -> None:
+        config = _config(servers={"pool": _pool(), "m1": TOP_LEVEL})
+        gateway.boot(config)
+        booted = get_runtime().repository.get("m1")
+        assert _pool_member_is_the_repository_server()
+
+        result = gateway.reload(config)
+
+        assert result["mcp_servers_unchanged"] == ["m1"]
+        assert get_runtime().repository.get("m1") is booted
+        assert _pool_member_is_the_repository_server()
+        assert booted.description == "top-level"
+
+    def test_swapping_the_order_on_a_reload_replaces_nothing(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gateway.boot(_config(servers={"m1": TOP_LEVEL, "pool": _pool()}))
+        booted, shutdown = _spy_on_shutdown(monkeypatch, "m1")
+
+        result = gateway.reload(_config(servers={"pool": _pool(), "m1": TOP_LEVEL}))
+
+        assert result["mcp_servers_unchanged"] == ["m1"]
+        shutdown.assert_not_called()
+        assert get_runtime().repository.get("m1") is booted
+        assert _pool_member_is_the_repository_server()
+
+    def test_an_inline_entry_under_a_later_server_id_leaves_no_second_copy(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The group held a copy the repository never did, so a reload never stopped it."""
+        config = _config(servers={"pool": _pool({"id": "m1", **_server()}), "m1": TOP_LEVEL})
+        gateway.boot(config)
+        assert _pool_member_is_the_repository_server()
+        booted, shutdown = _spy_on_shutdown(monkeypatch, "m1")
+
+        result = gateway.reload(config)
+
+        assert result["mcp_servers_unchanged"] == ["m1"]
+        shutdown.assert_not_called()
+        assert get_runtime().repository.get("m1") is booted
+        assert _pool_member_is_the_repository_server()
+        assert booted.description == "top-level"
+
+    def test_a_reload_whose_member_names_no_server_is_refused_and_changes_nothing(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gateway.boot(_config(servers={"m1": TOP_LEVEL, "pool": _pool()}))
+        booted, shutdown = _spy_on_shutdown(monkeypatch, "m1")
+        pool = GROUPS["pool"]
+
+        with pytest.raises(ConfigurationError, match="Group 'pool' member 'late' names no server"):
+            gateway.reload(_config(servers={"m1": TOP_LEVEL, "pool": _pool({"id": "m1"}, {"id": "late"})}))
+
+        shutdown.assert_not_called()
+        assert get_runtime().repository.get("m1") is booted
+        assert get_runtime().repository.get("late") is None
+        assert GROUPS["pool"] is pool
