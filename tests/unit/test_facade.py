@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 import importlib
 import inspect
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
@@ -664,11 +666,22 @@ def _context_with(workers: list[_RecordingWorker]) -> Any:
 
 
 @contextlib.contextmanager
+def _coordinating(keeper: Any = None, tailer: Any = None):
+    """The lease keeper and event tailer bootstrap built: none, unless given."""
+    with (
+        patch("mcp_hangar.server.lifecycle.get_lease_keeper", return_value=keeper),
+        patch("mcp_hangar.server.lifecycle.get_event_tailer", return_value=tailer),
+    ):
+        yield
+
+
+@contextlib.contextmanager
 def _booting(context: Any):
-    """`bootstrap()` hands the facade *context*; the process-wide closers are left alone."""
+    """`bootstrap()` hands the facade *context*; the process-wide closers and coordination are left alone."""
     with (
         patch.object(bootstrap_package, "bootstrap", return_value=context),
         patch.object(bootstrap_package, "close_what_bootstrap_started"),
+        _coordinating(),
     ):
         yield
 
@@ -734,7 +747,7 @@ class TestHangarRunsTheBackgroundWorkers:
         served, embedded = _workers(), _workers()
 
         lifecycle = ServerLifecycle(_context_with(served))
-        with patch.object(lifecycle, "_warm_up"):
+        with patch("mcp_hangar.server.lifecycle.start_front_door_warm_up"):
             lifecycle.start()
 
         hangar = _builder_hangar()
@@ -747,6 +760,148 @@ class TestHangarRunsTheBackgroundWorkers:
 
         assert started(served) == _WORKER_TASKS
         assert started(embedded) == started(served)
+
+
+def _recording(order: list[str], name: str) -> MagicMock:
+    """A keeper or tailer that records its start and stop in *order*."""
+    component = MagicMock()
+    component.start.side_effect = lambda: order.append(f"{name} started")
+    component.stop.side_effect = lambda: order.append(f"{name} stopped")
+    return component
+
+
+class TestHangarStartsCoordinationAndTheWarmUp:
+    """`Hangar.start()` starts the lease keeper, the tailer and the warm-up `serve` starts (#1465).
+
+    The facade started none of them, so an embedded gateway with a
+    `coordination:` block never took the management lease, and an embedded
+    front door listed nothing until each server was started some other way.
+    Real threads, a real lease and a real warm-up are in
+    `tests/integration/test_the_facade_starts_coordination_and_the_warm_up.py`.
+    """
+
+    async def test_the_lease_is_taken_first_and_released_last(self):
+        order: list[str] = []
+        keeper, tailer = _recording(order, "keeper"), _recording(order, "tailer")
+        context = _context_with(_workers())
+        hangar = _builder_hangar()
+
+        with (
+            _booting(context),
+            _coordinating(keeper, tailer),
+            patch.object(context, "shutdown", side_effect=lambda: order.append("context shut down")),
+        ):
+            await hangar.start()
+            await hangar.stop()
+            await hangar.stop()  # a second stop does nothing
+
+        assert order == ["keeper started", "tailer started", "tailer stopped", "context shut down", "keeper stopped"]
+
+    async def test_serve_and_the_facade_order_coordination_the_same_way(self):
+        served: list[str] = []
+        lifecycle = ServerLifecycle(_context_with(_workers()))
+        with (
+            _coordinating(_recording(served, "keeper"), _recording(served, "tailer")),
+            patch.object(lifecycle._context, "shutdown", side_effect=lambda: served.append("context shut down")),
+            patch("mcp_hangar.server.lifecycle.start_front_door_warm_up"),
+        ):
+            lifecycle.start()
+            lifecycle.shutdown()
+
+        embedded: list[str] = []
+        context = _context_with(_workers())
+        hangar = _builder_hangar()
+        with (
+            _booting(context),
+            _coordinating(_recording(embedded, "keeper"), _recording(embedded, "tailer")),
+            patch.object(context, "shutdown", side_effect=lambda: embedded.append("context shut down")),
+        ):
+            await hangar.start()
+            await hangar.stop()
+
+        assert embedded == served
+
+    async def test_a_failed_start_releases_the_lease(self):
+        order: list[str] = []
+        workers = _workers()
+        workers[1].start = Mock(side_effect=RuntimeError("no start"))  # type: ignore[method-assign]
+        hangar = _builder_hangar()
+
+        with (
+            _booting(_context_with(workers)),
+            _coordinating(_recording(order, "keeper"), _recording(order, "tailer")),
+            pytest.raises(RuntimeError, match="no start"),
+        ):
+            await hangar.start()
+
+        assert order == ["keeper started", "tailer started", "tailer stopped", "keeper stopped"]
+        assert hangar._context is None
+
+    async def test_start_warms_the_front_door_and_stop_stops_the_retry(self):
+        order: list[str] = []
+        retry = MagicMock()
+        retry.run.side_effect = lambda: order.append("retry ran")
+        retry.stop.side_effect = lambda: order.append("retry stopped")
+        context = _context_with(_workers())
+        hangar = _builder_hangar()
+
+        def warm(runtime: Any) -> None:
+            assert runtime is context.runtime
+            order.append("warmed")
+
+        with (
+            _booting(context),
+            patch("mcp_hangar.server.lifecycle.warm_the_front_door_catalogue", side_effect=warm),
+            patch("mcp_hangar.server.catalogue_readiness.CatalogueRetry", return_value=retry),
+        ):
+            await hangar.start()
+            assert hangar._warm_up is not None
+            thread = hangar._warm_up[1]
+            await hangar.stop()
+
+        assert order == ["warmed", "retry ran", "retry stopped"]
+        assert not thread.is_alive()
+        assert hangar._warm_up is None
+
+    async def test_concurrent_starts_bootstrap_once_and_a_stop_waits_for_them(self):
+        workers = _workers()
+        context = _context_with(workers)
+        boots: list[int] = []
+
+        def slow_bootstrap(**_: Any) -> Any:
+            boots.append(1)
+            time.sleep(0.2)
+            return context
+
+        hangar = _builder_hangar()
+        with _booting(context), patch.object(bootstrap_package, "bootstrap", side_effect=slow_bootstrap):
+            await asyncio.gather(hangar.start(), hangar.start(), hangar.stop())
+
+        assert boots == [1]
+        assert [(w.starts, w.stops) for w in workers] == [(1, 1)] * len(workers)
+        assert hangar._context is None
+
+    def test_concurrent_sync_starts_bootstrap_once(self):
+        workers = _workers()
+        context = _context_with(workers)
+        boots: list[int] = []
+
+        def slow_bootstrap(**_: Any) -> Any:
+            boots.append(1)
+            time.sleep(0.2)
+            return context
+
+        hangar = SyncHangar(_builder_hangar())
+        with _booting(context), patch.object(bootstrap_package, "bootstrap", side_effect=slow_bootstrap):
+            starters = [threading.Thread(target=hangar.start) for _ in range(2)]
+            for starter in starters:
+                starter.start()
+            for starter in starters:
+                starter.join(10)
+            hangar.stop()
+
+        assert boots == [1]
+        assert [(w.starts, w.stops) for w in workers] == [(1, 1)] * len(workers)
 
 
 class TestHangarNotStarted:
