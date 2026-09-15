@@ -25,6 +25,11 @@ without the caller's tenant. On a front door that lookup is answered with the
 deny-all policy for a caller with no identity, which asks for no approval, so
 no approval list held a flat call: ``job_held`` and ``solo_held_a`` each ran
 and answered with a task.
+
+A third server, ``job-flat``, answers in SEP-2663's flat task shape rather than
+the nested one. Its task is governed and polled the same way. A caller that did
+not declare the tasks extension is refused a task on both paths, and the task
+it was refused is not recorded (#1405).
 """
 
 from __future__ import annotations
@@ -43,13 +48,26 @@ TOPOLOGIES = ("front_door", "egress")
 TENANTS = ("tenant-a", "tenant-b")
 
 # As `_front_door_task_governance_harness.py` names them.
-TOOLS = ("job", "job_denied", "job_withdrawn", "job_withdrawn_a", "job_held", "solo_job", "solo_held_a")
+TOOLS = (
+    "job",
+    "job_denied",
+    "job_withdrawn",
+    "job_withdrawn_a",
+    "job_held",
+    "solo_job",
+    "solo_held_a",
+    "flat_job",
+)
 REFUSED = {
     "tenant-a": {"job_denied", "job_withdrawn", "job_withdrawn_a", "job_held", "solo_held_a"},
     "tenant-b": {"job_denied", "job_withdrawn", "job_held"},
 }
 #: Refused by an approval list rather than by access or withdrawal.
 HELD = {"tenant-a": {"job_held", "solo_held_a"}, "tenant-b": {"job_held"}}
+#: Answered by its upstream in SEP-2663's flat task shape.
+FLAT_TOOL = "flat_job"
+#: What a caller that did not declare the tasks extension is told, on each path.
+CANNOT_POLL = {"front_door": "io.modelcontextprotocol/tasks", "egress": "TasksNotNegotiated"}
 
 
 def _run(topology: str, tmp: Path) -> dict[str, Any]:
@@ -138,3 +156,39 @@ class TestAnAllowedCallIsATaskItsCallerCanPoll:
                 continue
             assert call["outcome"] == "task", (tool, call)
             assert call["polled"] == "working", (tool, call)
+
+
+@pytest.mark.parametrize("tenant", TENANTS)
+@pytest.mark.parametrize("topology", TOPOLOGIES)
+class TestAFlatShapedUpstreamTaskIsGovernedAlike:
+    def test_its_caller_is_handed_it_and_can_poll_it(self, runs, topology: str, tenant: str) -> None:
+        call = _calls(runs, topology, tenant)[FLAT_TOOL]
+
+        assert call["outcome"] == "task", call
+        assert call["polled"] == "working", call
+
+
+@pytest.mark.parametrize("tenant", TENANTS)
+@pytest.mark.parametrize("topology", TOPOLOGIES)
+class TestACallerThatCannotPollIsNotHandedATask:
+    def test_it_is_refused_once_the_upstream_made_the_task(self, runs, topology: str, tenant: str) -> None:
+        """The upstream was reached, so the refusal is the relay's, not a gate's."""
+        undeclared = runs[topology]["undeclared"][tenant]
+
+        assert set(undeclared) == {"job", FLAT_TOOL}
+        for tool, call in undeclared.items():
+            assert call["outcome"] == "refused", (tool, call)
+            assert call["reached_upstream"], (tool, call)
+
+    def test_it_is_told_what_to_declare(self, runs, topology: str, tenant: str) -> None:
+        for tool, call in runs[topology]["undeclared"][tenant].items():
+            assert CANNOT_POLL[topology] in call["detail"], (tool, call)
+
+
+@pytest.mark.parametrize("topology", TOPOLOGIES)
+def test_the_store_records_exactly_the_tasks_callers_were_handed(runs, topology: str) -> None:
+    handed = sorted(
+        call["task_id"] for tenant in TENANTS for call in _calls(runs, topology, tenant).values() if call.get("task_id")
+    )
+
+    assert runs[topology]["recorded"] == handed

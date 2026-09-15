@@ -24,6 +24,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from mcp_hangar._sdk_compat import INVALID_PARAMS
+from mcp_hangar.context import caller_polls_tasks_var
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server.flat_call_tasks import govern_flat_call
@@ -161,7 +162,7 @@ class TestBothPathsAnswerAlike:
 # a result that is not a task.
 
 
-def _captured_task() -> list[CallResult]:
+def _captured_task(upstream: dict[str, Any] | None = None) -> list[CallResult]:
     capture = RelayCapture(
         identity=IdentityContext(
             caller=CallerIdentity(
@@ -171,7 +172,7 @@ def _captured_task() -> list[CallResult]:
         pin=None,
         target_server_id="upstream",
         correlation_id="call-1",
-        upstream={"task": dict(_TASK)},
+        upstream=upstream if upstream is not None else {"task": dict(_TASK)},
         logical_mcp_server="upstream",
         tool="long_job",
     )
@@ -183,6 +184,13 @@ def _with_store(store: Any) -> Any:
 
 
 class TestGovernFlatCall:
+    @pytest.fixture(autouse=True)
+    def _a_caller_that_can_poll(self) -> Any:
+        """What the task relay's middleware binds for a caller that declared the extension."""
+        token = caller_polls_tasks_var.set(True)
+        yield
+        caller_polls_tasks_var.reset(token)
+
     def test_a_governed_task_is_answered_with_its_task_result(self) -> None:
         store = GovernedTaskStore()
 
@@ -194,6 +202,34 @@ class TestGovernFlatCall:
         assert created.task_id == _TASK_ID
         owner = store._tasks[("upstream", _TASK_ID)].owner
         assert (owner.tenant_id, owner.principal_id) == ("tenant-a", "alice")
+
+    def test_an_upstream_task_in_the_flat_shape_is_governed_and_answered_alike(self) -> None:
+        """SEP-2663's flat `resultType: "task"`, with its `ttlMs`, is the same task (#1405)."""
+        flat = {"resultType": "task", **{k: v for k, v in _TASK.items() if k != "ttl"}, "ttlMs": _TASK["ttl"]}
+        store = GovernedTaskStore()
+
+        with _with_store(store):
+            result, created = govern_flat_call(_captured_task(flat))
+
+        assert result.success
+        assert isinstance(created, CreateTaskResult)
+        assert (created.task_id, created.ttl_ms) == (_TASK_ID, _TASK["ttl"])
+        assert store._tasks[("upstream", _TASK_ID)].owner.principal_id == "alice"
+
+    def test_a_caller_that_cannot_poll_is_refused_and_nothing_is_recorded(self) -> None:
+        store = GovernedTaskStore()
+        token = caller_polls_tasks_var.set(False)
+        try:
+            with _with_store(store):
+                result, created = govern_flat_call(_captured_task())
+        finally:
+            caller_polls_tasks_var.reset(token)
+
+        assert not result.success
+        assert result.error_type == "TasksNotNegotiated"
+        assert "io.modelcontextprotocol/tasks" in (result.error or "")
+        assert created is None
+        assert store._tasks == {}
 
     def test_a_task_the_store_cannot_record_is_a_failure_not_a_task(self) -> None:
         store = Mock(spec=GovernedTaskStore)
