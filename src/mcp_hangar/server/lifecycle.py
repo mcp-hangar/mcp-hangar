@@ -28,6 +28,7 @@ from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
+from .bootstrap.workers import start_background_workers
 from .catalogue_readiness import CatalogueRetry
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
@@ -370,14 +371,8 @@ class ServerLifecycle:
         if tailer is not None:
             tailer.start()
 
-        # Start background workers
-        for worker in self._context.background_workers:
-            worker.start()
-
-        logger.info(
-            "background_workers_started",
-            workers=[w.task for w in self._context.background_workers],
-        )
+        # The `Hangar` facade starts them through the same function (#1435).
+        start_background_workers(self._context.background_workers)
 
         self._start_discovery()
 
