@@ -14,6 +14,7 @@ Provides:
 import logging
 import os
 import re
+import math
 from typing import Any
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
@@ -674,7 +675,11 @@ async def error_handler(request: Request, exc: Exception) -> HangarJSONResponse:
             }
         }
 
-    return HangarJSONResponse(error_body, status_code=status_code)
+    # A rate-limit refusal that knows when its budget refills says so the way
+    # HTTP does, as well as in `details` (#1471).
+    retry_after = exc.retry_after if isinstance(exc, RateLimitExceeded) else None
+    headers = {"Retry-After": str(math.ceil(retry_after))} if retry_after is not None else None
+    return HangarJSONResponse(error_body, status_code=status_code, headers=headers)
 
 
 async def dispatch_query(query: Any) -> Any:
