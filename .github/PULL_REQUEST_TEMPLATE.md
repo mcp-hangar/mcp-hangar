@@ -10,6 +10,8 @@
      The changelog is enforced separately: add ONE file
      `changelog.d/<id>-<slug>.<kind>.md` (see changelog.d/README.md), or apply
      the `skip-changelog` label. Do not edit CHANGELOG.md — no note needed here.
+     An upgrade note is likewise ONE file `upgrade.d/<id>-<slug>.md` whose first
+     line is `### <headline>` (see upgrade.d/README.md). Do not edit UPGRADE.md.
      ───────────────────────────────────────────────────────────────────────── -->
 
 ## What
