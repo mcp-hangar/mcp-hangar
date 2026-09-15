@@ -80,8 +80,8 @@ def stop_discovery_loop(orchestrator: Any, loop: asyncio.AbstractEventLoop, thre
     finish, and a retained loop kept the process alive after it returned.
 
     The sources hear of the stop first, from this thread: one can be blocked
-    on the loop's own thread (the docker source waits out its connection
-    backoff there), and nothing scheduled on the loop runs until it returns.
+    on the loop's own thread, and nothing scheduled on the loop runs until it
+    returns.
     """
     try:
         orchestrator.request_stop()
