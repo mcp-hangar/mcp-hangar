@@ -55,7 +55,6 @@ from mcp_hangar.server.tools.batch.executor import (
     BatchExecutor,
     _approval_loop_local,
     _CallPipeline,
-    _close_approval_loops,
 )
 from mcp_hangar.server.tools.batch.models import CallResult, CallSpec
 
@@ -244,10 +243,6 @@ def _clean_state():
     reset_tool_access_resolver()
     reset_tool_projection_registry()
     _approval_loop_local.approval_id = None
-    # The gate ran on an approval loop -- this thread's, or a batch worker's --
-    # and `asyncio.to_thread` gave that loop a pool nothing closes before exit
-    # (#1389). Every one of them, not just this thread's.
-    _close_approval_loops()
 
 
 @pytest.fixture()

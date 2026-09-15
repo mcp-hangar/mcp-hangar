@@ -1,6 +1,41 @@
 # Upgrading MCP Hangar
 
-## Next — `block` and `quarantine` stop a server whose tools drift
+## Next — the HTTP graceful-shutdown bound can be set
+
+`serve --http` reads a new key, `http.graceful_shutdown_timeout_s`. It is how
+many seconds a stop waits for the requests already in flight before it cancels
+them.
+
+```yaml
+http:
+  graceful_shutdown_timeout_s: 90
+```
+
+Nothing changes unless you set it. Unset, Hangar passes uvicorn its own default,
+`None`, which waits for in-flight requests without a bound. The process then
+ends when they finish, or when something kills it. In Kubernetes that is the
+kubelet's SIGKILL at the end of the pod's `terminationGracePeriodSeconds`, 30
+seconds by default.
+
+- The value is a positive whole number of seconds. Any other value, or an
+  `http` that is not a mapping, refuses to start. A reload with such a value is
+  refused too, and everything keeps running as it was.
+- The bound is read when the HTTP server starts. A reload checks it, but the
+  running server keeps the bound it started with. Restart to change it.
+- Stdio mode has no HTTP server, and ignores the key.
+- `starting_http_server` logs the bound in force as
+  `graceful_shutdown_timeout_s`, and logs `null` when it is unset.
+
+**In Kubernetes**, the bound only helps if the pod lives long enough to use it.
+The kubelet counts the grace period from the start of the `preStop` hook, so set
+`terminationGracePeriodSeconds` longer than the `preStop` delay plus the bound,
+with room for Hangar's own cleanup after it. The mcp-hangar Helm chart sets all
+three from its `shutdown` values, and refuses to render a grace period that is
+too short.
+
+## Upgrade to 2.20.0
+
+### `block` and `quarantine` stop a server whose tools drift
 
 A server with `capabilities.enforcement_mode` set to `block` or `quarantine`
 whose upstream serves a tool that is not in `capabilities.tools.expected_tools`
@@ -41,7 +76,7 @@ server `cold`, and the next start, a call's included, checks them too.
 the same as a tool call. Before, they were forwarded to any server with a live
 connection, a `degraded` one included.
 
-## Next — egress calls are governed with their group and tenant scope
+### egress calls are governed with their group and tenant scope
 
 A `hangar_call` that names a group member by its own server id, instead of
 naming the group, is now governed by that group. Before,
@@ -104,7 +139,7 @@ approved. Before, it ran.
 Calls that name a group are governed as before, apart from their approval lists.
 So are servers that are in no group.
 
-## Next — a continuation answers only the caller that made the call
+### a continuation answers only the caller that made the call
 
 With response truncation on (`truncation.enabled`), the rest of a truncated
 `hangar_call` result is kept in the continuation cache.
@@ -147,7 +182,7 @@ on an older version still serves any continuation to any caller that holds its
 id, and returns a value written by an upgraded replica with the owner in front
 of the payload.
 
-## Next — `tool_access.rules` is refused as a key nothing reads
+### `tool_access.rules` is refused as a key nothing reads
 
 `tool_access.rules` was never read. The config schema listed it next to
 `tool_access.mode`, so a `rules:` block passed `mcp-hangar config check` and
@@ -172,7 +207,7 @@ Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
 and deny lists of a server, a group and a group member, and `tool_access.mode`
 still selects the `egress` or `front_door` topology.
 
-## Next — a reload applies the whole configuration, and keeps the topology mode
+### a reload applies the whole configuration, and keeps the topology mode
 
 This affects every configuration reload: `POST /api/config/reload`,
 `hangar_reload_config`, SIGHUP, and the config file watcher.
@@ -237,40 +272,7 @@ reload never finds them empty. A reload builds and checks every server and
 group before it stops any, so a bad block refuses the reload and changes
 nothing.
 
-## Next — the HTTP graceful-shutdown bound can be set
-
-`serve --http` reads a new key, `http.graceful_shutdown_timeout_s`. It is how
-many seconds a stop waits for the requests already in flight before it cancels
-them.
-
-```yaml
-http:
-  graceful_shutdown_timeout_s: 90
-```
-
-Nothing changes unless you set it. Unset, Hangar passes uvicorn its own default,
-`None`, which waits for in-flight requests without a bound. The process then
-ends when they finish, or when something kills it. In Kubernetes that is the
-kubelet's SIGKILL at the end of the pod's `terminationGracePeriodSeconds`, 30
-seconds by default.
-
-- The value is a positive whole number of seconds. Any other value, or an
-  `http` that is not a mapping, refuses to start. A reload with such a value is
-  refused too, and everything keeps running as it was.
-- The bound is read when the HTTP server starts. A reload checks it, but the
-  running server keeps the bound it started with. Restart to change it.
-- Stdio mode has no HTTP server, and ignores the key.
-- `starting_http_server` logs the bound in force as
-  `graceful_shutdown_timeout_s`, and logs `null` when it is unset.
-
-**In Kubernetes**, the bound only helps if the pod lives long enough to use it.
-The kubelet counts the grace period from the start of the `preStop` hook, so set
-`terminationGracePeriodSeconds` longer than the `preStop` delay plus the bound,
-with room for Hangar's own cleanup after it. The mcp-hangar Helm chart sets all
-three from its `shutdown` values, and refuses to render a grace period that is
-too short.
-
-## Next — a config dict gets every setting it passes
+### a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
 embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
@@ -313,7 +315,7 @@ that calls `enable_discovery()`, or adds a server with `mode="remote"` and
 applied. They now log `unknown_config_key`, and under strict mode the boot
 refuses.
 
-## Next — remote servers and discovery from the builder take effect
+### remote servers and discovery from the builder take effect
 
 This affects code that builds its configuration with `HangarConfig` and runs it
 with `Hangar.from_builder()`. Code that calls `Hangar.from_config()` on a file
@@ -355,7 +357,7 @@ on a key the gateway does not read. `to_dict()` no longer includes
 setting. `HangarConfigData` no longer has `gc_interval_s` or
 `health_check_interval_s`.
 
-## Next — a server Hangar gives up on reads `dead`, not `cold`
+### a server Hangar gives up on reads `dead`, not `cold`
 
 When the recovery saga runs out of retries, the server now goes to `dead`.
 Before, giving up was a stop, so the server went to `cold`: the state of a
@@ -484,7 +486,7 @@ upgrading. The flat spelling
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
 
-## Next — a group's `healthy_count` counts members that are `ready`
+### a group's `healthy_count` counts members that are `ready`
 
 A group's `healthy_count` used to count every member in rotation that was not
 `dead`, `cold` ones included. It now counts the members that are `ready` and in
