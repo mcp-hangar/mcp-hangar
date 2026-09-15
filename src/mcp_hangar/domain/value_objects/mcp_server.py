@@ -34,7 +34,9 @@ class McpServerState(Enum):
         DEGRADED: McpServer has failures but may recover after backoff.
         DEAD: McpServer failed and is not running. Health checks, the recovery
             saga and the GC leave it there. Why it died decides what starts it
-            again: see the DEAD_* reasons in ``domain.model.mcp_server``.
+            again: see the DEAD_* reasons in ``domain.model.mcp_server``. The
+            read surfaces report it as ``dead.reason``: ``given_up``,
+            ``crashed``, ``start_failed`` or ``capability_blocked`` (#1418).
     """
 
     COLD = "cold"

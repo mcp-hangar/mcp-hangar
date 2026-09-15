@@ -65,7 +65,7 @@ PIN = "a" * 64
 DENY_Y = ToolAccessPolicy(deny_list=("y",))
 PAYLOAD_CAP = {"type": "payload_size", "max_bytes": 64}
 #: Every server id a test here adds, so teardown removes exactly those.
-IDS = (SERVER, "extra", "late", "other", "m1", "bad")
+IDS = (SERVER, "extra", "late", "other", "m1", "bad", "docker", "remote")
 
 
 def _server(**extra: Any) -> dict[str, Any]:
@@ -396,9 +396,7 @@ class TestGovernanceAcrossAReload:
         self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An inline member is declared by the file: not removed, not stopped, not stripped."""
-        # Resources spelled out: a server whose file omits them is restarted by
-        # every reload, which is #1426 and not what this pins.
-        member = {"id": "m1", **_server(resources={"memory": "512m", "cpu": "1.0"})}
+        member = {"id": "m1", **_server()}
         config = _config(servers={"g": {"mode": "group", "auto_start": False, "members": [member]}})
         gateway.boot(config)
         get_tool_access_resolver().set_mcp_server_policy("m1", DENY_Y)  # a REST provider-scope policy
@@ -430,14 +428,12 @@ class TestGovernanceAcrossAReload:
 
 
 MOCK_PROVIDER = Path(__file__).resolve().parents[1] / "mock_provider.py"
-#: Spelled out: a server whose file omits `resources` is restarted by every reload (#1426).
-RESOURCES = {"resources": {"memory": "512m", "cpu": "1.0"}}
 
 
 class TestAnUnchangedServerIsKept:
     def test_a_running_server_and_an_inline_member_stay_the_running_objects(self, gateway: _Gateway) -> None:
         """Not replaced by idle copies, which left the running processes with nothing to stop them (#1424)."""
-        real = {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)], **RESOURCES}
+        real = {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]}
         group = {"mode": "group", "auto_start": False, "members": [{"id": "m1", **real}]}
         config = _config(servers={SERVER: real, "g": group})
         gateway.boot(config)
@@ -462,11 +458,11 @@ class TestAnUnchangedServerIsKept:
     def test_a_server_whose_entry_changed_is_stopped_before_it_is_replaced(
         self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Even for a field the change check does not compare: a server that is replaced is stopped."""
-        gateway.boot(_config(servers={SERVER: _server(description="before", **RESOURCES)}))
+        """A server whose settings changed is stopped before it is replaced."""
+        gateway.boot(_config(servers={SERVER: _server(description="before")}))
         before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
 
-        result = gateway.reload(_config(servers={SERVER: _server(description="after", **RESOURCES)}))
+        result = gateway.reload(_config(servers={SERVER: _server(description="after")}))
 
         assert result["mcp_servers_updated"] == [SERVER]
         shutdown.assert_called_once()
@@ -490,7 +486,7 @@ class TestAnUnchangedServerIsKept:
         Keeping it kept the REST edit while the reload reported the server as
         updated, and a restart applies the file.
         """
-        spec = _server(env={"TOKEN": "from-file"}, description="from file", **RESOURCES)
+        spec = _server(env={"TOKEN": "from-file"}, description="from file")
         gateway.boot(_config(servers={SERVER: spec}))
         before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
         before.update_config(**edit)  # what the REST update endpoint does to the running server
@@ -513,7 +509,6 @@ class TestAnUnchangedServerIsKept:
             "mode": "subprocess",
             "command": [sys.executable, str(MOCK_PROVIDER)],
             "env": {"MOCK_ADD_DESCRIPTION": "from the file"},
-            **RESOURCES,
         }
         gateway.boot(_config(servers={SERVER: spec}))
         repository = get_runtime().repository
@@ -726,7 +721,7 @@ class TestNoCallSeesAGap:
 
 
 #: A top-level server a group names as its member, never started.
-TOP_LEVEL = {"mode": "subprocess", "command": ["python", "-c", "pass"], "description": "top-level", **RESOURCES}
+TOP_LEVEL = {"mode": "subprocess", "command": ["python", "-c", "pass"], "description": "top-level"}
 
 
 def _pool(*members: dict[str, Any]) -> dict[str, Any]:
@@ -798,3 +793,145 @@ class TestAGroupMemberIsItsTopLevelServerWhateverTheOrder:
         assert get_runtime().repository.get("m1") is booted
         assert get_runtime().repository.get("late") is None
         assert GROUPS["pool"] is pool
+
+
+#: One server of each kind, none of them setting `resources`: the files #1426 is about.
+KINDS: dict[str, dict[str, Any]] = {
+    SERVER: _server(),
+    "docker": {"mode": "docker", "image": "example/server:1"},
+    "remote": {"mode": "remote", "endpoint": "http://127.0.0.1:9/mcp"},
+}
+
+#: One server setting changed on one server: each is something the server is built from.
+ONE_SETTING: list[tuple[str, dict[str, Any]]] = [
+    (SERVER, {"command": ["python", "-c", "pass  # edited"]}),
+    (SERVER, {"args": ["--verbose"]}),
+    (SERVER, {"env": {"LEVEL": "debug"}}),
+    (SERVER, {"resources": {"memory": "1g", "cpu": "1.0"}}),
+    (SERVER, {"user": "1000:1000"}),
+    (SERVER, {"read_only": False}),
+    (SERVER, {"network": "bridge"}),
+    (SERVER, {"volumes": ["/tmp/data:/data:ro"]}),
+    (SERVER, {"description": "edited"}),
+    (SERVER, {"idle_ttl_s": 30}),
+    (SERVER, {"health_check_interval_s": 5}),
+    (SERVER, {"max_consecutive_failures": 9}),
+    (SERVER, {"tools": [{"name": "listed", "description": "a predefined tool"}]}),
+    (SERVER, {"capabilities": {"network": {"dns_allowed": False}}}),
+    ("docker", {"image": "example/server:2"}),
+    ("docker", {"build": {"context": "."}}),
+    ("remote", {"endpoint": "http://127.0.0.1:10/mcp"}),
+    ("remote", {"auth": {"type": "bearer", "token": "t"}}),
+    ("remote", {"tls": {"verify_ssl": False}}),
+    ("remote", {"http": {"connect_timeout": 5}}),
+]
+
+
+class TestOnlyAChangedServerRestarts:
+    """A reload restarts a server only when the file changes what the server is built from (#1426).
+
+    The diff ran a check of its own on part of the spec, and counted a server
+    whose file left `resources` out as changed on every reload. It stopped the
+    server, and the commit put the stopped server back.
+    """
+
+    def _boot(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch, servers: dict[str, Any]
+    ) -> dict[str, tuple[Any, Mock]]:
+        gateway.boot(_config(servers=servers))
+        return {mcp_server_id: _spy_on_shutdown(monkeypatch, mcp_server_id) for mcp_server_id in servers}
+
+    def test_an_unchanged_file_restarts_nothing_of_any_kind(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        running = self._boot(gateway, monkeypatch, KINDS)
+
+        result = gateway.reload(_config(servers=KINDS))
+
+        assert result["mcp_servers_updated"] == []
+        assert result["mcp_servers_unchanged"] == sorted(KINDS)
+        for mcp_server_id, (server, shutdown) in running.items():
+            shutdown.assert_not_called()
+            assert get_runtime().repository.get(mcp_server_id) is server
+
+    def test_a_default_left_out_or_spelled_out_is_the_same_server(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ((server, shutdown),) = self._boot(gateway, monkeypatch, {SERVER: _server()}).values()
+        spelled_out = _server(
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            volumes=[],
+            resources={"memory": "512m", "cpu": "1.0"},
+            network="none",
+            read_only=True,
+        )
+
+        result = gateway.reload(_config(servers={SERVER: spelled_out}))
+
+        assert result["mcp_servers_unchanged"] == [SERVER]
+        shutdown.assert_not_called()
+        assert get_runtime().repository.get(SERVER) is server
+
+    @pytest.mark.parametrize(
+        ("changed", "edit"), ONE_SETTING, ids=[f"{sid}.{next(iter(edit))}" for sid, edit in ONE_SETTING]
+    )
+    def test_one_changed_setting_restarts_only_that_server(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch, changed: str, edit: dict[str, Any]
+    ) -> None:
+        running = self._boot(gateway, monkeypatch, KINDS)
+
+        result = gateway.reload(_config(servers={**KINDS, changed: {**KINDS[changed], **edit}}))
+
+        assert result["mcp_servers_updated"] == [changed]
+        assert result["mcp_servers_unchanged"] == sorted(set(KINDS) - {changed})
+        for mcp_server_id, (server, shutdown) in running.items():
+            assert shutdown.call_count == (1 if mcp_server_id == changed else 0), mcp_server_id
+            assert (get_runtime().repository.get(mcp_server_id) is server) is (mcp_server_id != changed)
+
+    def test_governance_alone_restarts_nothing_and_still_takes_effect(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Policies, withdrawals, pins and header_exposure are swapped in whether or not the server is kept."""
+        ((server, shutdown),) = self._boot(gateway, monkeypatch, {SERVER: _server()}).values()
+        governed = {
+            **GOVERNED,
+            "access": {"prompt": {"deny_list": ["draft_*"]}},
+            "tool_access": {"member": {TENANT: {"deny_list": ["y"]}}},
+        }
+
+        declared = gateway.reload(_config(servers={SERVER: governed}))
+        in_force = _governance(SERVER)
+        lifted = gateway.reload(_config(servers={SERVER: _server()}))
+
+        assert declared["mcp_servers_unchanged"] == lifted["mcp_servers_unchanged"] == [SERVER]
+        assert set(in_force.values()) == {True}
+        assert set(_governance(SERVER).values()) == {False}
+        shutdown.assert_not_called()
+        assert get_runtime().repository.get(SERVER) is server
+
+    def test_an_inline_member_keeps_running_through_a_new_weight_and_restarts_on_a_new_env(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def pool(**member: Any) -> dict[str, Any]:
+            return {"g": {"mode": "group", "auto_start": False, "members": [{"id": "m1", **_server(), **member}]}}
+
+        gateway.boot(_config(servers=pool(weight=1)))
+        server, shutdown = _spy_on_shutdown(monkeypatch, "m1")
+
+        reweighted = gateway.reload(_config(servers=pool(weight=2, priority=3)))
+
+        member = GROUPS["g"].get_member("m1")
+        assert reweighted["mcp_servers_unchanged"] == ["m1"]
+        shutdown.assert_not_called()
+        assert member is not None and member.mcp_server is server and member.weight == 2
+
+        edited = gateway.reload(_config(servers=pool(weight=2, priority=3, env={"LEVEL": "debug"})))
+
+        member = GROUPS["g"].get_member("m1")
+        assert edited["mcp_servers_updated"] == ["m1"]
+        shutdown.assert_called_once()
+        assert member is not None and member.mcp_server is get_runtime().repository.get("m1")
+        assert member.mcp_server is not server
