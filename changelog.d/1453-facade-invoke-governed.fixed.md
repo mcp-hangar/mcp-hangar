@@ -10,5 +10,6 @@ is an anonymous caller's, as an unauthenticated `hangar_call` is, so an embedder
 whose configuration refuses anonymous callers now has to pass a principal. A
 refused or failed call raises the new `ToolCallFailedError`, a
 `ToolInvocationError` whose `code` is the `error_type` that `hangar_call`
-reports for the same call. `invoke` also accepts a group id now. See
-`UPGRADE.md`.
+reports for the same call. `invoke` still returns the whole result: response
+truncation does not apply to it, and no continuation is stored for it. It also
+accepts a group id now. See `UPGRADE.md`.

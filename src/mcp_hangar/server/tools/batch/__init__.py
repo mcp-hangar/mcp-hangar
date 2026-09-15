@@ -371,6 +371,10 @@ def call_as(
     principal is governed as an unauthenticated ``hangar_call``: refused where
     authentication is configured, and carrying no tenant.
 
+    The result comes back whole, as the facade has always returned it: neither
+    the per-call size cap nor the configured truncation cuts it, and no
+    continuation is stored for it.
+
     Args:
         principal: The caller, a ``Principal``. ``Principal.anonymous()`` for none.
         mcp_server: The server or group to call.
@@ -392,6 +396,7 @@ def call_as(
         timeout=timeout,
         fail_fast=False,
         max_attempts=1,
+        whole_result=True,
     )
 
 
@@ -405,6 +410,7 @@ def _run_calls(
     timeout: float,
     fail_fast: bool,
     max_attempts: int,
+    whole_result: bool = False,
 ) -> dict[str, Any]:
     """Validate, authorize and execute *calls* for one caller: the body of ``hangar_call``.
 
@@ -417,6 +423,8 @@ def _run_calls(
         identity: Bound as the caller's identity while the executor runs, or
             None to leave the binding as it is.
         request_ctx: The FastMCP request context, when there is a request.
+        whole_result: Whether the caller takes each result whole, uncut by the
+            size cap and the configured truncation (``CallSpec.whole_result``).
     """
     batch_id = str(uuid.uuid4())
 
@@ -509,6 +517,7 @@ def _run_calls(
                     arguments=call["arguments"],
                     timeout=call.get("timeout"),
                     max_retries=max_attempts,  # Internal field uses max_retries
+                    whole_result=whole_result,
                 )
             )
             exec_to_orig.append(i)

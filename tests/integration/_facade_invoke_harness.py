@@ -2,21 +2,27 @@
 
 Run as a script, in its own interpreter, by
 ``test_the_facade_invoke_is_governed_like_hangar_call.py``:
-``python _facade_invoke_harness.py <out.json>``. Not collected by pytest.
+``python _facade_invoke_harness.py <controls|truncation> <out.json>``. Not
+collected by pytest.
 
 A separate process because ``bootstrap()`` fills process-global state -- the
 runtime singleton, the executor's validator pipeline, the tool-access resolver,
-the tenant budgets -- and two boots in one interpreter would read each other's.
+the tenant budgets, the truncation manager -- and two boots in one interpreter
+would read each other's.
 
-``Hangar.from_config`` boots the real ``bootstrap()`` from a file that denies
-one tool, withdraws another, caps the payload with a validator, and gives two
-tenants an execution budget. Each case is then called twice, by the same
-caller: through ``Hangar.invoke``, and as ``hangar_call`` through the app
-``serve --http`` serves (``mcp_app_for_serving``), behind API-key
-authentication that names the caller and its tenant. A caller with no key is
-let through as anonymous, as an unauthenticated ``hangar_call`` is. The
-upstream is the in-process HTTP MCP server from ``_front_door_harness``.
-Nothing is stubbed.
+``Hangar.from_config`` boots the real ``bootstrap()`` from a file. Each call is
+then made twice, by the same caller: through ``Hangar.invoke``, and as
+``hangar_call`` through the app ``serve --http`` serves
+(``mcp_app_for_serving``), behind API-key authentication that names the caller
+and its tenant. A caller with no key is let through as anonymous, as an
+unauthenticated ``hangar_call`` is. The upstream is the in-process HTTP MCP
+server from ``_front_door_harness``. Nothing is stubbed.
+
+* ``controls``: the file denies one tool, withdraws another, caps the payload
+  with a validator, and gives two tenants an execution budget.
+* ``truncation``: the file sets a truncation budget far under one result.
+  Reports the continuation cache's size after the ``invoke`` and after the
+  ``hangar_call``.
 
 Naming: neutral placeholders only (store, read_item, write_item, retired_item,
 tenant:a, tenant:b).
@@ -75,7 +81,14 @@ CASES: dict[str, tuple[str | None, str, dict[str, Any]]] = {
 }
 
 
-def _config(endpoint: str) -> dict[str, Any]:
+def _config(mode: str, endpoint: str) -> dict[str, Any]:
+    if mode == "truncation":
+        return {
+            "mcp_servers": {SERVER: {"mode": "remote", "endpoint": endpoint}},
+            # A budget far under one result, so a `hangar_call` result is cut.
+            "truncation": {"enabled": True, "max_batch_size_bytes": 32, "min_per_response_bytes": 8},
+            "config_reload": {"enabled": False},
+        }
     return {
         "mcp_servers": {
             SERVER: {
@@ -138,7 +151,34 @@ def _hangar_call(client: Any, key: str | None, tool: str, arguments: dict[str, A
     return dict(call)
 
 
-async def _run(out: Path) -> dict[str, Any]:
+async def _controls(hangar: Any, client: Any, keys: dict[str, str]) -> dict[str, Any]:
+    tenant_b_first = await _invoke(hangar, TENANT_B, READ, {"x": "1"})
+    cases: dict[str, dict[str, Any]] = {}
+    for name, (tenant, tool, arguments) in CASES.items():
+        cases[name] = {
+            "facade": await _invoke(hangar, tenant, tool, arguments),
+            "hangar_call": _hangar_call(client, keys.get(tenant) if tenant else None, tool, arguments),
+        }
+    return {"tenant_b_first": tenant_b_first, "cases": cases}
+
+
+async def _truncation(hangar: Any, client: Any) -> dict[str, Any]:
+    from mcp_hangar.server.bootstrap.truncation import get_response_cache
+
+    cache = get_response_cache()
+    assert cache is not None
+    invoked = await _invoke(hangar, None, READ, {"x": "1"})
+    cached_after_invoke = cache.size()
+    served = _hangar_call(client, None, READ, {"x": "1"})
+    return {
+        "invoked": invoked,
+        "cached_after_invoke": cached_after_invoke,
+        "hangar_call": served,
+        "cached_after_hangar_call": cache.size(),
+    }
+
+
+async def _run(mode: str, out: Path) -> dict[str, Any]:
     from http.server import ThreadingHTTPServer
 
     from _front_door_harness import Upstream
@@ -155,7 +195,7 @@ async def _run(out: Path) -> dict[str, Any]:
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     config_path = out.parent / "hangar.yaml"
     endpoint = f"http://127.0.0.1:{upstream.server_address[1]}/mcp"
-    config_path.write_text(yaml.safe_dump(_config(endpoint)), encoding="utf-8")
+    config_path.write_text(yaml.safe_dump(_config(mode, endpoint)), encoding="utf-8")
 
     hangar = Hangar.from_config(config_path)
     await hangar.start()
@@ -170,23 +210,17 @@ async def _run(out: Path) -> dict[str, Any]:
     authn = AuthenticationMiddleware([ApiKeyAuthenticator(store)], allow_anonymous=True)
     app = create_auth_enforced_app(mcp_app_for_serving(context.mcp_server), SimpleNamespace(authn_middleware=authn))
 
-    cases: dict[str, dict[str, Any]] = {}
     with TestClient(app, base_url=BASE_URL) as client:
-        tenant_b_first = await _invoke(hangar, TENANT_B, READ, {"x": "1"})
-        for name, (tenant, tool, arguments) in CASES.items():
-            cases[name] = {
-                "facade": await _invoke(hangar, tenant, tool, arguments),
-                "hangar_call": _hangar_call(client, keys.get(tenant) if tenant else None, tool, arguments),
-            }
+        report = await (_truncation(hangar, client) if mode == "truncation" else _controls(hangar, client, keys))
 
     await hangar.stop()
     upstream.shutdown()
-    return {"tenant_b_first": tenant_b_first, "cases": cases, "upstream_called": list(handler.called)}
+    return {**report, "upstream_called": list(handler.called)}
 
 
-def main(out: Path) -> None:
+def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
-    report = asyncio.run(_run(out))
+    report = asyncio.run(_run(mode, out))
     out.write_text(json.dumps(report))
     sys.stdout.flush()
     sys.stderr.flush()
@@ -194,4 +228,4 @@ def main(out: Path) -> None:
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    main(sys.argv[1], Path(sys.argv[2]))

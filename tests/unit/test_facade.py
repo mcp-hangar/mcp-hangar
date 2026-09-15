@@ -827,14 +827,13 @@ class TestHangarWithMockedContext:
         assert (raised.value.code, raised.value.message) == ("ValidationError", "arguments must be a dictionary")
 
     @pytest.mark.asyncio
-    async def test_a_truncated_result_is_not_returned_as_if_whole(self, hangar_with_context, governed):
-        governed.answer = _batch(result=None, truncated=True, truncated_reason="response_size_exceeded")
+    async def test_a_batch_with_no_result_raises_no_result(self, hangar_with_context, governed):
+        governed.answer = {**_batch(), "total": 0, "succeeded": 0, "results": []}
 
         with pytest.raises(ToolCallFailedError) as raised:
             await hangar_with_context.invoke("math", "add")
 
-        assert raised.value.code == "ResponseTruncated"
-        assert "response_size_exceeded" in raised.value.message
+        assert (raised.value.code, raised.value.message) == ("NoResult", "The call returned no result")
 
     @pytest.mark.asyncio
     async def test_get_provider_returns_info(self, hangar_with_context):

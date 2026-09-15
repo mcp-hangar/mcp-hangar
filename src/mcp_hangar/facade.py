@@ -645,7 +645,8 @@ class Hangar:
         call-time control the configuration sets applies: tool access and
         withdrawals, digest pins, validators and interceptors, approval, the
         global and per-server concurrency limits, and tenant budgets (#1453).
-        Auto-starts the mcp_server if it's cold.
+        Auto-starts the mcp_server if it's cold. The result is returned whole:
+        response truncation does not apply to it, and no continuation is stored.
 
         The call is made on behalf of *principal*. It is authorized for
         `tool:invoke` as an authenticated `hangar_call` caller is, and its
@@ -847,7 +848,10 @@ def _invoke_outcome(mcp_server_name: str, tool_name: str, batch: dict[str, Any])
             raise ToolNotFoundError(mcp_server_name, tool_name)
         raise ToolCallFailedError(mcp_server_name, tool_name, "ValidationError", error["message"])
 
-    (call,) = batch["results"]
+    results = batch.get("results") or []
+    if not results:
+        raise ToolCallFailedError(mcp_server_name, tool_name, "NoResult", "The call returned no result")
+    call = results[0]
     if not call["success"]:
         code = call["error_type"] or "UnknownError"
         message = call["error"] or "Tool call failed"
@@ -855,16 +859,6 @@ def _invoke_outcome(mcp_server_name: str, tool_name: str, batch: dict[str, Any])
         if raised is not None:
             raise raised(mcp_server_name, tool_name, message)
         raise ToolCallFailedError(mcp_server_name, tool_name, code, message)
-    if call.get("truncated"):
-        # `hangar_call` hands back a cut result and a continuation. `invoke` has
-        # no way to fetch the rest, so it does not return part of a result as
-        # if it were the whole.
-        raise ToolCallFailedError(
-            mcp_server_name,
-            tool_name,
-            "ResponseTruncated",
-            f"The tool's response was truncated ({call.get('truncated_reason')}); invoke returns whole results only",
-        )
     return call["result"]
 
 

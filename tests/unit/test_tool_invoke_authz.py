@@ -168,6 +168,8 @@ def test_principal_with_tool_invoke_allowed() -> None:
     assert result["succeeded"] == 1
     assert result["results"][0]["success"] is True
     executor.execute.assert_called_once()
+    # hangar_call's results are still cut by the size cap and truncation (#1453).
+    assert executor.execute.call_args.kwargs["calls"][0].whole_result is False
 
 
 def test_mixed_batch_denies_only_unauthorized_tool() -> None:
@@ -268,6 +270,8 @@ def test_call_as_authorizes_the_principal_and_binds_its_tenant() -> None:
     assert identity_context_var.get() is None
     (spec,) = executor.execute.call_args.kwargs["calls"]
     assert (spec.mcp_server, spec.tool, spec.arguments) == ("svc", "do_thing", {"x": 1})
+    # The facade returns results whole, as it always has.
+    assert spec.whole_result is True
     assert executor.execute.call_args.kwargs["global_timeout"] == 12.0
 
 

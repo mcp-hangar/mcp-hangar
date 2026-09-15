@@ -14,6 +14,9 @@ Nothing is stubbed.
   carries no tenant, when the budgets give a caller with no tenant none.
 * An allowed call returns what ``hangar_call`` returns as its result.
 * Only the calls that were let through reach the upstream.
+* Truncation is not one of those controls: with a truncation budget configured,
+  ``invoke`` still returns the whole result and stores no continuation, while
+  the same call through ``hangar_call`` is cut.
 
 The unit-level mapping of every outcome is in ``tests/unit/test_facade.py``,
 and the caller's authorization in ``tests/unit/test_tool_invoke_authz.py``.
@@ -21,6 +24,7 @@ and the caller's authorization in ``tests/unit/test_tool_invoke_authz.py``.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import subprocess
@@ -30,6 +34,7 @@ from typing import Any
 import pytest
 
 HARNESS = Path(__file__).with_name("_facade_invoke_harness.py")
+MODES = ("controls", "truncation")
 
 TOO_FAST = "This tenant's execution budget is exhausted: calls started too fast"
 NO_BUDGET = "No execution budget is configured for this tenant"
@@ -44,17 +49,32 @@ REFUSED = {
 }
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    out = tmp_path_factory.mktemp("facade-invoke") / "run.json"
+def _run(mode: str, tmp: Path) -> dict[str, Any]:
+    out = tmp / mode / "run.json"
+    out.parent.mkdir()
     result = subprocess.run(
-        [sys.executable, str(HARNESS), str(out)],
+        [sys.executable, str(HARNESS), mode, str(out)],
         capture_output=True,
         text=True,
         timeout=90,
     )
-    assert result.returncode == 0 and out.exists(), f"harness exited {result.returncode}:\n{result.stderr[-4000:]}"
+    assert result.returncode == 0 and out.exists(), (
+        f"{mode}: harness exited {result.returncode}:\n{result.stderr[-4000:]}"
+    )
     return dict(json.loads(out.read_text()))
+
+
+@pytest.fixture(scope="module")
+def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any]]:
+    tmp = tmp_path_factory.mktemp("facade-invoke")
+    with ThreadPoolExecutor(max_workers=len(MODES)) as pool:
+        pending = {mode: pool.submit(_run, mode, tmp) for mode in MODES}
+        return {mode: future.result() for mode, future in pending.items()}
+
+
+@pytest.fixture
+def run(runs: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return runs["controls"]
 
 
 @pytest.mark.parametrize(("case", "code"), sorted(REFUSED.items()))
@@ -87,3 +107,21 @@ def test_an_allowed_call_returns_the_result_hangar_call_returns(run: dict[str, A
 def test_only_the_calls_let_through_reach_the_upstream(run: dict[str, Any]) -> None:
     # tenant:b's first call, and the allowed call on each surface.
     assert run["upstream_called"] == ["read_item"] * 3
+
+
+def test_with_truncation_configured_invoke_returns_the_whole_result(runs: dict[str, dict[str, Any]]) -> None:
+    truncation = runs["truncation"]
+    whole = runs["controls"]["cases"]["allowed"]["facade"]["result"]
+
+    assert truncation["invoked"] == {"ok": True, "result": whole}, truncation["invoked"]
+    assert truncation["cached_after_invoke"] == 0
+
+
+def test_the_same_call_through_hangar_call_is_cut(runs: dict[str, dict[str, Any]]) -> None:
+    # The control: truncation is on, and the budget cuts this result.
+    truncation = runs["truncation"]
+    served = truncation["hangar_call"]
+
+    assert served["success"] is True and served.get("truncated") is True, served
+    assert served.get("continuation_id"), served
+    assert truncation["cached_after_hangar_call"] == 1

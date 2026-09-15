@@ -481,12 +481,17 @@ class BatchExecutor:
             self._concurrency_manager = get_concurrency_manager()
         return self._concurrency_manager
 
-    def _apply_batch_truncation(self, batch_id: str, results: list[CallResult]) -> list[CallResult]:
+    def _apply_batch_truncation(
+        self, batch_id: str, results: list[CallResult], whole: frozenset[int] = frozenset()
+    ) -> list[CallResult]:
         """Apply batch-level truncation if enabled and needed.
 
         Args:
             batch_id: The batch identifier.
             results: List of call results to potentially truncate.
+            whole: Indexes of the calls whose caller takes the whole result
+                (``CallSpec.whole_result``, #1453). They are left out of the
+                batch budget: never cut, and no continuation is stored for them.
 
         Returns:
             List of results, potentially with some truncated.
@@ -502,7 +507,9 @@ class BatchExecutor:
         # thread, under the identity hangar_call bound for the batch, and the
         # continuation tools read the caller the same way.
         owner = ContinuationOwner.of(get_identity_context())
-        return truncation_manager.process_batch(batch_id, results, owner=owner)
+        cut = truncation_manager.process_batch(batch_id, [r for r in results if r.index not in whole], owner=owner)
+        by_index = {r.index: r for r in cut}
+        return [by_index.get(r.index, r) for r in results]
 
     def _l7_approval_rule(self, call: CallSpec, ctx: Any) -> str | None:
         """The L7 (MCPEgressPolicy) requireApproval verdict for this call.
@@ -1133,7 +1140,9 @@ class BatchExecutor:
 
                 # Apply batch-level truncation if enabled
                 final_results = [r for r in results if r is not None]
-                final_results = self._apply_batch_truncation(batch_id, final_results)
+                final_results = self._apply_batch_truncation(
+                    batch_id, final_results, frozenset(c.index for c in calls if c.whole_result)
+                )
 
                 return BatchResult(
                     batch_id=batch_id,
@@ -2083,7 +2092,8 @@ class BatchExecutor:
         result_json = json.dumps(result)
         result_size = len(result_json.encode("utf-8"))
 
-        if result_size > MAX_RESPONSE_SIZE_BYTES:
+        # A call whose caller takes the whole result is not cut (#1453).
+        if result_size > MAX_RESPONSE_SIZE_BYTES and not call.whole_result:
             truncated = True
             truncated_reason = "response_size_exceeded"
             original_size = result_size

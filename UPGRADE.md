@@ -55,9 +55,9 @@ anonymous callers, pass a principal.
   whose `code` names that type.
 - `McpServerNotFoundError`, `ToolNotFoundError` and `TimeoutError` are raised
   as before.
-- A response over the per-call size limit (10 MB), or one cut by a
-  `truncation:` section, raises `ToolCallFailedError` with the code
-  `ResponseTruncated`. `invoke` returned the whole response before.
+- The result is still returned whole. The per-call size limit (10 MB) and a
+  `truncation:` section cut `hangar_call` results, not the results `invoke`
+  returns, and no continuation is stored for an `invoke` call.
 
 **Also:**
 
