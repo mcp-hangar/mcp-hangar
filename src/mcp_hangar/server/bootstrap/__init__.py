@@ -72,6 +72,7 @@ from .tools import register_all_tools
 from .truncation import init_truncation
 from .workers import (
     create_background_workers,
+    stop_background_workers,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
@@ -153,16 +154,10 @@ class ApplicationContext:
         """
         logger.info("application_context_shutdown_start")
 
-        # Stop background workers
-        for worker in self.background_workers:
-            try:
-                worker.stop()
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual worker stop fails
-                logger.warning(
-                    "worker_stop_failed",
-                    task=worker.task,
-                    error=str(e),
-                )
+        # Stop the background workers and wait for their threads, so none is
+        # still mid-cycle on a server the loop below stops, and none outlives
+        # the context: the `Hangar` facade stops them here too (#1435).
+        stop_background_workers(self.background_workers)
 
         # After the workers, whose health checks are what degrade a server and
         # arm a retry; before the servers stop, so no retry restarts one.

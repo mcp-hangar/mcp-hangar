@@ -1,5 +1,7 @@
-"""Background workers initialization."""
+"""Background workers: built by bootstrap, started and stopped here."""
 
+from collections.abc import Sequence
+import time
 from typing import Any, cast
 
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
@@ -17,6 +19,9 @@ HEALTH_CHECK_INTERVAL_SECONDS = 60
 
 METRICS_SNAPSHOT_INTERVAL_SECONDS = 60
 """Interval for metrics history snapshot worker."""
+
+WORKER_STOP_TIMEOUT_SECONDS = 10.0
+"""How long `stop_background_workers` waits, in total, for the workers' threads to end."""
 
 
 def create_background_workers(
@@ -58,3 +63,48 @@ def create_background_workers(
 
     logger.info("background_workers_created", workers=worker_names)
     return workers
+
+
+def start_background_workers(workers: Sequence[Any]) -> None:
+    """Start *workers*, the ones `bootstrap()` built into the application context.
+
+    `ServerLifecycle.start` and the `Hangar` facade both start them here, so
+    `serve` and an embedded gateway run the same set (#1435).
+
+    Args:
+        workers: The context's `background_workers`.
+    """
+    for worker in workers:
+        worker.start()
+
+    logger.info("background_workers_started", workers=[worker.task for worker in workers])
+
+
+def stop_background_workers(workers: Sequence[Any], timeout_s: float = WORKER_STOP_TIMEOUT_SECONDS) -> None:
+    """Stop *workers* and wait for their threads to end.
+
+    Every worker is told to stop before any is waited on, so they wind down
+    together. The wait is bounded by *timeout_s* in total: a cycle stuck on an
+    upstream must not hold shutdown for ever, so a worker still running then
+    is logged and left. A worker that fails to stop is logged, and the others
+    are still stopped.
+
+    Args:
+        workers: The context's `background_workers`.
+        timeout_s: The most this waits for all of them together.
+    """
+    for worker in workers:
+        try:
+            worker.stop()
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual worker stop fails
+            logger.warning("worker_stop_failed", task=worker.task, error=str(e))
+
+    deadline = time.monotonic() + timeout_s
+    for worker in workers:
+        try:
+            ended = worker.join(max(0.0, deadline - time.monotonic()))
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one worker's failed wait must not skip the others
+            logger.warning("worker_join_failed", task=worker.task, error=str(e))
+            continue
+        if not ended:
+            logger.warning("worker_still_running_after_stop", task=worker.task, timeout_s=timeout_s)

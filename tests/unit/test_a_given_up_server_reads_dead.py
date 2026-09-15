@@ -349,7 +349,7 @@ class TestTheWayOut:
         worker.running = True
         checks_before = _gauge(m.HEALTH_CHECK_TOTAL, fleet.sid, result="unhealthy")
 
-        with patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration]), pytest.raises(StopIteration):
+        with patch.object(worker._stopped, "wait", side_effect=[False, StopIteration]), pytest.raises(StopIteration):
             worker._loop()
 
         fleet.server.health_check.assert_not_called()
