@@ -15,6 +15,7 @@ from contextlib import ExitStack
 import asyncio
 import contextvars
 from dataclasses import dataclass, replace
+from functools import partial
 import json
 import threading
 import time
@@ -38,6 +39,7 @@ from ....domain.value_objects.truncation import ContinuationOwner
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
+from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....domain.model.mcp_server import (
     DEAD_NOT_REVIVED_BY_CALLS,
@@ -318,6 +320,161 @@ def _resolve_projection(
     return resolved
 
 
+def _approval_policy(
+    resolver: Any, tool: str, tenant_id: str | None, scopes: list[tuple[str, str | None, str | None]]
+) -> Any:
+    """The effective policy of the first of *scopes* whose approval list holds *tool*, or None.
+
+    Every scope the access gate asks, each with the caller's tenant. A tool on
+    any of their approval lists needs approval, and the first scope that asks
+    supplies the timeout and channel. There is no `_global` second lookup:
+    `_compute_effective_policy` merges `_global` into every scope it resolves.
+    """
+    for server_id, group_id, member_server_id in scopes:
+        scoped = resolver.resolve_effective_policy(server_id, group_id, tenant_id, member_server_id=member_server_id)
+        if not scoped.is_unrestricted() and scoped.requires_approval(tool):
+            return scoped
+    return None
+
+
+@dataclass(frozen=True)
+class _Governance:
+    """What governs one call, decided against one configuration's overlays (#1431).
+
+    The access, withdrawal, pin and approval gates each act on their part of
+    it. They used to read the overlays themselves, one gate after another, so a
+    reload that landed between two gates could combine two files. A reload
+    that moves a control from `tools.deny_list: [t]` to
+    `tool_projection.withdrawn: [t]` let `t` through on the new policy and the
+    previous withdrawals, which neither file allows. `_decide_governance`
+    makes the whole decision through `read_as_one_set` before a gate acts on
+    any of it.
+    """
+
+    #: The tenant every overlay was asked for: the caller's.
+    tenant_id: str | None
+    #: Whether the policy of every scope `_policy_scopes` names allows the tool. Deny wins.
+    allowed: bool
+    #: The tool's projection as the call resolves it (`_resolve_projection`). None: not in the catalogue.
+    projection: Any
+    #: Whether the tool is withdrawn for the tenant (`_withdrawn_in_scope`).
+    withdrawn: bool
+    #: ``(id, pin, mode)`` for each pin the call must match: the pins of the
+    #: groups of a member named directly first, the call's own last. Each
+    #: carries the id that declared it and that id's digest-enforcement mode.
+    pins: tuple[tuple[str, Any, DigestEnforcement], ...]
+    #: The policy that routes the tool to a human (`_approval_policy`), or None.
+    approval_policy: Any
+
+
+def _decide_governance(
+    resolver: Any,
+    proj_registry: Any,
+    mcp_server: str,
+    tool: str,
+    tenant_id: str | None,
+    scopes: list[tuple[str, str | None, str | None]],
+    *,
+    target_server_id: str,
+    owning_groups: tuple[str, ...],
+) -> _Governance:
+    """Decide what governs a call of *tool* on *mcp_server* for *tenant_id*. Run it through `read_as_one_set`.
+
+    It reads the policies, the withdrawals, the pins and their modes, and
+    changes nothing, so it can be made again when a reload swaps the overlays
+    while it runs.
+
+    Args:
+        mcp_server: The id the call named: a group or a server.
+        scopes: The call's policy scopes, from `_policy_scopes`.
+        target_server_id: The server the call goes to. For a group, the member it selected.
+        owning_groups: The groups of a group member named directly.
+    """
+    projection = _resolve_projection(proj_registry, mcp_server, tool, tenant_id, target_server_id)
+    own = proj_registry.resolve_pin(mcp_server, tool, tenant_id)
+    if own is None and target_server_id and target_server_id != mcp_server:
+        # A pin declared on the member a group selected. Same two-name problem
+        # as the projection (#1040): without this, a pinned tool served through
+        # a group was never validated against its pin, in either topology and
+        # with no listing filter behind it.
+        own = proj_registry.resolve_pin(target_server_id, tool, tenant_id)
+    # A group member named directly: the pins its groups declare apply as
+    # well. Before this, a pin on the group did not hold against a call naming
+    # its member.
+    pins = [
+        (group_id, pin)
+        for group_id in owning_groups
+        if (pin := proj_registry.resolve_pin(group_id, tool, tenant_id)) is not None
+    ]
+    if own is not None:
+        pins.append((mcp_server, own))
+    return _Governance(
+        tenant_id=tenant_id,
+        allowed=_allowed_in_every_scope(resolver, tool, tenant_id, scopes),
+        projection=projection,
+        withdrawn=_withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups),
+        pins=tuple((scope, pin, proj_registry.digest_enforcement(scope)) for scope, pin in pins),
+        approval_policy=_approval_policy(resolver, tool, tenant_id, scopes),
+    )
+
+
+@dataclass(frozen=True)
+class _AfterHold:
+    """What the re-check after an approval hold reads, against one configuration's overlays (#1431)."""
+
+    #: ``(reason, error type)`` when the policy no longer allows the call, or could not be read.
+    policy_refusal: tuple[str, str] | None
+    projection: Any = None
+    withdrawn: bool = False
+
+
+def _governance_after_hold(
+    resolver: Any,
+    proj_registry: Any,
+    call: CallSpec,
+    tenant_id: str | None,
+    *,
+    group_id: str | None,
+    target_server_id: str,
+    owning_groups: tuple[str, ...],
+) -> _AfterHold:
+    """Read the policy, the catalogue and the withdrawals after an approval hold. Run it through `read_as_one_set`.
+
+    See `BatchExecutor._revalidate_after_hold` for the arguments.
+    """
+    # The caller's tenant and the target group are carried, not dropped: asked
+    # without them this was a different question than the pre-hold gate asked,
+    # and in front_door a resolve with no member_id is the fail-closed
+    # missing-identity branch, which refused EVERY approved call at dispatch
+    # (#1039). Then the groups of a member named directly, asked exactly as
+    # the gate before the hold asked them.
+    #
+    # No `_global` second lookup: `_compute_effective_policy` merges the
+    # `_global` policy into every scope it resolves, so a result that is
+    # unrestricted means `_global` was empty too.
+    scopes = [
+        (call.mcp_server, group_id, target_server_id or None),
+        *((owner, owner, call.mcp_server) for owner in owning_groups),
+    ]
+    try:
+        denied = any(
+            not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool)
+            for policy in (
+                resolver.resolve_effective_policy(server_id, scope_group, tenant_id, member_server_id=member)
+                for server_id, scope_group, member in scopes
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
+        return _AfterHold((f"policy could not be re-resolved: {exc}", "ApprovalRevalidationError"))
+    if denied:
+        return _AfterHold(("tool is no longer allowed by policy", "ToolAccessDenied"))
+    # The catalogue as it is now. The withdrawal and pin re-checks both read it.
+    projection = _resolve_projection(proj_registry, call.mcp_server, call.tool, tenant_id, target_server_id)
+    return _AfterHold(
+        None, projection, _withdrawn_in_scope(proj_registry, projection, call.tool, tenant_id, owning_groups)
+    )
+
+
 def current_tool_access_refusal(
     mcp_server: str, tool: str, tenant_id: str | None, *, target_server_id: str = ""
 ) -> tuple[str, str] | None:
@@ -342,11 +499,23 @@ def current_tool_access_refusal(
     is_group = mcp_server in GROUPS
     owning_groups = () if is_group else _groups_owning(mcp_server)
     scopes = _policy_scopes(mcp_server, is_group, target_server_id, owning_groups)
-    if not _allowed_in_every_scope(get_tool_access_resolver(), tool, tenant_id, scopes):
+    # The gates' one decision, against one configuration's overlays (#1431).
+    governance = read_as_one_set(
+        partial(
+            _decide_governance,
+            get_tool_access_resolver(),
+            get_tool_projection_registry(),
+            mcp_server,
+            tool,
+            tenant_id,
+            scopes,
+            target_server_id=target_server_id,
+            owning_groups=owning_groups,
+        )
+    )
+    if not governance.allowed:
         return _TOOL_ACCESS_DENIED, "ToolAccessDeniedError"
-    proj_registry = get_tool_projection_registry()
-    projection = _resolve_projection(proj_registry, mcp_server, tool, tenant_id, target_server_id)
-    if _withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups):
+    if governance.withdrawn:
         return _withdrawn_message(tool), "ToolWithdrawnError"
     return None
 
@@ -384,11 +553,8 @@ class _CallPipeline:
     #: member of. Empty for a call that names a group,
     #: and for a server that is in no group.
     owning_groups: tuple[str, ...] = ()
-    #: Set by _gate_digest_pin.
-    pin: Any = None
-    #: Set by _gate_digest_pin: ``(group id, pin)`` for each group of a member
-    #: named directly that pins this tool.
-    group_pins: tuple[tuple[str, Any], ...] = ()
+    #: Decided when a gate first asks: see `governance`.
+    _governance: _Governance | None = None
     _projection: Any = _UNRESOLVED
     #: True when a pin exists but the catalogue was not there to check it
     #: against; the cold start populates it and the gate re-runs (#601).
@@ -398,14 +564,39 @@ class _CallPipeline:
     reservation: Reservation | None = None
 
     @property
-    def projection(self) -> Any:
-        """The tool's projection, resolved once and cached.
+    def governance(self) -> _Governance:
+        """What governs this call: one decision, against one configuration's overlays (#1431).
 
-        A cached lookup rather than a field set by whichever gate happens to run
-        first: both the withdrawal gate and the digest-pin gate need it, and
-        making one of them responsible for populating it for the other is an
-        ordering dependency that fails silently -- reorder the two and the pin
-        check quietly defers instead of running.
+        Made when a gate first asks, after `_gate_resolve_target` chose the
+        target, and kept. The access, withdrawal, pin and approval gates each
+        act on their part of it, so a reload that lands between two gates
+        cannot give them two different files.
+        """
+        if self._governance is None:
+            self._governance = read_as_one_set(
+                partial(
+                    _decide_governance,
+                    self.resolver,
+                    self.proj_registry,
+                    self.call.mcp_server,
+                    self.call.tool,
+                    self.caller_tenant_id,
+                    self.policy_scopes(),
+                    target_server_id=self.target_server_id,
+                    owning_groups=self.owning_groups,
+                )
+            )
+        return self._governance
+
+    @property
+    def projection(self) -> Any:
+        """The tool's projection, as the governance decision resolved it.
+
+        Part of the decision rather than a field set by whichever gate happens
+        to run first: both the withdrawal gate and the digest-pin gate need it,
+        and making one of them responsible for populating it for the other is
+        an ordering dependency that fails silently -- reorder the two and the
+        pin check quietly defers instead of running.
 
         Two ids, because a group has two names (#1040). ``call.mcp_server`` is
         the GROUP id whenever a group is the target -- front_door collapses the
@@ -420,34 +611,33 @@ class _CallPipeline:
         is also where the discovered schema the pin is validated against lives.
         """
         if self._projection is _UNRESOLVED:
-            self._projection = _resolve_projection(
-                self.proj_registry, self.call.mcp_server, self.call.tool, self.caller_tenant_id, self.target_server_id
-            )
+            self._projection = self.governance.projection
         return self._projection
 
     def reresolve_projection(self) -> Any:
         """Look the projection up again, after a cold start populated it.
 
         The deferred pin gate needs the answer to a question that had none when
-        the cached one was taken. It goes through the property rather than
-        calling the registry itself, because a second copy of the two-name
-        lookup is a copy that can be missing the fallback -- which is what it
-        was: the deferred gate asked the group id alone, found nothing for a
-        member that had just started, and refused the first pinned call after
-        every gateway boot as unverifiable (#1166).
+        the decision was made. It asks `_resolve_projection`, the lookup the
+        decision makes, rather than the registry itself, because a second copy
+        of the two-name lookup is a copy that can be missing the fallback --
+        which is what it was: the deferred gate asked the group id alone, found
+        nothing for a member that had just started, and refused the first
+        pinned call after every gateway boot as unverifiable (#1166).
         """
-        self._projection = _UNRESOLVED
-        return self.projection
+        self._projection = _resolve_projection(
+            self.proj_registry, self.call.mcp_server, self.call.tool, self.caller_tenant_id, self.target_server_id
+        )
+        return self._projection
 
-    def pins(self) -> list[tuple[str, Any]]:
-        """Every pin this call must match, each with the id whose enforcement mode applies.
+    def pins(self) -> tuple[tuple[str, Any, DigestEnforcement], ...]:
+        """Every pin this call must match: ``(id that declared it, pin, that id's enforcement mode)``.
 
         The groups' pins come first and the call's own pin last. When every pin
         matches, the digest bound to the request is then the call's own, as it
         was before group pins were added.
         """
-        own = [(self.call.mcp_server, self.pin)] if self.pin is not None else []
-        return [*self.group_pins, *own]
+        return self.governance.pins
 
     def policy_scopes(self) -> list[tuple[str, str | None, str | None]]:
         """Every ``(server id, group id, member server id)`` this call's policy is resolved under.
@@ -647,6 +837,7 @@ class BatchExecutor:
         *,
         tenant_id: str | None = None,
         scopes: list[tuple[str, str | None, str | None]] | None = None,
+        governance: _Governance | None = None,
     ) -> CallResult | None:
         """Check if the tool requires approval and block until resolved.
 
@@ -661,6 +852,10 @@ class BatchExecutor:
             scopes: The ``(server, group, member server)`` scopes the access
                 gate asked, from ``_CallPipeline.policy_scopes``. The default
                 is the named server alone.
+            governance: The call's governance decision. Its approval policy
+                is the one this gate applies, read with the rest of the call's
+                governance as one set (#1431). Without it, the approval lists
+                of *scopes* are read here, as one set.
         """
         # Cleared per call: worker threads are reused across calls, so a stale
         # id from the previous call in this thread must never be revalidated
@@ -668,21 +863,16 @@ class BatchExecutor:
         _approval_loop_local.approval_id = None
 
         # The approval lists of every scope the access gate asked, each with
-        # the caller's tenant. A tool on any of them needs approval, and the
-        # first scope that asks supplies the timeout and channel. Before this,
-        # only the named server's list was read. A group's list and a tenant's
-        # list never held a call, and in front_door no list did.
-        #
-        # There is no `_global` second lookup: `_compute_effective_policy`
-        # merges `_global` into every scope it resolves.
-        policy: Any = None
-        for server_id, group_id, member_server_id in scopes or [(call.mcp_server, None, None)]:
-            scoped = resolver.resolve_effective_policy(
-                server_id, group_id, tenant_id, member_server_id=member_server_id
+        # the caller's tenant: see `_approval_policy`. Before this, only the
+        # named server's list was read. A group's list and a tenant's list
+        # never held a call, and in front_door no list did.
+        policy: Any
+        if governance is not None:
+            policy = governance.approval_policy
+        else:
+            policy = read_as_one_set(
+                partial(_approval_policy, resolver, call.tool, tenant_id, scopes or [(call.mcp_server, None, None)])
             )
-            if not scoped.is_unrestricted() and scoped.requires_approval(call.tool):
-                policy = scoped
-                break
 
         needs_mrtr_approval = policy is not None
 
@@ -842,48 +1032,32 @@ class BatchExecutor:
             if reason is not None:
                 return _refuse(reason, "ApprovalNoLongerValid")
 
+        # The effective policy, the catalogue and the withdrawals as they are
+        # now, read against one configuration's overlays, never a mix of two
+        # (#1431). Acted on in the order the gates before the hold act on them.
+        now = read_as_one_set(
+            partial(
+                _governance_after_hold,
+                resolver,
+                proj_registry,
+                call,
+                caller_tenant_id,
+                group_id=group_id,
+                target_server_id=target_server_id,
+                owning_groups=owning_groups,
+            )
+        )
+
         # Effective policy, re-resolved. A tool moved to deny during the hold
         # must not execute on the pre-change decision.
-        try:
-            # The caller's tenant and the target group are carried, not dropped:
-            # asked without them this was a different question than the pre-hold
-            # gate asked, and in front_door a resolve with no member_id is the
-            # fail-closed missing-identity branch, which refused EVERY approved
-            # call at dispatch (#1039).
-            #
-            # No `_global` second lookup: `_compute_effective_policy` merges the
-            # `_global` policy into every scope it resolves, so a result that is
-            # unrestricted means `_global` was empty too -- the fallback could
-            # only ever re-answer the same question.
-            policy = resolver.resolve_effective_policy(
-                call.mcp_server,
-                group_id,
-                caller_tenant_id,
-                member_server_id=target_server_id or None,
-            )
-            if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
-                return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
-            # The groups of a member named directly, asked exactly as the gate
-            # before the hold asked them.
-            for owner in owning_groups:
-                owner_policy = resolver.resolve_effective_policy(
-                    owner, owner, caller_tenant_id, member_server_id=call.mcp_server
-                )
-                if not owner_policy.is_unrestricted() and not owner_policy.is_tool_allowed(call.tool):
-                    return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
-        except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
-            return _refuse(f"policy could not be re-resolved: {exc}", "ApprovalRevalidationError")
-
-        # The catalogue as it is now. The withdrawal and pin re-checks both read it.
-        projection = proj_registry.resolve(call.mcp_server, call.tool, caller_tenant_id)
-        if projection is None and target_server_id and target_server_id != call.mcp_server:
-            projection = proj_registry.resolve(target_server_id, call.tool, caller_tenant_id)
+        if now.policy_refusal is not None:
+            return _refuse(*now.policy_refusal)
 
         # Withdrawal, re-checked with the scopes `_gate_withdrawal` uses and
         # refused with the outcome it gives. A tool withdrawn while the call
         # waited for a human used to run once approved, although this re-check
         # was documented to cover it.
-        if _withdrawn_in_scope(proj_registry, projection, call.tool, caller_tenant_id, owning_groups):
+        if now.withdrawn:
             logger.warning(
                 "approval_revalidation_failed",
                 approval_id=approval_id,
@@ -895,8 +1069,10 @@ class BatchExecutor:
 
         # The pinned tool digest, re-verified against the catalogue as it is
         # now. The pre-gate check spoke for a schema that may since have moved.
-        if pin is not None and projection is not None:
-            rejection: CallResult | None = enforce_digest_pin(projection, pin)
+        # The pins, and the mode each is enforced in, are the ones the call
+        # was approved under: one decision, made before the hold.
+        if pin is not None and now.projection is not None:
+            rejection: CallResult | None = enforce_digest_pin(now.projection, pin)
             if rejection is not None:
                 return rejection
 
@@ -1573,8 +1749,9 @@ class BatchExecutor:
             # For a group: the group, and the policy of the member
             # `_gate_resolve_target` selected, keyed by its SERVER id (#1164).
             # For a server: its own policy, plus each group that owns it when
-            # it is a member named directly. Deny wins.
-            allowed = _allowed_in_every_scope(p.resolver, p.call.tool, p.caller_tenant_id, p.policy_scopes())
+            # it is a member named directly. Deny wins. Decided with the
+            # withdrawals and pins, as one set (#1431).
+            allowed = p.governance.allowed
             policy_span.set_attribute("policy.allowed", allowed)
 
         if allowed:
@@ -1605,7 +1782,7 @@ class BatchExecutor:
         withdrawal declared on a group did not hold against a call naming a
         member of that group.
         """
-        if not _withdrawn_in_scope(p.proj_registry, p.projection, p.call.tool, p.caller_tenant_id, p.owning_groups):
+        if not p.governance.withdrawn:
             return None
         return self._withdrawn_refusal(p.call, p.ctx, p.caller_tenant_id, p.elapsed_ms())
 
@@ -1632,23 +1809,22 @@ class BatchExecutor:
         Usually that is a single pin, the call's own. A call naming a group
         member also carries each pin its groups declare for the tool. Each pin
         is enforced in the mode set on the id that declared it, as a call
-        naming that group would enforce it.
+        naming that group would enforce it, read with the pin (#1431).
         """
-        for scope, pin in p.pins():
-            refusal = self._enforce_digest_pin(p, projection, pin, enforcement_scope=scope)
+        for _scope, pin, enforcement in p.pins():
+            refusal = self._enforce_digest_pin(p, projection, pin, enforcement)
             if refusal is not None:
                 return refusal
         return None
 
     def _enforce_digest_pin(
-        self, p: "_CallPipeline", projection: Any, pin: Any, *, enforcement_scope: str | None = None
+        self, p: "_CallPipeline", projection: Any, pin: Any, enforcement: DigestEnforcement
     ) -> CallResult | None:
         """Validate *projection* against the tenant's *pin*; a CallResult means reject.
 
-        *enforcement_scope* is the id whose ``digest_enforcement`` mode applies.
-        It defaults to the id the call named.
+        *enforcement* is the ``digest_enforcement`` mode of the id that
+        declared the pin, read with it.
         """
-        enforcement = p.proj_registry.digest_enforcement(enforcement_scope or p.call.mcp_server)
         try:
             digest_result = DigestValidator(
                 DigestPolicy(
@@ -1716,22 +1892,11 @@ class BatchExecutor:
         (#601). So the check is deferred and re-run by
         _gate_deferred_digest_pin once the cold start has populated the
         catalogue.
+
+        The pins are the governance decision's (`_decide_governance`): the one
+        on the id the call named, else on the member a group selected, and
+        those of the groups of a member named directly.
         """
-        p.pin = p.proj_registry.resolve_pin(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
-        if p.pin is None and p.target_server_id and p.target_server_id != p.call.mcp_server:
-            # A pin declared on the member a group selected. Same two-name
-            # problem as the projection above (#1040): without this, a pinned
-            # tool served through a group was never validated against its pin,
-            # in either topology and with no listing filter behind it.
-            p.pin = p.proj_registry.resolve_pin(p.target_server_id, p.call.tool, p.caller_tenant_id)
-        # A group member named directly: the pins its groups declare apply as
-        # well. Before this, a pin on the group did not hold against a call
-        # naming its member.
-        p.group_pins = tuple(
-            (group_id, pin)
-            for group_id in p.owning_groups
-            if (pin := p.proj_registry.resolve_pin(group_id, p.call.tool, p.caller_tenant_id)) is not None
-        )
         if not p.pins():
             return None
         if p.projection is None:
@@ -1868,7 +2033,12 @@ class BatchExecutor:
             approval_span.set_attribute("mcp.server.id", p.call.mcp_server)
             approval_span.set_attribute("gen_ai.tool.name", p.call.tool)
             approval_result = self._check_approval_gate(
-                p.call, p.resolver, p.ctx, tenant_id=p.caller_tenant_id, scopes=p.policy_scopes()
+                p.call,
+                p.resolver,
+                p.ctx,
+                tenant_id=p.caller_tenant_id,
+                scopes=p.policy_scopes(),
+                governance=p.governance,
             )
             if approval_result is not None:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
@@ -1983,7 +2153,7 @@ class BatchExecutor:
         late_projection = p.reresolve_projection()
         if late_projection is not None:
             return self._enforce_digest_pins(p, late_projection)
-        if all(p.proj_registry.digest_enforcement(scope) != DigestEnforcement.BLOCK for scope, _pin in p.pins()):
+        if all(enforcement != DigestEnforcement.BLOCK for _scope, _pin, enforcement in p.pins()):
             return None
         logger.info(
             "tool_digest_pin_unresolvable",
