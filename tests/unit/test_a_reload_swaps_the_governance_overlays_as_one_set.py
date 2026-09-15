@@ -9,6 +9,10 @@ of another: a state that neither file declares. The commit now swaps them as
 one generation, and a decision read through `read_as_one_set` is made against
 one configuration's overlays in full.
 
+A call's decisions include a tool call's (#1431): the executor's decision
+for `hangar_call` -- access, withdrawal and pins together -- and the front
+door's listing and routing.
+
 The two files below differ in every overlay, and each test checks a call
 against both of them: the one the reload replaces and the one it puts in force.
 """
@@ -27,13 +31,16 @@ from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
     reset_tool_projection_registry,
 )
+from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.policies import header_exposure
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies, get_header_exposure_policy
 from mcp_hangar.domain.services.governance_overlays import read_as_one_set, swapping
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
+from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.tools.batch import executor
 
 SERVER = "store"
 GROUP = "g"
@@ -69,12 +76,33 @@ OLD = _file(deny="t", withdrawn="w", pin="a" * 64, exposure="*old*", group_deny=
 NEW = _file(deny="u", withdrawn="t", pin="b" * 64, exposure="*new*", group_deny="gb")
 
 
+def _tool_call(mcp_server: str, tool: str) -> Any:
+    """The decision the executor makes for a `hangar_call` of *tool* on *mcp_server*, read as it is."""
+    owners = executor._groups_owning(mcp_server)
+    return executor._decide_governance(
+        get_tool_access_resolver(),
+        get_tool_projection_registry(),
+        mcp_server,
+        tool,
+        TENANT,
+        executor._policy_scopes(mcp_server, False, mcp_server, owners),
+        target_server_id=mcp_server,
+        owning_groups=owners,
+    )
+
+
 def _decisions() -> tuple[Any, ...]:
-    """What a call reads off every overlay: the policy, withdrawals, pin, `header_exposure` and group policy."""
+    """What a call reads off every overlay: the policy, withdrawals, pin, `header_exposure` and group policy.
+
+    Then what a tool call decides from them (#1431): `hangar_call`'s access,
+    withdrawal and pins, for a server and for a group member, and the front
+    door's flat map, which is both its listing and its routing.
+    """
     resolver = get_tool_access_resolver()
     registry = get_tool_projection_registry()
     pin = registry.resolve_pin(SERVER, "p", None)
     exposure = get_header_exposure_policy(SERVER)
+    call, pinned, member = _tool_call(SERVER, "t"), _tool_call(SERVER, "p"), _tool_call(MEMBER, "ga")
     return (
         resolver.is_tool_allowed(SERVER, "t"),
         resolver.is_tool_allowed(SERVER, "u"),
@@ -84,6 +112,10 @@ def _decisions() -> tuple[Any, ...]:
         exposure.deny_annotated if exposure is not None else None,
         is_governed_allowed(MEMBER, "ga", kind="tool", tenant_id=TENANT),
         is_governed_allowed(MEMBER, "gb", kind="tool", tenant_id=TENANT),
+        (call.allowed, call.withdrawn),
+        tuple(pin.sha256 for _scope, pin, _mode in pinned.pins),
+        member.allowed,
+        tuple(sorted(flat_tool_projection._flat_map_now(TENANT))),
     )
 
 
@@ -113,6 +145,10 @@ class _Files:
 def files() -> Any:
     _reset()
     server_config.load_config(OLD)
+    # What the front door lists: `t`, `u` and `w` are each denied or withdrawn by one file.
+    get_tool_projection_registry().build_from_tools(
+        SERVER, [ToolSchema(name=name, description=name, input_schema={}) for name in ("t", "u", "w")]
+    )
     old, new = server_config.build_config(OLD), server_config.build_config(NEW)
     decided_under_old = _decisions()
     new.commit(replace=True)
