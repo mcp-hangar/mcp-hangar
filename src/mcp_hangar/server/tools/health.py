@@ -13,7 +13,7 @@ from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ...logging_config import get_logger
 from ..catalogue_readiness import catalogue_detail
 from ..context import get_context
-from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper
+from ..validation import not_rate_limited, tool_error_hook, tool_error_mapper
 from .replica_view import observe_replica
 
 logger = get_logger(__name__)
@@ -211,7 +211,7 @@ def register_health_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_health",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_health"),
+        check_rate_limit=not_rate_limited,
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
@@ -270,7 +270,7 @@ def register_health_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_metrics",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_metrics"),
+        check_rate_limit=not_rate_limited,
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,

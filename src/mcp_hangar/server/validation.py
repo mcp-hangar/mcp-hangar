@@ -8,13 +8,13 @@ import warnings
 
 from .. import metrics as prometheus_metrics
 from ..application.mcp.tooling import ToolErrorPayload
-from ..domain.exceptions import RateLimitExceeded
 from ..domain.security.input_validator import (
     validate_arguments,
     validate_mcp_server_id,
     validate_timeout,
     validate_tool_name,
 )
+from ..infrastructure.caller_rate_limit import charge
 from .context import get_context
 
 
@@ -25,7 +25,8 @@ def check_rate_limit(key: str = "global") -> None:
         Rate limiting is now enforced at the command bus middleware layer
         via RateLimitMiddleware. This function will be removed in a future version.
 
-    Gets rate limiter from application context (DIP).
+    Gets rate limiter from application context (DIP). Charges the call to its
+    caller's budget and the shared one, as the command bus does (#1471).
     Updates Prometheus metrics when rate limit is hit.
     """
     warnings.warn(
@@ -34,19 +35,39 @@ def check_rate_limit(key: str = "global") -> None:
         stacklevel=2,
     )
     ctx = get_context()
-    result = ctx.rate_limiter.consume(key)
-    if not result.allowed:
+    refusal = charge(ctx.rate_limiter, key)
+    if refusal is not None:
         # Update Prometheus metrics
         prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
 
         ctx.security_handler.log_rate_limit_exceeded(
-            limit=result.limit,
-            window_seconds=int(1.0 / result.limit) if result.limit else 1,
+            limit=refusal.limit,
+            window_seconds=refusal.window_seconds,
         )
-        raise RateLimitExceeded(
-            limit=result.limit,
-            window_seconds=int(1.0 / result.limit) if result.limit else 1,
-        )
+        raise refusal
+
+
+#: The listing and inspection tools. They read state and change nothing, so no
+#: rate limit refuses them (#1471): each registers `not_rate_limited` as its
+#: check, and tests/unit/test_caller_rate_limit.py holds the two together.
+#: `hangar_tools` is not one: it may start a stopped server to list its tools.
+READ_ONLY_TOOLS = frozenset(
+    {
+        "hangar_details",
+        "hangar_discovered",
+        "hangar_group_list",
+        "hangar_health",
+        "hangar_list",
+        "hangar_metrics",
+        "hangar_quarantine",
+        "hangar_sources",
+        "hangar_status",
+    }
+)
+
+
+def not_rate_limited(key: str) -> None:
+    """The rate-limit check of a tool in `READ_ONLY_TOOLS`: there is none."""
 
 
 def tool_error_mapper(exc: Exception) -> ToolErrorPayload:

@@ -5,6 +5,7 @@ All domain-specific exceptions should be defined here.
 These exceptions carry context and can be serialized to structured error responses.
 """
 
+import math
 from typing import Any
 
 
@@ -468,18 +469,67 @@ class ConfigurationUnavailableError(ConfigurationError):
 # --- Rate Limiting Exceptions ---
 
 
-class RateLimitExceeded(MCPError):
-    """Raised when rate limit is exceeded."""
+#: Whose budget a `RateLimitExceeded` refusal found used up (#1471): the
+#: caller's own, or the one every caller shares.
+RATE_LIMIT_CALLER = "caller"
+RATE_LIMIT_ALL_CALLERS = "all_callers"
 
-    def __init__(self, mcp_server_id: str = "", limit: int = 0, window_seconds: int = 0):
+_RATE_LIMIT_BUDGETS = {
+    RATE_LIMIT_CALLER: "this caller's rate limit",
+    RATE_LIMIT_ALL_CALLERS: "the rate limit all callers share",
+}
+
+
+class RateLimitExceeded(MCPError):
+    """Raised when rate limit is exceeded.
+
+    A refusal given a `retry_after` reads the same on every path (#1471). Its
+    message, which is all an MCP tool result carries, names the code, the
+    budget, the limit and when to retry, and `details` holds the same values
+    for the HTTP API.
+    """
+
+    def __init__(
+        self,
+        mcp_server_id: str = "",
+        limit: int = 0,
+        window_seconds: int = 0,
+        *,
+        retry_after: float | None = None,
+        scope: str = "",
+        key: str = "",
+        rps: float | None = None,
+    ):
+        details: dict[str, Any] = {"limit": limit, "window_seconds": window_seconds}
+        if retry_after is None:
+            message = f"Rate limit exceeded: {limit} requests per {window_seconds}s"
+        else:
+            retry_after = max(0.0, retry_after)
+            window_seconds = window_seconds or math.ceil(retry_after)
+            budget = _RATE_LIMIT_BUDGETS.get(scope, "the rate limit")
+            refill = f", refilled at {rps:g} per second" if rps is not None else ""
+            message = (
+                f"RateLimitExceeded: {budget} for {key or 'this call'} is used up "
+                f"({limit} at once{refill}). Retry after {retry_after:.2f}s."
+            )
+            details = {
+                "limit": limit,
+                "window_seconds": window_seconds,
+                "retry_after": round(retry_after, 3),
+                "scope": scope,
+                "key": key,
+                "rps": rps,
+            }
         super().__init__(
-            message=f"Rate limit exceeded: {limit} requests per {window_seconds}s",
+            message=message,
             mcp_server_id=mcp_server_id,
             operation="rate_limit",
-            details={"limit": limit, "window_seconds": window_seconds},
+            details=details,
         )
         self.limit = limit
         self.window_seconds = window_seconds
+        self.retry_after = retry_after
+        self.scope = scope
 
 
 # --- Authentication Exceptions ---

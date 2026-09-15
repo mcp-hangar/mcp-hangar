@@ -26,7 +26,13 @@ from ...domain.exceptions import (
 )
 from ...domain.value_objects import GroupState, McpServerState
 from ..context import get_context
-from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
+from ..validation import (
+    check_rate_limit,
+    not_rate_limited,
+    tool_error_hook,
+    tool_error_mapper,
+    validate_mcp_server_id_input,
+)
 from .replica_view import observe_replica
 
 #: The dashboard's version of `scope_note`, shorter because it sits above a
@@ -95,7 +101,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
     @mcp_tool_wrapper(
         tool_name="hangar_list",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_list"),
+        check_rate_limit=not_rate_limited,
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
@@ -284,7 +290,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
     @mcp_tool_wrapper(
         tool_name="hangar_status",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_status"),
+        check_rate_limit=not_rate_limited,
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
