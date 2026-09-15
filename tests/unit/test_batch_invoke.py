@@ -640,6 +640,39 @@ class TestResponseTruncation:
         assert call_result["original_size_bytes"] is not None
         assert call_result["result"] is None  # No partial data
 
+    def test_a_call_that_takes_its_whole_result_is_not_cut(self, mock_large_response):
+        """The facade's `invoke` takes its result whole, as it always has (#1453)."""
+        from mcp_hangar.domain.value_objects import Principal
+        from mcp_hangar.server.tools.batch import call_as
+
+        response = call_as(Principal.anonymous(), "math", "add", {})
+
+        (call_result,) = response["results"]
+        assert call_result["success"] is True
+        assert "truncated" not in call_result
+        assert call_result["result"] == mock_large_response.command_bus.send.return_value
+
+    def test_configured_truncation_leaves_a_whole_result_whole(self):
+        """Left out of the batch budget, and nothing is cached for it (#1453)."""
+        from mcp_hangar.server.bootstrap.truncation import get_response_cache, init_truncation, reset_truncation
+        from mcp_hangar.server.tools.batch.executor import BatchExecutor
+        from mcp_hangar.server.tools.batch.models import CallResult
+
+        init_truncation({"truncation": {"enabled": True, "max_batch_size_bytes": 64, "min_per_response_bytes": 8}})
+        try:
+            results = [
+                CallResult(index=i, call_id=f"c-{i}", success=True, result={"data": "x" * 1000}) for i in range(2)
+            ]
+
+            out = BatchExecutor()._apply_batch_truncation("b-1", results, whole=frozenset({0}))
+
+            assert out[0] is results[0]
+            assert out[1].truncated is True and out[1].continuation_id
+            cache = get_response_cache()
+            assert cache is not None and cache.size() == 1  # the cut one's, only
+        finally:
+            reset_truncation()
+
 
 # =============================================================================
 # Cross-Provider Batch Tests

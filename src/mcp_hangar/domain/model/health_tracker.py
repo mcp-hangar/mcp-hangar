@@ -194,6 +194,21 @@ class HealthTracker:
         remaining = backoff - elapsed
         return max(0.0, remaining)
 
+    def backoff_ends_by(self) -> float | None:
+        """The latest time the current backoff can end, in epoch seconds.
+
+        `can_retry()` draws fresh jitter on every call, so the end moves between
+        two reads. This is its ceiling: from this time on, `can_retry()` is True
+        whatever it draws. It can be in the past.
+
+        Returns:
+            The time, or None when no failure is recorded, so no backoff applies.
+        """
+        if self._last_failure_at is None:
+            return None
+        base = min(60.0, 2.0**self._consecutive_failures)
+        return self._last_failure_at + min(60.0, base * (1.0 + max(0.0, self.jitter_factor)))
+
     def _calculate_backoff(self) -> float:
         """Calculate backoff duration with jitter.
 
