@@ -430,8 +430,9 @@ class TestTheToolLevelCheck:
 
         monkeypatch.setattr(discovery, "mcp_tool_wrapper", recorder)
         discovery.register_discovery_tools(SimpleNamespace(tool=lambda *_a, **_k: lambda func: func))
+        shared = _shared(burst=1)
         monkeypatch.setattr(
-            validation, "get_context", lambda: SimpleNamespace(rate_limiter=_shared(burst=1), security_handler=Mock())
+            validation, "get_context", lambda: SimpleNamespace(rate_limiter=shared, security_handler=Mock())
         )
 
         assert "hangar_sources" not in READ_ONLY_TOOLS
