@@ -39,7 +39,12 @@ from ....application.read_models.tool_projection import get_tool_projection_regi
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
-from ....domain.model.mcp_server import DEAD_NOT_REVIVED_BY_CALLS
+from ....domain.model.mcp_server import (
+    DEAD_NOT_REVIVED_BY_CALLS,
+    START_REFUSED_IN_BACKOFF,
+    START_REFUSED_NOT_REVIVED_BY_CALLS,
+)
+from ....domain.exceptions import CannotStartMcpServerError
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
@@ -51,6 +56,7 @@ from ....metrics import (
     BATCH_DURATION_SECONDS,
     BATCH_SIZE_HISTOGRAM,
     BATCH_TRUNCATIONS_TOTAL,
+    TENANT_QUOTA_REFUSALS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
 from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
@@ -59,8 +65,16 @@ from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
+from .tenant_admission import CONCURRENCY, get_tenant_admission, Grant, NO_BUDGET, RATE, Refusal, Reservation
 
 logger = get_logger(__name__)
+
+#: What a caller refused by its tenant's execution budget is told, by reason (#1445).
+_TENANT_QUOTA_MESSAGES = {
+    NO_BUDGET: "No execution budget is configured for this tenant",
+    CONCURRENCY: "This tenant's execution budget is exhausted: too many calls in flight",
+    RATE: "This tenant's execution budget is exhausted: calls started too fast",
+}
 
 
 def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
@@ -265,6 +279,9 @@ class _CallPipeline:
     #: True when a pin exists but the catalogue was not there to check it
     #: against; the cold start populates it and the gate re-runs (#601).
     digest_pin_deferred: bool = False
+    #: Set by _gate_tenant_budget: the token taken from the caller's tenant
+    #: budget, given back if a later gate refuses the call (#1445).
+    reservation: Reservation | None = None
 
     @property
     def projection(self) -> Any:
@@ -1251,11 +1268,81 @@ class BatchExecutor:
             tracer=get_tracer(__name__),
         )
 
-        for gate in _GATES:
-            refusal = gate(self, pipeline)
-            if refusal is not None:
-                return refusal
+        refusal = self._run_gates(pipeline)
+        if refusal is not None:
+            return refusal
 
+        # The slot of the tenant's execution budget (#1445), taken after every
+        # gate -- a call held for approval, or waiting on a cold start, holds
+        # none -- and before the execution slot, so a tenant at its limit never
+        # queues for one. Its token was taken by `_gate_tenant_budget`.
+        admitted = self._enforce_tenant_budget(pipeline)
+        if isinstance(admitted, CallResult):
+            return admitted
+        try:
+            return self._dispatch(pipeline)
+        finally:
+            # On every path: a result, a relayed task handle, an exception. A
+            # worker thread cannot be cancelled, so a call its batch gave up on
+            # releases here too, once its invoke returns.
+            admitted.release()
+
+    def _run_gates(self, p: "_CallPipeline") -> CallResult | None:
+        """Run `_GATES` in order: the first refusal, or None when every gate lets the call through.
+
+        A token `_gate_tenant_budget` took is given back when a gate after it
+        refuses the call, or raises: a call stopped there never ran.
+        """
+        passed = False
+        try:
+            for gate in _GATES:
+                refusal = gate(self, p)
+                if refusal is not None:
+                    return refusal
+            passed = True
+            return None
+        finally:
+            if not passed and p.reservation is not None:
+                p.reservation.refund()
+
+    def _enforce_tenant_budget(self, p: "_CallPipeline") -> Grant | CallResult:
+        """Take the call's slot from its tenant's budget, or refuse the call (#1445).
+
+        Refuses at once: it never waits for a slot, and never retries. A call
+        refused here after an approval hold names the approval in its log line:
+        its tenant's slots were all taken when it was dispatched, and running
+        it again needs a new approval. See `tenant_admission.py`.
+        """
+        if p.reservation is not None:
+            granted = p.reservation.grant()
+        else:  # not reached while `_gate_tenant_budget` is a gate: take both rather than neither
+            granted = get_tenant_admission().admit(p.caller_tenant_id)
+        if isinstance(granted, Grant):
+            return granted
+        # Read after the approval gate, which clears it for every call.
+        return self._refuse_over_budget(p, granted, approval_id=getattr(_approval_loop_local, "approval_id", None))
+
+    def _refuse_over_budget(
+        self, p: "_CallPipeline", refusal: Refusal, *, approval_id: str | None = None
+    ) -> CallResult:
+        """Log, count and build the refusal of a call its tenant's budget does not admit."""
+        # A warning when a human's approval is spent on a call that does not run.
+        log = logger.warning if approval_id is not None else logger.info
+        log(
+            "tenant_quota_exceeded",
+            mcp_server_id=p.call.mcp_server,
+            tool=p.call.tool,
+            tenant_id=p.caller_tenant_id,
+            budget=refusal.budget,
+            reason=refusal.reason,
+            approval_id=approval_id,
+        )
+        TENANT_QUOTA_REFUSALS_TOTAL.inc(budget=refusal.budget, reason=refusal.reason)
+        return p.refuse(_TENANT_QUOTA_MESSAGES[refusal.reason], "TenantQuotaExceeded")
+
+    def _dispatch(self, pipeline: "_CallPipeline") -> CallResult:
+        """Run a call every gate let through: the execution slot, the invoke, the relay and the group's health."""
+        call = pipeline.call
         # Acquire concurrency slots (global + per-mcp_server) before invocation.
         # This is where backpressure happens: if the global or mcp_server semaphore
         # is full, this thread blocks until a slot frees up. Crucially, the call
@@ -1281,10 +1368,10 @@ class BatchExecutor:
 
             result = self._invoke_with_retry(
                 call,
-                cancel_event,
+                pipeline.cancel_event,
                 pipeline.effective_timeout,
-                call_start,
-                ctx,
+                pipeline.call_start,
+                pipeline.ctx,
                 pipeline.target_server_id,
             )
 
@@ -1606,6 +1693,21 @@ class BatchExecutor:
             p.group_obj.report_failure(p.target_server_id)
         return refusal
 
+    @staticmethod
+    def _refused_start(p: "_CallPipeline", e: CannotStartMcpServerError) -> CallResult:
+        """A call's start the server refused, coded as `_refuse_dead_target` codes the same condition."""
+        if e.reason == START_REFUSED_NOT_REVIVED_BY_CALLS:
+            return p.refuse(
+                "A capability block is not revived by a call; start it explicitly", "CannotStartMcpServerError"
+            )
+        if e.reason.startswith(START_REFUSED_IN_BACKOFF):
+            BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
+            return p.refuse(
+                f"Circuit breaker open (too many consecutive failures); retry in {e.time_until_retry:.1f}s",
+                "CircuitBreakerOpen",
+            )
+        return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
+
     def _gate_validators(self, p: "_CallPipeline") -> CallResult | None:
         """Interceptor validators, fail-closed BEFORE prompting for approval.
 
@@ -1617,6 +1719,28 @@ class BatchExecutor:
             return None
         denied.elapsed_ms = p.elapsed_ms()
         return denied
+
+    def _gate_tenant_budget(self, p: "_CallPipeline") -> CallResult | None:
+        """Whether the caller's tenant has a budget, and a token for this call (#1445).
+
+        After the policy gates, so a call they refuse spends nothing. Before
+        the approval hold and the cold start, so a caller with no budget, or
+        over its rate, neither asks a human to approve a call that cannot run
+        nor starts a stopped server. The token goes back if a later gate
+        refuses the call (`_run_gates`); the slot is taken last, by
+        `_enforce_tenant_budget`.
+
+        Being before the cold start puts it before the deferred pin check
+        (#601), which needs the catalogue a cold start fills. On a server that
+        has not started, a caller refused here is told `TenantQuotaExceeded`,
+        not a pin mismatch, and nothing starts. Pinned by
+        tests/unit/test_batch_gate_precedence.py.
+        """
+        reserved = get_tenant_admission().reserve(p.caller_tenant_id)
+        if isinstance(reserved, Refusal):
+            return self._refuse_over_budget(p, reserved)
+        p.reservation = reserved
+        return None
 
     def _gate_approval(self, p: "_CallPipeline") -> CallResult | None:
         """Human approval gate, plus the re-check of everything it paused.
@@ -1711,9 +1835,17 @@ class BatchExecutor:
             try:
                 self._single_flight.do(
                     p.target_server_id,
-                    lambda: p.ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=p.target_server_id)),
+                    lambda: p.ctx.command_bus.send(
+                        StartMcpServerCommand(mcp_server_id=p.target_server_id, deliberate=False)
+                    ),
                 )
                 cs_span.set_attribute("cold_start.result", "success")
+            except CannotStartMcpServerError as e:
+                # The server's own check refused the start after this gate's
+                # passed: each draws the backoff's jitter afresh, or the server
+                # was blocked in between. Not a failed start (#1446).
+                cs_span.set_attribute("cold_start.result", "refused")
+                return self._fail_group_member(p, self._refused_start(p, e))
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)
@@ -2044,6 +2176,7 @@ _GATES = (
     BatchExecutor._gate_digest_pin,
     BatchExecutor._gate_circuit_breaker,
     BatchExecutor._gate_validators,
+    BatchExecutor._gate_tenant_budget,
     BatchExecutor._gate_approval,
     BatchExecutor._gate_cold_start,
     BatchExecutor._gate_deferred_digest_pin,

@@ -123,11 +123,16 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "coordination": frozenset({"lease_ttl_s", "renew_deadline_s", "renew_interval_s"}),
     "discovery": frozenset({"auto_register", "enabled", "refresh_interval_s", "security", "sources"}),
     "event_store": frozenset({"allow_memory_fallback", "driver", "enabled", "path"}),
-    "execution": frozenset({"default_mcp_server_concurrency", "max_concurrency"}),
+    # `tenant_limits` (#1445), read by `config._init_tenant_limits_from_config`,
+    # which checks the keys of each entry itself.
+    "execution": frozenset({"default_mcp_server_concurrency", "max_concurrency", "tenant_limits"}),
     # `param_validation.required` (ADR-025). Global to the front door: the
     # condition is a property of the request, not of one upstream.
     "headers": frozenset({"param_validation"}),
     "hot_loading": frozenset({"cache", "enabled", "registry"}),
+    # `graceful_shutdown_timeout_s` (#1447), read by `config.http_graceful_shutdown_timeout`
+    # for `serve --http`, which hands it to uvicorn.
+    "http": frozenset({"graceful_shutdown_timeout_s"}),
     "interceptors": frozenset({"validators"}),
     "logging": frozenset({"file", "json_format", "level"}),
     # `audit.enabled` (#1327), read by `bootstrap/observability._parse_observability_config`.
@@ -142,9 +147,11 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
     "startup_checks": frozenset({"enforce"}),
-    # `mode`, read by `config._init_topology_mode_from_config`. `rules` was
-    # listed here too and never read (#1422): see `_REMOVED_SECTION_KEYS`.
-    "tool_access": frozenset({"mode"}),
+    # `mode`, read by `config._init_topology_mode_from_config`, and
+    # `required_catalogue` (#1446), read by `catalogue_readiness.required_catalogue`,
+    # which checks its own keys. `rules` was listed here too and never read
+    # (#1422): see `_REMOVED_SECTION_KEYS`.
+    "tool_access": frozenset({"mode", "required_catalogue"}),
     "truncation": None,  # TruncationConfig.from_dict owns these
     # `tenants` (ADR-024, #1048), read by `config._init_ui_resources_from_config`.
     # Shipped in 2.13.1 without an entry here, so `HANGAR_CONFIG_STRICT=1` --

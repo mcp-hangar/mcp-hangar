@@ -10,16 +10,238 @@ replica holding the management lease can run it. The check read only top-level
 
 - a server with no `mode`. The loader builds it as `subprocess`, with or
   without an `endpoint`;
-- a group member whose entry in the group's `members:` list has a local or
-  missing `mode`, when the member is not a server already defined above the
-  group under `mcp_servers`. The error names it `<group>/<member>`;
+- a group member whose id names no server under `mcp_servers`, when its own
+  entry in the group's `members:` list has a local or missing `mode`. The error
+  names it `<group>/<member>`;
 - `mode: podman`. That configuration already failed to load, later, with
   `'podman' is not a valid McpServerMode`.
 
 To fix a refused configuration, give each server it names `mode: remote` and an
-`endpoint`. For a group member, do that in the member's entry, or define the
-server under `mcp_servers` above the group. If this is one gateway, remove the
-`coordination:` block. A configuration without `coordination:` is unaffected.
+`endpoint`. For a group member, do that in the member's entry, or declare the
+server under `mcp_servers` and name it by its id. If this is one gateway,
+remove the `coordination:` block. A configuration without `coordination:` is
+unaffected.
+
+## Next — a group member is its top-level server, whatever the order in the file
+
+A group member whose `id` names a top-level server in `mcp_servers` is now that
+server, wherever the group appears in the file, at startup and on a reload.
+Before, a group listed above the server got a member built from the member
+entry alone. With only an `id`, that was a server with no command, which could
+not start, and not the server the rest of Hangar knew by that id.
+
+Two configurations now load differently:
+
+- **A member that names no server is refused.** A member whose id is not a
+  top-level server, and whose entry does not say how to run one, fails the
+  load: `Group 'pool' member 'm1' names no server`. Before, it loaded and
+  failed only when a call was routed to it. A reload with such a member is
+  refused and changes nothing. Declare the server under `mcp_servers`, or give
+  the member entry what its mode needs: `command` for `subprocess`, `image` or
+  `build` for `docker`, `endpoint` for `remote`.
+- **A member entry cannot redefine a top-level server.** When a member entry
+  sets server fields such as `command`, `env` or `mode`, and a top-level server
+  has the same id, the member is the top-level server and the entry's server
+  fields are ignored. Before, which of the two the group held depended on the
+  order in the file. The ignored fields are named in a
+  `group_member_entry_settings_ignored` warning. `weight`, `priority` and
+  `tools` on a member entry still apply.
+
+## Next — per-tenant execution budgets
+
+`execution.max_concurrency` bounds the whole process, so one tenant's burst
+could take every execution slot. The new, optional `execution.tenant_limits`
+section bounds each tenant on its own. **With no `tenant_limits` section,
+nothing changes.**
+
+```yaml
+execution:
+  max_concurrency: 50
+  tenant_limits:
+    "tenant:a": {max_concurrency: 4, rps: 10, burst: 20}
+    "*": {max_concurrency: 2, rps: 5, burst: 10}
+```
+
+- `max_concurrency` is how many of the tenant's calls may be executing at
+  once. `rps` and `burst` are a token bucket: calls start at `rps` per second
+  on average, and at most `burst` at once. All three are required.
+  `max_concurrency` and `burst` are integers from 1 to 1000000000, and `rps` is
+  above 0 and at most 1000000. A misspelt or extra key, or a value out of
+  range, refuses the configuration.
+- **A tenant that is not listed** gets a budget of its own, built from the
+  `"*"` entry. `"*"` is a template, not a pool that unlisted tenants share.
+  Callers with no tenant share one such budget. **With authentication off, no
+  caller has a tenant, so every caller shares that single `"*"` budget.**
+- **With budgets configured and no `"*"` entry, an unlisted tenant and a
+  caller with no tenant are refused.** If you add `tenant_limits` for a few
+  tenants, add a `"*"` entry too, unless refusing everyone else is what you
+  want.
+- `none` cannot be a tenant id in `tenant_limits`: it is the metric's label for
+  a call that no entry applied to.
+- **Where the budget is taken.** Both parts come after the policy gates (tool
+  access, withdrawal, pins, the circuit breaker and validators), so a call they
+  refuse spends nothing.
+  - The token, and the check that the caller has a budget at all, come before
+    the approval hold and the cold start. A caller with no budget, or over its
+    rate, is refused before anyone is asked to approve the call, and before the
+    call starts a stopped server. On a server that has not started yet, a
+    pinned tool's pin can only be checked once the server starts, so such a
+    caller is refused with `TenantQuotaExceeded`, not a pin mismatch. A call
+    refused after that point (denied or
+    expired at approval, no longer valid after the hold, or its server failing
+    to start) gets its token back.
+  - The slot comes last, just before the upstream call. A call held for
+    approval, or waiting on a cold start, holds no slot. The slot is given back
+    when the call returns. A call that the upstream answers with a task handle
+    returns with the handle, so a task the upstream keeps running does not hold
+    a slot.
+- **An approved call can still be refused** if all of its tenant's slots are
+  taken when it is dispatched. The approval is then spent: running the call
+  again needs a new one. The `tenant_quota_exceeded` log line, a warning in this
+  case, names the approval. Leave room in `max_concurrency` for tools that need
+  approval.
+- A tenant at its concurrency limit can still start a stopped server, with a
+  call that is then refused.
+- A call over its budget is refused at once, never queued or retried, with the
+  error type `TenantQuotaExceeded`. The front-door call log records it as
+  `denied`, and `mcp_hangar_tenant_quota_refusals_total{budget,reason}` counts
+  it, with `reason` one of `no_budget`, `concurrency` or `rate`.
+- **Budgets are counted per process**, like `execution.max_concurrency`. With
+  N replicas a tenant can run up to N times its budget, so size each budget for
+  your replica count.
+- A reload keeps the budget of every tenant whose limits did not change, with
+  its calls in flight and its spent tokens. A tenant whose limits changed keeps
+  counting the calls it has in flight, so lowering a limit never lets more than
+  the new limit start. A tenant removed from `tenant_limits` is refused from
+  then on, and calls it still has running are counted again if it is added
+  back. Calls already running when budgets are first turned on are not
+  counted.
+
+## Next — the HTTP graceful-shutdown bound can be set
+
+`serve --http` reads a new key, `http.graceful_shutdown_timeout_s`. It is how
+many seconds a stop waits for the requests already in flight before it cancels
+them.
+
+```yaml
+http:
+  graceful_shutdown_timeout_s: 90
+```
+
+Nothing changes unless you set it. Unset, Hangar passes uvicorn its own default,
+`None`, which waits for in-flight requests without a bound. The process then
+ends when they finish, or when something kills it. In Kubernetes that is the
+kubelet's SIGKILL at the end of the pod's `terminationGracePeriodSeconds`, 30
+seconds by default.
+
+- The value is a positive whole number of seconds. Any other value, or an
+  `http` that is not a mapping, refuses to start. A reload with such a value is
+  refused too, and everything keeps running as it was.
+- The bound is read when the HTTP server starts. A reload checks it, but the
+  running server keeps the bound it started with. Restart to change it.
+- Stdio mode has no HTTP server, and ignores the key.
+- `starting_http_server` logs the bound in force as
+  `graceful_shutdown_timeout_s`, and logs `null` when it is unset.
+
+**In Kubernetes**, the bound only helps if the pod lives long enough to use it.
+The kubelet counts the grace period from the start of the `preStop` hook, so set
+`terminationGracePeriodSeconds` longer than the `preStop` delay plus the bound,
+with room for Hangar's own cleanup after it. The mcp-hangar Helm chart sets all
+three from its `shutdown` values, and refuses to render a grace period that is
+too short.
+
+## Next — a front door can wait for its catalogue before it is ready
+
+Opt-in: nothing changes unless you add `tool_access.required_catalogue`, and it
+only takes effect with `tool_access.mode: front_door`.
+
+```yaml
+tool_access:
+  mode: front_door
+  required_catalogue:
+    servers: [payments, search-pool]
+    retry_for_s: 600
+```
+
+- `retry_for_s`, 600 by default, is a window that opens when the replica first
+  applies its configuration. Inside it, `/health/ready` answers 503 until the
+  boot warm-up has projected every listed server once. When they all have
+  been, or when the window ends, readiness stops depending on the catalogue
+  and goes back to today's rule. A replica is held out of the Service for at
+  most `retry_for_s`, even if a listed backend never comes back.
+- The window counts from that first apply, before the rest of boot and the
+  warm-up, so set `retry_for_s` to cover boot plus the warm-up. If they
+  outlast it, the retry still gives each missing server one attempt before it
+  ends; readiness does not wait for that attempt.
+- The readiness endpoint is unauthenticated, so its `catalogue` field reports
+  counts and state only: `complete`, `holds_readiness`, `required`,
+  `projected`, `missing_count`, `not_retried_count`, and `retry`.
+- The missing ids, and the reason the retry will not start a server, are
+  logged in a `required_catalogue_waiting` line each time they change, and
+  `hangar_health` returns them under `catalogue`. Both keep reporting after
+  the window ends.
+- Within the window, a server the warm-up could not start is retried. The
+  retry starts a server the way a call does, so a dead server waits out its
+  backoff. It never starts a server that is `dead` for `given_up` or
+  `capability_blocked`, it leaves a `degraded` server to the recovery saga, and
+  it never starts a server this replica has already projected, so a server
+  stopped for being idle stays stopped. Each attempt writes a
+  `required_catalogue_retry` log line and one sample of
+  `mcp_hangar_catalogue_retries_total{mcp_server, outcome}`.
+- The retry ends in a final state: `finished` once the list is met,
+  `blocked` as soon as every server still missing is one it may not start,
+  `exhausted` when the window ends, and `stopped` at shutdown or when a
+  reload removes the list. After `blocked`, readiness still waits for the rest
+  of the window.
+- Once every listed server has been projected, readiness never depends on the
+  catalogue again: a backend that stops, goes idle or fails later does not make
+  the replica not ready.
+- A group id is satisfied once any one of its members has been projected. A
+  member defined only inline in its group can be listed too.
+- The block is checked at load, from a file and from a dict alike. These
+  refuse the configuration:
+  - an id that is not a server or group in `mcp_servers`;
+  - a group with no members;
+  - a key other than `servers` and `retry_for_s`;
+  - a `retry_for_s` that is not a number above 0;
+  - with a `coordination:` block or a shared storage backend, a listed server
+    in a local mode (`subprocess`, `docker`, `container`, `podman`), or a group
+    whose members all are. Only the replica holding the management lease may
+    start one, so the others could never project it. Use `remote` mode for a
+    server every replica must serve.
+  - A persistence backend registered by a plugin is treated as shared, so a
+    local-mode server is refused there too, as a precaution.
+  - A single-replica deployment on a shared backend, such as `postgresql`,
+    cannot require a local-mode server either: the configuration cannot know
+    how many replicas will run it.
+
+  In `egress` it is checked and then ignored.
+- A reload checks the block like any other key, and never moves the window.
+  Inside the window, a reload replaces the list, and one that removes the
+  block releases the wait. A replica that has met its list stays ready. After
+  the window has ended, or on a replica that booted without a list, a reload
+  that adds a required server does not hold readiness and does not start a
+  retry: the server is reported in the log and in `hangar_health`, and is
+  started by a call or a deliberate start.
+
+**A call's cold start now follows the call rules**, in every topology. The
+batch executor starts a cold or dead server as a call, not as a deliberate
+start, so a server that became capability-blocked, or went back into its
+backoff, after the executor checked it is not started by the call. The call
+is refused with the code the executor's own check gives the same condition:
+`CircuitBreakerOpen` inside a backoff, `CannotStartMcpServerError` for a
+capability block.
+
+**If readiness stays 503.** Read the `required_catalogue_waiting` log line, or
+`hangar_health`, for the ids. A server under `not_retried` is one Hangar gave up
+on or blocked for a capability drift. Fix it, then start it deliberately
+(`hangar_start`, or a start through the REST API), or take it off the list;
+otherwise readiness falls back when the window ends.
+
+**Probe timings.** A replica can now stay not ready for up to `retry_for_s`
+after it starts. A failing readiness probe does not restart a pod, but a
+rollout waits for it, so keep the Deployment's `progressDeadlineSeconds` above
+`retry_for_s`.
 
 ## Upgrade to 2.20.0
 

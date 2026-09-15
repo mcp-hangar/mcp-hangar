@@ -115,6 +115,8 @@ DENIAL_CODES = SESSION_REFUSALS | frozenset(
         "ApprovalGateError",
         "ApprovalNoLongerValid",
         "ApprovalRevalidationError",
+        # Over its tenant's execution budget, or with no budget (#1445).
+        "TenantQuotaExceeded",
     }
 )
 

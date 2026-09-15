@@ -972,6 +972,16 @@ TOOL_ACCESS_DENIED_TOTAL = Counter(
     labels=["mcp_server", "tool", "reason"],  # reason: tool_not_in_access_policy
 )
 
+# A call refused by a per-tenant execution budget (#1445), after every policy
+# gate passed it. `budget` is the configured entry that refused it -- a tenant
+# id from `execution.tenant_limits`, or "*" -- or "none" when no entry applied,
+# so its values are bounded by the configuration, not by who calls.
+TENANT_QUOTA_REFUSALS_TOTAL = Counter(
+    name="mcp_hangar_tenant_quota_refusals",
+    description="Total tool calls refused by a per-tenant execution budget",
+    labels=["budget", "reason"],  # reason: no_budget, concurrency, rate
+)
+
 TOOLS_FILTERED_TOTAL = Gauge(
     name="mcp_hangar_tools_filtered",
     description="Number of tools filtered by access policy per mcp_server",
@@ -1084,6 +1094,17 @@ EMPTY_PROJECTION_TOTAL = Counter(
     # reason: no_identity (fail-closed, no tenant), nothing_discovered (cold
     # replica), filtered (policy or withdrawal removed everything)
     labels=["reason"],
+)
+
+# One sample per start the front door's catalogue retry makes for a required
+# server its boot warm-up could not project (#1446). `mcp_server` is bounded by
+# `tool_access.required_catalogue.servers`, which is checked against the config.
+CATALOGUE_RETRIES_TOTAL = Counter(
+    name="mcp_hangar_catalogue_retries",
+    description="Total starts the front door's required-catalogue retry made, by outcome",
+    # outcome: projected, started (not projected yet), failed, refused (the
+    # server's own backoff or capability block refused the start)
+    labels=["mcp_server", "outcome"],
 )
 
 # How big the answer to `tools/list` is, which nothing on the server side could
@@ -1341,6 +1362,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             TOOL_ACCESS_DENIED_TOTAL,
+            TENANT_QUOTA_REFUSALS_TOTAL,
             TOOLS_FILTERED_TOTAL,
             TOOL_ACCESS_POLICY_ACTIVE,
         ]
@@ -1375,6 +1397,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             EMPTY_PROJECTION_TOTAL,
+            CATALOGUE_RETRIES_TOTAL,
             PROJECTED_TOOLS,
             # Surface size, composition and churn (#1369).
             PROJECTED_SURFACE_BYTES,
@@ -1522,6 +1545,11 @@ def record_mcp_server_start(mcp_server: str, success: bool):
 def record_mcp_server_stop(mcp_server: str, reason: str):
     """Record a mcp_server stop."""
     PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=reason)
+
+
+def record_catalogue_retry(mcp_server: str, outcome: str) -> None:
+    """Record one start by the front door's required-catalogue retry (#1446)."""
+    CATALOGUE_RETRIES_TOTAL.inc(mcp_server=mcp_server, outcome=outcome)
 
 
 def record_cold_start(mcp_server: str, duration: float, mode: str = "subprocess"):

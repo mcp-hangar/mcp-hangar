@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast, ParamSpec, TypeVar
 import yaml
 
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
-from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
+from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
@@ -30,6 +30,7 @@ from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .bootstrap.group_circuit_metric import observe_group_circuit
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
+from .tools.batch.tenant_admission import configure_tenant_limits, parse_tenant_limits, TenantLimits
 
 if TYPE_CHECKING:
     from ..application.read_models.tool_projection import ToolProjectionRegistry
@@ -486,6 +487,12 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
     (#1424). It used to build after stopping them, and a refused block left
     a reload half-applied.
 
+    Every top-level server is built before any group, so a group member that
+    names one resolves to it whatever the order in the file (#1437). In file
+    order, a group listed before its member's server built the member from the
+    member entry alone: a server with no command, and not the one the
+    repository held under that id.
+
     Args:
         config: Dictionary mapping mcp_server IDs to mcp_server spec dictionaries
 
@@ -493,6 +500,7 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
         The built configuration; `commit` puts it in force.
     """
     with _building(_StagedConfig()) as staged:
+        groups: list[tuple[str, dict[str, Any]]] = []
         for mcp_server_id, spec_dict in config.items():
             result = validate_mcp_server_id(mcp_server_id)
             if not result.valid:
@@ -502,10 +510,13 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
             mode = spec_dict.get("mode", "subprocess")
 
             if mode == "group":
-                _load_group_config(mcp_server_id, spec_dict)
+                groups.append((mcp_server_id, spec_dict))
                 continue
 
             _load_mcp_server_config(mcp_server_id, spec_dict)
+
+        for group_id, spec_dict in groups:
+            _load_group_config(group_id, spec_dict)
     return staged
 
 
@@ -521,6 +532,37 @@ def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
             default="round_robin",
         )
         return LoadBalancerStrategy.ROUND_ROBIN
+
+
+#: What a group's member entry sets about its place in the group, rather than
+#: about the server: the only keys read when the member is a declared server.
+_MEMBER_ENTRY_KEYS = frozenset({"id", "weight", "priority", "tools"})
+
+#: What an inline member entry must set to be a server of its own, by mode: the
+#: fields `_load_mcp_server_config` builds each kind of server from (#1437).
+_RUNS_WITH: dict[McpServerMode, tuple[str, ...]] = {
+    McpServerMode.SUBPROCESS: ("command",),
+    McpServerMode.DOCKER: ("image", "build"),
+    McpServerMode.CONTAINER: ("image", "build"),
+    McpServerMode.REMOTE: ("endpoint",),
+}
+_RUNS_WITH_HINT = "subprocess needs 'command', docker needs 'image' or 'build', remote needs 'endpoint'"
+
+
+def _defines_a_server(member_spec: dict[str, Any]) -> bool:
+    """Whether a member entry says how to run its server, so it can be built from the entry alone.
+
+    The mode is read as the server reads it, with `McpServerMode.normalize`. A
+    mode that does not normalise is left to the server's own check, which
+    refuses it. `url` is not read: the loader builds a remote server from
+    `endpoint` alone, so a member with only `url` would have no address.
+    """
+    try:
+        mode = McpServerMode.normalize(member_spec.get("mode", "subprocess"))
+    except (ValueError, TypeError):
+        return True
+    required = _RUNS_WITH.get(mode)
+    return required is None or any(member_spec.get(key) for key in required)
 
 
 def _load_group_members(
@@ -545,15 +587,33 @@ def _load_group_members(
             logger.warning("skipping_invalid_member_id", member_id=member_id)
             continue
 
-        # Use the mcp_server this load already built, if the top-level
-        # mcp_servers section defines it. Only create a new one from member_spec
+        # Use the mcp_server this load already built: the top-level entry of
+        # that id, which `build_config` builds before any group (#1437), or an
+        # earlier group's inline member. Only create a new one from member_spec
         # if not found. Not the running repository: a reload builds before it
         # removes anything, and reusing the running aggregate would ignore an
         # edited inline member (#1424).
         member_mcp_server = _staged_config().servers.get(member_id)
         if member_mcp_server is None:
+            if not _defines_a_server(member_spec):
+                raise ConfigurationError(
+                    f"Group '{group_id}' member '{member_id}' names no server: mcp_servers declares no "
+                    f"'{member_id}', and the member entry does not say how to run one ({_RUNS_WITH_HINT}). "
+                    f"Declare '{member_id}' under mcp_servers, or give the member entry its own definition."
+                )
             member_mcp_server = _load_mcp_server_config(member_id, member_spec)
         else:
+            ignored = sorted(set(member_spec) - _MEMBER_ENTRY_KEYS)
+            if ignored:
+                # The file cannot mean both. The member is the server declared
+                # under that id, whatever the member entry says.
+                logger.warning(
+                    "group_member_entry_settings_ignored",
+                    group_id=group_id,
+                    member_id=member_id,
+                    ignored=ignored,
+                    reason="a server of this id is already declared; the member is that server",
+                )
             logger.debug(
                 "group_member_resolved_from_mcp_servers",
                 group_id=group_id,
@@ -1189,6 +1249,39 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     logger.debug("tool_access_topology_mode_set", mode=mode)
 
 
+def _init_required_catalogue_from_config(full_config: dict[str, Any]) -> None:
+    """Apply ``tool_access.required_catalogue`` (#1446).
+
+    ::
+
+        tool_access:
+          mode: front_door
+          required_catalogue:
+            servers: [payments, search-pool]
+            retry_for_s: 600
+
+    The servers a front-door replica must have projected once before
+    ``/health/ready`` answers 200, for at most ``retry_for_s`` after the
+    configuration is first applied. The window counts from that first apply,
+    before the rest of boot and the warm-up, so ``retry_for_s`` must cover
+    those too; see `server/catalogue_readiness.py`. Absent
+    means readiness keeps today's rule. In ``egress`` the block is checked, so a
+    name that is not in ``mcp_servers`` is refused there too, and then not
+    applied: readiness there does not depend on backends.
+
+    Raises:
+        ConfigurationError: If the block is malformed or names an unknown server.
+    """
+    from ..domain.services.tool_access_resolver import configured_topology_mode
+    from .catalogue_readiness import configure_required_catalogue, required_catalogue
+
+    required = required_catalogue(full_config)
+    if required is not None and configured_topology_mode(full_config) != "front_door":
+        logger.info("required_catalogue_not_applied", reason="egress")
+        required = None
+    configure_required_catalogue(required)
+
+
 def _init_param_validation_from_config(full_config: dict[str, Any]) -> None:
     """Apply ``headers.param_validation.required`` (ADR-025 Decision 2).
 
@@ -1400,6 +1493,27 @@ def _concurrency_limits(full_config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _init_tenant_limits_from_config(full_config: dict[str, Any]) -> None:
+    """Put `execution.tenant_limits` in force (#1445).
+
+    Reconciled, not replaced: a tenant whose limits did not change keeps its
+    budget, with the calls it has in flight and the tokens it has spent, so a
+    reload -- a byte-identical one from the file watcher included -- neither
+    frees slots that running calls hold nor refills a spent budget. An absent
+    section removes every budget. See `tools/batch/tenant_admission.py`.
+    """
+    limits = _tenant_limits(full_config)
+    configure_tenant_limits(limits)
+    if limits:
+        logger.info("tenant_limits_configured", entries=sorted(limits))
+
+
+def _tenant_limits(full_config: dict[str, Any]) -> dict[str, TenantLimits]:
+    """The checked ``execution.tenant_limits``, empty when there is none."""
+    execution_config = full_config.get("execution") or {}
+    return parse_tenant_limits(execution_config.get("tenant_limits") if isinstance(execution_config, dict) else None)
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1426,13 +1540,61 @@ def _validator_specs(full_config: dict[str, Any]) -> list[dict[str, Any]] | None
     return None
 
 
+def http_graceful_shutdown_timeout(full_config: dict[str, Any]) -> int | None:
+    """``http.graceful_shutdown_timeout_s``, checked (#1447). Absent means uvicorn's default.
+
+    ::
+
+        http:
+          graceful_shutdown_timeout_s: 90
+
+    How long ``serve --http`` waits, once it is told to stop, for the requests
+    already in flight to finish before it cancels them. uvicorn's own default is
+    ``None``: it waits as long as they take, so the only bound is whatever ends
+    the process -- in Kubernetes, the kubelet's SIGKILL at the end of the pod's
+    grace period. Absent keeps exactly that, so nobody's behaviour changes on
+    upgrade.
+
+    Read when the HTTP server starts, and passed to uvicorn then. A reload
+    checks the value, so a bad one refuses the reload like any other section,
+    but the running server keeps the bound it started with until it restarts.
+
+    Whole seconds: uvicorn declares the option as ``int | None``, and a pod's
+    ``terminationGracePeriodSeconds``, which has to exceed it, is counted in
+    whole seconds too. ``True`` is an ``int`` to ``isinstance`` and is refused
+    explicitly -- ``graceful_shutdown_timeout_s: yes`` is not a bound of 1.
+
+    Raises:
+        ConfigurationError: If ``http`` is not a mapping, or the key is present
+            and not a positive integer.
+    """
+    section = full_config.get("http")
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigurationError(f"Invalid http section {section!r}. It must be a mapping.")
+
+    raw = section.get("graceful_shutdown_timeout_s")
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise ConfigurationError(
+            f"Invalid http.graceful_shutdown_timeout_s {raw!r}. It must be a positive whole number of "
+            "seconds; omit the key entirely to keep uvicorn's default, which waits for in-flight "
+            "requests without a bound."
+        )
+    return raw
+
+
 #: Every process-wide section, in the order startup has always applied them:
 #: the concurrency manager before the executor that reads it, and before the
 #: servers set their own limits on it. A reload applies the same list (#1424);
 #: it used to apply none of it.
 _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_concurrency_from_config,
+    _init_tenant_limits_from_config,
     _init_topology_mode_from_config,
+    _init_required_catalogue_from_config,
     _init_param_validation_from_config,
     _init_resource_links_from_config,
     _init_interceptors_from_config,
@@ -1453,15 +1615,23 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     """
     from ..application.services.interceptor_registry import build_validator_pipeline
     from ..domain.services.tool_access_resolver import configured_topology_mode
+    from .catalogue_readiness import required_catalogue
 
     configured_topology_mode(full_config)
+    required_catalogue(full_config)
     _param_validation_required(full_config)
     _max_links_per_tenant(full_config)
     _ui_resource_policies(full_config)
+    # Checked, not applied: `run_http` reads it when the server starts (#1447).
+    http_graceful_shutdown_timeout(full_config)
     try:
         _concurrency_limits(full_config)
     except (TypeError, ValueError) as e:
         raise ConfigurationError(f"Invalid concurrency limit in execution or mcp_servers: {e}") from e
+    try:
+        _tenant_limits(full_config)
+    except ValueError as e:
+        raise ConfigurationError(f"Invalid execution.tenant_limits: {e}") from e
     try:
         build_validator_pipeline(_validator_specs(full_config))
     except (TypeError, ValueError) as e:
@@ -1471,10 +1641,11 @@ def check_process_config(full_config: dict[str, Any]) -> None:
 def apply_process_config(full_config: dict[str, Any]) -> None:
     """Apply every process-wide section of a configuration: startup's step, and a reload's.
 
-    `tool_access.mode`, `execution`, `headers.param_validation`,
-    `resource_links`, `interceptors` and `ui_resources`. A section that is
-    absent is put back to its default, so deleting a block and reloading
-    removes it. Checked first, so nothing is applied unless all of it can be.
+    `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
+    `headers.param_validation`, `resource_links`, `interceptors` and
+    `ui_resources`. A section that is absent is put back to its default, so
+    deleting a block and reloading removes it. Checked first, so nothing is
+    applied unless all of it can be.
     """
     check_process_config(full_config)
     for apply_section in _PROCESS_SECTIONS:
