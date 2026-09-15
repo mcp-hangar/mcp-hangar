@@ -139,16 +139,15 @@ class GiveUpOnMcpServerHandler(BaseMcpServerHandler):
         """
         Leave a degraded mcp_server DEAD (#1361).
 
-        The stop counter keeps the increment it had when this was a stop: the
-        connection is closed either way, under the reason the saga gave.
+        Not counted here: the give-up records a stop with its own reason
+        (#1360), and the stop counter counts it from that event, as it counts
+        every stop the aggregate records.
 
         Returns:
             Whether it was given up on, and the state it is in.
         """
         mcp_server = self._get_mcp_server(command.mcp_server_id)
         gave_up = mcp_server.give_up(command.reason)
-        if gave_up:
-            record_mcp_server_stop(command.mcp_server_id, reason=command.reason)
         self._publish_events(mcp_server)
 
         return {"mcp_server": command.mcp_server_id, "gave_up": gave_up, "state": mcp_server.state.value}

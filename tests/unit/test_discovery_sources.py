@@ -113,8 +113,10 @@ class TestDockerDiscoverySource:
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_docker_client.ping.return_value = True
+        mock_docker_client.containers.list.return_value = []
 
         source = DockerDiscoverySource()
+        await source.discover()
         healthy = await source.health_check()
 
         assert healthy is True

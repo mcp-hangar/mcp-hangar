@@ -505,9 +505,13 @@ class Hangar:
         """Start Hangar and initialize all components.
 
         This bootstraps the application context, registers mcp_servers,
-        and starts background workers.
+        and starts the background workers `serve` starts: the GC worker,
+        which stops a server idle past its `idle_ttl_s`, the health-check
+        worker, the metrics snapshot worker and, for a config file, the
+        config reload worker. Discovery starts too, when configured.
 
-        Called automatically when using async context manager.
+        Called automatically when using async context manager. A second call
+        while started does nothing.
         """
         if self._started:
             return
@@ -535,15 +539,16 @@ class Hangar:
                 lambda: bootstrap(config_path=self._config_path),
             )
 
-        await loop.run_in_executor(self._executor, self._start_discovery)
+        await loop.run_in_executor(self._executor, self._start_background)
         self._started = True
         logger.info("hangar_started", config_path=self._config_path)
 
     async def stop(self) -> None:
         """Stop Hangar and cleanup resources.
 
-        Stops all mcp_servers and background workers.
-        Called automatically when using async context manager.
+        Stops all mcp_servers, and stops the background workers and waits for
+        their threads to end. Called automatically when using async context
+        manager. A second call does nothing.
         """
         # Not gated on `_started`: a `start()` that raised leaves the thread
         # pool running, and only this releases it. The context is shut down
@@ -571,28 +576,33 @@ class Hangar:
         """Async context manager exit."""
         await self.stop()
 
-    def _start_discovery(self) -> None:
-        """Run discovery, when the configuration enables it.
+    def _start_background(self) -> None:
+        """Start the background workers, then discovery when configured.
 
-        `bootstrap()` builds the orchestrator and its sources and starts
-        neither; `serve` starts them in `ServerLifecycle`. The facade never did,
-        so a discovery section, from a file or from `enable_discovery()`, was
-        built and never ran a cycle.
+        `bootstrap()` builds the workers, the orchestrator and its sources, and
+        starts none of them; `serve` starts them in `ServerLifecycle`. The
+        facade started neither, so an embedded gateway never stopped an idle
+        server or health-checked one (#1435), and a discovery section, from a
+        file or from `enable_discovery()`, was built and never ran a cycle
+        (#1423). The workers start through the function `ServerLifecycle`
+        uses, so the two run the same set. `stop()` stops them, through
+        `ApplicationContext.shutdown()`.
         """
+        from .server.bootstrap.workers import start_background_workers
         from .server.lifecycle import start_discovery_loop
 
-        orchestrator = self._context.discovery_orchestrator if self._context else None
-        if orchestrator is None:
-            return
+        assert self._context is not None
+        context = self._context
         try:
-            self._discovery = start_discovery_loop(orchestrator)
+            start_background_workers(context.background_workers)
+            if context.discovery_orchestrator is not None:
+                self._discovery = start_discovery_loop(context.discovery_orchestrator)
         except Exception:
             # A caller whose `start()` raised does not call `stop()`, so the
-            # context bootstrap just built would be left running. Dropped once
-            # shut down: `ApplicationContext.shutdown()` has no guard against a
-            # second call.
-            assert self._context is not None
-            context, self._context = self._context, None
+            # context bootstrap just built would be left running, its workers
+            # with it. Dropped once shut down: `ApplicationContext.shutdown()`
+            # has no guard against a second call.
+            self._context = None
             context.shutdown()
             raise
 

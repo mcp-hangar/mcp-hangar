@@ -18,6 +18,7 @@ from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     DEGRADED_BY_HEALTH_CHECKS,
+    STOPPED_BY_GIVING_UP,
     CapabilityViolationDetected,
     DomainEvent,
     McpServerCapabilityQuarantined,
@@ -140,15 +141,24 @@ def _tool_call_params(tool_name: str, arguments: dict[str, Any], progress_token:
     return params
 
 
+def _rpc_error_code(error: dict[str, Any]) -> int | None:
+    """An upstream JSON-RPC error's code, or None when it is not an integer.
+
+    The spec's code is an integer. Anything else the upstream sent in its place
+    is not copied.
+    """
+    code = error.get("code")
+    return code if type(code) is int else None
+
+
 def _rpc_error_type(error: dict[str, Any]) -> str:
     """``ToolInvocationFailed.error_type`` for an upstream JSON-RPC error: its code, or ``_OTHER``.
 
-    The spec's code is an integer. Anything else the upstream sent in its place
-    is not copied: ``error_type`` is the bounded classifier that summary logs,
-    the security log and audit records carry (GHSA-qwq2-7g49-jxc6).
+    ``error_type`` is the bounded classifier that summary logs, the security log
+    and audit records carry (GHSA-qwq2-7g49-jxc6).
     """
-    code = error.get("code")
-    return str(code) if type(code) is int else OTHER_ERROR_TYPE
+    code = _rpc_error_code(error)
+    return str(code) if code is not None else OTHER_ERROR_TYPE
 
 
 #: The two reasons `ensure_ready()` gives a call it will not start the server
@@ -1838,7 +1848,13 @@ class McpServer(AggregateRoot):
                 raise ToolInvocationError(
                     self.mcp_server_id,
                     f"tool_error: {error_msg}",
-                    {"tool_name": tool_name, "correlation_id": correlation_id},
+                    {
+                        "tool_name": tool_name,
+                        "correlation_id": correlation_id,
+                        # Whether the error answers the request or reports a broken
+                        # exchange: a group reads it to judge the member (#1409).
+                        "jsonrpc_code": _rpc_error_code(response["error"]),
+                    },
                 )
 
             result = response.get("result", {})
@@ -2113,6 +2129,8 @@ class McpServer(AggregateRoot):
         What the recovery saga does when it runs out of retries (#1361). It used
         to stop the server instead, which returned it to COLD -- the state of a
         server nobody has called yet -- so an outage read as an idle server.
+        It is still recorded as a stop, with its own reason,
+        ``STOPPED_BY_GIVING_UP`` (#1360), and then as the move to DEAD.
 
         Only from DEGRADED, the state the saga gives up on. In any other state
         the server moved on after the event the saga acted on -- a call started
@@ -2139,6 +2157,11 @@ class McpServer(AggregateRoot):
             # not running. A start lists them again.
             self._tools.clear()
             self._meta.clear()
+            # A stop, so the stop counter, the audit log and the stream tell a
+            # give-up from an idle reap or an operator's stop. Before the move
+            # to DEAD: a stop replays to COLD, and the move that follows leaves
+            # the stream, and the state gauge, at DEAD.
+            self._record_event(McpServerStopped(mcp_server_id=self.mcp_server_id, reason=STOPPED_BY_GIVING_UP))
             self._mark_dead(DEAD_GIVEN_UP)
         logger.warning("mcp_server_given_up", mcp_server_id=self.mcp_server_id, reason=reason)
         return True

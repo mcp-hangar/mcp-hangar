@@ -6,7 +6,13 @@ from unittest.mock import MagicMock
 from mcp_hangar.application.commands import GiveUpOnMcpServerCommand, StartMcpServerCommand, StopMcpServerCommand
 from mcp_hangar.application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga, McpServerFailoverSaga
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
-from mcp_hangar.domain.events import HealthCheckFailed, McpServerDegraded, McpServerStarted, McpServerStopped
+from mcp_hangar.domain.events import (
+    STOPPED_BY_GIVING_UP,
+    HealthCheckFailed,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStopped,
+)
 from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 
@@ -366,6 +372,21 @@ class TestMcpServerFailoverSaga:
 
         assert len(saga.get_active_failovers()) == 0
         assert not saga.is_backup_active("backup")
+
+    def test_a_backup_given_up_on_ends_its_failover(self):
+        """A give-up is a stop (#1360): the failover ends, and no failback turns the dead backup cold."""
+        mock_saga_manager = MagicMock()
+        saga = McpServerFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup", auto_failback=True, failback_delay_s=30.0)
+        saga.handle(McpServerDegraded("primary", 3, 5, "error"))
+        saga.handle(McpServerStarted("backup", "subprocess", 5, 100.0))
+
+        saga.handle(McpServerStopped("backup", STOPPED_BY_GIVING_UP))
+        saga.handle(McpServerStarted("primary", "subprocess", 5, 100.0))
+
+        assert saga.get_active_failovers() == {}
+        assert not saga.is_backup_active("backup")
+        mock_saga_manager.schedule_command.assert_not_called()
 
     def test_is_backup_active(self):
         """Test checking if provider is active backup."""
