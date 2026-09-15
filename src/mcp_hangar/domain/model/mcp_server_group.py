@@ -10,6 +10,7 @@ import hashlib
 import time
 from typing import Any
 
+from ...errors import bounded_error_type
 from ...lock_hierarchy import LockLevel, TrackedLock
 from ...logging_config import get_logger
 from ..events import CircuitBreakerStateChanged, DomainEvent
@@ -492,7 +493,13 @@ class McpServerGroup(AggregateRoot):
         try:
             member.mcp_server.ensure_ready()
         except (McpServerStartError, CannotStartMcpServerError) as e:
-            logger.warning(f"Failed to start member {member_id}: {e}")
+            # The type only: a start failure's text can carry what the upstream printed.
+            logger.warning(
+                "group_member_start_failed",
+                group_id=self.id,
+                mcp_server_id=member_id,
+                error_type=bounded_error_type(type(e).__qualname__),
+            )
             with self._lock:
                 # Only update if member still exists (may have been removed)
                 if member_id in self._members:
