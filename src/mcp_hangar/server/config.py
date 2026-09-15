@@ -1189,6 +1189,39 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     logger.debug("tool_access_topology_mode_set", mode=mode)
 
 
+def _init_required_catalogue_from_config(full_config: dict[str, Any]) -> None:
+    """Apply ``tool_access.required_catalogue`` (#1446).
+
+    ::
+
+        tool_access:
+          mode: front_door
+          required_catalogue:
+            servers: [payments, search-pool]
+            retry_for_s: 600
+
+    The servers a front-door replica must have projected once before
+    ``/health/ready`` answers 200, for at most ``retry_for_s`` after the
+    configuration is first applied. The window counts from that first apply,
+    before the rest of boot and the warm-up, so ``retry_for_s`` must cover
+    those too; see `server/catalogue_readiness.py`. Absent
+    means readiness keeps today's rule. In ``egress`` the block is checked, so a
+    name that is not in ``mcp_servers`` is refused there too, and then not
+    applied: readiness there does not depend on backends.
+
+    Raises:
+        ConfigurationError: If the block is malformed or names an unknown server.
+    """
+    from ..domain.services.tool_access_resolver import configured_topology_mode
+    from .catalogue_readiness import configure_required_catalogue, required_catalogue
+
+    required = required_catalogue(full_config)
+    if required is not None and configured_topology_mode(full_config) != "front_door":
+        logger.info("required_catalogue_not_applied", reason="egress")
+        required = None
+    configure_required_catalogue(required)
+
+
 def _init_param_validation_from_config(full_config: dict[str, Any]) -> None:
     """Apply ``headers.param_validation.required`` (ADR-025 Decision 2).
 
@@ -1433,6 +1466,7 @@ def _validator_specs(full_config: dict[str, Any]) -> list[dict[str, Any]] | None
 _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_concurrency_from_config,
     _init_topology_mode_from_config,
+    _init_required_catalogue_from_config,
     _init_param_validation_from_config,
     _init_resource_links_from_config,
     _init_interceptors_from_config,
@@ -1453,8 +1487,10 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     """
     from ..application.services.interceptor_registry import build_validator_pipeline
     from ..domain.services.tool_access_resolver import configured_topology_mode
+    from .catalogue_readiness import required_catalogue
 
     configured_topology_mode(full_config)
+    required_catalogue(full_config)
     _param_validation_required(full_config)
     _max_links_per_tenant(full_config)
     _ui_resource_policies(full_config)
@@ -1471,10 +1507,11 @@ def check_process_config(full_config: dict[str, Any]) -> None:
 def apply_process_config(full_config: dict[str, Any]) -> None:
     """Apply every process-wide section of a configuration: startup's step, and a reload's.
 
-    `tool_access.mode`, `execution`, `headers.param_validation`,
-    `resource_links`, `interceptors` and `ui_resources`. A section that is
-    absent is put back to its default, so deleting a block and reloading
-    removes it. Checked first, so nothing is applied unless all of it can be.
+    `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
+    `headers.param_validation`, `resource_links`, `interceptors` and
+    `ui_resources`. A section that is absent is put back to its default, so
+    deleting a block and reloading removes it. Checked first, so nothing is
+    applied unless all of it can be.
     """
     check_process_config(full_config)
     for apply_section in _PROCESS_SECTIONS:
