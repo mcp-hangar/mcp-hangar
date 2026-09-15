@@ -68,12 +68,13 @@ class _StagedConfig:
 
     `load_config` builds everything here, then `commit` puts it in force in an
     order that leaves no gap a concurrent call could fall into (#1424): first
-    the tool-access policies, the withdrawals and pins, and the
-    `header_exposure` blocks, each swapped in under one lock; then the servers
-    and groups they govern. A reload used to clear the policy set and register
-    it again server by server, so a call that arrived in between was resolved
-    against no policies at all, and a server was in the repository before its
-    policy was registered.
+    the governance overlays -- the tool-access policies, group policies
+    included, the withdrawals and pins, and the `header_exposure` blocks --
+    swapped in as one set, so a decision read through `read_as_one_set` sees
+    all of them or none (#1431); then the servers and groups they govern. A
+    reload used to clear the policy set and register it again server by server,
+    so a call that arrived in between was resolved against no policies at all,
+    and a server was in the repository before its policy was registered.
     """
 
     policies: "ToolAccessResolver" = field(default_factory=_new_policies)
@@ -108,21 +109,27 @@ class _StagedConfig:
         from ..application.read_models.tool_projection import get_tool_projection_registry
         from ..domain.policies.header_exposure import adopt_header_exposure_policies
         from ..domain.services import get_tool_access_resolver
+        from ..domain.services.governance_overlays import swapping
 
         # Outside the resolver lock: this may wait on a database.
         stored = _stored_policies_now(self.stored_policies) if replace else None
         resolver = get_tool_access_resolver()
-        with resolver.locked():
-            resolver.adopt_config_policies(self.policies, replace=replace)
-            if stored is not None:
-                # What startup does after the file: the REST endpoint's stored
-                # policies go over it, so a reload and a restart agree on a
-                # scope both define. Under the same lock, so no call is resolved
-                # against the file's policy on that scope in between; from rows
-                # already read, so nothing waits on the store while it is held.
-                _replay_stored_rows(stored)
-        get_tool_projection_registry().adopt_config_overlays(self.projections, replace=replace)
-        adopt_header_exposure_policies(self.header_exposure, replace=replace)
+        projections = get_tool_projection_registry()
+        # Every overlay in one swap (#1431). Swapped one after another, a
+        # decision reading two of them could take the new policies with the
+        # previous file's withdrawals: a state neither file declares.
+        with swapping():
+            with resolver.locked():
+                resolver.adopt_config_policies(self.policies, replace=replace)
+                if stored is not None:
+                    # What startup does after the file: the REST endpoint's stored
+                    # policies go over it, so a reload and a restart agree on a
+                    # scope both define. Under the same lock, so no call is resolved
+                    # against the file's policy on that scope in between; from rows
+                    # already read, so nothing waits on the store while it is held.
+                    _replay_stored_rows(stored)
+            projections.adopt_config_overlays(self.projections, replace=replace)
+            adopt_header_exposure_policies(self.header_exposure, replace=replace)
 
         repository = _mcp_server_repository()
         for mcp_server_id, mcp_server in self.servers.items():

@@ -263,9 +263,15 @@ def _deliverable(tenant_id: str | None, mcp_server_id: str, upstream_uri: str) -
     if not _ui_guard().evaluate(upstream_uri, tenant_id).allowed:
         return False
 
+    from functools import partial
+
+    from ..domain.services.governance_overlays import read_as_one_set
     from .flat_tool_projection import is_governed_allowed
 
-    return is_governed_allowed(mcp_server_id, upstream_uri, kind="resource", tenant_id=tenant_id)
+    # Against one configuration's overlays, never a mix of two (#1431).
+    return read_as_one_set(
+        partial(is_governed_allowed, mcp_server_id, upstream_uri, kind="resource", tenant_id=tenant_id)
+    )
 
 
 #: ``(relay method, result key, URI field)`` for the two catalogue listings.

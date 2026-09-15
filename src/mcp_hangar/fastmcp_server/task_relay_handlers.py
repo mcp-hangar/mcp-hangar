@@ -28,6 +28,26 @@ Registers the THREE methods SEP-2663 defines: poll a relayed governed task
   cooperative, so claiming a status the upstream never reported would be the
   fabrication the spec warns about.
 
+* **Tool access, as it is now.** A task is its tool's call carried on, so its
+  follow-ups get the answer a new call of that tool would get now: the tool
+  policy, the withdrawals and the caller's tenant, asked through the executor's
+  own gates (#1473). The store records the call's server and tool when it
+  registers the task. Per method:
+
+  - ``tasks/update`` sends the tool new input, so it is refused as a call is,
+    before the consent gate opens or the upstream is asked anything.
+  - ``tasks/cancel`` is never refused for this. Stopping work is always allowed.
+  - ``tasks/get`` still serves a status, so a caller can see a task it
+    cancelled end. A poll that would hand over what the tool produced -- a
+    result, an error or input requests, or any ``completed``, ``failed`` or
+    ``input_required`` answer -- is refused, and a legacy upstream's
+    ``tasks/result`` is never fetched for it.
+
+  A refusal is ``-32602``, the code this relay refuses a drifted digest with,
+  carrying the call's message and ``data.error_type`` (``ToolAccessDeniedError``
+  or ``ToolWithdrawnError``). A task registered without its tool cannot be
+  checked, so it is refused the same way (fail-closed).
+
 ## Who is served, and what everyone else gets
 
 SEP-2663 splits refusal into two codes, and the split is deliberate:
@@ -399,6 +419,42 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
         return key
 
+    def _tool_access_refusal(key: tuple[str, str]) -> Exception | None:
+        """The error a follow-up of ``key`` is refused with now, or ``None`` when its tool is still allowed.
+
+        Asks what a new call of the task's tool would be refused with (#1473).
+        Call only after ``store.authorize(key)``.
+        """
+        # Lazily: the batch package reaches `server.bootstrap`, which imports this module back (#894).
+        from ..server.tools.batch.executor import current_tool_access_refusal
+
+        identity = get_identity_context()
+        tenant_id = identity.caller.tenant_id if identity is not None and identity.caller is not None else None
+        recorded = store.task_tool(key)
+        if recorded is None:
+            # Fail closed: a task registered without its tool cannot be checked.
+            refusal: tuple[str, str] | None = ("Tool not available for this task", "ToolAccessDeniedError")
+        else:
+            refusal = current_tool_access_refusal(recorded[0], recorded[1], tenant_id, target_server_id=key[0])
+        if refusal is None:
+            return None
+        message, error_type = refusal
+        logger.info(
+            "task_follow_up_refused",
+            target_server_id=key[0],
+            task_id=key[1],
+            tool=recorded[1] if recorded is not None else None,
+            tenant_id=tenant_id,
+            error_type=error_type,
+        )
+        error: Exception = make_mcp_error(INVALID_PARAMS, message, {"error_type": error_type})
+        return error
+
+    async def _refuse_unless_tool_allowed(key: tuple[str, str]) -> None:
+        refusal = await asyncio.to_thread(_tool_access_refusal, key)
+        if refusal is not None:
+            raise refusal
+
     async def _sync_snapshot_from_result(key: tuple[str, str], result: dict[str, Any]) -> None:
         """Sync the local snapshot from a raw upstream ``tasks/get`` result dict."""
         status = result.get("status")
@@ -482,6 +538,10 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
                 result = resp.get("result") if isinstance(resp, dict) else None
                 if isinstance(result, dict):
                     await _sync_snapshot_from_result(key, result)
+                    if _carries_output(result):
+                        # A status is served; what the tool produced is not, once
+                        # a call of the tool would be refused (#1473).
+                        await _refuse_unless_tool_allowed(key)
                     if result.get("result") is not None or result.get("status") == "completed":
                         # Fail-closed supply-chain re-verification; its McpError propagates.
                         # Runs BEFORE the payload is fetched, not just before it is
@@ -550,6 +610,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         The ledger still tracks truth: the entry is marked cancelled and retired
         ONLY when the upstream actually confirms, and is otherwise kept with its
         real status intact.
+
+        Not checked against the tool's current access (#1473): stopping work is
+        always allowed, including for a tool a call could no longer reach.
         """
         token = _bridge_identity(ctx)
         try:
@@ -607,6 +670,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             key = await _resolve_owned_key(task_id)
             if not await asyncio.to_thread(store.authorize, key):
                 raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
+            # New input for the tool: refused as a new call of it would be (#1473),
+            # before the gate opens or the upstream is asked anything.
+            await _refuse_unless_tool_allowed(key)
             principal_id = _current_principal_id()
 
             # Key the decision off the current upstream input_required state.
@@ -646,6 +712,17 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
     low.add_request_handler("tasks/get", _GetTaskParams, _get)
     low.add_request_handler("tasks/cancel", _CancelTaskParams, _cancel)
     low.add_request_handler("tasks/update", _UpdateTaskParams, _update)
+
+
+#: Statuses whose answer is the tool's output or its request for input, not only a status.
+_OUTPUT_STATUSES: frozenset[str] = frozenset({"completed", "failed", "input_required"})
+
+
+def _carries_output(result: dict[str, Any]) -> bool:
+    """Does an upstream ``tasks/get`` answer carry what the tool produced, rather than only a status?"""
+    if result.get("status") in _OUTPUT_STATUSES:
+        return True
+    return any(result.get(field) is not None for field in ("result", "error", "inputRequests", "input_requests"))
 
 
 def _cancel_confirmed(resp: Any) -> bool:
