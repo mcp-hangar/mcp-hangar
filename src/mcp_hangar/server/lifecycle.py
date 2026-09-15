@@ -12,6 +12,7 @@ The lifecycle flow:
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 import ipaddress
 from pathlib import Path
@@ -241,6 +242,81 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     logger.info("front_door_warmup_complete", warmed=warmed, failed=failed, skipped_dead=skipped)
 
 
+def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.Thread:
+    """Warm the front door's catalogue, then run *retry* on the servers it missed, on a thread of its own.
+
+    One thread for both: the retry starts where the warm-up ends, and each
+    returns at once where it does not apply (``egress``, or no
+    ``tool_access.required_catalogue``, #1446). On a thread because a backend
+    handshake is I/O, and nothing may wait on it: `build_readiness_report`
+    spells out why gating the serving path on a warm backend deadlocks the
+    deployment. The front door serves a short list until this finishes, which
+    is the bounded version of serving an empty one forever (#878, #885, #886).
+
+    `ServerLifecycle.start` and the `Hangar` facade both start it here (#1465).
+
+    Args:
+        runtime: The runtime holding the fleet and the command bus.
+        retry: The required-catalogue retry; its ``stop`` ends it.
+
+    Returns:
+        The started thread.
+    """
+
+    def warm_up() -> None:
+        warm_the_front_door_catalogue(runtime)
+        retry.run()
+
+    thread = threading.Thread(target=warm_up, name="mcp-hangar-front-door-warmup", daemon=True)
+    thread.start()
+    return thread
+
+
+def start_coordination() -> None:
+    """Start the management lease keeper, then the event tailer, where bootstrap built them.
+
+    `ServerLifecycle.start` and the `Hangar` facade both start them here, first,
+    before the workers and discovery (#1465). Everything those run asks whether
+    this instance holds the lease, and a keeper that has not started yet answers
+    no. Starting it here rather than in bootstrap means a process that is
+    assembled but never run never claims to be the manager. The tailer starts
+    after the handlers are registered -- which bootstrap has done by now -- so a
+    peer's event is not applied to an empty handler table.
+    """
+    keeper = get_lease_keeper()
+    if keeper is not None:
+        keeper.start()
+
+    tailer = get_event_tailer()
+    if tailer is not None:
+        tailer.start()
+
+
+def stop_coordination(shut_down: Callable[[], None]) -> None:
+    """Stop the event tailer, run *shut_down*, then release the management lease.
+
+    The tailer stops after the loops it feeds, and the lease is released last:
+    releasing hands management to a peer in seconds rather than a TTL, so
+    everything this instance was doing under it has to have stopped first.
+    Released even when *shut_down* raises, so a failed shutdown does not cost
+    a peer the wait for the TTL. `ServerLifecycle.shutdown` and the `Hangar`
+    facade both stop them here (#1465).
+
+    Args:
+        shut_down: The application context's shutdown.
+    """
+    tailer = get_event_tailer()
+    if tailer is not None:
+        tailer.stop()
+
+    try:
+        shut_down()
+    finally:
+        keeper = get_lease_keeper()
+        if keeper is not None:
+            keeper.stop()
+
+
 def mcp_app_for_serving(mcp_server: Any) -> Any:
     """Build the ASGI app ``serve --http`` mounts at ``/mcp``.
 
@@ -368,45 +444,17 @@ class ServerLifecycle:
         self._running = True
         logger.info("server_lifecycle_start")
 
-        # First: everything below asks whether this instance holds the lease,
-        # and a keeper that has not started yet answers no. Starting it here
-        # rather than in bootstrap means a process that is assembled but never
-        # run never claims to be the manager.
-        keeper = get_lease_keeper()
-        if keeper is not None:
-            keeper.start()
+        # First: everything below asks whether this instance holds the lease.
+        # The `Hangar` facade starts coordination, the workers and the warm-up
+        # through the same functions (#1435, #1465).
+        start_coordination()
 
-        # After the handlers are registered -- which bootstrap has done by now --
-        # so a peer's event is not applied to an empty handler table.
-        tailer = get_event_tailer()
-        if tailer is not None:
-            tailer.start()
-
-        # The `Hangar` facade starts them through the same function (#1435).
         start_background_workers(self._context.background_workers)
 
         self._start_discovery()
 
-        # Last, and on a thread of its own: a backend handshake is I/O, and
-        # nothing may wait on it. `build_readiness_report` above spells out why
-        # -- gating the serving path on a warm backend deadlocks the deployment.
-        # The front door serves a short list until this finishes, which is the
-        # bounded version of serving an empty one forever (#878, #885, #886).
-        threading.Thread(
-            target=self._warm_up,
-            name="mcp-hangar-front-door-warmup",
-            daemon=True,
-        ).start()
-
-    def _warm_up(self) -> None:
-        """Warm the front door's catalogue, then retry the required servers it missed (#1446).
-
-        One thread for both: the retry starts where the warm-up ends, and each
-        returns at once where it does not apply (``egress``, or no
-        ``tool_access.required_catalogue``).
-        """
-        warm_the_front_door_catalogue(self._context.runtime)
-        self._catalogue_retry.run()
+        # Last, and on a thread of its own.
+        start_front_door_warm_up(self._context.runtime, self._catalogue_retry)
 
     def _start_discovery(self) -> None:
         """Start discovery on a dedicated long-lived event loop."""
@@ -706,17 +754,7 @@ class ServerLifecycle:
         # over in seconds". Releasing it while discovery was still winding down
         # would let a peer start converging against a fleet this instance is
         # still touching.
-        tailer = get_event_tailer()
-        if tailer is not None:
-            tailer.stop()
-
-        self._context.shutdown()
-
-        # Last. Releasing hands management to a peer in seconds rather than a
-        # TTL, and everything this instance was doing under it has now stopped.
-        keeper = get_lease_keeper()
-        if keeper is not None:
-            keeper.stop()
+        stop_coordination(self._context.shutdown)
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")
