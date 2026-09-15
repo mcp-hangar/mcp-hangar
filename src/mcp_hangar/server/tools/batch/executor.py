@@ -262,6 +262,95 @@ def _withdrawn_in_scope(
     return any(proj_registry.is_withdrawn(group_id, tool, tenant_id=tenant_id) for group_id in owning_groups)
 
 
+#: What a call refused by tool access is told. A task's follow-up is told the same (#1473).
+_TOOL_ACCESS_DENIED = "Tool not available for this mcp_server"
+
+
+def _withdrawn_message(tool: str) -> str:
+    """What a call of a withdrawn *tool* is told. A task's follow-up is told the same (#1473)."""
+    return f"Tool '{tool}' is withdrawn for this tenant"
+
+
+def _policy_scopes(
+    mcp_server: str, is_group: bool, target_server_id: str, owning_groups: tuple[str, ...]
+) -> list[tuple[str, str | None, str | None]]:
+    """Every ``(server id, group id, member server id)`` a call's policy is resolved under.
+
+    - A call naming a group has one scope: the group, plus the member
+      ``_gate_resolve_target`` selected. The member's policy is keyed by
+      its SERVER id (#1164).
+    - A call naming a server has its own scope. When the server is a group
+      member, there is also one scope per owning group, asked as a call
+      naming that group and routed to this member is asked.
+
+    The access gate, the approval gate, the re-check after a hold and a
+    task's follow-ups ask these same scopes, each with the caller's tenant.
+    The approval gate used to ask only the named server, with no tenant.
+    """
+    if is_group:
+        return [(mcp_server, mcp_server, target_server_id or None)]
+    return member_policy_scopes(mcp_server, owning_groups)
+
+
+def _allowed_in_every_scope(
+    resolver: Any, tool: str, tenant_id: str | None, scopes: list[tuple[str, str | None, str | None]]
+) -> bool:
+    """Whether every scope's policy allows *tool* for *tenant_id*. Deny wins."""
+    return all(
+        resolver.is_tool_allowed(
+            mcp_server_id=server_id,
+            tool_name=tool,
+            group_id=group_id,
+            member_id=tenant_id,
+            member_server_id=member_server_id,
+        )
+        for server_id, group_id, member_server_id in scopes
+    )
+
+
+def _resolve_projection(
+    proj_registry: Any, mcp_server: str, tool: str, tenant_id: str | None, target_server_id: str
+) -> Any:
+    """The tool's projection under the id a call named, else under the member it went to (#1040)."""
+    resolved = proj_registry.resolve(mcp_server, tool, tenant_id)
+    if resolved is None and target_server_id and target_server_id != mcp_server:
+        resolved = proj_registry.resolve(target_server_id, tool, tenant_id)
+    return resolved
+
+
+def current_tool_access_refusal(
+    mcp_server: str, tool: str, tenant_id: str | None, *, target_server_id: str = ""
+) -> tuple[str, str] | None:
+    """What a new call of *tool* on *mcp_server* would be refused with now, by tool access or withdrawal.
+
+    A relayed task's follow-ups ask this, so a task and a call of its tool get
+    one answer (#1473). The questions are the access and withdrawal gates':
+    the same scopes, resolver, projection lookup and tenant, in the same
+    order, and the same refusal.
+
+    Args:
+        mcp_server: The id the call that created the task named: a group or a server.
+        tool: The tool that call named.
+        tenant_id: The caller's tenant.
+        target_server_id: The server the call went to. For a group, the member it selected.
+
+    Returns:
+        ``(message, error_type)`` as the call's refusal carries them, or ``None``
+        when a call would pass both gates.
+    """
+    # A group id is not a server id, so this is the choice `_gate_resolve_target` makes.
+    is_group = mcp_server in GROUPS
+    owning_groups = () if is_group else _groups_owning(mcp_server)
+    scopes = _policy_scopes(mcp_server, is_group, target_server_id, owning_groups)
+    if not _allowed_in_every_scope(get_tool_access_resolver(), tool, tenant_id, scopes):
+        return _TOOL_ACCESS_DENIED, "ToolAccessDeniedError"
+    proj_registry = get_tool_projection_registry()
+    projection = _resolve_projection(proj_registry, mcp_server, tool, tenant_id, target_server_id)
+    if _withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups):
+        return _withdrawn_message(tool), "ToolWithdrawnError"
+    return None
+
+
 @dataclass
 class _CallPipeline:
     """Mutable state threaded through the gates of a single batch call.
@@ -331,10 +420,9 @@ class _CallPipeline:
         is also where the discovered schema the pin is validated against lives.
         """
         if self._projection is _UNRESOLVED:
-            resolved = self.proj_registry.resolve(self.call.mcp_server, self.call.tool, self.caller_tenant_id)
-            if resolved is None and self.target_server_id and self.target_server_id != self.call.mcp_server:
-                resolved = self.proj_registry.resolve(self.target_server_id, self.call.tool, self.caller_tenant_id)
-            self._projection = resolved
+            self._projection = _resolve_projection(
+                self.proj_registry, self.call.mcp_server, self.call.tool, self.caller_tenant_id, self.target_server_id
+            )
         return self._projection
 
     def reresolve_projection(self) -> Any:
@@ -364,20 +452,9 @@ class _CallPipeline:
     def policy_scopes(self) -> list[tuple[str, str | None, str | None]]:
         """Every ``(server id, group id, member server id)`` this call's policy is resolved under.
 
-        - A call naming a group has one scope: the group, plus the member
-          ``_gate_resolve_target`` selected. The member's policy is keyed by
-          its SERVER id (#1164).
-        - A call naming a server has its own scope. When the server is a group
-          member, there is also one scope per owning group, asked as a call
-          naming that group and routed to this member is asked.
-
-        The access gate, the approval gate and the re-check after a hold ask
-        these same scopes, each with the caller's tenant. The approval gate
-        used to ask only the named server, with no tenant.
+        See :func:`_policy_scopes`.
         """
-        if self.is_group:
-            return [(self.call.mcp_server, self.call.mcp_server, self.target_server_id or None)]
-        return member_policy_scopes(self.call.mcp_server, self.owning_groups)
+        return _policy_scopes(self.call.mcp_server, self.is_group, self.target_server_id, self.owning_groups)
 
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
@@ -1497,16 +1574,7 @@ class BatchExecutor:
             # `_gate_resolve_target` selected, keyed by its SERVER id (#1164).
             # For a server: its own policy, plus each group that owns it when
             # it is a member named directly. Deny wins.
-            allowed = all(
-                p.resolver.is_tool_allowed(
-                    mcp_server_id=server_id,
-                    tool_name=p.call.tool,
-                    group_id=group_id,
-                    member_id=p.caller_tenant_id,
-                    member_server_id=member_server_id,
-                )
-                for server_id, group_id, member_server_id in p.policy_scopes()
-            )
+            allowed = _allowed_in_every_scope(p.resolver, p.call.tool, p.caller_tenant_id, p.policy_scopes())
             policy_span.set_attribute("policy.allowed", allowed)
 
         if allowed:
@@ -1519,7 +1587,7 @@ class BatchExecutor:
             owning_groups=list(p.owning_groups),
         )
         TOOL_ACCESS_DENIED_TOTAL.inc(mcp_server=p.call.mcp_server, tool=p.call.tool, reason="tool_not_in_access_policy")
-        return p.refuse("Tool not available for this mcp_server", "ToolAccessDeniedError")
+        return p.refuse(_TOOL_ACCESS_DENIED, "ToolAccessDeniedError")
 
     def _gate_withdrawal(self, p: "_CallPipeline") -> CallResult | None:
         """Tool withdrawal status, checked BEFORE backend invoke (#231).
@@ -1553,7 +1621,7 @@ class BatchExecutor:
             index=call.index,
             call_id=call.call_id,
             success=False,
-            error=f"Tool '{call.tool}' is withdrawn for this tenant",
+            error=_withdrawn_message(call.tool),
             error_type="ToolWithdrawnError",
             elapsed_ms=elapsed_ms,
         )
