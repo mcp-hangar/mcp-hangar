@@ -257,3 +257,6 @@ coverage.xml
 .opencode/
 **/.opencode/
 coverage_html/
+
+# Written by every coverage run (CI decision-coverage, local --cov-report=json); never committed (#1489).
+coverage.json
