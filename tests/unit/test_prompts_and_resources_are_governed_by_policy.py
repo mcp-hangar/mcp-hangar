@@ -301,8 +301,8 @@ class TestPromptsAreFilteredAtBothSurfaces:
         get_tool_access_resolver().set_group_policy("group_g", ToolAccessPolicy(deny_list=("draft_*",)), kind="prompt")
 
         with patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
-            return_value={"member_1": "group_g"},
+            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+            return_value={"member_1": ("group_g",)},
         ):
             assert not is_governed_allowed("member_1", "draft_email", kind="prompt", tenant_id=_TENANT)
             assert is_governed_allowed("member_1", "greet", kind="prompt", tenant_id=_TENANT)
@@ -424,8 +424,8 @@ class TestAGroupScopePolicyGovernsEverySurface:
         with (
             _groups(),
             patch(
-                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
-                return_value={"member_1": _GROUP},
+                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+                return_value={"member_1": (_GROUP,)},
             ),
             patch.object(pp, "_relay", side_effect=lambda _s, _m, _p: {"result": {"prompts": [_GREET, _DRAFT]}}),
             patch.object(pp, "_upstream_ids", return_value=[_GROUP]),
@@ -455,8 +455,8 @@ class TestAGroupScopePolicyGovernsEverySurface:
         with (
             _groups(),
             patch(
-                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_group",
-                return_value={"member_1": _GROUP},
+                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+                return_value={"member_1": (_GROUP,)},
             ),
         ):
             assert not is_governed_allowed("member_1", "draft_email", kind="prompt", tenant_id=_TENANT)
