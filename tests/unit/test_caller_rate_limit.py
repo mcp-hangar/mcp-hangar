@@ -417,3 +417,24 @@ class TestTheToolLevelCheck:
         assert checks.keys() >= READ_ONLY_TOOLS
         assert {name for name, check in checks.items() if check is not_rate_limited} == READ_ONLY_TOOLS
         assert not_rate_limited("hangar_list") is None
+
+    def test_hangar_sources_is_charged(self, monkeypatch: pytest.MonkeyPatch):
+        """It runs every discovery source's health check, a call out of Hangar (#1479)."""
+        from mcp_hangar.server.tools import discovery
+
+        checks: dict[str, Any] = {}
+
+        def recorder(*, tool_name: str, check_rate_limit: Any, **_: Any) -> Any:
+            checks[tool_name] = check_rate_limit
+            return lambda func: func
+
+        monkeypatch.setattr(discovery, "mcp_tool_wrapper", recorder)
+        discovery.register_discovery_tools(SimpleNamespace(tool=lambda *_a, **_k: lambda func: func))
+        monkeypatch.setattr(
+            validation, "get_context", lambda: SimpleNamespace(rate_limiter=_shared(burst=1), security_handler=Mock())
+        )
+
+        assert "hangar_sources" not in READ_ONLY_TOOLS
+        checks["hangar_sources"]("global")
+        with pytest.raises(RateLimitExceeded, match="the rate limit all callers share for hangar_sources"):
+            checks["hangar_sources"]("global")

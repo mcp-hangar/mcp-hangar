@@ -238,7 +238,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_sources",
         rate_limit_key=key_global,
-        check_rate_limit=not_rate_limited,
+        check_rate_limit=lambda key: check_rate_limit("hangar_sources"),
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,

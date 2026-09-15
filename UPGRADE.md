@@ -18,9 +18,11 @@ What is new:
   it never refuses a call the shared budget would not.
 - **The read-only tools are never refused** by the rate limit: `hangar_list`,
   `hangar_status`, `hangar_details`, `hangar_group_list`, `hangar_health`,
-  `hangar_metrics`, `hangar_discovered`, `hangar_quarantine` and
-  `hangar_sources`. `hangar_tools` is still limited, because it may start a
-  stopped server.
+  `hangar_metrics`, `hangar_discovered` and `hangar_quarantine`. They read
+  Hangar's own state and call nothing outside it. `hangar_tools` is still
+  limited, because it may start a stopped server. So is `hangar_sources`,
+  because it runs every discovery source's health check, and the Kubernetes
+  source's check is a call to the cluster's API.
 - **A refusal reads the same on every path.** Its message names the code, the
   budget, the limit and when to retry, as in the example below. A `hangar_call`
   result has `error_type` `RateLimitExceeded`. The HTTP API answers `429` with

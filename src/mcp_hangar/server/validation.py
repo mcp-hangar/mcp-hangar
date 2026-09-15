@@ -51,6 +51,8 @@ def check_rate_limit(key: str = "global") -> None:
 #: rate limit refuses them (#1471): each registers `not_rate_limited` as its
 #: check, and tests/unit/test_caller_rate_limit.py holds the two together.
 #: `hangar_tools` is not one: it may start a stopped server to list its tools.
+#: Nor is `hangar_sources`: it runs every discovery source's health check, a
+#: call out of Hangar (the Kubernetes source's is a call to the cluster's API).
 READ_ONLY_TOOLS = frozenset(
     {
         "hangar_details",
@@ -60,7 +62,6 @@ READ_ONLY_TOOLS = frozenset(
         "hangar_list",
         "hangar_metrics",
         "hangar_quarantine",
-        "hangar_sources",
         "hangar_status",
     }
 )
