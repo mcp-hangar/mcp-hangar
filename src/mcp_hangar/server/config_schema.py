@@ -142,9 +142,11 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
     "startup_checks": frozenset({"enforce"}),
-    # `mode`, read by `config._init_topology_mode_from_config`. `rules` was
-    # listed here too and never read (#1422): see `_REMOVED_SECTION_KEYS`.
-    "tool_access": frozenset({"mode"}),
+    # `mode`, read by `config._init_topology_mode_from_config`, and
+    # `required_catalogue` (#1446), read by `catalogue_readiness.required_catalogue`,
+    # which checks its own keys. `rules` was listed here too and never read
+    # (#1422): see `_REMOVED_SECTION_KEYS`.
+    "tool_access": frozenset({"mode", "required_catalogue"}),
     "truncation": None,  # TruncationConfig.from_dict owns these
     # `tenants` (ADR-024, #1048), read by `config._init_ui_resources_from_config`.
     # Shipped in 2.13.1 without an entry here, so `HANGAR_CONFIG_STRICT=1` --

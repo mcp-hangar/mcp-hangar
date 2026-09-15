@@ -76,8 +76,14 @@ class SupportsHealthStats(Protocol):
 class SupportsMcpServerLifecycle(Protocol):
     """Commands-side lifecycle surface required by command handlers."""
 
-    def ensure_ready(self) -> None:
-        """Ensure mcp_server is started and ready to accept requests."""
+    def ensure_ready(self, *, by_call: bool = False) -> None:
+        """Ensure mcp_server is started and ready to accept requests.
+
+        ``by_call``: start it as a call would, not deliberately -- a dead server
+        waits out its backoff and a capability-blocked one is refused (#1361).
+        The aggregate has always taken it; the contract now says so, for the
+        start command's non-deliberate mode (#1446).
+        """
         ...
 
     def shutdown(self) -> None:
