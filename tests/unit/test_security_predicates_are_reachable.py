@@ -351,10 +351,11 @@ def _served(topology: str, upstream_url: str, workdir: Path) -> Iterator[_Gatewa
     from mcp_hangar.protocol import is_task_relay_wired, set_task_relay_wired
     from mcp_hangar.server.api.middleware import create_auth_enforced_app
     from mcp_hangar.server.bootstrap.event_handlers import init_event_handlers
-    from mcp_hangar.server.config import _init_interceptors_from_config
+    from mcp_hangar.server.config import _init_interceptors_from_config, _init_tenant_limits_from_config
     from mcp_hangar.server.context import init_context, reset_context
     from mcp_hangar.server.lifecycle import mcp_app_for_serving
     from mcp_hangar.server.tools.batch import configure_interceptors
+    from mcp_hangar.server.tools.batch.tenant_admission import configure_tenant_limits
 
     authorizer_before, relay_before = get_tool_authorizer(), is_task_relay_wired()
     reset_context()
@@ -404,6 +405,12 @@ def _served(topology: str, upstream_url: str, workdir: Path) -> Iterator[_Gatewa
         _init_interceptors_from_config(
             {"interceptors": {"validators": [{"type": "payload_size", "max_bytes": 1_000_000}]}}
         )
+        # A budget for the caller's tenant, read from config the same way
+        # (#1445), so each invoke path takes and gives back a real slot. It is
+        # far above what the probes spend, so it refuses nothing.
+        _init_tenant_limits_from_config(
+            {"execution": {"tenant_limits": {"tenant-a": {"max_concurrency": 100, "rps": 1000, "burst": 1000}}}}
+        )
 
         server = build_serving_mcp_server()
         enable_governed_task_relay(server, relay_tasks_enabled=True)
@@ -426,6 +433,7 @@ def _served(topology: str, upstream_url: str, workdir: Path) -> Iterator[_Gatewa
             for mcp_server in runtime.repository.get_all().values():
                 mcp_server.shutdown()
         configure_interceptors(None)
+        configure_tenant_limits({})
         reset_context()
         reset_tool_access_resolver()
         reset_tool_projection_registry()
