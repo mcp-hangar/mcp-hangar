@@ -21,6 +21,8 @@ from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 from mcp_hangar.application.ports.bus import HandlerNotRegisteredError
 
+from .caller_rate_limit import charge
+
 if TYPE_CHECKING:
     from ..application.commands import Command
     from ..domain.security.rate_limiter import RateLimiter
@@ -153,8 +155,9 @@ class CommandBus(ICommandBus):
 class RateLimitMiddleware(CommandBusMiddleware):
     """Middleware that enforces rate limiting on all commands.
 
-    Checks rate limit before allowing command dispatch. Raises
-    RateLimitExceeded if the rate limit is exceeded.
+    Charges each command, before dispatch, to its caller's budget when
+    `rate_limit.per_caller` sets one, and to the budget all callers share.
+    Raises RateLimitExceeded when either is used up (see `caller_rate_limit`).
     """
 
     def __init__(self, rate_limiter: "RateLimiter"):
@@ -166,16 +169,19 @@ class RateLimitMiddleware(CommandBusMiddleware):
         self._rate_limiter = rate_limiter
 
     def __call__(self, command: "Command", next_handler: Callable[["Command"], Any]) -> Any:
-        """Check rate limit before dispatching command."""
+        """Charge the command to its caller's budget and the shared one, then dispatch it."""
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("rate_limit.check") as rl_span:
-            # Use command type name as rate limit key for granularity
+            # One budget per command type, shared by every caller, and with
+            # `rate_limit.per_caller` one per caller under it (#1471).
             key = type(command).__name__
             rl_span.set_attribute("rate_limit.key", key)
-            result = self._rate_limiter.consume(key)
-            rl_span.set_attribute("rate_limit.allowed", result.allowed)
+            refusal = charge(self._rate_limiter, key)
+            rl_span.set_attribute("rate_limit.allowed", refusal is None)
+            if refusal is not None:
+                rl_span.set_attribute("rate_limit.scope", refusal.scope)
 
-        if not result.allowed:
+        if refusal is not None:
             # Update Prometheus metrics
             try:
                 from mcp_hangar import metrics as prometheus_metrics
@@ -187,12 +193,7 @@ class RateLimitMiddleware(CommandBusMiddleware):
             except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block rate limit enforcement
                 pass
 
-            from mcp_hangar.domain.exceptions import RateLimitExceeded
-
-            raise RateLimitExceeded(
-                limit=result.limit,
-                window_seconds=int(result.retry_after) if result.retry_after else 0,
-            )
+            raise refusal
 
         # Update allowed metric
         try:
