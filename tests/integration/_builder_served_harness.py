@@ -165,8 +165,8 @@ def _discovery(out: Path) -> dict[str, Any]:
         "running": orchestrator.get_stats()["running"],
         "kubernetes_stand_in": stand_in,
     }
-    # With Docker unreachable the docker source may be waiting out a connection
-    # backoff on discovery's loop; the stop ends that wait (#1436).
+    # With Docker unreachable the docker source may be connecting, on a thread
+    # of its own; the stop does not wait for it (#1436, #1464).
     hangar.stop()
     return report
 
