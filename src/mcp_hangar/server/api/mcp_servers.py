@@ -86,7 +86,9 @@ async def list_mcp_servers(request: Request) -> HangarJSONResponse:
         state: Optional state filter (cold, ready, degraded, dead)
 
     Returns:
-        JSON with {"mcp_servers": [...]} array of mcp_server summaries.
+        JSON with {"mcp_servers": [...]} array of mcp_server summaries. Each
+        carries `dead`: null unless its state is dead, then why, since when and
+        what starts it again (`DeadInfo` in `application.read_models`, #1418).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     state = request.query_params.get("state")
@@ -101,7 +103,9 @@ async def get_mcp_server(request: Request) -> HangarJSONResponse:
         mcp_server_id: McpServer identifier.
 
     Returns:
-        JSON with mcp_server details including tools and health.
+        JSON with mcp_server details including tools and health, and `dead`:
+        null unless its state is dead, then why, since when and what starts it
+        again (`DeadInfo` in `application.read_models`, #1418).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
