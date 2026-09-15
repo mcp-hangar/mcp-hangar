@@ -129,6 +129,9 @@ def _build_prompt_map(tenant_id: str | None) -> dict[str, tuple[str, dict[str, A
     ponytail: sequential per-request relay to every upstream, no cache; add a
     prompt projection (discovery-time, like tools) if list latency matters.
     """
+    from functools import partial
+
+    from ..domain.services.governance_overlays import read_as_one_set
     from .flat_tool_projection import is_governed_allowed
 
     flat: dict[str, tuple[str, dict[str, Any]]] = {}
@@ -149,8 +152,9 @@ def _build_prompt_map(tenant_id: str | None) -> dict[str, tuple[str, dict[str, A
             name = prompt["name"]
             # Governance (#1028): a prompt denied or withdrawn for this tenant
             # is dropped here, which is both the list filter and -- because
-            # `prompts/get` rebuilds this map -- the fetch-time re-check.
-            if not is_governed_allowed(server_id, name, kind="prompt", tenant_id=tenant_id):
+            # `prompts/get` rebuilds this map -- the fetch-time re-check. Made
+            # against one configuration's overlays, never a mix of two (#1431).
+            if not read_as_one_set(partial(is_governed_allowed, server_id, name, kind="prompt", tenant_id=tenant_id)):
                 continue
             if name in collisions:
                 continue
