@@ -27,6 +27,7 @@ from .producer import (
 )
 from .lifecycle import (
     DEGRADED_BY_HEALTH_CHECKS,
+    DELIBERATE_STOP_REASONS,
     STOPPED_BY_GIVING_UP,
     CircuitBreakerStateChanged,
     McpServerDegraded,
@@ -229,6 +230,7 @@ __all__ = [
     "DigestMismatchEvent",
     "DigestMismatchInTask",
     "DEGRADED_BY_HEALTH_CHECKS",
+    "DELIBERATE_STOP_REASONS",
     "STOPPED_BY_GIVING_UP",
     "DiscoveryCycleCompleted",
     "DiscoverySourceHealthChanged",

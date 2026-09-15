@@ -12,6 +12,7 @@ from mcp_hangar.application.event_handlers.alert_handler import (
     LogAlertSink,
 )
 from mcp_hangar.domain.events import (
+    DELIBERATE_STOP_REASONS,
     STOPPED_BY_GIVING_UP,
     HealthCheckFailed,
     McpServerDegraded,
@@ -222,6 +223,18 @@ class TestAlertEventHandler:
         handler.handle(event2)
 
         assert len(alerts) == 0
+
+    @pytest.mark.parametrize("reason", DELIBERATE_STOP_REASONS)
+    def test_a_stop_made_on_purpose_is_not_alerted(self, reason):
+        # The stop command's reason reaches the event now (#1466). An
+        # operator's stop, a failback or a block was recorded as `shutdown`
+        # before, and raises no alert still.
+        alerts = []
+        handler = AlertEventHandler(sinks=[_CapturingSink(alerts)])
+
+        handler.handle(McpServerStopped(mcp_server_id="test-provider", reason=reason))
+
+        assert alerts == []
 
     def test_handle_tool_invocation_failed_event(self):
         """Test handling ToolInvocationFailed event creates warning alert."""
