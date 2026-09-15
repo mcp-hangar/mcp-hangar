@@ -28,6 +28,63 @@ later calls return once the first has finished. A `stop()` made while a
 the same way. Before, two concurrent starts could both bootstrap, and the
 first context was never stopped.
 
+## Next — a member of several groups is governed by each of them on the front door
+
+On the front door, a server that is a member of several groups is now governed
+by every one of those groups, as `hangar_call` naming that server already was.
+Before, the front door kept one group per member, whichever group the file
+declared last. The other groups' `tools` policy, `tool_projection` withdrawals
+and pins, and `header_exposure` block did not apply to that member there.
+**A server in one group, or in none, is unaffected.** For a server in several
+groups:
+
+- **It may now be refused a tool it was served before.** A tool that any of its
+  groups denies or withdraws, for every tenant or for the caller's, is no longer
+  listed for it, and a call to it is refused. A call to a tool any of its groups
+  pins is checked against that pin. This is the decision `hangar_call` already
+  gave for the same config.
+- **A call is routed to the server itself**, not through one of its groups, so
+  no group's `strategy` picks the member that answers. A server in one group is
+  still routed through its group.
+- **Its tools are counted under its own id** in
+  `mcp_hangar_projected_upstream_bytes`, not under a group's.
+
+To serve such a tool again, allow it in every group the server is a member of,
+or take the server out of the group that refuses it.
+
+## Next — a reload restarts only the servers whose settings changed
+
+A configuration reload used to restart every server whose entry left
+`resources` out, which is most of them, even when nothing in the file had
+changed. That applied to a reload over `POST /api/config/reload`, SIGHUP or the
+file watcher alike. Each reload stopped those servers and dropped their
+in-flight calls, and their next call started a new process.
+
+A reload now keeps a server running, with the same process, sessions, health
+and circuit state, unless the file changes something the server is built from:
+`mode`, `command`, `args`, `image`, `build`, `endpoint`, `env`, `volumes`,
+`resources`, `network`, `read_only`, `user`, `description`, `idle_ttl_s`,
+`health_check_interval_s`, `max_consecutive_failures`, a list of predefined
+`tools`, `auth`, `tls`, `http` or `capabilities`. Defaults count as set: leaving
+a setting out and spelling out its default are the same server. A group's
+inline members follow the same rule.
+
+What changes for you:
+
+- **A governance change no longer restarts a server.** A reload applies a
+  change to a server's `tools` access block, `access`, `tool_access`,
+  `tool_projection` or `header_exposure`, or to a member's `weight` or
+  `priority` in its group, and the server keeps running. Before, such a change
+  restarted the server.
+- **`mcp_servers_updated` lists only the servers the reload restarted**, in the
+  reload response and in the `ConfigurationReloaded` event. The servers it kept
+  are in `mcp_servers_unchanged`.
+- **A reload no longer restarts a server whose settings did not change.** To
+  restart one, stop it with `hangar_stop` or `POST /api/mcp_servers/{id}/stop`.
+  Its next call starts it again.
+- A server whose `env`, `description` or intervals were edited over the REST
+  API is still restarted with the file's values, as before.
+
 ## Next — the Python facade's `invoke` applies the configured controls
 
 `Hangar.invoke` and `SyncHangar.invoke` called the server directly, so none of
