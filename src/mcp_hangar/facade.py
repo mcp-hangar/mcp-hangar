@@ -47,8 +47,14 @@ from .logging_config import get_logger
 if TYPE_CHECKING:
     from .domain.model import McpServer
     from .server.bootstrap import ApplicationContext
+    from .server.catalogue_readiness import CatalogueRetry
 
 logger = get_logger(__name__)
+
+#: How long `stop()` waits for the front-door warm-up thread once its retry is
+#: stopped. The warm-up itself is a start of each configured server, which
+#: cannot be interrupted, so one still running then is logged and left.
+WARM_UP_STOP_TIMEOUT_S = 10.0
 
 
 # --- Configuration Builder ---
@@ -472,8 +478,13 @@ class Hangar:
         pool_size = config.max_concurrency if config else FACADE_DEFAULT_CONCURRENCY
         self._executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="hangar-")
         self._started = False
+        #: Held by `start()` and `stop()`, so concurrent callers share one
+        #: bootstrap and a `stop()` waits for a start in flight (#1465).
+        self._lifecycle_lock = asyncio.Lock()
         #: Discovery's loop and the thread running it, while discovery runs.
         self._discovery: tuple[asyncio.AbstractEventLoop, threading.Thread] | None = None
+        #: The required-catalogue retry and the front-door warm-up thread it runs on, while started.
+        self._warm_up: tuple[CatalogueRetry, threading.Thread] | None = None
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> Hangar:
@@ -511,17 +522,24 @@ class Hangar:
         """Start Hangar and initialize all components.
 
         This bootstraps the application context, registers mcp_servers,
-        and starts the background workers `serve` starts: the GC worker,
-        which stops a server idle past its `idle_ttl_s`, the health-check
-        worker, the metrics snapshot worker and, for a config file, the
-        config reload worker. Discovery starts too, when configured.
+        and starts what `serve` starts: the management lease keeper and the
+        event tailer under a `coordination:` block, the GC worker, which stops
+        a server idle past its `idle_ttl_s`, the health-check worker, the
+        metrics snapshot worker and, for a config file, the config reload
+        worker. Discovery starts too, when configured, and in front-door mode
+        the catalogue warm-up and the required-catalogue retry.
 
         Called automatically when using async context manager. A second call
-        while started does nothing.
+        while started does nothing. Concurrent calls share one bootstrap: the
+        others return once the first has finished.
         """
-        if self._started:
-            return
+        async with self._lifecycle_lock:
+            if self._started:
+                return
+            await self._bootstrap()
 
+    async def _bootstrap(self) -> None:
+        """Bootstrap the context and start its background components. Called under the lifecycle lock."""
         # Import here to avoid circular imports
         from .server.bootstrap import bootstrap
 
@@ -552,25 +570,26 @@ class Hangar:
     async def stop(self) -> None:
         """Stop Hangar and cleanup resources.
 
-        Stops all mcp_servers, and stops the background workers and waits for
-        their threads to end. Called automatically when using async context
-        manager. A second call does nothing.
+        Stops the warm-up and the catalogue retry, discovery, the event tailer,
+        all mcp_servers and the background workers, waiting for their threads
+        to end, and then releases the management lease. Called automatically
+        when using async context manager. A second call does nothing. A call
+        made while `start()` is in flight waits for it, then stops what it
+        started.
         """
-        # Not gated on `_started`: a `start()` that raised leaves the thread
-        # pool running, and only this releases it. The context is shut down
-        # once -- `ApplicationContext.shutdown()` has no guard of its own -- so
-        # it is dropped here, and a failed start drops it after shutting it down.
-        if self._context:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(self._executor, self._stop_discovery)
-            await loop.run_in_executor(
-                self._executor,
-                self._context.shutdown,
-            )
-            self._context = None
+        async with self._lifecycle_lock:
+            # Not gated on `_started`: a `start()` that raised leaves the thread
+            # pool running, and only this releases it. The context is shut down
+            # once -- `ApplicationContext.shutdown()` has no guard of its own --
+            # so it is dropped here, and a failed start drops it after shutting
+            # it down.
+            context, self._context = self._context, None
+            if context is not None:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(self._executor, self._release, context)
 
-        self._executor.shutdown(wait=False)
-        self._started = False
+            self._executor.shutdown(wait=False)
+            self._started = False
         logger.info("hangar_stopped")
 
     async def __aenter__(self) -> Hangar:
@@ -583,44 +602,64 @@ class Hangar:
         await self.stop()
 
     def _start_background(self) -> None:
-        """Start the background workers, then discovery when configured.
+        """Start coordination and the background workers, then discovery, then the front-door warm-up.
 
-        `bootstrap()` builds the workers, the orchestrator and its sources, and
-        starts none of them; `serve` starts them in `ServerLifecycle`. The
-        facade started neither, so an embedded gateway never stopped an idle
-        server or health-checked one (#1435), and a discovery section, from a
-        file or from `enable_discovery()`, was built and never ran a cycle
-        (#1423). The workers start through the function `ServerLifecycle`
-        uses, so the two run the same set. `stop()` stops them, through
-        `ApplicationContext.shutdown()`.
+        `bootstrap()` builds all of them and starts none; `serve` starts them in
+        `ServerLifecycle.start`, in this order. The facade started only some,
+        so an embedded gateway never stopped an idle server or health-checked
+        one (#1435), a discovery section never ran a cycle (#1423), a
+        `coordination:` block never took the management lease or tailed the
+        shared log, and a front door listed nothing until each server had been
+        started some other way (#1465). Each starts through the function
+        `ServerLifecycle` uses, so the two run the same set. `stop()` stops
+        them, through `_release`.
         """
         from .server.bootstrap.workers import start_background_workers
-        from .server.lifecycle import start_discovery_loop
+        from .server.catalogue_readiness import CatalogueRetry
+        from .server.lifecycle import start_coordination, start_discovery_loop, start_front_door_warm_up
 
         assert self._context is not None
         context = self._context
         try:
+            start_coordination()
             start_background_workers(context.background_workers)
             if context.discovery_orchestrator is not None:
                 self._discovery = start_discovery_loop(context.discovery_orchestrator)
+            retry = CatalogueRetry(context.runtime)
+            self._warm_up = (retry, start_front_door_warm_up(context.runtime, retry))
         except Exception:
             # A caller whose `start()` raised does not call `stop()`, so the
             # context bootstrap just built would be left running, its workers
-            # with it. Dropped once shut down: `ApplicationContext.shutdown()`
-            # has no guard against a second call.
+            # and the lease with it. Dropped once released:
+            # `ApplicationContext.shutdown()` has no guard against a second call.
             self._context = None
-            context.shutdown()
+            self._release(context)
             raise
 
-    def _stop_discovery(self) -> None:
-        """Stop the discovery `_start_discovery` started, if it did."""
-        from .server.lifecycle import stop_discovery_loop
+    def _release(self, context: ApplicationContext) -> None:
+        """Stop everything `_start_background` started, in `ServerLifecycle.shutdown`'s order.
 
-        running, self._discovery = self._discovery, None
-        orchestrator = self._context.discovery_orchestrator if self._context else None
-        if running is None or orchestrator is None:
-            return
-        stop_discovery_loop(orchestrator, *running)
+        The retry first, because it would start a server the context is about
+        to stop, and the warm-up thread it runs on is waited for, for the same
+        reason: unlike `serve`, the host process lives on after `stop()`.
+        Then discovery, then the tailer, the context and the lease, through the
+        function `ServerLifecycle.shutdown` uses.
+        """
+        from .server.lifecycle import stop_coordination, stop_discovery_loop
+
+        warm_up, self._warm_up = self._warm_up, None
+        if warm_up is not None:
+            retry, thread = warm_up
+            retry.stop()
+            thread.join(WARM_UP_STOP_TIMEOUT_S)
+            if thread.is_alive():
+                logger.warning("front_door_warmup_still_running_after_stop", timeout_s=WARM_UP_STOP_TIMEOUT_S)
+
+        discovery, self._discovery = self._discovery, None
+        if discovery is not None and context.discovery_orchestrator is not None:
+            stop_discovery_loop(context.discovery_orchestrator, *discovery)
+
+        stop_coordination(context.shutdown)
 
     def _ensure_started(self) -> None:
         """Ensure Hangar is started."""
@@ -913,6 +952,9 @@ class SyncHangar:
         """
         self._hangar = hangar
         self._loop: asyncio.AbstractEventLoop | None = None
+        #: Serialises `start()` and `stop()` across threads: they share one
+        #: event loop, which cannot run twice at once (#1465).
+        self._lifecycle_lock = threading.Lock()
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> SyncHangar:
@@ -945,15 +987,17 @@ class SyncHangar:
         return self._loop.run_until_complete(coro)
 
     def start(self) -> None:
-        """Start Hangar."""
-        self._run(self._hangar.start())
+        """Start Hangar. Concurrent calls, from any thread, share one bootstrap."""
+        with self._lifecycle_lock:
+            self._run(self._hangar.start())
 
     def stop(self) -> None:
-        """Stop Hangar."""
-        self._run(self._hangar.stop())
-        if self._loop:
-            self._loop.close()
-            self._loop = None
+        """Stop Hangar. A call made while `start()` is in flight waits for it."""
+        with self._lifecycle_lock:
+            self._run(self._hangar.stop())
+            if self._loop:
+                self._loop.close()
+                self._loop = None
 
     def __enter__(self) -> SyncHangar:
         """Context manager entry."""
