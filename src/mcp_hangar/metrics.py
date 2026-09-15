@@ -1086,6 +1086,17 @@ EMPTY_PROJECTION_TOTAL = Counter(
     labels=["reason"],
 )
 
+# One sample per start the front door's catalogue retry makes for a required
+# server its boot warm-up could not project (#1446). `mcp_server` is bounded by
+# `tool_access.required_catalogue.servers`, which is checked against the config.
+CATALOGUE_RETRIES_TOTAL = Counter(
+    name="mcp_hangar_catalogue_retries",
+    description="Total starts the front door's required-catalogue retry made, by outcome",
+    # outcome: projected, started (not projected yet), failed, refused (the
+    # server's own backoff or capability block refused the start)
+    labels=["mcp_server", "outcome"],
+)
+
 # How big the answer to `tools/list` is, which nothing on the server side could
 # see. The surface sits in an agent's prompt prefix and is paid for on every
 # turn, so a client with a small context window can be pushed over the limit
@@ -1375,6 +1386,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             EMPTY_PROJECTION_TOTAL,
+            CATALOGUE_RETRIES_TOTAL,
             PROJECTED_TOOLS,
             # Surface size, composition and churn (#1369).
             PROJECTED_SURFACE_BYTES,
@@ -1522,6 +1534,11 @@ def record_mcp_server_start(mcp_server: str, success: bool):
 def record_mcp_server_stop(mcp_server: str, reason: str):
     """Record a mcp_server stop."""
     PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=reason)
+
+
+def record_catalogue_retry(mcp_server: str, outcome: str) -> None:
+    """Record one start by the front door's required-catalogue retry (#1446)."""
+    CATALOGUE_RETRIES_TOTAL.inc(mcp_server=mcp_server, outcome=outcome)
 
 
 def record_cold_start(mcp_server: str, duration: float, mode: str = "subprocess"):

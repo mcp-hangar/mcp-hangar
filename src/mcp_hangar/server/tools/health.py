@@ -11,6 +11,7 @@ from mcp_hangar._sdk_compat import FastMCP
 from ... import metrics as m
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ...logging_config import get_logger
+from ..catalogue_readiness import catalogue_detail
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper
 from .replica_view import observe_replica
@@ -177,7 +178,7 @@ def hangar_health() -> dict:
     for group in view.groups:
         group_state_counts[group.state] = group_state_counts.get(group.state, 0) + 1
 
-    return {
+    health: dict[str, Any] = {
         "status": "healthy",
         "mcp_servers": {
             "total": view.total_servers,
@@ -195,6 +196,12 @@ def hangar_health() -> dict:
         },
         **view.scope_fields(),
     }
+    # The front door's required catalogue, with the ids and dead reasons that
+    # `/health/ready` leaves out because it answers without authentication (#1446).
+    catalogue = catalogue_detail(ctx.repository)
+    if catalogue is not None:
+        health["catalogue"] = catalogue
+    return health
 
 
 def register_health_tools(mcp: FastMCP) -> None:

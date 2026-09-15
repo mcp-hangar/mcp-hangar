@@ -97,6 +97,10 @@ class ToolProjectionRegistry:
         self._projections: dict[tuple[str, str], ToolProjection] = {}
         # Tracks whether the registry has been populated at least once
         self._built: bool = False
+        # Every server whose catalogue has been projected at least once in this
+        # process, an empty catalogue included (#1446). Never shrinks: a stop
+        # does not remove a projection, so an idle server still counts.
+        self._projected: set[str] = set()
         # Config-withdrawal overlay: (mcp_server, kind, name) -> set of tenant_ids
         # or _ALL_TENANTS sentinel. Populated at config-load time; re-applied on
         # every reload. _ALL_TENANTS means withdrawn for every tenant.
@@ -176,6 +180,7 @@ class ToolProjectionRegistry:
                 del self._projections[k]
             self._projections.update(new_projections)
             self._built = True
+            self._projected.add(mcp_server)
             logger.debug(
                 "tool_projection_registry_built",
                 extra={
@@ -613,7 +618,20 @@ class ToolProjectionRegistry:
             self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
             self._built = False
+            self._projected.clear()
             logger.debug("tool_projection_registry_invalidated")
+
+    def was_projected(self, mcp_server: str) -> bool:
+        """Whether *mcp_server*'s catalogue has been projected at least once on this replica.
+
+        True from its first ``McpServerStarted`` handled here, even when it
+        discovered no tools, and it stays true when the server stops: this is
+        what a front-door replica's readiness waits for (#1446), and what the
+        catalogue retry never restarts a server after. A peer's start does not
+        count, since the handler that projects is a local view (#922).
+        """
+        with self._lock:
+            return mcp_server in self._projected
 
     @property
     def is_built(self) -> bool:

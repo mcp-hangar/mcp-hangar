@@ -97,7 +97,8 @@ class StartMcpServerHandler(BaseMcpServerHandler):
         """
         mcp_server = self._get_mcp_server(command.mcp_server_id)
         try:
-            mcp_server.ensure_ready()
+            # Not deliberate: started as a call would start it (see the command).
+            mcp_server.ensure_ready(by_call=not command.deliberate)
             record_mcp_server_start(command.mcp_server_id, success=True)
         except Exception as e:  # noqa: BLE001 -- fault-barrier: catch for metrics recording, then re-raise
             record_mcp_server_start(command.mcp_server_id, success=False)
