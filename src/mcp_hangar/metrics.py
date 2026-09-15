@@ -999,6 +999,16 @@ TOOL_ACCESS_DENIED_TOTAL = Counter(
     labels=["mcp_server", "tool", "reason"],  # reason: tool_not_in_access_policy
 )
 
+# A call refused by a per-tenant execution budget (#1445), after every policy
+# gate passed it. `budget` is the configured entry that refused it -- a tenant
+# id from `execution.tenant_limits`, or "*" -- or "none" when no entry applied,
+# so its values are bounded by the configuration, not by who calls.
+TENANT_QUOTA_REFUSALS_TOTAL = Counter(
+    name="mcp_hangar_tenant_quota_refusals",
+    description="Total tool calls refused by a per-tenant execution budget",
+    labels=["budget", "reason"],  # reason: no_budget, concurrency, rate
+)
+
 TOOLS_FILTERED_TOTAL = Gauge(
     name="mcp_hangar_tools_filtered",
     description="Number of tools filtered by access policy per mcp_server",
@@ -1379,6 +1389,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             TOOL_ACCESS_DENIED_TOTAL,
+            TENANT_QUOTA_REFUSALS_TOTAL,
             TOOLS_FILTERED_TOTAL,
             TOOL_ACCESS_POLICY_ACTIVE,
         ]
