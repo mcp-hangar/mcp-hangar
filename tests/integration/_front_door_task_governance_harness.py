@@ -77,6 +77,8 @@ class _TaskUpstream(BaseHTTPRequestHandler):
     #: The tools a ``tools/call`` reached, in order.
     reached: ClassVar[list[str]] = []
     tasks: ClassVar[dict[str, dict[str, Any]]] = {}
+    #: The ``(method, task id)`` of each ``tasks/update`` and ``tasks/cancel`` it was sent.
+    follow_ups: ClassVar[list[tuple[str, str]]] = []
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
@@ -88,6 +90,7 @@ class _TaskUpstream(BaseHTTPRequestHandler):
             return
         method = request.get("method")
         params = request.get("params") or {}
+        followed = params.get("taskId") or params.get("task_id")
         answer: dict[str, Any]
         if method == "initialize":
             answer = {
@@ -114,6 +117,12 @@ class _TaskUpstream(BaseHTTPRequestHandler):
             answer = {"result": {"task": task}}
         elif method == "tasks/get" and params.get("taskId") in self.tasks:
             answer = {"result": self.tasks[params["taskId"]]}
+        elif method in ("tasks/update", "tasks/cancel") and followed in self.tasks:
+            with _LOCK:
+                self.follow_ups.append((method, followed))
+                if method == "tasks/cancel":
+                    self.tasks[followed]["status"] = "cancelled"
+            answer = {"result": self.tasks[followed]}
         else:
             answer = {"error": {"code": -32601, "message": f"Unknown method: {method}"}}
         self._send(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], **answer}).encode())
@@ -128,7 +137,9 @@ class _TaskUpstream(BaseHTTPRequestHandler):
 
 def _upstream(tools: tuple[str, ...]) -> tuple[str, type[_TaskUpstream]]:
     """Serve an upstream exposing *tools*: its endpoint, and its handler class holding what it saw."""
-    handler: type[_TaskUpstream] = type("_ThisUpstream", (_TaskUpstream,), {"tools": tools, "reached": [], "tasks": {}})
+    handler: type[_TaskUpstream] = type(
+        "_ThisUpstream", (_TaskUpstream,), {"tools": tools, "reached": [], "tasks": {}, "follow_ups": []}
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{server.server_address[1]}/mcp", handler
