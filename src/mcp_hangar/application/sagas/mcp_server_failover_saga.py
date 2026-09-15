@@ -307,7 +307,12 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
         return []
 
     def _handle_stopped(self, event: McpServerStopped) -> list[Command]:
-        """Clean up when a backup is stopped."""
+        """Clean up when a backup is stopped.
+
+        A backup the recovery saga gives up on is stopped too (#1360): its
+        failover ends, and no failback stops it later, which would turn the
+        dead backup cold.
+        """
         mcp_server_id = event.mcp_server_id
 
         if mcp_server_id in self._active_backups:

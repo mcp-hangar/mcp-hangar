@@ -12,6 +12,7 @@ from mcp_hangar.application.event_handlers.alert_handler import (
     LogAlertSink,
 )
 from mcp_hangar.domain.events import (
+    STOPPED_BY_GIVING_UP,
     HealthCheckFailed,
     McpServerDegraded,
     McpServerStarted,
@@ -196,6 +197,15 @@ class TestAlertEventHandler:
         assert len(alerts) == 1
         assert alerts[0].level == "warning"
         assert alerts[0].event_type == "McpServerStopped"
+
+    def test_a_give_up_is_an_unexpected_stop(self):
+        """A give-up is recorded as a stop with its own reason (#1360), and warns."""
+        alerts: list[Alert] = []
+        handler = AlertEventHandler(sinks=[_CapturingSink(alerts)])
+
+        handler.handle(McpServerStopped(mcp_server_id="test-provider", reason=STOPPED_BY_GIVING_UP))
+
+        assert [(a.level, a.details) for a in alerts] == [("warning", {"reason": "max_retries_exceeded"})]
 
     def test_handle_provider_stopped_normal_no_alert(self):
         """Test McpServerStopped with normal reason doesn't trigger alerts."""
