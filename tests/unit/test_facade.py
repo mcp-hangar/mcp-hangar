@@ -11,8 +11,14 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from mcp_hangar import facade
-from mcp_hangar.domain.exceptions import ConfigurationError, McpServerNotFoundError
-from mcp_hangar.domain.value_objects import McpServerMode, McpServerState
+from mcp_hangar.domain.exceptions import (
+    ConfigurationError,
+    McpServerNotFoundError,
+    ToolCallFailedError,
+    ToolInvocationError,
+    ToolNotFoundError,
+)
+from mcp_hangar.domain.value_objects import McpServerMode, McpServerState, Principal, PrincipalId, PrincipalType
 from mcp_hangar.facade import (
     FACADE_DEFAULT_CONCURRENCY,
     FACADE_MAX_CONCURRENCY,
@@ -761,6 +767,66 @@ class TestHangarNotStarted:
             await hangar.list_mcp_servers()
 
 
+def _batch(**call: Any) -> dict[str, Any]:
+    """What `hangar_call` returns for one call, with *call*'s fields over a success."""
+    result = {
+        "index": 0,
+        "call_id": "c-1",
+        "success": True,
+        "result": {"result": 42},
+        "error": None,
+        "error_type": None,
+        "elapsed_ms": 1.0,
+        **call,
+    }
+    ok = bool(result["success"])
+    return {
+        "batch_id": "b-1",
+        "success": ok,
+        "total": 1,
+        "succeeded": int(ok),
+        "failed": int(not ok),
+        "elapsed_ms": 1.0,
+        "results": [result],
+    }
+
+
+def _invalid(field: str, message: str) -> dict[str, Any]:
+    """What `hangar_call` returns for a call its validation refused."""
+    return {
+        "batch_id": "b-1",
+        "success": False,
+        "error": "Validation failed",
+        "validation_errors": [{"index": 0, "field": field, "message": message}],
+    }
+
+
+@pytest.fixture
+def governed(monkeypatch):
+    """The executor path `invoke` runs (#1453): answers with `.answer`, records each call in `.calls`.
+
+    Its governance is tested where it lives: `tests/unit/test_tool_invoke_authz.py`
+    for the caller, and `tests/integration/test_the_facade_invoke_is_governed_like_hangar_call.py`
+    over a real boot.
+    """
+    import mcp_hangar.server.tools.batch as batch_package
+
+    seen = SimpleNamespace(calls=[], answer=_batch())
+
+    def call_as(principal, mcp_server, tool, arguments, *, timeout):
+        seen.calls.append(
+            SimpleNamespace(principal=principal, mcp_server=mcp_server, tool=tool, arguments=arguments, timeout=timeout)
+        )
+        return seen.answer
+
+    monkeypatch.setattr(batch_package, "call_as", call_as)
+    return seen
+
+
+def _caller() -> Principal:
+    return Principal(id=PrincipalId("agent-1"), type=PrincipalType.SERVICE_ACCOUNT, tenant_id="tenant:a")
+
+
 class TestHangarWithMockedContext:
     """Tests for Hangar with mocked ApplicationContext."""
 
@@ -789,28 +855,116 @@ class TestHangarWithMockedContext:
         """Create Hangar with pre-initialized context."""
         hangar = Hangar(config_path="config.yaml", _context=mock_context)
         hangar._started = True
-        return hangar
+        yield hangar
+        # The pool `invoke` and the other methods ran in.
+        hangar._executor.shutdown(wait=True)
 
     @pytest.mark.asyncio
-    async def test_invoke_calls_provider(self, hangar_with_context, mock_provider):
-        """Should invoke tool on provider."""
+    async def test_invoke_runs_the_call_through_the_executor_path(self, hangar_with_context, mock_provider, governed):
+        """The call goes to `hangar_call`'s path, not straight to the server (#1453)."""
         result = await hangar_with_context.invoke("math", "add", {"a": 1, "b": 2})
 
-        mock_provider.invoke_tool.assert_called_once_with("add", {"a": 1, "b": 2})
         assert result == {"result": 42}
+        (call,) = governed.calls
+        assert (call.mcp_server, call.tool, call.arguments, call.timeout) == ("math", "add", {"a": 1, "b": 2}, 30.0)
+        mock_provider.invoke_tool.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_invoke_with_empty_args(self, hangar_with_context, mock_provider):
+    async def test_invoke_with_empty_args(self, hangar_with_context, governed):
         """Should invoke tool with empty args when not provided."""
-        await hangar_with_context.invoke("math", "list")
+        await hangar_with_context.invoke("math", "list", timeout_s=5.0)
 
-        mock_provider.invoke_tool.assert_called_once_with("list", {})
+        (call,) = governed.calls
+        assert (call.arguments, call.timeout) == ({}, 5.0)
 
     @pytest.mark.asyncio
-    async def test_invoke_unknown_provider_raises_error(self, hangar_with_context):
-        """Should raise ProviderNotFoundError for unknown provider."""
+    async def test_invoke_without_a_principal_is_an_anonymous_call(self, hangar_with_context, governed):
+        await hangar_with_context.invoke("math", "add", {"a": 1})
+
+        assert governed.calls[0].principal.is_anonymous()
+
+    @pytest.mark.asyncio
+    async def test_invoke_is_made_as_the_principal_given(self, hangar_with_context, governed):
+        caller = _caller()
+
+        await hangar_with_context.invoke("math", "add", {"a": 1}, principal=caller)
+
+        assert governed.calls[0].principal is caller
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "AuthorizationDenied",
+            "ToolAccessDeniedError",
+            "ToolWithdrawnError",
+            "ToolDigestMismatchError",
+            "ValidatorDenied",
+            "TenantQuotaExceeded",
+            "CircuitBreakerOpen",
+            "EgressPolicyDeniedError",
+        ],
+    )
+    async def test_a_call_that_did_not_succeed_raises_with_its_code(self, hangar_with_context, governed, code):
+        governed.answer = _batch(success=False, result=None, error="what hangar_call says", error_type=code)
+
+        with pytest.raises(ToolCallFailedError) as raised:
+            await hangar_with_context.invoke("math", "add")
+
+        assert (raised.value.code, raised.value.message) == (code, "what hangar_call says")
+        assert (raised.value.mcp_server_id, raised.value.tool_name) == ("math", "add")
+        # Caught by the handlers written for the exception `invoke` documented.
+        assert isinstance(raised.value, ToolInvocationError)
+
+    @pytest.mark.asyncio
+    async def test_invoke_unknown_provider_raises_error(self, hangar_with_context, governed):
+        """Should raise McpServerNotFoundError for a name that is neither a server nor a group."""
+        governed.answer = _invalid("mcp_server", "McpServer 'unknown' not found")
+
         with pytest.raises(McpServerNotFoundError):
             await hangar_with_context.invoke("unknown", "tool")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("answer", "raised"),
+        [
+            (
+                _batch(success=False, result=None, error="gone", error_type="McpServerNotFoundError"),
+                McpServerNotFoundError,
+            ),
+            (_invalid("tool", "Tool 'x' not found in mcp_server 'math'"), ToolNotFoundError),
+            (
+                _batch(success=False, result=None, error="Tool not found: x", error_type="ToolNotFoundError"),
+                ToolNotFoundError,
+            ),
+            (_batch(success=False, result=None, error="Timeout", error_type="TimeoutError"), TimeoutError),
+        ],
+    )
+    async def test_the_failures_invoke_raised_by_their_own_type_still_are(
+        self, hangar_with_context, governed, answer, raised
+    ):
+        governed.answer = answer
+
+        with pytest.raises(raised):
+            await hangar_with_context.invoke("math", "x")
+
+    @pytest.mark.asyncio
+    async def test_any_other_invalid_call_raises_a_validation_code(self, hangar_with_context, governed):
+        governed.answer = _invalid("arguments", "arguments must be a dictionary")
+
+        with pytest.raises(ToolCallFailedError) as raised:
+            await hangar_with_context.invoke("math", "add")
+
+        assert (raised.value.code, raised.value.message) == ("ValidationError", "arguments must be a dictionary")
+
+    @pytest.mark.asyncio
+    async def test_a_batch_with_no_result_raises_no_result(self, hangar_with_context, governed):
+        governed.answer = {**_batch(), "total": 0, "succeeded": 0, "results": []}
+
+        with pytest.raises(ToolCallFailedError) as raised:
+            await hangar_with_context.invoke("math", "add")
+
+        assert (raised.value.code, raised.value.message) == ("NoResult", "The call returned no result")
 
     @pytest.mark.asyncio
     async def test_get_provider_returns_info(self, hangar_with_context):
@@ -902,14 +1056,28 @@ class TestSyncHangarWithMockedContext:
 
         hangar = Hangar(config_path="config.yaml", _context=context)
         hangar._started = True
-        return SyncHangar(hangar)
+        sync_hangar = SyncHangar(hangar)
+        yield sync_hangar
+        # The pool `invoke` ran in, and the loop the wrapper opened.
+        hangar._executor.shutdown(wait=True)
+        if sync_hangar._loop is not None:
+            sync_hangar._loop.close()
 
-    def test_invoke_returns_result(self, sync_hangar_with_context, mock_provider):
-        """Should invoke tool synchronously."""
+    def test_invoke_returns_result(self, sync_hangar_with_context, mock_provider, governed):
+        """Should invoke tool synchronously, through the executor path (#1453)."""
         result = sync_hangar_with_context.invoke("math", "add", {"a": 1})
 
-        mock_provider.invoke_tool.assert_called_once()
         assert result == {"result": 42}
+        assert governed.calls[0].principal.is_anonymous()
+        mock_provider.invoke_tool.assert_not_called()
+
+    def test_invoke_is_made_as_the_principal_given(self, sync_hangar_with_context, governed):
+        caller = _caller()
+
+        sync_hangar_with_context.invoke("math", "add", {"a": 1}, principal=caller, timeout_s=7.0)
+
+        (call,) = governed.calls
+        assert (call.principal, call.timeout) == (caller, 7.0)
 
     def test_list_mcp_servers(self, sync_hangar_with_context):
         """Should list providers synchronously."""
