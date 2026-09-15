@@ -25,7 +25,9 @@ Two configurations now load differently:
   `group_member_entry_settings_ignored` warning. `weight`, `priority` and
   `tools` on a member entry still apply.
 
-## Next — `block` and `quarantine` stop a server whose tools drift
+## Upgrade to 2.20.0
+
+### `block` and `quarantine` stop a server whose tools drift
 
 A server with `capabilities.enforcement_mode` set to `block` or `quarantine`
 whose upstream serves a tool that is not in `capabilities.tools.expected_tools`
@@ -66,7 +68,7 @@ server `cold`, and the next start, a call's included, checks them too.
 the same as a tool call. Before, they were forwarded to any server with a live
 connection, a `degraded` one included.
 
-## Next — egress calls are governed with their group and tenant scope
+### egress calls are governed with their group and tenant scope
 
 A `hangar_call` that names a group member by its own server id, instead of
 naming the group, is now governed by that group. Before,
@@ -129,7 +131,7 @@ approved. Before, it ran.
 Calls that name a group are governed as before, apart from their approval lists.
 So are servers that are in no group.
 
-## Next — a continuation answers only the caller that made the call
+### a continuation answers only the caller that made the call
 
 With response truncation on (`truncation.enabled`), the rest of a truncated
 `hangar_call` result is kept in the continuation cache.
@@ -172,7 +174,7 @@ on an older version still serves any continuation to any caller that holds its
 id, and returns a value written by an upgraded replica with the owner in front
 of the payload.
 
-## Next — `tool_access.rules` is refused as a key nothing reads
+### `tool_access.rules` is refused as a key nothing reads
 
 `tool_access.rules` was never read. The config schema listed it next to
 `tool_access.mode`, so a `rules:` block passed `mcp-hangar config check` and
@@ -197,7 +199,7 @@ Nothing that restricts a tool changes. Tool access is set by the `tools:` allow
 and deny lists of a server, a group and a group member, and `tool_access.mode`
 still selects the `egress` or `front_door` topology.
 
-## Next — a reload applies the whole configuration, and keeps the topology mode
+### a reload applies the whole configuration, and keeps the topology mode
 
 This affects every configuration reload: `POST /api/config/reload`,
 `hangar_reload_config`, SIGHUP, and the config file watcher.
@@ -262,7 +264,7 @@ reload never finds them empty. A reload builds and checks every server and
 group before it stops any, so a bad block refuses the reload and changes
 nothing.
 
-## Next — a config dict gets every setting it passes
+### a config dict gets every setting it passes
 
 This affects code that calls `bootstrap(config_dict=...)` directly, such as
 embedders and test harnesses. `Hangar.from_config()` and `mcp-hangar serve` read
@@ -305,7 +307,7 @@ that calls `enable_discovery()`, or adds a server with `mode="remote"` and
 applied. They now log `unknown_config_key`, and under strict mode the boot
 refuses.
 
-## Next — remote servers and discovery from the builder take effect
+### remote servers and discovery from the builder take effect
 
 This affects code that builds its configuration with `HangarConfig` and runs it
 with `Hangar.from_builder()`. Code that calls `Hangar.from_config()` on a file
@@ -347,7 +349,7 @@ on a key the gateway does not read. `to_dict()` no longer includes
 setting. `HangarConfigData` no longer has `gc_interval_s` or
 `health_check_interval_s`.
 
-## Next — a server Hangar gives up on reads `dead`, not `cold`
+### a server Hangar gives up on reads `dead`, not `cold`
 
 When the recovery saga runs out of retries, the server now goes to `dead`.
 Before, giving up was a stop, so the server went to `cold`: the state of a
@@ -476,7 +478,7 @@ upgrading. The flat spelling
 `McpServerGroup(...)` no longer accepts `circuit_reset_timeout_s`: passing it
 raises `TypeError`.
 
-## Next — a group's `healthy_count` counts members that are `ready`
+### a group's `healthy_count` counts members that are `ready`
 
 A group's `healthy_count` used to count every member in rotation that was not
 `dead`, `cold` ones included. It now counts the members that are `ready` and in
