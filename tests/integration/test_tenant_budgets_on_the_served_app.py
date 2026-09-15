@@ -46,7 +46,6 @@ from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.fastmcp_server import flat_call_log
 from mcp_hangar.server.config import _init_tenant_limits_from_config
 from mcp_hangar.server.context import get_context
-from mcp_hangar.server.tools.batch.executor import _close_approval_loops
 from mcp_hangar.server.tools.batch.tenant_admission import get_tenant_admission, reset_tenant_admission
 from tests.integration._front_door_harness import FrontDoor, front_door, jsonrpc, SERVER, TENANT_A, TENANT_B
 
@@ -249,26 +248,21 @@ class TestRate:
 class TestWhatSpendsNothing:
     def test_a_call_held_for_approval_holds_no_slot(self, budgets: Callable[[dict[str, Any]], None]) -> None:
         budgets({TENANT_A: _budget(1), TENANT_B: _budget(1)})
-        try:
-            with front_door((READ, HELD)) as door:
-                approvals = _Approvals()
-                get_tool_access_resolver().set_standalone_member_policy(
-                    SERVER, TENANT_A, ToolAccessPolicy(approval_list=(HELD,), approval_timeout_seconds=30)
-                )
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    held = pool.submit(door.call, TENANT_A, HELD)
-                    _wait_for(approvals.pending, "the call to be held for approval")
-                    in_flight_while_held = get_tenant_admission().in_flight(TENANT_A)
-                    # A's only slot is free while the other call waits for a human.
-                    served = _served(door, TENANT_A, READ)
-                    (approval_id,) = approvals.pending()
-                    approvals.approve(approval_id)
-                    answered = jsonrpc(held.result(timeout=30))
-                reached = list(door.upstream.called)
-        finally:
-            # The hold waited on the executor's per-thread approval loop, whose
-            # worker thread would otherwise outlive the suite's thread guard.
-            _close_approval_loops()
+        with front_door((READ, HELD)) as door:
+            approvals = _Approvals()
+            get_tool_access_resolver().set_standalone_member_policy(
+                SERVER, TENANT_A, ToolAccessPolicy(approval_list=(HELD,), approval_timeout_seconds=30)
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                held = pool.submit(door.call, TENANT_A, HELD)
+                _wait_for(approvals.pending, "the call to be held for approval")
+                in_flight_while_held = get_tenant_admission().in_flight(TENANT_A)
+                # A's only slot is free while the other call waits for a human.
+                served = _served(door, TENANT_A, READ)
+                (approval_id,) = approvals.pending()
+                approvals.approve(approval_id)
+                answered = jsonrpc(held.result(timeout=30))
+            reached = list(door.upstream.called)
 
         assert in_flight_while_held == 0
         assert served == f"did {READ}"
@@ -299,17 +293,14 @@ class TestWhatIsRefusedEarly:
         self, budgets: Callable[[dict[str, Any]], None]
     ) -> None:
         budgets({TENANT_A: _budget(5, rps=0.001, burst=1)})
-        try:
-            with front_door((READ, HELD)) as door:
-                approvals = _Approvals()
-                get_tool_access_resolver().set_standalone_member_policy(
-                    SERVER, TENANT_A, ToolAccessPolicy(approval_list=(HELD,), approval_timeout_seconds=30)
-                )
-                served = _served(door, TENANT_A, READ)
-                refused = _refused(door, TENANT_A, HELD)
-                pending = approvals.pending()
-        finally:
-            _close_approval_loops()
+        with front_door((READ, HELD)) as door:
+            approvals = _Approvals()
+            get_tool_access_resolver().set_standalone_member_policy(
+                SERVER, TENANT_A, ToolAccessPolicy(approval_list=(HELD,), approval_timeout_seconds=30)
+            )
+            served = _served(door, TENANT_A, READ)
+            refused = _refused(door, TENANT_A, HELD)
+            pending = approvals.pending()
 
         assert served == f"did {READ}"
         assert refused == TOO_FAST
