@@ -1081,7 +1081,7 @@ class McpServer(AggregateRoot):
                 "mcp_session_renegotiation_failed",
                 mcp_server_id=self.mcp_server_id,
                 method=method,
-                error=str(exc),
+                error_type=bounded_error_type(type(exc).__qualname__),
             )
             return response
 
@@ -1229,7 +1229,7 @@ class McpServer(AggregateRoot):
             logger.warning(
                 "mcp_initialized_notification_failed",
                 mcp_server_id=self.mcp_server_id,
-                error=str(exc),
+                error_type=bounded_error_type(type(exc).__qualname__),
             )
 
     def _route_upstream_message(self, msg: dict[str, Any]) -> None:
@@ -1517,7 +1517,12 @@ class McpServer(AggregateRoot):
         else:
             self._mark_dead(DEAD_START_FAILED)
 
-        logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
+        # The type only: a start failure's text can carry what the upstream printed.
+        logger.error(
+            "mcp_server_start_failed",
+            mcp_server_id=self.mcp_server_id,
+            error_type=bounded_error_type(type(error).__qualname__) if error is not None else OTHER_ERROR_TYPE,
+        )
 
     def _enforce_l7_policy(
         self,

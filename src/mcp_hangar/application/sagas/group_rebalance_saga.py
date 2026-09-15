@@ -155,7 +155,14 @@ class GroupRebalanceSaga(EventTriggeredSaga):
                 # one failure twice.
                 logger.info(f"Member {mcp_server_id} degraded by health checks in group {group_id}")
             else:
-                logger.info(f"Member {mcp_server_id} degraded in group {group_id}: {event.reason}")
+                # Not the reason: for a failed start it is the error's text,
+                # which can carry what the upstream printed.
+                logger.info(
+                    "group_member_degraded",
+                    mcp_server_id=mcp_server_id,
+                    group_id=group_id,
+                    consecutive_failures=event.consecutive_failures,
+                )
                 if group:
                     group.report_failure(mcp_server_id)
 

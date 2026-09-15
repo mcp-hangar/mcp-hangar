@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from ..errors import bounded_error_type
 from ..logging_config import get_logger, setup_logging
 from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
@@ -221,7 +222,12 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
                 warmed += 1
             except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
                 failed += 1
-                logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+                # The type only: a start failure's text can carry what the upstream printed.
+                logger.warning(
+                    "front_door_warmup_failed",
+                    mcp_server_id=mcp_server_id,
+                    error_type=bounded_error_type(type(e).__qualname__),
+                )
     finally:
         # In `finally`: a warm-up that dies must not leave every later listing
         # waiting out the full deadline for something that will never finish.
