@@ -371,6 +371,15 @@ def call_as(
     principal is governed as an unauthenticated ``hangar_call``: refused where
     authentication is configured, and carrying no tenant.
 
+    Nothing verifies the principal: the embedder vouches for its id, groups and
+    tenant. The system principal is refused before anything runs, because
+    authorization grants it every permission and the ``tool:invoke`` check
+    would not apply to it.
+
+    Two things a request carries and this call does not: a session, so session
+    suspension does not apply to it, and request headers, so an L7 rule that
+    selects on ``Mcp-Param-*`` does not fire, as for ``hangar_call`` over stdio.
+
     The result comes back whole, as the facade has always returned it: neither
     the per-call size cap nor the configured truncation cuts it, and no
     continuation is stored for it.
@@ -384,7 +393,15 @@ def call_as(
 
     Returns:
         What ``hangar_call`` returns for the same one call.
+
+    Raises:
+        ValueError: If *principal* is the system principal.
     """
+    if principal.is_system():
+        raise ValueError(
+            "The system principal cannot make an embedded call: pass the principal of the caller it is made for"
+        )
+
     from ....fastmcp_server.asgi import _principal_to_identity_context
 
     return _run_calls(

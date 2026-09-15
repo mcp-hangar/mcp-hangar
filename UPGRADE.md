@@ -29,6 +29,11 @@ async with Hangar.from_config("config.yaml") as hangar:
 
 `SyncHangar.invoke` takes the same `principal=`.
 
+Nothing verifies the principal: your application vouches for its id, groups
+and tenant, as an authenticator does for a request. `Principal.system()` is
+refused with `ValueError`, because authorization grants the system principal
+every permission.
+
 **Without a principal, the call is an anonymous caller's**, the same as an
 unauthenticated `hangar_call`:
 
@@ -55,9 +60,24 @@ anonymous callers, pass a principal.
   whose `code` names that type.
 - `McpServerNotFoundError`, `ToolNotFoundError` and `TimeoutError` are raised
   as before.
+- A server that fails to start used to raise `McpServerStartError`. It now
+  raises `ToolCallFailedError` with `code == "McpServerStartError"`, so an
+  `except McpServerStartError` no longer catches it.
 - The result is still returned whole. The per-call size limit (10 MB) and a
   `truncation:` section cut `hangar_call` results, not the results `invoke`
   returns, and no continuation is stored for an `invoke` call.
+
+**A tool that needs approval.**
+
+- `invoke` raises `TimeoutError` at `timeout_s`, and the event loop is not
+  blocked while the call waits.
+- The call still holds one of the facade's pool threads until the approval is
+  decided or expires (`approval_timeout_seconds`, 300 seconds by default). An
+  approval given after `invoke` timed out is refused, so the tool does not run.
+- That pool also runs `stop()` and `health()`, and each pending approval takes
+  one of its threads. Size it with `HangarConfig().max_concurrency(...)` for
+  the approvals that can be pending at once.
+- `SyncHangar.invoke` blocks the calling thread for up to `timeout_s`.
 
 **Also:**
 
@@ -67,6 +87,9 @@ anonymous callers, pass a principal.
   clamped to 1-300 seconds, as `hangar_call` clamps its `timeout`.
 - A facade call now writes the `hangar_call` span and log lines, and is counted
   in the batch metrics.
+- A call through `invoke` has no session and no request headers: session
+  suspension does not apply to it, and an L7 rule that selects on
+  `Mcp-Param-*` does not fire, as for `hangar_call` over stdio.
 
 ## Next — a group member is judged by its own health
 

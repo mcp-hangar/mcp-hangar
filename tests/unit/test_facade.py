@@ -726,7 +726,9 @@ class TestHangarWithMockedContext:
         """Create Hangar with pre-initialized context."""
         hangar = Hangar(config_path="config.yaml", _context=mock_context)
         hangar._started = True
-        return hangar
+        yield hangar
+        # The pool `invoke` and the other methods ran in.
+        hangar._executor.shutdown(wait=True)
 
     @pytest.mark.asyncio
     async def test_invoke_runs_the_call_through_the_executor_path(self, hangar_with_context, mock_provider, governed):
@@ -925,7 +927,12 @@ class TestSyncHangarWithMockedContext:
 
         hangar = Hangar(config_path="config.yaml", _context=context)
         hangar._started = True
-        return SyncHangar(hangar)
+        sync_hangar = SyncHangar(hangar)
+        yield sync_hangar
+        # The pool `invoke` ran in, and the loop the wrapper opened.
+        hangar._executor.shutdown(wait=True)
+        if sync_hangar._loop is not None:
+            sync_hangar._loop.close()
 
     def test_invoke_returns_result(self, sync_hangar_with_context, mock_provider, governed):
         """Should invoke tool synchronously, through the executor path (#1453)."""

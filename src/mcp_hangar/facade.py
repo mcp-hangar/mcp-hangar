@@ -8,8 +8,11 @@ Example (async):
         result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
         print(result)  # {"result": 3}
 
-A call made through `invoke` is governed as `hangar_call` governs it: pass the
-caller as `principal=`, or it is made as an anonymous caller.
+A call made through `invoke` runs through the executor behind `hangar_call`,
+under its controls: pass the caller as `principal=`, or it is made as an
+anonymous caller. It has no session and no request headers, so session
+suspension does not apply to it, and an L7 rule on `Mcp-Param-*` does not fire,
+as for `hangar_call` over stdio.
 
 Example (sync):
     from mcp_hangar import SyncHangar
@@ -639,7 +642,7 @@ class Hangar:
         timeout_s: float = 30.0,
         principal: Principal | None = None,
     ) -> Any:
-        """Invoke a tool on a mcp_server or group, governed as `hangar_call` governs it.
+        """Invoke a tool on a mcp_server or group, under the controls `hangar_call` applies.
 
         The call runs through the executor behind `hangar_call`, so every
         call-time control the configuration sets applies: tool access and
@@ -654,6 +657,20 @@ class Hangar:
         one, the call is an anonymous caller's, as an unauthenticated
         `hangar_call` is: refused where authentication is configured, and
         carrying no tenant.
+
+        Nothing verifies the principal: the embedder vouches for its id, groups
+        and tenant. `Principal.system()` is refused with `ValueError`, because
+        authorization grants the system principal every permission. The call
+        has no session and no request headers, so session suspension does not
+        apply to it, and an L7 rule on `Mcp-Param-*` does not fire, as for
+        `hangar_call` over stdio.
+
+        A tool that needs approval holds one of this facade's pool threads
+        until the approval is decided or expires (`approval_timeout_seconds`,
+        300 s by default), even after `invoke` has raised `TimeoutError` at
+        `timeout_s`. An approval given after that is refused. The same pool
+        runs `stop()` and `health()`, so size `max_concurrency` for the
+        approvals that can be pending at once.
 
         Args:
             mcp_server_name: Name of the mcp_server or group.
@@ -672,6 +689,7 @@ class Hangar:
             ToolCallFailedError: If a control refused the call or the tool
                 failed. Its `code` is the `error_type` `hangar_call` reports.
             TimeoutError: If invocation times out.
+            ValueError: If *principal* is the system principal.
 
         Example:
             result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
@@ -945,9 +963,10 @@ class SyncHangar:
         timeout_s: float = 30.0,
         principal: Principal | None = None,
     ) -> Any:
-        """Invoke a tool on a mcp_server or group, governed as `hangar_call` governs it.
+        """Invoke a tool on a mcp_server or group, under the controls `hangar_call` applies.
 
-        See Hangar.invoke() for full documentation.
+        See Hangar.invoke() for full documentation. Blocks the calling thread
+        for up to `timeout_s`.
         """
         return self._run(
             self._hangar.invoke(mcp_server_name, tool_name, arguments, timeout_s=timeout_s, principal=principal)

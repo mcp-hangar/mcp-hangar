@@ -22,6 +22,8 @@ clashes across the suite).
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import mcp_hangar.server.tools.batch as batch_mod
 from mcp_hangar.context import get_identity_context, identity_context_var
 from mcp_hangar.domain.exceptions import AccessDeniedError
@@ -237,6 +239,24 @@ def test_call_as_an_anonymous_caller_is_denied_where_auth_is_configured() -> Non
     assert (call["error_type"], call["error"]) == ("AuthorizationDenied", "Authentication required to invoke tools")
     executor.execute.assert_not_called()
     authz.authorize.assert_not_called()
+    # Every call was denied, so the executor never ran: the identity bound for
+    # it is released all the same. A facade worker thread is reused.
+    assert identity_context_var.get() is None
+
+
+def test_call_as_refuses_the_system_principal_before_anything_runs() -> None:
+    """Authorization grants the system principal everything, so it may not be the caller."""
+    authz = MagicMock()
+    executor = _make_executor()
+    with (
+        _patched(authz_middleware=authz, executor=executor),
+        pytest.raises(ValueError, match="system principal"),
+    ):
+        call_as(Principal.system(), "svc", "do_thing", {})
+
+    executor.execute.assert_not_called()
+    authz.authorize.assert_not_called()
+    assert identity_context_var.get() is None
 
 
 def test_call_as_an_anonymous_caller_carries_no_tenant_where_auth_is_off() -> None:
@@ -284,3 +304,4 @@ def test_call_as_a_principal_lacking_tool_invoke_is_denied() -> None:
 
     assert result["results"][0]["error_type"] == "AuthorizationDenied"
     executor.execute.assert_not_called()
+    assert identity_context_var.get() is None
