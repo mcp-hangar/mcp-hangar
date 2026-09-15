@@ -177,9 +177,14 @@ def test_no_call_sees_a_mix_while_reloads_swap_between_two_files(files: _Files) 
     stop = threading.Event()
     seen: list[list[tuple[Any, ...]]] = [[] for _ in range(4)]
 
+    reads = [0]
+    reads_lock = threading.Lock()
+
     def call(answers: list[tuple[Any, ...]]) -> None:
         while not stop.is_set():
             answers.append(read_as_one_set(_decisions))
+            with reads_lock:
+                reads[0] += 1
 
     switch_interval = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)
@@ -189,7 +194,19 @@ def test_no_call_sees_a_mix_while_reloads_swap_between_two_files(files: _Files) 
             caller.start()
         for reload in range(200):
             (files.new if reload % 2 == 0 else files.old).commit(replace=True)
-            time.sleep(0.0005)
+            # Let a caller finish one read under this file before the next swap.
+            # A read that a swap overlaps is made again, so back-to-back swaps
+            # under a slow tracer (coverage) could starve every caller until the
+            # loop ends, and they would only ever see the last file. A read that
+            # completes after the commit returned was made entirely under it.
+            with reads_lock:
+                before = reads[0]
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                with reads_lock:
+                    if reads[0] > before:
+                        break
+                time.sleep(0.0002)
     finally:
         stop.set()
         for caller in callers:
