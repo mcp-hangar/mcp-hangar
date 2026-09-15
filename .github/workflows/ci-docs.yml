@@ -6,12 +6,14 @@ on:
     paths:
       - 'docs/internal/**'
       - '*.md'
+      - 'upgrade.d/*.md'
       - '.markdownlint.json'
       - '.github/workflows/ci-docs.yml'
   pull_request:
     paths:
       - 'docs/internal/**'
       - '*.md'
+      - 'upgrade.d/*.md'
       - '.markdownlint.json'
       - '.github/workflows/ci-docs.yml'
 
@@ -38,3 +40,4 @@ jobs:
           globs: |
             docs/internal/**/*.md
             *.md
+            upgrade.d/*.md

@@ -48,6 +48,21 @@ conflicting on the same lines. Details in
 [changelog.d/README.md](changelog.d/README.md); `make changelog-check`
 validates what you wrote.
 
+## Upgrade notes
+
+A change a reader has to act on -- one that breaks callers, removes public API,
+or changes what an existing configuration does -- also gets an upgrade note. Do
+not edit `UPGRADE.md`: add one new file whose first line is the note's heading
+at level three.
+
+```bash
+printf '### what is now true\n\nThe old form, the new form, and what to change.\n' \
+  > upgrade.d/<issue-or-pr>-<slug>.md
+```
+
+The release folds the fragments into `## Upgrade to <version>` and deletes
+them. Details in [upgrade.d/README.md](upgrade.d/README.md).
+
 ## Licensing
 
 MCP Hangar is licensed under the [MIT License](LICENSE).
