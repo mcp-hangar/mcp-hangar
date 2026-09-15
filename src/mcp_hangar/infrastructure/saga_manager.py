@@ -18,6 +18,7 @@ from ..application.ports.saga import (  # noqa: F401 -- re-exported for backward
     SagaStep,
 )
 from ..domain.events import DomainEvent
+from ..errors import bounded_error_type
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from ..logging_config import get_logger
 from .command_bus import CommandBus, get_command_bus
@@ -141,7 +142,8 @@ class SagaManager(ISagaManager):
                     "scheduled_command_failed",
                     timer_id=timer_id,
                     command=type(command).__name__,
-                    error=str(e),
+                    # The type only: a failed start's text can carry what the upstream printed.
+                    error_type=bounded_error_type(type(e).__qualname__),
                 )
                 if on_failure is not None:
                     self._follow_up(timer_id, command, on_failure, e, epoch)
@@ -198,7 +200,11 @@ class SagaManager(ISagaManager):
             try:
                 self._command_bus.send(follow_up)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: one failed follow-up must not stop the next
-                logger.error("scheduled_command_follow_up_failed", command=type(follow_up).__name__, error=str(e))
+                logger.error(
+                    "scheduled_command_follow_up_failed",
+                    command=type(follow_up).__name__,
+                    error_type=bounded_error_type(type(e).__qualname__),
+                )
 
     def cancel_scheduled_command(self, timer_id: str) -> bool:
         """
@@ -296,7 +302,12 @@ class SagaManager(ISagaManager):
                     ) as e:
                         step.error = str(e)
                         saga.on_step_failed(step, e)
-                        logger.error(f"Saga {saga_id} step '{step.name}' failed: {e}")
+                        logger.error(
+                            "saga_step_failed",
+                            saga_id=saga_id,
+                            step=step.name,
+                            error_type=bounded_error_type(type(e).__qualname__),
+                        )
 
                         # Start compensation
                         context.state = SagaState.COMPENSATING
@@ -340,7 +351,12 @@ class SagaManager(ISagaManager):
                     step.compensated = True
                     logger.debug(f"Saga {saga_id} step '{step.name}' compensated")
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: compensation failure must not prevent other compensations
-                    logger.error(f"Saga {saga_id} compensation for '{step.name}' failed: {e}")
+                    logger.error(
+                        "saga_compensation_failed",
+                        saga_id=saga_id,
+                        step=step.name,
+                        error_type=bounded_error_type(type(e).__qualname__),
+                    )
                     # Continue compensating other steps
 
         context.state = SagaState.COMPENSATED
@@ -405,7 +421,12 @@ class SagaManager(ISagaManager):
                             self._command_bus.send(command)
                             logger.debug(f"Saga {saga.saga_type} sent command {type(command).__name__}")
                         except Exception as e:  # noqa: BLE001 -- fault-barrier: command failure must not crash event handler
-                            logger.error(f"Saga {saga.saga_type} command failed: {e}")
+                            logger.error(
+                                "saga_command_failed",
+                                saga_type=saga.saga_type,
+                                command=type(command).__name__,
+                                error_type=bounded_error_type(type(e).__qualname__),
+                            )
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: saga handler failure must not crash event bus
                     logger.error(f"Saga {saga.saga_type} failed to handle event: {e}")
 
