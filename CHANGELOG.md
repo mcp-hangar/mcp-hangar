@@ -5,6 +5,431 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.20.0...v2.21.0) (2026-09-16)
+
+### Added
+
+- **core:** new config key `http.graceful_shutdown_timeout_s`: how many seconds
+  `serve --http` waits, once told to stop, for the requests already in flight
+  before it cancels them. Unset keeps today's behaviour, uvicorn's own default,
+  which waits for them without a bound. The value must be a positive whole number
+  of seconds. Any other value refuses the configuration, whether it comes from a
+  file, from `bootstrap(config_dict=...)` or from a reload. The bound is read when
+  the HTTP server starts, so a reload does not change it for a running server.
+  `starting_http_server` logs the bound in force. See `UPGRADE.md` ([#1449](https://github.com/mcp-hangar/mcp-hangar/pull/1449))
+- **core:** a front door can now wait for its catalogue before it reports ready.
+  The new `tool_access.required_catalogue` block lists the servers a `front_door`
+  replica must have projected before `/health/ready` answers 200, within a window
+  of `retry_for_s` seconds (600 by default) from when the configuration is first
+  applied, which has to cover the rest of boot and the warm-up. When the list is met, or the window ends, readiness goes back to
+  today's rule, so a replica is held out of the Service for at most `retry_for_s`.
+  The readiness endpoint is unauthenticated, so its `catalogue` field reports
+  counts and state. The missing ids, and why the retry will not start a server,
+  are logged in a `required_catalogue_waiting` line and returned by
+  `hangar_health`. Within the window, a server the boot warm-up could not start is
+  retried the way a call starts it, so a dead server waits out its backoff. The
+  retry never starts a server that is `dead` for `given_up` or
+  `capability_blocked`, leaves a `degraded` one to the recovery saga, never starts
+  one this replica has already projected, and ends in a final state. Each attempt
+  writes one log line, with the error type and not the error text, and one sample
+  of `mcp_hangar_catalogue_retries_total`. A group id is satisfied by any one of
+  its members. An unknown id, a group with no members, an unknown key, a
+  `retry_for_s` of 0 or less, and, with a `coordination:` block or shared storage,
+  a required server in a local mode refuse the configuration at load, from a file
+  and from a dict. Without the block, and in `egress`, readiness is unchanged.
+  A call's cold start in the batch executor now follows the call rules, in every
+  topology: a server that became capability-blocked, or went back into its
+  backoff, after the executor checked it is not started by the call, and is
+  refused as `CircuitBreakerOpen` or `CannotStartMcpServerError`, the codes the
+  executor's own check gives the same conditions. ([#1451](https://github.com/mcp-hangar/mcp-hangar/pull/1451))
+- **core:** per-tenant execution budgets. The new, optional
+  `execution.tenant_limits` section gives each tenant a `max_concurrency`, an
+  `rps` and a `burst`, so one tenant can no longer take every execution slot. A
+  `"*"` entry gives each tenant that is not listed a budget of its own; without
+  one, an unlisted tenant and a caller with no tenant are refused. The budget is
+  taken after every policy gate, so a call that a policy refuses spends nothing.
+  The token is taken before an approval hold and a cold start, and given back if
+  the call is refused later. The slot is taken last, so a call held for approval
+  holds none. A call over its budget is refused at once with `TenantQuotaExceeded`,
+  which the front-door call log records as `denied` and
+  `mcp_hangar_tenant_quota_refusals_total` counts. A reload keeps the budget of
+  every tenant whose limits did not change. Budgets are counted per process. With
+  no `tenant_limits`, nothing changes. ([#1450](https://github.com/mcp-hangar/mcp-hangar/pull/1450))
+- **core:** `hangar_details`, `hangar_list`, `hangar_status`, `GET /api/mcp_servers`
+  and `GET /api/mcp_servers/{id}` now say why a server is `dead`. Each server
+  entry has a new `dead` field, null unless the state is `dead`. Then it holds
+  `reason`, one of `given_up`, `crashed`, `start_failed` and `capability_blocked`
+  (`unknown` only for a server restored from a record written before the reason
+  was kept); `since`, when the server went dead; `retry_allowed_at`, the latest
+  time its backoff ends, or null when no call starts it or no backoff applies;
+  and `revived_by`, `call_or_start` or `start`. The times are ISO 8601 UTC. The
+  `hangar_status` note for a dead server now names the reason and what starts it
+  again. The reason is a fixed value, never the upstream's error text. ([#1478](https://github.com/mcp-hangar/mcp-hangar/pull/1478))
+
+### Fixed
+
+- **core:** the two error producers #1495 left behind now answer the one shape.
+  `MCPError.to_dict()` rendered a fifth key, `type`, naming the exception class: a
+  second serializer in the domain that nothing reached, since the REST envelope
+  builds `code`/`message`/`details` from the exception itself and a tool error is
+  `ToolErrorPayload`'s three keys. It is deleted rather than corrected -- an
+  unreachable serializer is what drifts unnoticed. `hangar_reload_config` answered
+  a failed reload with `status`/`message`/`error_type`, the right key in a layout
+  of its own; it now answers `error`, `error_type` and `details`, like every other
+  tool failure, with the same message text under `error`. A successful reload is
+  unchanged. A tree-wide test fails if a new error payload names the failure under
+  `type` again. See `UPGRADE.md`. ([#1511](https://github.com/mcp-hangar/mcp-hangar/pull/1511))
+- **core:** a server loaded with `hangar_load` now has a log buffer, and unloading
+  or deleting one releases it. A hot-loaded server was given none at all, so no
+  stderr reader was ever started for it and `GET /api/mcp_servers/{id}/logs`
+  served an empty list for a running server. It is attached before the process
+  starts, because the reader is spawned while the client is created and only when
+  a buffer is set by then. On the way out, the buffer registry is a process-wide
+  dict that removing a server does not reach, so an unloaded or deleted server's
+  output stayed registered under an id that is free again; both paths release it
+  now. A server that already holds a buffer keeps it, with the lines already in
+  it. ([#1510](https://github.com/mcp-hangar/mcp-hangar/pull/1510))
+- **core:** a batch no longer leaves its routing headers bound on the caller's
+  context. `BatchExecutor.execute` binds this request's `Mcp-Param-*` routing
+  headers and its negotiated protocol version so a worker thread can read them,
+  and now resets both when the batch ends, on every path including a raise. Both
+  callers reach the executor on a copied context that is discarded, so what a call
+  routed on was never read by another call; a caller that runs the executor on a
+  context it keeps now gets the same guarantee. `set_current_protocol_negotiation`
+  returns a reset token, and `reset_current_protocol_negotiation` puts back what
+  was bound before it. ([#1508](https://github.com/mcp-hangar/mcp-hangar/pull/1508))
+- **core:** a configuration reload now gives a server it adds a log buffer.
+  Per-server buffers were attached once, at boot, so a server a reload ADDED had
+  none: its stderr reader was never started, and `GET
+  /api/mcp_servers/{id}/logs` served an empty list for a running server. The
+  commit attaches one as it puts the server in the repository, through the helper
+  bootstrap uses, and logs `log_buffer_attached_to_mcp_server`. A server the
+  reload removes has its buffer released rather than left registered under an id
+  that is now free, while a server the file does not declare and that is still
+  running keeps its own. A rebuilt server still carries its predecessor's buffer
+  over. ([#1505](https://github.com/mcp-hangar/mcp-hangar/pull/1505))
+- **core:** a tool call that names a group now asks a human for the
+  `requireApproval` rule of the member it is routed to. The approval gate looked
+  the L7 egress policy up by the id the call named, and a group id is not a
+  server id -- the server repository holds no groups -- so a call naming a group
+  read no policy at all. The member's `requireApproval` rule never reached an
+  approver, and the member's own check then refused the call on invoke: an
+  operator who configured "ask a human" got "refuse". A call's governance
+  decision now records the policy of the server the call is routed to -- the one
+  it names, or, for a group, the member the group selected -- and the rule is
+  applied as it is for a call that names that member directly. A call naming the
+  member directly is unchanged, as is the refusal a call gets when no approver is
+  configured. ([#1504](https://github.com/mcp-hangar/mcp-hangar/pull/1504))
+- **core:** a configuration reload no longer drops an L7 egress policy set
+  through the REST API or the fleet projection. A reload that rebuilds a server,
+  because a setting the server is built from changed, built the new object from
+  the file alone -- and no config-file key carries an L7 policy -- so an
+  unrelated `env` edit dropped the policy while the reload reported success. The
+  policy is now carried onto the rebuilt server as the commit puts it in force,
+  and the reload logs `l7_policy_carried_to_rebuilt_mcp_server`. A policy the
+  file declares for that server would still win. A server the reload keeps is the
+  same object, and always kept its policy. The per-server log buffer, attached at
+  bootstrap and likewise absent from the file, is carried the same way, so a
+  rebuilt server's output still reaches `hangar_logs`. ([#1500](https://github.com/mcp-hangar/mcp-hangar/pull/1500))
+- **core:** a rate-limit refusal has one shape on every MCP tool path. A refusal
+  from the tool wrapper's own check left the wrapper as an MCP error, while one
+  raised inside a tool body -- by the command bus or by `charge_tool` -- came back
+  as a payload whose error key was `type`, so a client read three shapes for one
+  `RateLimitExceeded`. Every tool path now answers with the payload a
+  `hangar_call` result already uses: `error_type` names the failure, and `details`
+  carries `retry_after`, `scope`, `rps` and the budget's `limit` in the same
+  places. `error_type` replaces `type` in every tool error payload, not only a
+  refusal's. A refusal by the command bus's limiter now reaches the security
+  handler as a tool-level one does, once per refusal, with bounded fields only:
+  the scope, the kind of key, and the tool or command type it is named after. See
+  `UPGRADE.md`. ([#1507](https://github.com/mcp-hangar/mcp-hangar/pull/1507))
+- **core:** a front door now forwards the caller's tasks declaration upstream, so
+  a current-spec upstream creates tasks there. The flat `tools/call` ran the
+  executor without the request context, so the caller's
+  `io.modelcontextprotocol/tasks` declaration was never read and never relayed. An
+  upstream that follows SEP-2663 -- which creates a task only for a client that
+  declared the extension -- therefore never created one for a front-door caller,
+  and only upstreams that create tasks unasked ever produced one. The same request
+  context also carries the caller's W3C trace context and its `Mcp-Param-*`
+  routing headers into the call, as it already did on `hangar_call`.
+
+  A task no caller is handed is now cancelled upstream. When an upstream creates a
+  task for a caller that cannot poll one, Hangar refuses the task, as before, and
+  additionally sends that upstream a best-effort `tasks/cancel` for it, off the
+  request path and bounded, so work nobody can collect no longer runs on to its
+  own TTL. The outcome is logged by type; no upstream text is logged.
+
+  Whether a caller declared the extension is now read once per request and used
+  both to decide what is forwarded upstream and whether a task may be handed back,
+  so the two cannot disagree. A caller on a revision without `tasks/*` no longer
+  has a declaration forwarded on its behalf. ([#1501](https://github.com/mcp-hangar/mcp-hangar/pull/1501))
+- **core:** a tool call made while a configuration reload swaps the servers and
+  groups now reads group membership with the governance overlays, as one set.
+  The reload swapped the servers and each group's membership after the
+  tool-access policies, withdrawals, pins and `header_exposure` blocks. A call to
+  a group member named directly in between was governed by the groups that owned
+  it before the reload, under their new policies: a member moved from a group
+  that denies `t` to one that allows it, while the group it left withdraws `t`
+  instead, was refused as withdrawn, which neither file says. The servers, the
+  groups and their membership are now swapped in the same set as the overlays,
+  and `hangar_call`, a task's follow-ups, the re-check after an approval hold and
+  the front door read which groups own a member in the same decision as the
+  policies. The L7 egress policy the approval gate routes a call on is read in
+  that decision too. ([#1497](https://github.com/mcp-hangar/mcp-hangar/pull/1497))
+- **core:** the command-bus rate limit admits what it is configured to. A bucket
+  idle for the cleanup window was dropped even if it had not refilled, so the next
+  call found a full one. `hangar_start`, `hangar_stop`, `hangar_tools`,
+  `hangar_approve`, `hangar_load`, `hangar_unload` and `hangar_group_rebalance`
+  kept a budget per server or group a call named, so naming more of them bought
+  more calls. The limited `hangar_*` tools were also charged by the deprecated
+  `check_rate_limit()` as well as by the command bus: two budgets for one call.
+
+  A bucket is now dropped only once it has refilled. A tool whose work is a
+  command, such as `hangar_start` of a server, is charged once, at the command
+  bus. A tool whose work never reaches the bus, such as `hangar_load` or a group
+  start, is charged once to a budget named after the tool, whatever it names.
+  `check_rate_limit()` is removed. See `UPGRADE.md`. ([#1494](https://github.com/mcp-hangar/mcp-hangar/pull/1494))
+- **core:** on the front door, a server that is a member of several groups is now
+  governed by each of them, as `hangar_call` naming that member already was. The
+  front door kept one group per member, so the tool policy, withdrawals, pins and
+  `header_exposure` block of the member's other groups did not apply there, and
+  which group counted depended on the order of the groups in the file. A tool that
+  any of the member's groups denies or withdraws is no longer listed for it, and a
+  call to it is refused. A member of several groups is now routed to itself rather
+  than through one of its groups. A member of one group is routed and governed as
+  before. See `UPGRADE.md`. ([#1476](https://github.com/mcp-hangar/mcp-hangar/pull/1476))
+- **core:** a relayed task's follow-ups get the answer a new call of its tool
+  gets. When a new call of the task's tool would be refused by the tool policy or
+  a withdrawal for the caller's tenant, `tasks/update` is refused with `-32602`,
+  the call's message and `data.error_type` (`ToolAccessDeniedError` or
+  `ToolWithdrawnError`), and the upstream is not sent the input. `tasks/get`
+  still answers with the task's status, and refuses a poll that would hand over
+  the tool's result, error or input requests. `tasks/cancel` is always served. A
+  tool that is still allowed is followed up as before. See UPGRADE.md. ([#1477](https://github.com/mcp-hangar/mcp-hangar/pull/1477))
+- **core:** three more paths no longer repeat an upstream's text. When an
+  upstream process refuses `initialize`, the log line is
+  `mcp_server_initialize_refused` with `exit_code` and `stderr_bytes`, the size of
+  the stderr it captured, in place of the `mcp_server_process_exit_code: <code>`
+  and `mcp_server_stderr: <text>` lines. `McpServerDegraded.reason` for a failed
+  start is the error's type, as `bounded_error_type` gives it, not the error's
+  text. A failed tool call sends the security handler its error type, not
+  `<type>: <message>`. The caller still gets the full error from the start or the
+  call it made. ([#1493](https://github.com/mcp-hangar/mcp-hangar/pull/1493))
+- **core:** each caller can have its own command-bus rate limit, and the
+  read-only tools are out of it. `rate_limit` was one budget per command type,
+  shared by every caller, so one caller's tool calls could use up
+  `InvokeToolCommand` for all of them. The same limit refused `hangar_group_list`
+  and the other listing tools.
+
+  `rate_limit` keeps its meaning, the budget all callers share, so no deployment
+  admits more than it did. The new `rate_limit.per_caller` (`rps`, `burst`) gives
+  each caller, by tenant and principal, a budget of its own under it. A caller
+  over its own budget is refused without spending the shared one. The listing and
+  inspection tools (`hangar_list`, `hangar_status`, `hangar_details`,
+  `hangar_group_list` and the others that change nothing) are no longer rate
+  limited. On every path, a refusal names the code, the budget, the limit and when
+  to retry, and the HTTP API adds `Retry-After`. See `UPGRADE.md`. ([#1479](https://github.com/mcp-hangar/mcp-hangar/pull/1479))
+- **core:** each server stop is counted once in `mcp_hangar_mcp_server_stops_total`.
+  An idle reap was counted twice under `idle`. A stop through the stop command
+  (`hangar_stop`, the REST stop or block, a failback) was counted under its own
+  reason and again under `shutdown`. Each stop is now counted once, from its
+  `McpServerStopped` event, which carries the stop command's reason instead of
+  `shutdown`. Stop rates drop after the upgrade with no change in how often
+  servers stop, so review the alerts and recording rules on this counter. See
+  UPGRADE.md. ([#1482](https://github.com/mcp-hangar/mcp-hangar/pull/1482))
+- **core:** `Hangar.start()` and `SyncHangar.start()` now start the coordination
+  and front-door warm-up that `serve` starts. Under a `coordination:` block, an
+  embedded gateway now takes and renews the management lease and follows the
+  shared event log. `stop()` stops the tailer and releases the lease last. In
+  front-door mode, `start()` now warms the catalogue: it starts every configured
+  server on a thread of its own, and runs the required-catalogue retry when
+  `tool_access.required_catalogue` is set. Before, an embedded front door listed
+  nothing until each server had been started some other way. `stop()` stops the
+  retry and waits up to 10 s for the warm-up. Concurrent `start()` calls now share
+  one bootstrap, and a `stop()` made during a `start()` waits for it. Before, two
+  concurrent starts could both bootstrap, and the first context was never
+  stopped. ([#1483](https://github.com/mcp-hangar/mcp-hangar/pull/1483))
+- **core:** docker discovery no longer holds up `serve`, or a `Hangar` that runs
+  discovery, while Docker is unreachable. Starting waited for the docker source's
+  whole connection retry schedule, about 15 s by default. And a single connection
+  attempt blocked discovery's event loop for as long as the Docker client took to
+  give up: 60 s by default, for a TCP `DOCKER_HOST` that does not answer. A stop
+  could hang that long. The source now connects on a thread of its own. Starting
+  returns at once, and a stop no longer waits for an attempt in flight. Each
+  request of an attempt times out after the new `connect_timeout_s`, 5 s by
+  default. A reachable Docker is still scanned in the first discovery cycle.
+  The docker source's `is_healthy`, in `GET /discovery/sources` and
+  `hangar_sources`, now reports whether discovery's last connection or scan
+  reached Docker, instead of connecting from the request. ([#1469](https://github.com/mcp-hangar/mcp-hangar/pull/1469))
+- **core:** a `coordination:` block now refuses every server the loader builds as
+  a child process of one gateway. The check read only top-level `mcp_servers`
+  entries whose `mode` was written as `subprocess`, `docker` or `container`, so
+  three shapes passed it:
+
+  - a server with no `mode`, which the loader builds as `subprocess`;
+  - a group member whose id names no server under `mcp_servers`, built from its
+    own `members:` entry with a local or missing `mode`, now reported as
+    `<group>/<member>`;
+  - `mode: podman`, which then failed later, when the server was built, with
+    `'podman' is not a valid McpServerMode`.
+
+  The refused modes are now the launcher's `LOCAL_MODES`, the set it refuses to
+  start on a replica that does not hold the lease. A member whose id names a
+  top-level server is that server, wherever the group is in the file, and is
+  checked once, as that server. A member entry that names no server and does not
+  say how to run one is left to the loader, which refuses it as naming no server. ([#1459](https://github.com/mcp-hangar/mcp-hangar/pull/1459))
+- **core:** a failed server start is logged by its error type, not by its
+  message. The message can carry what the upstream wrote or printed, and it
+  reached the logs on every path that starts a server: the front-door warm-up
+  (`front_door_warmup_failed`), the start itself (`mcp_server_start_failed`), a
+  group starting its members, the sagas that restart or fail over a server, and
+  the MCP handshake's `notifications/initialized` and session renegotiation. Each
+  of these lines now carries `error_type`, a bounded class name, in place of the
+  message. The caller still receives the full error from the start it asked for.
+
+  Four lines that were free text are now structured events, so a log query that
+  matched their old wording needs updating: `mcp_server_start_failed: <id>,
+  error=<text>` is `mcp_server_start_failed` with `mcp_server_id` and
+  `error_type`; `Failed to start member <id>: <text>` is
+  `group_member_start_failed`; `Member <id> degraded in group <group>: <reason>`
+  is `group_member_degraded` with `consecutive_failures`; and the saga manager's
+  `Saga ... failed: <text>` lines are `saga_step_failed`,
+  `saga_compensation_failed` and `saga_command_failed`. ([#1457](https://github.com/mcp-hangar/mcp-hangar/pull/1457))
+- **core:** the Python facade's `Hangar.invoke` and `SyncHangar.invoke` now run
+  each call through the executor behind `hangar_call`, so the configured
+  call-time controls apply to them: tool access and withdrawals, digest pins,
+  validators and interceptors, approval, the global and per-server concurrency
+  limits, and tenant budgets. They called the server directly before, and none of
+  these applied. `invoke` takes a new, optional `principal=`: the call is
+  authorized for `tool:invoke`, and its per-tenant controls are applied, for that
+  principal, as for an authenticated `hangar_call` caller. Without one, the call
+  is an anonymous caller's, as an unauthenticated `hangar_call` is, so an embedder
+  whose configuration refuses anonymous callers now has to pass a principal.
+  `Principal.system()` is refused with `ValueError`. A refused or failed call
+  raises the new `ToolCallFailedError`, a
+  `ToolInvocationError` whose `code` is the `error_type` that `hangar_call`
+  reports for the same call. `invoke` still returns the whole result: response
+  truncation does not apply to it, and no continuation is stored for it. It also
+  accepts a group id now. See `UPGRADE.md`. ([#1467](https://github.com/mcp-hangar/mcp-hangar/pull/1467))
+- **core:** a group member that names a top-level server is now that server,
+  whatever the order in `mcp_servers`. A group listed before its member's server
+  built the member from the member entry alone: with only an `id`, a server with
+  no command that could not start, and not the one the repository held under that
+  id. A member entry that defined the server inline, under the id of a top-level
+  server declared later, was a second copy the repository never held, so a reload
+  never stopped it. Every top-level server is now built before any group, at
+  startup and on a reload. A member whose id names no server, and whose entry does
+  not say how to run one, now fails the load and names the group and the member.
+  Server settings on a member entry that names a declared server are ignored, as
+  they were when the group came after the server, and a
+  `group_member_entry_settings_ignored` warning now names them. See `UPGRADE.md`. ([#1458](https://github.com/mcp-hangar/mcp-hangar/pull/1458))
+- **core:** stopping `serve`, or a `Hangar` that runs discovery, no longer waits
+  out the docker discovery source's connection backoff while Docker is
+  unreachable. The retry slept on discovery's own event loop, so the stop could
+  not run until the remaining retries had finished: up to about 15 s with the
+  defaults. The wait now ends as soon as the stop begins, and no further
+  connection attempts are made. `DiscoverySource` has a new optional, synchronous
+  `request_stop()` hook, called from the stopping thread before `stop()`; a
+  custom source that blocks discovery's loop in the same way can override it to
+  end its wait. ([#1461](https://github.com/mcp-hangar/mcp-hangar/pull/1461))
+- **core:** the Python facade now runs the background workers `serve` runs.
+  `Hangar.start()` and `SyncHangar.start()`, and their `async with` and `with`
+  blocks, start the GC, health-check and metrics snapshot workers, and the config
+  reload worker for a config file, through the function `ServerLifecycle.start`
+  uses, so the two start the same set. None of them ran under the facade before:
+  a server idle past its `idle_ttl_s` kept running for the life of the host, and
+  no server was health checked on schedule. `stop()` stops the workers and waits
+  for their threads to end, up to 10 seconds in total, and a second `start()` or
+  `stop()` does nothing. A stopped GC or health-check worker, or config reload
+  poller, now ends its thread at once rather than after its interval, and
+  shutdown waits for them, under `serve` too. See `UPGRADE.md` for what an
+  embedded gateway now does that it did not. ([#1462](https://github.com/mcp-hangar/mcp-hangar/pull/1462))
+- **core:** a configuration reload no longer lets more calls run than the
+  concurrency limits allow. Every reload, a byte-identical one from the file
+  watcher included, replaced the concurrency limits. The calls already running
+  held their slots on the replaced limits, so up to twice the configured number
+  could run while they finished. A reload now changes a limit in place. A call in
+  flight keeps its slot, and its release frees that slot. A changed limit applies
+  to the calls that start after the reload. A reload that is refused leaves every
+  limit as it was: a server's `max_concurrency` used to be applied while the new
+  configuration was still being built. A negative `execution.max_concurrency`,
+  `execution.default_mcp_server_concurrency` or server `max_concurrency` is now
+  refused by the configuration check, before a reload stops any server. It used to
+  fail later, part-way through the reload. ([#1486](https://github.com/mcp-hangar/mcp-hangar/pull/1486))
+- **core:** a tool call made while a configuration reload swaps the governance
+  overlays now gets one file's answer. The reload swaps the tool-access policies,
+  then the withdrawals and pins, and `hangar_call`'s gates, like the front door's
+  listing and routing, read them one after another. A call in between could
+  combine the new policy with the previous withdrawals: a reload that moved a
+  control from `tools.deny_list: [t]` to `tool_projection.withdrawn: [t]` let `t`
+  run for a moment, which neither file allows. Each call's access, withdrawal,
+  pins, digest-enforcement modes and approval list are now decided together, as
+  are the front door's flat map and the re-check after an approval hold. A call
+  that arrives during the swap waits for it to finish. ([#1487](https://github.com/mcp-hangar/mcp-hangar/pull/1487))
+- **core:** a configuration reload now puts a file's tool-access policies, group
+  policies included, withdrawals, pins and `header_exposure` blocks in force as
+  one set. It swapped them one after another, so a decision that read two of them
+  during a reload could combine the new value of one with the previous value of
+  another, a state neither file declares. The prompt and resource surfaces now
+  decide against the previous file's overlays or the new file's, never a mix. ([#1484](https://github.com/mcp-hangar/mcp-hangar/pull/1484))
+- **core:** a configuration reload no longer restarts servers whose settings did
+  not change. The reload diff compared part of each server's entry with the
+  running server, and counted a server whose entry left `resources` out as
+  changed on every reload. That is most servers: each reload stopped them and
+  dropped their in-flight calls. A server is now kept, with its process,
+  sessions, health and circuit state, unless the file changes something the
+  server is built from, with every default applied. A change to its tool-access
+  policy, `access`, `tool_access`, `tool_projection` or `header_exposure` block,
+  or to its `weight` or `priority` in a group, now takes effect without a
+  restart. `mcp_servers_updated` lists only the servers the reload restarted. See
+  `UPGRADE.md`. ([#1470](https://github.com/mcp-hangar/mcp-hangar/pull/1470))
+- **core:** a group member is judged by its own health. Every call through a
+  group that did not succeed used to count against the member that took it. So
+  errors the caller caused took a healthy member out of rotation, and enough of
+  them opened the group's circuit: a division by zero, arguments the tool rejects,
+  a tool result marked `isError: true`, or a call the command bus's rate limit
+  refused before it reached the member.
+
+  A member that answered the request now counts as healthy. That covers a tool
+  result with `isError: true`, invalid params (`-32602`), method not found
+  (`-32601`), and a JSON-RPC error whose code is outside the reserved range
+  `-32768` to `-32000`, such as a tool's own `-1`. A refusal Hangar makes before
+  asking the member counts as nothing: its rate limit, an egress rule, or a tool
+  the member does not list. A transport failure, a timeout, a failed start, the
+  member's own backoff, and a JSON-RPC error in the reserved range, such as
+  `-32603` or `-32000`, still count, as before.
+
+  Operators may see fewer members leave rotation and fewer circuit openings, with
+  `mcp_hangar_group_circuit_open` at `1` less often. See `UPGRADE.md`. ([#1468](https://github.com/mcp-hangar/mcp-hangar/pull/1468))
+- **core:** an upstream task in the current flat shape (`resultType: "task"`) is
+  now relayed as one in the older nested shape is: it is recorded for its caller,
+  and `tasks/get`, `tasks/update` and `tasks/cancel` work for it, on `hangar_call`
+  and on the front door. Before, `hangar_call` handed the flat handle back
+  unrecorded, and the front door answered `-32602`. A task is now handed only to a
+  caller that can poll it: a 2026-07-28 client that declared the
+  `io.modelcontextprotocol/tasks` extension. Any other caller gets a tool error
+  naming the extension to declare (`TasksNotNegotiated` in a `hangar_call` batch),
+  not a task that `tasks/*` would refuse it. See `UPGRADE.md`. ([#1491](https://github.com/mcp-hangar/mcp-hangar/pull/1491))
+- **core:** the front door's per-call log line now says what the caller got. A
+  flat `tools/call` whose upstream answer the gateway could not turn into a
+  `CallToolResult` -- one with no `content` -- was validated by the SDK *after*
+  the line was written, so the line said `outcome: ok` for a call the client
+  received as a JSON-RPC `-32602`. The result the caller receives is now built
+  inside the logged scope, so the line and the client agree: such a call is
+  answered with a tool error (`isError`) and logged `outcome: tool_error`,
+  `reason: invalid_result`. The upstream's payload is in neither the line nor the
+  answer. See `UPGRADE.md`. ([#1517](https://github.com/mcp-hangar/mcp-hangar/pull/1517))
+- **core:** giving up on a server is recorded as a stop with its own reason.
+  When the recovery saga gives up on a server, the server records
+  `McpServerStopped` with `reason: max_retries_exceeded`, then the move to `dead`,
+  so the audit log, the event store and the alert handler see the give-up as a
+  stop. `mcp_hangar_mcp_server_stops_total{reason="max_retries_exceeded"}` still
+  counts each give-up once, now from that event, as `idle` and `shutdown` are
+  counted. The `reason` label is a closed set, listed in the metric's HELP line:
+  a REST stop that names any other reason is counted as `manual`. A failover
+  whose backup is given up on ends, so no failback stop turns the dead backup
+  `cold`. See UPGRADE.md. ([#1463](https://github.com/mcp-hangar/mcp-hangar/pull/1463))
+
 ## [2.20.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.19.1...v2.20.0) (2026-09-15)
 
 ### Added
