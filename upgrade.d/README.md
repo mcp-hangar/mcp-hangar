@@ -49,6 +49,35 @@ A group member's circuit used to open on any failed call through the group ...
 - No `## Next` heading and no version: the promoter adds the version.
 - The prose rules of `UPGRADE.md` apply. Write for a reader upgrading, not for a
   reviewer: name the old and the new form, say what breaks and what to change.
+- A fence that shows a key this release **removes** carries
+  `<!-- config-check: skip -->` on the line above it. The docs site syncs
+  `UPGRADE.md` verbatim, and its `check_config` gate reads every `yaml` fence
+  there as configuration -- so an unmarked fence fails on the very key the note
+  tells the reader to delete. One blank line may sit between the marker and the
+  fence, which is what markdownlint wants around a fence. The marker covers the
+  one fence beneath it: a note that shows two removals writes it twice. It marks
+  an illustration of something being deleted, not a way to quiet a fence whose
+  keys are simply not documented yet.
+
+A removal note, whole:
+
+````markdown
+### a group's `circuit_breaker.reset_timeout_s` is removed
+
+It never did anything: a breaker half-opens only when it is asked whether to let
+a request through, and a group never asks. Delete it from every group:
+
+<!-- config-check: skip -->
+
+```yaml
+mcp_servers:
+  pool:
+    mode: group
+    circuit_breaker:
+      failure_threshold: 10
+      reset_timeout_s: 60   # delete this line
+```
+````
 
 ## Release
 
