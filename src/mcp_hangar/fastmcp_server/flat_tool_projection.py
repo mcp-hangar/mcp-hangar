@@ -87,9 +87,9 @@ from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.governance_overlays import read_as_one_set
 from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
-from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
+from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
-from .flat_call_log import logging_each_call, note_failure
+from .flat_call_log import as_client_result, logging_each_call, note_failure
 from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
@@ -1052,9 +1052,6 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         """
         return await _list_projected_tools(mcp_ctx, _management_tools)
 
-    # One log line per call, whatever its outcome (#1362). Outermost, so a
-    # suspended session's refusal is logged too.
-    @logging_each_call
     # A suspended session never reaches the body (GHSA-fhwh-fmq2-7m5c).
     @_refusing_suspended_sessions
     async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
@@ -1222,13 +1219,18 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
     # exposes list_tools()/call_tool() registration decorators; SDK v2 dropped
     # them for add_request_handler(method, params_type, handler) with a
     # (ctx, params) -> HandlerResult signature.
+    # One log line per call, whatever its outcome (#1362), written by the
+    # outermost wrapper so a call refused before the handler body -- a suspended
+    # session -- is logged like any other. On v2 the caller's result is built
+    # inside that scope, so the line cannot say `ok` for a call the SDK then
+    # rejects as a `-32602` (#1404). v1 is left as it was: its lowlevel server
+    # builds the caller's result itself, out of shapes `CallToolResult` does not
+    # accept on its own, and `mcp==2.0.0` is what ships.
     if hasattr(low, "list_tools"):  # SDK v1
         low.list_tools()(_flat_list_tools)
-        low.call_tool(validate_input=False)(_flat_call_tool)
+        low.call_tool(validate_input=False)(logging_each_call(_flat_call_tool))
     else:  # SDK v2
         from mcp_types import CallToolRequestParams, PaginatedRequestParams
-
-        from mcp_hangar._sdk_compat import CallToolResult
 
         from .asgi import (
             bind_caller_identity,
@@ -1267,13 +1269,14 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                 release_routing_headers(headers_token)
                 release_caller_identity(token)
 
+        # The caller's result is built by `as_client_result`, inside the log's
+        # scope: an upstream answer that cannot become a `CallToolResult` is the
+        # caller's tool error and the line's `tool_error`, not an `ok` line and
+        # a `-32602` the SDK raised after the line was written (#1404).
+        logged_call = logging_each_call(as_client_result(_flat_call_tool))
+
         async def _call_v2_inner(params: Any, ctx: Any) -> Any:
-            out = await _flat_call_tool(params.name, params.arguments or {}, ctx)
-            # Built already: the error path's result, or a governed task's (#1394).
-            if isinstance(out, (CallToolResult, CreateTaskResult)):
-                return out
-            # success path returned the raw backend result dict; wrap it.
-            return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
+            return await logged_call(params.name, params.arguments or {}, ctx)
 
         low.add_request_handler("tools/list", PaginatedRequestParams, _list_v2)
         low.add_request_handler("tools/call", CallToolRequestParams, _call_v2)

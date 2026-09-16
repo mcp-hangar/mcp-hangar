@@ -40,7 +40,7 @@ from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_reso
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.fastmcp_server import flat_call_log, flat_tool_projection
-from mcp_hangar.fastmcp_server.flat_call_log import CALL_LOG_EVENT, DENIAL_CODES
+from mcp_hangar.fastmcp_server.flat_call_log import CALL_LOG_EVENT, DENIAL_CODES, INVALID_RESULT
 from mcp_hangar.logging_config import setup_logging
 from mcp_hangar.server.api.sessions import get_session_suspension_registry
 from mcp_hangar.server.session_guard import SESSION_SUSPENDED_REASON, SUSPENSION_UNCHECKED_REASON
@@ -62,12 +62,15 @@ _SESSION = "s-call-log"
 
 #: In every call's arguments. It must never reach the log.
 CANARY = "CANARY-1362-do-not-log"
+#: In the upstream answer the gateway cannot turn into a tool result (#1404).
+UPSTREAM_CANARY = "CANARY-1404-upstream-payload"
 
 _SERVED = "read_graph"
 _REFUSED_AT_DISPATCH = "search_nodes"  # the policy moved between the listing and the call
 _TIMED_OUT = "open_nodes"
 _ANSWERED_WITH_ERROR = "create_entities"
 _EXPLODES = "add_observations"
+_UNUSABLE_RESULT = "list_notes"  # the upstream answers with something that is not a tool result
 _DENIED_BY_POLICY = "delete_entities"  # never projected to this tenant
 _UNKNOWN = "no_such_tool"
 
@@ -88,6 +91,8 @@ def _answer(tool: str, batch_id: str) -> CallResult:
             error_type="ToolAccessDeniedError",
         ),
         _TIMED_OUT: CallResult(index=0, call_id=batch_id, success=False, error="timed out", error_type="TimeoutError"),
+        # Succeeded, and no `content`: not a `CallToolResult` (#1404).
+        _UNUSABLE_RESULT: CallResult(index=0, call_id=batch_id, success=True, result={"notes": [UPSTREAM_CANARY]}),
         _ANSWERED_WITH_ERROR: CallResult(
             index=0,
             call_id=batch_id,
@@ -144,7 +149,15 @@ def front_door(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     reset_tool_access_resolver()
     resolver = get_tool_access_resolver()
     resolver.set_topology_mode("front_door")
-    projected = [_SERVED, _REFUSED_AT_DISPATCH, _TIMED_OUT, _ANSWERED_WITH_ERROR, _EXPLODES, _DENIED_BY_POLICY]
+    projected = [
+        _SERVED,
+        _REFUSED_AT_DISPATCH,
+        _TIMED_OUT,
+        _ANSWERED_WITH_ERROR,
+        _EXPLODES,
+        _UNUSABLE_RESULT,
+        _DENIED_BY_POLICY,
+    ]
     get_tool_projection_registry().build_from_tools(
         _SERVER, [ToolSchema(name=name, description=name, input_schema={"type": "object"}) for name in projected]
     )
@@ -308,6 +321,35 @@ class TestEveryServedCallLeavesOneLine:
         # Nothing Hangar logged at INFO for these calls carries an argument.
         assert CANARY not in output
         assert all("arguments" not in line and "query" not in line for line in lines)
+
+
+class TestTheLineSaysWhatTheCallerGot:
+    """The outcome is decided on the result the client receives, not before (#1404)."""
+
+    def test_a_result_that_cannot_be_a_tool_result_is_not_logged_ok(
+        self, front_door: TestClient, call_log: CallLog
+    ) -> None:
+        # The SDK used to validate the handler's return after the log line was
+        # written: the caller got a -32602 the line called `ok`.
+        _, answer = _call(front_door, _UNUSABLE_RESULT, "req-1404")
+
+        lines, _ = call_log()
+
+        (line,) = lines
+        assert (line["tool"], line["outcome"], line["reason"]) == (_UNUSABLE_RESULT, "tool_error", INVALID_RESULT)
+        assert answer.get("result", {}).get("isError") is True
+        assert "error" not in answer
+
+    def test_neither_the_line_nor_the_caller_carries_the_upstream_payload(
+        self, front_door: TestClient, call_log: CallLog
+    ) -> None:
+        _, answer = _call(front_door, _UNUSABLE_RESULT)
+
+        lines, output = call_log()
+
+        assert UPSTREAM_CANARY not in json.dumps(lines)
+        assert UPSTREAM_CANARY not in output
+        assert UPSTREAM_CANARY not in json.dumps(answer)
 
 
 class TestTheCallerSeesNoDifference:
