@@ -16,7 +16,7 @@ missing or malformed ``_meta`` -- it falls back to
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -87,9 +87,20 @@ def read_protocol_negotiation(meta: Mapping[str, Any] | None) -> ProtocolNegotia
 _protocol_negotiation_var: ContextVar[ProtocolNegotiation | None] = ContextVar("protocol_negotiation", default=None)
 
 
-def set_current_protocol_negotiation(negotiation: ProtocolNegotiation) -> None:
-    """Store the negotiated protocol context for the current request scope."""
-    _protocol_negotiation_var.set(negotiation)
+def set_current_protocol_negotiation(negotiation: ProtocolNegotiation) -> Token[ProtocolNegotiation | None]:
+    """Store the negotiated protocol context for the current request scope.
+
+    Returns a reset token, so a caller that binds on a context it does not own
+    can put back what was there before (see
+    :func:`reset_current_protocol_negotiation`). Discarding it is safe only on a
+    context that is thrown away with the request.
+    """
+    return _protocol_negotiation_var.set(negotiation)
+
+
+def reset_current_protocol_negotiation(token: Token[ProtocolNegotiation | None]) -> None:
+    """Restore the negotiation bound before *token*."""
+    _protocol_negotiation_var.reset(token)
 
 
 def get_current_protocol_negotiation() -> ProtocolNegotiation | None:
