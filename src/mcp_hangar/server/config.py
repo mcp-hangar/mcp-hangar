@@ -116,6 +116,9 @@ class _StagedConfig:
         from ..domain.services import get_tool_access_resolver
         from ..domain.services.governance_overlays import swapping
 
+        # Function-local, as the rest are: `server.bootstrap` imports this module.
+        from .bootstrap.logs import ensure_log_buffer
+
         # Outside the resolver lock: this may wait on a database.
         stored = _stored_policies_now(self.stored_policies) if replace else None
         resolver = get_tool_access_resolver()
@@ -160,8 +163,20 @@ class _StagedConfig:
                 running = repository.get(mcp_server_id)
                 if running is not None and running is not mcp_server:
                     _carry_runtime_state(mcp_server_id, running, mcp_server)
+                # A server this configuration ADDS has no predecessor to carry a
+                # buffer from, and bootstrap's pass runs once, at boot: it had
+                # none at all, so its output reached no log the API reads
+                # (#1502). Attached before the server is in the repository, so
+                # the aggregate lock this takes is on an object no other thread
+                # can reach; the buffer registry's own lock is a leaf that
+                # nothing holds while waiting on the swap.
+                if ensure_log_buffer(mcp_server_id, mcp_server):
+                    logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=mcp_server_id)
                 repository.add(mcp_server_id, mcp_server)
             if replace:
+                # While `_BUILT_FROM` still holds the previous configuration's
+                # servers: it is cleared on the next line.
+                _release_departed_log_buffers(set(self.servers), repository)
                 _BUILT_FROM.clear()
             _BUILT_FROM.update(
                 {sid: (self.built_with[sid], server) for sid, server in self.servers.items() if sid in self.built_with}
@@ -253,6 +268,33 @@ def _carry_runtime_state(mcp_server_id: str, running: McpServer, built: McpServe
         )
     if built._log_buffer is None and running._log_buffer is not None:
         built.set_log_buffer(running._log_buffer)
+
+
+def _release_departed_log_buffers(declared: set[str], repository: Any) -> None:
+    """Release the log buffer of every server the previous configuration declared and this one does not.
+
+    The buffer registry is a process-wide dict, and the reload that takes a
+    removed server out of the repository does not reach it
+    (`ReloadConfigurationHandler._remove`). Its output stayed registered under
+    that id for the life of the process, and the id was never free of it
+    (#1502) -- the leak the policies of a removed server had until #1028.
+
+    Only for a server that is no longer in the repository. One this file does
+    not declare but that is still running -- `hangar_load` added it, so it was
+    never in `_BUILT_FROM` either -- keeps the buffer its logs are read from.
+
+    Args:
+        declared: The ids this configuration declares.
+        repository: The mcp_server repository, read to leave a still-running
+            server's buffer alone.
+    """
+    from .bootstrap.logs import release_log_buffer
+
+    for mcp_server_id in [known for known in _BUILT_FROM if known not in declared]:
+        if repository.get(mcp_server_id) is not None:
+            continue
+        release_log_buffer(mcp_server_id)
+        logger.info("log_buffer_released", mcp_server_id=mcp_server_id)
 
 
 def _runtime_editable(server: McpServer) -> tuple[Any, ...]:
