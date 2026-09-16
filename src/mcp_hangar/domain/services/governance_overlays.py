@@ -16,11 +16,19 @@ that reads more than one overlay runs through `read_as_one_set`. It waits out a
 swap in progress, and runs again when a swap began while it ran, so what it
 returns was decided against one configuration's overlays.
 
+The servers and the groups, with each group's membership, are swapped in the
+same generation (#1488). Which groups own a member decides whose policies,
+withdrawals and pins govern it, and a server carries its L7 egress policy. A
+decision that reads which groups own a member reads it in the same
+`read_as_one_set` run as the overlays.
+
 No registry lock is taken here, and no lock is held while waiting: this
 module's condition is never held while another lock is acquired, so this adds
-no lock-order edge. What `read_as_one_set` runs must be safe to run more than
-once, and it must not be called with a registry lock held: a swap waiting for
-that lock would never end.
+no lock-order edge. A commit takes the resolver's, the projection registry's,
+the `header_exposure` blocks' and the server repository's locks inside
+`swapping`, each on its own. What `read_as_one_set` runs must be safe to run
+more than once, and it must not be called with any of those locks held: a swap
+waiting for that lock would never end.
 """
 
 from __future__ import annotations

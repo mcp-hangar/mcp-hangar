@@ -14,6 +14,14 @@ window: `hangar_call`, and the front door's `tools/call` and listing. The call
 waits out the swap and gets the new file's answer, never an allow. The last
 test does the same for the re-check after an approval hold, with a reload
 that lands in the middle of it.
+
+A reload swaps the servers and the groups, with each group's membership, in
+the same set (#1488). A member that a reload moves from a group that denies
+`t` to one that allows it, while the group it leaves withdraws `t` instead of
+deny-listing it, was governed by the group it left under that group's new
+withdrawals: a refusal neither file gives. The tests pause a reload after its
+overlay swaps and before its membership swap, and ask each surface about the
+member in that window.
 """
 
 from __future__ import annotations
@@ -44,7 +52,7 @@ from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, Pri
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.state import get_runtime, GROUPS
-from mcp_hangar.server.tools.batch import hangar_call
+from mcp_hangar.server.tools.batch import executor, hangar_call
 from mcp_hangar.server.tools.batch.executor import BatchExecutor
 from mcp_hangar.server.tools.batch.models import CallSpec
 
@@ -63,6 +71,29 @@ def _server(**extra: Any) -> dict[str, Any]:
 DENIED = {SERVER: _server(tools={"deny_list": [TOOL]})}
 WITHDRAWN = {SERVER: _server(tool_projection={"withdrawn": [TOOL]})}
 
+MEMBER = "member"  # a server a reload moves from one group to the other
+GROUP_A, GROUP_B = "group-a", "group-b"
+
+
+def _groups(*, member_in: str, group_a: dict[str, Any]) -> dict[str, Any]:
+    """`member` in the group *member_in*; `group-a` governed by *group_a*, and `group-b`, which allows `t`."""
+    members: dict[str, list[dict[str, Any]]] = {
+        GROUP_A: [{"id": "a-1", **_server()}],
+        GROUP_B: [{"id": "b-1", **_server()}],
+    }
+    members[member_in].append({"id": MEMBER})
+    return {
+        MEMBER: _server(),
+        GROUP_A: {"mode": "group", "auto_start": False, **group_a, "members": members[GROUP_A]},
+        GROUP_B: {"mode": "group", "auto_start": False, "members": members[GROUP_B]},
+    }
+
+
+#: `member` in group A, which denies `t`.
+IN_A = _groups(member_in=GROUP_A, group_a={"tools": {"deny_list": [TOOL]}})
+#: `member` moved to group B, which allows `t`. Group A still refuses `t`, by a withdrawal now.
+IN_B = _groups(member_in=GROUP_B, group_a={"tool_projection": {"withdrawn": [TOOL]}})
+
 
 def _reset() -> None:
     reset_tool_access_resolver()
@@ -70,16 +101,20 @@ def _reset() -> None:
     clear_header_exposure_policies()
     server_config._BUILT_FROM.clear()
     repository = get_runtime().repository
-    if repository.exists(SERVER):
-        repository.remove(SERVER)
+    for mcp_server_id in (SERVER, MEMBER, "a-1", "b-1"):
+        if repository.exists(mcp_server_id):
+            repository.remove(mcp_server_id)
     GROUPS.clear()
 
 
-def _in_force(file: dict[str, Any], *, then: dict[str, Any]) -> Any:
-    """Put *file* in force with `t` and `open` in the catalogue, and build *then*, the file a reload puts in force."""
+def _in_force(file: dict[str, Any], *, then: dict[str, Any], server: str = SERVER) -> Any:
+    """Put *file* in force with `t` and `open` in *server*'s catalogue, and build *then*.
+
+    *then* is the file a reload puts in force.
+    """
     server_config.load_config(file)
     get_tool_projection_registry().build_from_tools(
-        SERVER, [ToolSchema(name=name, description=name, input_schema={}) for name in (TOOL, OPEN)]
+        server, [ToolSchema(name=name, description=name, input_schema={}) for name in (TOOL, OPEN)]
     )
     return server_config.build_config(then)
 
@@ -93,9 +128,12 @@ def served() -> Iterator[Mock]:
     context.governed_task_store = None
     context.approval_gate = None
     context.auth_components = None  # auth off
-    server = McpServer(mcp_server_id=SERVER, mode="subprocess", command=["unused"])
-    context.get_mcp_server.side_effect = {SERVER: server}.get
-    context.mcp_server_exists.side_effect = lambda server_id: server_id == SERVER
+    servers = {
+        server_id: McpServer(mcp_server_id=server_id, mode="subprocess", command=["unused"])
+        for server_id in (SERVER, MEMBER)
+    }
+    context.get_mcp_server.side_effect = servers.get
+    context.mcp_server_exists.side_effect = lambda server_id: server_id in servers
     with (
         patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=context),
         patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=context),
@@ -120,9 +158,11 @@ def _as_tenant(call: Callable[[], Any]) -> Any:
         identity_context_var.reset(token)
 
 
-def _hangar_call(tool: str) -> tuple[bool, str | None]:
-    """``(success, error type)`` of a `hangar_call` of *tool*."""
-    response = _as_tenant(lambda: hangar_call(calls=[{"mcp_server": SERVER, "tool": tool, "arguments": {}}], ctx=None))
+def _hangar_call(tool: str, mcp_server: str = SERVER) -> tuple[bool, str | None]:
+    """``(success, error type)`` of a `hangar_call` of *tool* on *mcp_server*."""
+    response = _as_tenant(
+        lambda: hangar_call(calls=[{"mcp_server": mcp_server, "tool": tool, "arguments": {}}], ctx=None)
+    )
     [result] = response["results"]
     return result["success"], result["error_type"]
 
@@ -171,12 +211,20 @@ class _PausedReload:
         adopt = ToolProjectionRegistry.adopt_config_overlays
 
         def pause_then_adopt(registry: ToolProjectionRegistry, *args: Any, **kwargs: Any) -> None:
-            self.paused.set()
-            self.resume.wait(5)
+            self.hold()
             adopt(registry, *args, **kwargs)
 
         monkeypatch.setattr(ToolProjectionRegistry, "adopt_config_overlays", pause_then_adopt)
         self._reload = threading.Thread(target=staged.commit, kwargs={"replace": True})
+
+    def hold(self) -> None:
+        self.paused.set()
+        self.resume.wait(5)
+
+    def window(self) -> None:
+        """The window itself: the new policy no longer denies `t`, and the old withdrawals do not withdraw it yet."""
+        assert get_tool_access_resolver().is_tool_allowed(SERVER, TOOL, member_id=TENANT)
+        assert not get_tool_projection_registry().is_withdrawn(SERVER, TOOL, tenant_id=TENANT)
 
     def call_in_the_window(self, call: Callable[[], Any]) -> Any:
         """Make *call* while the reload is held, and return its answer once the reload is done."""
@@ -185,10 +233,7 @@ class _PausedReload:
         self._reload.start()
         try:
             assert self.paused.wait(5)
-            # The window itself: the new policy no longer denies `t`, and the
-            # previous withdrawals do not withdraw it yet.
-            assert get_tool_access_resolver().is_tool_allowed(SERVER, TOOL, member_id=TENANT)
-            assert not get_tool_projection_registry().is_withdrawn(SERVER, TOOL, tenant_id=TENANT)
+            self.window()
 
             caller.start()
             caller.join(0.2)
@@ -199,6 +244,35 @@ class _PausedReload:
         caller.join(5)
         [answer] = answers
         return answer
+
+
+class _PausedBeforeTheGroups(_PausedReload):
+    """A reload held after it swapped every overlay, before it swaps the servers and the groups (#1488).
+
+    Held as it puts its first server in the repository: the servers and the
+    groups were swapped after the overlays' swap had ended.
+    """
+
+    def __init__(self, staged: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.paused, self.resume = threading.Event(), threading.Event()
+        repository = get_runtime().repository
+        add = repository.add
+
+        def pause_then_add(*args: Any, **kwargs: Any) -> None:
+            if not self.paused.is_set():
+                self.hold()
+            add(*args, **kwargs)
+
+        monkeypatch.setattr(repository, "add", pause_then_add)
+        self._reload = threading.Thread(target=staged.commit, kwargs={"replace": True})
+
+    def window(self) -> None:
+        """The window itself: group A withdraws `t` rather than denying it, and `member` is still in group A."""
+        assert executor._groups_owning(MEMBER) == (GROUP_A,)
+        assert get_tool_access_resolver().is_tool_allowed(
+            GROUP_A, TOOL, group_id=GROUP_A, member_id=TENANT, member_server_id=MEMBER
+        )
+        assert get_tool_projection_registry().is_withdrawn(GROUP_A, TOOL, tenant_id=TENANT)
 
 
 def test_a_hangar_call_between_two_swaps_gets_the_new_files_answer(served: Mock, monkeypatch) -> None:
@@ -268,3 +342,36 @@ def test_the_re_check_after_an_approval_hold_reads_one_set(served: Mock, monkeyp
         "Approval no longer valid at dispatch: tool is no longer allowed by policy",
         "ToolAccessDenied",
     )
+
+
+@pytest.mark.parametrize(
+    ("ask", "under_old", "under_new"),
+    [
+        pytest.param(
+            lambda: _hangar_call(TOOL, MEMBER), (False, "ToolAccessDeniedError"), (True, None), id="hangar_call"
+        ),
+        pytest.param(
+            lambda: executor.current_tool_access_refusal(MEMBER, TOOL, TENANT, target_server_id=MEMBER),
+            ("Tool not available for this mcp_server", "ToolAccessDeniedError"),
+            None,
+            id="task-follow-up",
+        ),
+        pytest.param(_listing, [OPEN], [OPEN, TOOL], id="front-door-listing"),
+    ],
+)
+def test_a_member_moved_between_groups_gets_one_files_answer(
+    served: Mock, monkeypatch: pytest.MonkeyPatch, ask: Callable[[], Any], under_old: Any, under_new: Any
+) -> None:
+    """The acceptance case (#1488): a reload paused between the overlay swap and the membership swap.
+
+    `member` moves from group A, which denies `t`, to group B, which allows it.
+    In the window, group A's new withdrawal with the previous membership
+    refuses `t` as withdrawn: an answer neither file gives.
+    """
+    staged = _in_force(IN_A, then=IN_B, server=MEMBER)
+    assert ask() == under_old, "the old file's answer"
+
+    answer = _PausedBeforeTheGroups(staged, monkeypatch).call_in_the_window(ask)
+
+    assert answer == under_new
+    assert ask() == answer, "the new file's answer"
