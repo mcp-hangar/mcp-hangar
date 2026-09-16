@@ -31,7 +31,12 @@ class McpServerStopped(DomainEvent):
 
 @dataclass
 class McpServerDegraded(DomainEvent):
-    """Published when a mcp_server enters degraded state."""
+    """Published when a mcp_server enters degraded state.
+
+    ``reason`` is bounded: ``DEGRADED_BY_HEALTH_CHECKS`` when health checks
+    degraded the server, and for a failed start the error's type as
+    ``bounded_error_type`` gives it, never the error's text.
+    """
 
     mcp_server_id: str
     consecutive_failures: int

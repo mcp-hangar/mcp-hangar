@@ -222,50 +222,46 @@ class InMemoryRateLimiter(RateLimiter):
 
         Args:
             config: Rate limit configuration
-            cleanup_interval: How often to clean up old buckets (seconds)
+            cleanup_interval: How often to drop the buckets that have refilled (seconds)
         """
         self.config = config or RateLimitConfig()
         self.cleanup_interval = cleanup_interval
         self._buckets: dict[str, TokenBucket] = {}
-        self._bucket_last_used: dict[str, float] = {}
         self._lock = threading.Lock()
         self._last_cleanup = time.monotonic()
 
-    def _get_bucket(self, key: str) -> TokenBucket:
-        """Get or create a token bucket for the given key."""
-        with self._lock:
-            if key not in self._buckets:
-                self._buckets[key] = TokenBucket(
-                    rate=self.config.requests_per_second,
-                    capacity=self.config.burst_size,
-                )
-            self._bucket_last_used[key] = time.monotonic()
-
-            # Periodic cleanup
-            self._maybe_cleanup()
-
-            return self._buckets[key]
+    def _bucket(self, key: str) -> TokenBucket:
+        """The token bucket for *key*, made full when there is none. Call with the lock held."""
+        self._maybe_cleanup()
+        bucket = self._buckets.get(key)
+        if bucket is None:
+            bucket = TokenBucket(
+                rate=self.config.requests_per_second,
+                capacity=self.config.burst_size,
+            )
+            self._buckets[key] = bucket
+        return bucket
 
     def _maybe_cleanup(self) -> None:
-        """Clean up old buckets to prevent memory growth."""
+        """Drop the buckets that have refilled, at most once per `cleanup_interval`. Call with the lock held.
+
+        Only a full bucket is dropped: the one made in its place starts full,
+        so no answer changes (#1481). A bucket still refilling is kept however
+        long it has been idle, since dropping it would hand its caller the
+        tokens it has not yet earned back.
+        """
         now = time.monotonic()
         if now - self._last_cleanup < self.cleanup_interval:
             return
 
         self._last_cleanup = now
-
-        # Remove buckets not used in the last cleanup interval
-        cutoff = now - self.cleanup_interval
-        keys_to_remove = [key for key, last_used in self._bucket_last_used.items() if last_used < cutoff]
-
-        for key in keys_to_remove:
-            self._buckets.pop(key, None)
-            self._bucket_last_used.pop(key, None)
+        for key in [key for key, bucket in self._buckets.items() if bucket.is_full()]:
+            del self._buckets[key]
 
     def check(self, key: str = "global") -> RateLimitResult:
         """Check if a request would be allowed without consuming."""
-        bucket = self._get_bucket(key)
-        available, time_to_full = bucket.peek()
+        with self._lock:
+            available, time_to_full = self._bucket(key).peek()
 
         return RateLimitResult(
             allowed=available > 0,
@@ -277,9 +273,12 @@ class InMemoryRateLimiter(RateLimiter):
 
     def consume(self, key: str = "global", tokens: int = 1) -> RateLimitResult:
         """Consume tokens and return result."""
-        bucket = self._get_bucket(key)
-        allowed, wait_time = bucket.consume(tokens)
-        available, time_to_full = bucket.peek()
+        # Under the lock, so a cleanup never drops the bucket between finding
+        # it and spending from it.
+        with self._lock:
+            bucket = self._bucket(key)
+            allowed, wait_time = bucket.consume(tokens)
+            available, time_to_full = bucket.peek()
 
         return RateLimitResult(
             allowed=allowed,
@@ -299,7 +298,6 @@ class InMemoryRateLimiter(RateLimiter):
         """Reset all rate limits."""
         with self._lock:
             self._buckets.clear()
-            self._bucket_last_used.clear()
 
     def get_stats(self) -> dict[str, Any]:
         """Get rate limiter statistics."""

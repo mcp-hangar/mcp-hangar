@@ -58,6 +58,12 @@ identity_context_var: ContextVar[IdentityContext | None] = ContextVar("identity_
 #: until one matched, so only the headers a policy is allowed to see are carried.
 routing_headers_var: ContextVar[Mapping[str, str] | None] = ContextVar("routing_headers", default=None)
 
+#: Whether this request's caller can poll a task it is handed: it speaks a
+#: protocol revision that has ``tasks/*``, and it declared the tasks extension
+#: (#1405). Bound around every request by the task relay's server middleware.
+#: Unbound means no, so a path that never binds it is never handed a task.
+caller_polls_tasks_var: ContextVar[bool] = ContextVar("caller_polls_tasks", default=False)
+
 #: Where the listing path records that ``Mcp-Param-*`` validation was skipped
 #: for this POST. The carrier is ``request.state`` and not a contextvar because
 #: :func:`bind_routing_headers` rebuilds the mapping from the raw request

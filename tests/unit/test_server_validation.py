@@ -4,7 +4,7 @@ import pytest
 
 from mcp_hangar.server.context import reset_context
 from mcp_hangar.server.validation import (
-    check_rate_limit,
+    charge_tool,
     tool_error_hook,
     tool_error_mapper,
     validate_arguments_input,
@@ -193,8 +193,8 @@ class TestValidateTimeoutInput:
         assert "invalid_timeout" in str(exc_info.value)
 
 
-class TestCheckRateLimit:
-    """Tests for check_rate_limit function."""
+class TestChargeTool:
+    """Tests for charge_tool, the budget of a tool whose work never reaches the command bus."""
 
     @pytest.fixture(autouse=True)
     def reset_context_fixture(self):
@@ -206,8 +206,8 @@ class TestCheckRateLimit:
     def test_rate_limit_allows_request(self):
         """Rate limit should allow normal requests."""
         # Should not raise with default config
-        check_rate_limit("test-key")
+        charge_tool("test-key")
 
     def test_rate_limit_with_global_key(self):
         """Rate limit should work with global key."""
-        check_rate_limit("global")
+        charge_tool("global")

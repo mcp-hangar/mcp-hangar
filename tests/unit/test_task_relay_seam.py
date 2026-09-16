@@ -17,22 +17,27 @@ relay-only rejection. These tests pin all of that plus the fail-closed paths.
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-from mcp_hangar.context import identity_context_var
+from mcp_hangar.context import caller_polls_tasks_var, identity_context_var
 from mcp_hangar.domain.events import TaskCreated
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, hangar_call
 from mcp_hangar.server.tools.batch.models import CallResult, RelayCapture
-from mcp_hangar.server.tools.batch.relay_seam import govern_relayed_tasks
+from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling, caller_polls_tasks
+from mcp_hangar.server.tools.batch.relay_seam import govern_relayed_tasks, upstream_task
+from mcp_hangar.tasks_wire import EXTENSION_ID
 
 _SERVER = "server_a"
 _TOOL = "long_running_op"
@@ -45,6 +50,18 @@ _TASK_RESULT = {
         "ttl": 60_000,
     }
 }
+
+
+@pytest.fixture(autouse=True)
+def _a_caller_that_can_poll() -> Iterator[None]:
+    """What the task relay's middleware binds for a caller that declared the extension.
+
+    Every test here governs a task for such a caller, but the last section's,
+    which covers the caller that cannot poll one (#1405).
+    """
+    token = caller_polls_tasks_var.set(True)
+    yield
+    caller_polls_tasks_var.reset(token)
 
 
 def _identity(tenant_id: str | None, principal: str | None = None) -> IdentityContext:
@@ -441,3 +458,144 @@ def test_hangar_call_governs_relay_before_returning_response() -> None:
     # The governed entry is readable by its owner.
     with _bound(_identity("tenant-a", "alice")):
         assert store.get_task((_SERVER, "t1")) is not None
+
+
+# =============================================================================
+# Both upstream task shapes, and who is handed a task (#1405)
+# =============================================================================
+
+#: SEP-2663's flat task result, as a spec-current upstream answers `tools/call`.
+_FLAT_TASK_RESULT = {
+    "resultType": "task",
+    "taskId": "t1",
+    "status": "working",
+    "createdAt": "2020-01-01T00:00:00Z",
+    "lastUpdatedAt": "2020-01-01T00:00:00Z",
+    "ttlMs": 60_000,
+    "pollIntervalMs": 500,
+}
+
+
+class TestUpstreamTask:
+    def test_the_nested_shape_is_its_task(self) -> None:
+        assert upstream_task({"task": {"taskId": "t1", "status": "working"}}) == {"taskId": "t1", "status": "working"}
+
+    def test_the_flat_shape_is_its_task_under_the_ledgers_names(self) -> None:
+        assert upstream_task(_FLAT_TASK_RESULT) == {
+            "taskId": "t1",
+            "status": "working",
+            "createdAt": "2020-01-01T00:00:00Z",
+            "lastUpdatedAt": "2020-01-01T00:00:00Z",
+            "ttl": 60_000,
+            "pollInterval": 500,
+        }
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            None,
+            [],
+            "task",
+            {"content": []},
+            {"task": "t1"},
+            {"task": {}},
+            {"resultType": "complete", "taskId": "t1", "status": "working"},
+            {"taskId": "t1", "status": "working"},
+        ],
+    )
+    def test_anything_else_is_not_a_task(self, result: Any) -> None:
+        assert upstream_task(result) is None
+
+
+def test_seam_governs_a_flat_upstream_task_as_it_governs_a_nested_one() -> None:
+    events: list[object] = []
+    store = GovernedTaskStore(event_publisher=events.append)
+    capture = _capture(identity=_identity("tenant-a", "alice"))
+    capture.upstream = dict(_FLAT_TASK_RESULT)
+    executed = [_result_with_capture(capture)]
+
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
+        govern_relayed_tasks(executed)
+
+    assert executed[0].success is True
+    # Handed back as the upstream sent it.
+    assert executed[0].result == _FLAT_TASK_RESULT
+    entry = store._tasks[(_SERVER, "t1")]
+    assert entry.owner == TaskOwner("tenant-a", "alice")
+    assert entry.snapshot.ttl == 60_000
+    assert len([e for e in events if isinstance(e, TaskCreated)]) == 1
+
+
+def test_seam_refuses_a_caller_that_cannot_poll_and_records_nothing() -> None:
+    events: list[object] = []
+    store = GovernedTaskStore(event_publisher=events.append)
+    executed = [_result_with_capture(_capture(identity=_identity("tenant-a", "alice")))]
+
+    token = caller_polls_tasks_var.set(False)
+    try:
+        with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
+            govern_relayed_tasks(executed)
+    finally:
+        caller_polls_tasks_var.reset(token)
+
+    assert executed[0].success is False
+    assert executed[0].error_type == "TasksNotNegotiated"
+    assert EXTENSION_ID in (executed[0].error or "")
+    assert executed[0].result is None
+    assert store._tasks == {}
+    assert events == []
+
+
+def test_a_request_nothing_bound_is_one_whose_caller_cannot_poll() -> None:
+    """A path the task relay's middleware never wrapped is handed no task."""
+    store = GovernedTaskStore()
+    executed = [_result_with_capture(_capture(identity=_identity("tenant-a", "alice")))]
+
+    with patch("mcp_hangar.server.tools.batch.relay_seam.get_context", return_value=_seam_ctx(store)):
+        contextvars.Context().run(govern_relayed_tasks, executed)
+
+    assert executed[0].error_type == "TasksNotNegotiated"
+    assert store._tasks == {}
+
+
+def _request(version: str | None, declared: bool) -> SimpleNamespace:
+    """A `ServerRequestContext`, as far as who-can-poll reads it."""
+    extensions: dict[str, Any] = {EXTENSION_ID: {}} if declared else {}
+    capabilities = SimpleNamespace(extensions=extensions)
+    session = SimpleNamespace(protocol_version=version, client_params=SimpleNamespace(capabilities=capabilities))
+    return SimpleNamespace(session=session)
+
+
+class TestWhoCanPollATask:
+    @pytest.mark.parametrize(
+        ("version", "declared", "polls"),
+        [
+            ("2026-07-28", True, True),
+            ("2026-07-28", False, False),
+            ("2025-11-25", True, False),
+            ("2025-06-18", True, False),
+            (None, True, False),
+        ],
+    )
+    def test_a_caller_on_a_revision_with_tasks_that_declared_the_extension(
+        self, version: str | None, declared: bool, polls: bool
+    ) -> None:
+        assert caller_polls_tasks(_request(version, declared)) is polls
+
+    def test_a_request_with_no_session_cannot(self) -> None:
+        assert caller_polls_tasks(SimpleNamespace()) is False
+
+    def test_the_middleware_binds_it_for_the_request_and_releases_it(self) -> None:
+        seen: list[bool] = []
+
+        async def call_next(ctx: Any) -> str:
+            seen.append(caller_polls_tasks_var.get())
+            return "served"
+
+        async def request() -> tuple[str, bool]:
+            caller_polls_tasks_var.set(False)
+            served = await bind_task_polling(_request("2026-07-28", True), call_next)
+            return served, caller_polls_tasks_var.get()
+
+        assert asyncio.run(request()) == ("served", False)
+        assert seen == [True]

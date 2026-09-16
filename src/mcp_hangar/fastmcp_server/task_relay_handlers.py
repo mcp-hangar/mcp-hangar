@@ -104,6 +104,7 @@ from mcp_hangar._sdk_compat import (
     INVALID_PARAMS,
     METHOD_NOT_FOUND,
     RequestParams,
+    is_modern_protocol_version,
     lowlevel_server,
     make_mcp_error,
 )
@@ -117,7 +118,7 @@ from mcp_hangar.tasks_wire import (
     missing_capability_error_data,
 )
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-from mcp_hangar.context import get_identity_context, identity_context_var
+from mcp_hangar.context import caller_polls_tasks_var, get_identity_context, identity_context_var
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.fastmcp_server.asgi import identity_for_request
 from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
@@ -131,10 +132,6 @@ _RELAY_TIMEOUT = 30.0
 # Injected upstream transport: (target_server_id, method, params, timeout) -> raw
 # JSON-RPC response dict (the ``{"result": ...}`` / ``{"error": ...}`` shape).
 UpstreamRouter = Any
-
-# SEP-2663 is a 2026-07-28 extension. Below this version the methods do not
-# exist; ISO-date strings compare correctly lexicographically.
-_MODERN_TASKS_VERSION = "2026-07-28"
 
 
 class _GetTaskParams(RequestParams):
@@ -210,17 +207,21 @@ def _current_principal_id() -> str:
 
 
 def _is_modern_tasks_session(ctx: Any) -> bool:
-    """Does this connection speak 2026-07-28, where SEP-2663 Tasks exist at all?
+    """Does this connection speak a revision where SEP-2663 Tasks exist at all?
 
-    Fail-closed: any missing or non-comparable version is treated as legacy, so
+    That is a revision past the ``initialize`` handshake, 2026-07-28 or later.
+    Which revisions still use the handshake is read from the SDK
+    (:func:`~mcp_hangar._sdk_compat.is_modern_protocol_version`).
+
+    Fail-closed: any missing or unreadable version is treated as legacy, so
     an unreadable session gets ``-32601`` rather than a modern-shaped reply.
     """
     version = getattr(getattr(ctx, "session", None), "protocol_version", None)
     if version is None:
         return False
     try:
-        return str(version) >= _MODERN_TASKS_VERSION
-    except Exception:  # noqa: BLE001 -- a non-comparable version is treated as legacy
+        return is_modern_protocol_version(str(version))
+    except Exception:  # noqa: BLE001 -- an unreadable version is treated as legacy
         return False
 
 
@@ -323,6 +324,35 @@ def _require_tasks_client(ctx: Any, task_id: str) -> None:
             f"Client must declare the {EXTENSION_ID} extension to use tasks/*",
             data=missing_capability_error_data(),
         )
+
+
+def caller_polls_tasks(ctx: Any) -> bool:
+    """Can this request's caller poll a task, if it is handed one? (#1405)
+
+    The two rungs of :func:`_require_tasks_client` that are about the caller
+    rather than one request: it speaks a revision that has ``tasks/*``, and it
+    declared the extension. The relay hands an upstream's task only to a caller
+    this answers yes for, so no caller holds a task ``tasks/*`` would refuse it.
+    Fail-closed: anything unreadable is no.
+    """
+    try:
+        return _is_modern_tasks_session(ctx) and _client_declared_tasks_extension(ctx)
+    except Exception:  # noqa: BLE001 -- reading the caller must never break a request
+        return False
+
+
+async def bind_task_polling(ctx: Any, call_next: Any) -> Any:
+    """Server middleware: record, for this request, whether its caller can poll a task.
+
+    It wraps every inbound request, so it holds for the flat ``tools/call`` and
+    ``hangar_call`` alike, and the relay seam reads it when an upstream answers
+    with a task. Bound for the request and released after it.
+    """
+    token = caller_polls_tasks_var.set(caller_polls_tasks(ctx))
+    try:
+        return await call_next(ctx)
+    finally:
+        caller_polls_tasks_var.reset(token)
 
 
 def _derive_input_key(result: dict[str, Any]) -> str:
