@@ -29,6 +29,8 @@ import pytest
 import yaml
 
 from mcp_hangar.application.commands import ReloadConfigurationCommand
+from mcp_hangar.application.commands.crud_commands import SetL7PolicyCommand
+from mcp_hangar.application.commands.crud_handlers import SetL7PolicyHandler
 from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
 from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
@@ -40,6 +42,7 @@ from mcp_hangar.domain.exceptions import (
     ConfigurationRestartRequiredError,
     ConfigurationUnavailableError,
 )
+from mcp_hangar.domain.policies.egress_l7 import L7Policy, ToolRules
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies, get_header_exposure_policy
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
@@ -935,3 +938,42 @@ class TestOnlyAChangedServerRestarts:
         shutdown.assert_called_once()
         assert member is not None and member.mcp_server is get_runtime().repository.get("m1")
         assert member.mcp_server is not server
+
+
+class TestARuntimeL7PolicyAcrossAReload:
+    """A policy set over the API lives on the server object, and no file declares one (#1498)."""
+
+    @staticmethod
+    def _set_over_the_api(mcp_server_id: str, policy: L7Policy | None) -> None:
+        """What `POST /api/mcp_servers/{id}/l7_policy` does: the REST handler's own command."""
+        SetL7PolicyHandler(get_runtime().repository, Mock()).handle(
+            SetL7PolicyCommand(mcp_server_id=mcp_server_id, policy=policy, source="operator")
+        )
+
+    def test_a_rebuilt_server_keeps_it(self, gateway: _Gateway) -> None:
+        gateway.boot(_config(servers={SERVER: _server(env={"TOKEN": "before"})}))
+        repository = get_runtime().repository
+        before = repository.get(SERVER)
+        policy = L7Policy(tools=ToolRules(deny=("delete_*",)))
+        self._set_over_the_api(SERVER, policy)
+
+        result = gateway.reload(_config(servers={SERVER: _server(env={"TOKEN": "after"})}))
+
+        after = repository.get(SERVER)
+        assert result["mcp_servers_updated"] == [SERVER], "the new `env` rebuilds it"
+        assert after is not before
+        assert after.l7_policy == policy
+
+    def test_a_kept_server_keeps_it(self, gateway: _Gateway) -> None:
+        config = _config(servers={SERVER: _server()})
+        gateway.boot(config)
+        repository = get_runtime().repository
+        before = repository.get(SERVER)
+        policy = L7Policy(tools=ToolRules(deny=("delete_*",)))
+        self._set_over_the_api(SERVER, policy)
+
+        result = gateway.reload(config)
+
+        assert result["mcp_servers_unchanged"] == [SERVER]
+        assert repository.get(SERVER) is before
+        assert before.l7_policy is policy
