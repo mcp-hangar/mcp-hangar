@@ -123,7 +123,21 @@ Homepage = "https://mcp-hangar.io"
 Documentation = "https://mcp-hangar.io/docs/getting-started/quickstart"
 Repository = "https://github.com/mcp-hangar/mcp-hangar"
 [build-system]
-requires = ["hatchling"]
+# hatchling is PINNED. 1.32.1 (published 2026-09-16) loads a builder plugin
+# chain whose binary builder imports the `hatch` CLI package
+# (`hatchling/builders/binary.py`: `from hatch.plugin.manager import
+# PluginManager`). That package is NOT present in the isolated build env that
+# `hatch build` and `python -m build` each create from this `requires` list, so
+# every build path died with `ModuleNotFoundError: No module named 'hatch'` --
+# the Docker image, the `build` CI job, `make build-core` and the release
+# workflow. 1.32.0 is unaffected. See #1513.
+#
+# This one pin covers every path because all of them resolve the backend from
+# this list. Before lifting it, check that a newer hatchling no longer imports
+# `hatch` at plugin-load time, then prove it with `docker build .` and the
+# `build` job -- not with a local `pip install`, which has `hatch` on hand and
+# therefore cannot reproduce the failure.
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = ["/.github/brand"]
