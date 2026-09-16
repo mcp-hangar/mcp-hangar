@@ -64,7 +64,7 @@ def _started(answer: dict[str, Any]) -> bool:
 
 
 def _refused_by(answer: dict[str, Any], budget: str) -> None:
-    assert answer.get("type") == "RateLimitExceeded", answer
+    assert answer.get("error_type") == "RateLimitExceeded", answer
     assert answer["error"].startswith(f"RateLimitExceeded: {budget} for StartMcpServerCommand is used up"), answer
 
 

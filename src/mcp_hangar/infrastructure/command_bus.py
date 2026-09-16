@@ -13,7 +13,7 @@ proper layer separation (infrastructure should not define business commands).
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- re-exported for backward compat
 from mcp_hangar.application.ports.bus import ICommandBus
@@ -152,21 +152,49 @@ class CommandBus(ICommandBus):
         return command_type in self._handlers
 
 
+class RefusalLog(Protocol):
+    """What this middleware needs of the security handler: a record per refusal.
+
+    Declared here rather than imported so the infrastructure layer keeps no
+    dependency on the layers above it; `bootstrap.runtime` passes the real
+    handler in.
+    """
+
+    def log_rate_limit_exceeded(
+        self,
+        mcp_server_id: str | None = None,
+        limit: int = 0,
+        window_seconds: int = 0,
+        source_ip: str | None = None,
+        *,
+        scope: str = "",
+        key_kind: str = "",
+        key: str = "",
+    ) -> None: ...
+
+
 class RateLimitMiddleware(CommandBusMiddleware):
     """Middleware that enforces rate limiting on all commands.
 
     Charges each command, before dispatch, to its caller's budget when
     `rate_limit.per_caller` sets one, and to the budget all callers share.
     Raises RateLimitExceeded when either is used up (see `caller_rate_limit`).
+
+    A refusal is recorded by the security handler, once, the way a tool-level
+    one is (#1495).
     """
 
-    def __init__(self, rate_limiter: "RateLimiter"):
+    def __init__(self, rate_limiter: "RateLimiter", *, security_handler: RefusalLog | None = None):
         """Initialize with rate limiter.
 
         Args:
             rate_limiter: Rate limiter instance to check against.
+            security_handler: Where a refusal is recorded. None records none,
+                which is what a bus built without one (a test, a bus wired by
+                hand) has always done.
         """
         self._rate_limiter = rate_limiter
+        self._security_handler = security_handler
 
     def __call__(self, command: "Command", next_handler: Callable[["Command"], Any]) -> Any:
         """Charge the command to its caller's budget and the shared one, then dispatch it."""
@@ -192,6 +220,21 @@ class RateLimitMiddleware(CommandBusMiddleware):
                     prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
             except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block rate limit enforcement
                 pass
+
+            # One record per refusal, with bounded fields only: whose budget was
+            # used up, and the command type it is named after (#1495). No
+            # argument value and no caller's own text.
+            if self._security_handler is not None:
+                try:
+                    self._security_handler.log_rate_limit_exceeded(
+                        limit=refusal.limit,
+                        window_seconds=refusal.window_seconds,
+                        scope=refusal.scope,
+                        key_kind="command",
+                        key=key,
+                    )
+                except Exception:  # noqa: BLE001 -- fault-barrier: a logging failure must not block rate limit enforcement
+                    logger.debug("rate_limit_refusal_not_recorded", command_type=key)
 
             raise refusal
 

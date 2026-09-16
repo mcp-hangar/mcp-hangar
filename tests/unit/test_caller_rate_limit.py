@@ -425,7 +425,13 @@ class TestTheToolLevelCheck:
         with _as(_caller(*B)):
             validation.charge_tool("hangar_load")
 
-        security.log_rate_limit_exceeded.assert_called_once_with(limit=1, window_seconds=refused.value.window_seconds)
+        security.log_rate_limit_exceeded.assert_called_once_with(
+            limit=1,
+            window_seconds=refused.value.window_seconds,
+            scope=RATE_LIMIT_CALLER,
+            key_kind="tool",
+            key="hangar_load",
+        )
 
     def test_the_read_only_tools_are_the_ones_registered_without_a_limit(self, monkeypatch: pytest.MonkeyPatch):
         checks, _ = _registered(monkeypatch)
