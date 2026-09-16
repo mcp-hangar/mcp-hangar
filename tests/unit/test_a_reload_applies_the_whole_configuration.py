@@ -47,11 +47,12 @@ from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_pol
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.infrastructure.persistence.log_buffer import get_log_buffer, remove_log_buffer
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.api import middleware
-from mcp_hangar.server.config import load_configuration, ServerConfigLoader
+from mcp_hangar.server.config import load_config, load_configuration, ServerConfigLoader
 from mcp_hangar.server.context import get_context
 from mcp_hangar.server.state import get_runtime, GROUPS
 from mcp_hangar.server.tools import batch
@@ -96,6 +97,7 @@ def _reset() -> None:
     server_config._BUILT_FROM.clear()
     repository = get_runtime().repository
     for mcp_server_id in IDS:
+        remove_log_buffer(mcp_server_id)
         if repository.exists(mcp_server_id):
             repository.remove(mcp_server_id)
     GROUPS.clear()
@@ -977,3 +979,86 @@ class TestARuntimeL7PolicyAcrossAReload:
         assert result["mcp_servers_unchanged"] == [SERVER]
         assert repository.get(SERVER) is before
         assert before.l7_policy is policy
+
+
+class TestEveryServerInTheRepositoryHasALogBuffer:
+    """However it got there: booted, rebuilt by a reload, or added by one (#1502).
+
+    No configuration file declares a log buffer -- there is no key for one -- so
+    a server has one only because something attached it. Both halves are
+    checked: the aggregate fills the buffer from its process's stderr, and the
+    registry is where `GET /api/mcp_servers/{id}/logs` looks it up. A server
+    holding a buffer registered under no id, or an id registering a buffer the
+    server does not fill, is output nothing can read.
+    """
+
+    @staticmethod
+    def _buffer_of(mcp_server_id: str) -> Any:
+        server = get_runtime().repository.get(mcp_server_id)
+        return None if server is None else server._log_buffer
+
+    def test_a_booted_server_has_one(self, gateway: _Gateway) -> None:
+        # From the commit, before bootstrap's own pass, which no reload runs.
+        gateway.boot(_config(servers={SERVER: _server()}))
+
+        assert self._buffer_of(SERVER) is not None
+        assert get_log_buffer(SERVER) is self._buffer_of(SERVER)
+
+    def test_a_server_the_reload_adds_has_one(self, gateway: _Gateway) -> None:
+        gateway.boot(_config(servers={SERVER: _server()}))
+
+        result = gateway.reload(_config(servers={SERVER: _server(), "late": _server()}))
+
+        assert result["mcp_servers_added"] == ["late"]
+        assert self._buffer_of("late") is not None, "it has no predecessor to carry one from"
+        assert get_log_buffer("late") is self._buffer_of("late")
+
+    def test_a_rebuilt_server_keeps_the_one_it_had(self, gateway: _Gateway) -> None:
+        """#1498's behaviour, pinned here too: the carried buffer keeps the lines already in it."""
+        gateway.boot(_config(servers={SERVER: _server(env={"TOKEN": "before"})}))
+        booted = self._buffer_of(SERVER)
+
+        result = gateway.reload(_config(servers={SERVER: _server(env={"TOKEN": "after"})}))
+
+        assert result["mcp_servers_updated"] == [SERVER], "the new `env` rebuilds it"
+        assert self._buffer_of(SERVER) is booted
+        assert get_log_buffer(SERVER) is booted
+
+    def test_a_kept_server_keeps_the_one_it_had(self, gateway: _Gateway) -> None:
+        config = _config(servers={SERVER: _server()})
+        gateway.boot(config)
+        booted = self._buffer_of(SERVER)
+
+        result = gateway.reload(config)
+
+        assert result["mcp_servers_unchanged"] == [SERVER]
+        assert self._buffer_of(SERVER) is booted
+
+
+class TestTheLogBufferOfARemovedServer:
+    """A server the file no longer declares takes its buffer with it (#1502)."""
+
+    def test_it_is_released_with_the_server(self, gateway: _Gateway) -> None:
+        gateway.boot(_config(servers={SERVER: _server(), "extra": _server()}))
+        assert get_log_buffer("extra") is not None
+
+        result = gateway.reload(_config(servers={SERVER: _server()}))
+
+        assert result["mcp_servers_removed"] == ["extra"]
+        assert get_log_buffer("extra") is None, "its output stayed registered under an id now free"
+        assert get_log_buffer(SERVER) is not None, "and nothing else was released"
+
+    def test_a_server_that_is_still_running_keeps_its_own(self, gateway: _Gateway) -> None:
+        """The buffer follows the server, not the file: a running one still reads its own logs.
+
+        `load_config(replace=True)` puts a whole configuration in force without
+        the reload handler's removal step, which is the shape of a server the
+        file does not declare and nothing has unloaded.
+        """
+        gateway.boot(_config(servers={SERVER: _server(), "extra": _server()}))
+        running = get_log_buffer("extra")
+
+        load_config({SERVER: _server()}, replace=True)
+
+        assert get_runtime().repository.exists("extra")
+        assert get_log_buffer("extra") is running

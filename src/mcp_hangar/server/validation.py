@@ -5,10 +5,12 @@ for accessing rate limiter and security handler, following DIP.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from .. import metrics as prometheus_metrics
 from ..errors import bounded_error_type
 from ..application.mcp.tooling import ToolErrorPayload
+from ..domain.exceptions import RateLimitExceeded
 from ..domain.security.input_validator import (
     validate_arguments,
     validate_mcp_server_id,
@@ -36,9 +38,14 @@ def charge_tool(tool_name: str) -> None:
         # Update Prometheus metrics
         prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
 
+        # One record per refusal, with bounded fields only: whose budget was
+        # used up, and the tool it is named after (#1495).
         ctx.security_handler.log_rate_limit_exceeded(
             limit=refusal.limit,
             window_seconds=refusal.window_seconds,
+            scope=refusal.scope,
+            key_kind="tool",
+            key=tool_name,
         )
         raise refusal
 
@@ -90,11 +97,19 @@ def not_rate_limited(key: str) -> None:
 
 
 def tool_error_mapper(exc: Exception) -> ToolErrorPayload:
-    """Map exceptions to a stable MCP tool error payload."""
+    """Map exceptions to a stable MCP tool error payload.
+
+    A rate-limit refusal keeps its own details -- `retry_after`, `scope`, `rps`
+    and the budget's limit -- so a caller reads them from the same places
+    whichever path refused the call (#1495). They are values Hangar chose, not
+    anything an upstream returned. Every other exception's details are dropped:
+    those can carry upstream text.
+    """
+    details: dict[str, Any] = dict(exc.details) if isinstance(exc, RateLimitExceeded) else {}
     return ToolErrorPayload(
         error=str(exc) or "unknown error",
         error_type=type(exc).__name__,
-        details={},
+        details=details,
     )
 
 
@@ -108,6 +123,11 @@ def tool_error_hook(exc: Exception, context: dict) -> None:
         exc: The exception that occurred.
         context: Additional context dict with mcp_server_id, tool, etc.
     """
+    if isinstance(exc, RateLimitExceeded):
+        # Already recorded once, by whichever limiter refused the call:
+        # `charge_tool` or the command bus's middleware. Recording it here too
+        # would be a second record, and under the wrong event type (#1495).
+        return
     try:
         ctx = get_context()
         ctx.security_handler.log_validation_failed(

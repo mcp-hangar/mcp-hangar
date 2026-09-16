@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any, TypeVar
 
+from ...domain.exceptions import RateLimitExceeded
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -164,9 +165,15 @@ class ToolErrorPayload:
     details: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
+        """The one error shape an MCP tool returns.
+
+        The key naming the failure is `error_type`, the name a `hangar_call`
+        result already uses for it, so a client reads one key whichever tool
+        answered (#1495).
+        """
         return {
             "error": self.error,
-            "type": self.error_type,
+            "error_type": self.error_type,
             "details": self.details,
         }
 
@@ -178,6 +185,45 @@ def _default_error_mapper(exc: Exception) -> ToolErrorPayload:
         error_type=type(exc).__name__,
         details={},
     )
+
+
+def _guard_the_call(
+    *,
+    tool_name: str,
+    rate_limit_key: Callable[..., str],
+    check_rate_limit: Callable[[str], None],
+    validate: Callable[..., None] | None,
+    mapper: Callable[[Exception], ToolErrorPayload],
+    mcp_ctx: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None]:
+    """Everything that runs before a tool's body: the rate limit, then authorization, then validation.
+
+    Returns the rate-limit key, and the error payload to answer with when a rate
+    limit refused the call. A refusal is the same payload here as one raised
+    from inside the tool body, rather than an MCP error raised out of the
+    wrapper (#1495). Whichever limiter refused it has recorded it already, so it
+    is not passed to `on_error` as a tool failure as well.
+
+    The order is unchanged. The rate limit comes first, as the cheapest check.
+    Authorization follows, ahead of everything that does work on the caller's
+    behalf -- in particular ahead of the approval gate, so an unauthorized
+    caller cannot summon a human to decide about a call it was never allowed to
+    make. Authorization and validation still raise: their shapes are not this
+    change.
+    """
+    key = rate_limit_key(*args, **kwargs)
+    try:
+        check_rate_limit(key)
+    except RateLimitExceeded as refusal:
+        return key, mapper(refusal).to_dict()
+
+    _authorize_tool_call(tool_name, mcp_ctx)
+
+    if validate is not None:
+        validate(*args, **kwargs)
+    return key, None
 
 
 def mcp_tool_wrapper(
@@ -226,19 +272,18 @@ def mcp_tool_wrapper(
                 _mcp_ctx = kwargs.pop(_CTX_KW, None) if inject_ctx else None
                 _identity_token = _bridge_ctx_identity(_mcp_ctx)
                 try:
-                    # Rate limit first (cheapest check) to reduce abuse surface.
-                    key = rate_limit_key(*args, **kwargs)
-                    check_rate_limit(key)
-
-                    # Then authorization, ahead of everything that does work on
-                    # the caller's behalf -- in particular ahead of the approval
-                    # gate, so an unauthorized caller cannot summon a human to
-                    # decide about a call it was never allowed to make.
-                    _authorize_tool_call(tool_name, _mcp_ctx)
-
-                    # Validate inputs if provided.
-                    if validate is not None:
-                        validate(*args, **kwargs)
+                    key, refused = _guard_the_call(
+                        tool_name=tool_name,
+                        rate_limit_key=rate_limit_key,
+                        check_rate_limit=check_rate_limit,
+                        validate=validate,
+                        mapper=mapper,
+                        mcp_ctx=_mcp_ctx,
+                        args=args,
+                        kwargs=kwargs,
+                    )
+                    if refused is not None:
+                        return refused
 
                     # Approval gate (may block until human decision or timeout).
                     if check_approval is not None:
@@ -287,17 +332,18 @@ def mcp_tool_wrapper(
                 _mcp_ctx = kwargs.pop(_CTX_KW, None) if inject_ctx else None
                 _identity_token = _bridge_ctx_identity(_mcp_ctx)
                 try:
-                    # Rate limit first (cheapest check) to reduce abuse surface.
-                    key = rate_limit_key(*args, **kwargs)
-                    check_rate_limit(key)
-
-                    # See the async branch: authorization precedes any work done
-                    # on the caller's behalf.
-                    _authorize_tool_call(tool_name, _mcp_ctx)
-
-                    # Validate inputs if provided.
-                    if validate is not None:
-                        validate(*args, **kwargs)
+                    key, refused = _guard_the_call(
+                        tool_name=tool_name,
+                        rate_limit_key=rate_limit_key,
+                        check_rate_limit=check_rate_limit,
+                        validate=validate,
+                        mapper=mapper,
+                        mcp_ctx=_mcp_ctx,
+                        args=args,
+                        kwargs=kwargs,
+                    )
+                    if refused is not None:
+                        return refused
 
                     try:
                         return func(*args, **kwargs)
