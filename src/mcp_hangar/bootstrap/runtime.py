@@ -101,6 +101,10 @@ class ISecurityHandler(Protocol):
         limit: int = 0,
         window_seconds: int = 0,
         source_ip: str | None = None,
+        *,
+        scope: str = "",
+        key_kind: str = "",
+        key: str = "",
     ) -> None:
         """Log rate limit exceeded."""
         ...
@@ -255,7 +259,14 @@ def install_command_bus_rate_limit(
     per_caller = parse_per_caller(section.get("per_caller") if isinstance(section, dict) else None)
     shared = apply_rate_limit_config(runtime, full_config, env=env)
     configure_caller_rate_limit(per_caller)
-    runtime.command_bus.add_middleware(RateLimitMiddleware(rate_limiter=cast(Any, runtime.rate_limiter)))
+    runtime.command_bus.add_middleware(
+        RateLimitMiddleware(
+            rate_limiter=cast(Any, runtime.rate_limiter),
+            # So a refusal by the bus's limiter reaches the security handler,
+            # as a tool-level one does (#1495).
+            security_handler=runtime.security_handler,
+        )
+    )
     return shared, per_caller
 
 

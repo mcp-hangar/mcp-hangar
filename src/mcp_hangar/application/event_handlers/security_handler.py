@@ -32,9 +32,10 @@ reader does not spend the afternoon re-deriving them:
 The one apparent collision is rate limiting, and it is not one:
 `RateLimitLockout` is an auth-lockout domain event (per source IP, published by
 `auth/infrastructure/rate_limiter.py`), while `log_rate_limit_exceeded` reports
-request-rate rejection from `server/validation.charge_tool()`, the budget of a
-tool whose work never reaches the command bus. Different occurrences, so the
-two cannot disagree about the same one.
+request-rate rejection from the budgets Hangar charges a call to: the tool's,
+through `server/validation.charge_tool()`, and the command type's, through the
+command bus's `RateLimitMiddleware` (#1495). Different occurrences, so the two
+cannot disagree about the same one.
 
 What the investigation DID find: of the four sinks, only `LogSecuritySink` is
 ever wired -- `get_security_handler()` is always called with no argument.
@@ -477,8 +478,31 @@ class SecurityEventHandler:
         limit: int = 0,
         window_seconds: int = 0,
         source_ip: str | None = None,
+        *,
+        scope: str = "",
+        key_kind: str = "",
+        key: str = "",
     ) -> None:
-        """Log a rate limit violation."""
+        """Log a rate limit violation, from whichever limiter refused the call (#1495).
+
+        Every refusal is recorded here once: the tool-level check
+        (`server/validation.charge_tool`) and the command bus's limiter alike.
+
+        `scope` is whose budget was used up (`caller` or `all_callers`),
+        `key_kind` what the budget is named after (`tool` or `command`), and
+        `key` that name. All three are values Hangar chose, so the record stays
+        bounded: no argument value and no caller's own text reaches it.
+        """
+        details: dict[str, Any] = {
+            "limit": limit,
+            "window_seconds": window_seconds,
+        }
+        if scope:
+            details["scope"] = scope
+        if key_kind:
+            details["key_kind"] = key_kind
+        if key:
+            details["key"] = key
         self._emit(
             SecurityEvent(
                 event_type=SecurityEventType.RATE_LIMIT_EXCEEDED,
@@ -486,10 +510,7 @@ class SecurityEventHandler:
                 message="Rate limit exceeded",
                 mcp_server_id=mcp_server_id,
                 source_ip=source_ip,
-                details={
-                    "limit": limit,
-                    "window_seconds": window_seconds,
-                },
+                details=details,
             )
         )
 

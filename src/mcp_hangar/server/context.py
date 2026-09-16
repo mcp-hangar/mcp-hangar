@@ -101,6 +101,10 @@ class ISecurityHandler(Protocol):
         limit: int = 0,
         window_seconds: int = 0,
         source_ip: str | None = None,
+        *,
+        scope: str = "",
+        key_kind: str = "",
+        key: str = "",
     ) -> None:
         """Log rate limit exceeded event."""
         ...

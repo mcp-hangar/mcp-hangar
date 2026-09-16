@@ -60,7 +60,7 @@ class TestToolErrorPayload:
     def test_to_dict_structure(self):
         payload = ToolErrorPayload(error="bad", error_type="ValueError", details={"k": "v"})
         result = payload.to_dict()
-        assert result == {"error": "bad", "type": "ValueError", "details": {"k": "v"}}
+        assert result == {"error": "bad", "error_type": "ValueError", "details": {"k": "v"}}
 
     def test_to_dict_empty_details(self):
         payload = ToolErrorPayload(error="oops", error_type="RuntimeError", details={})
@@ -149,7 +149,7 @@ class TestMcpToolWrapperAsyncException:
 
         result = await _make_wrapper()(tool)()
         assert result["error"] == "bad thing"
-        assert result["type"] == "ValueError"
+        assert result["error_type"] == "ValueError"
         assert "details" in result
 
     async def test_on_error_hook_called_with_exc_and_context(self):
@@ -281,7 +281,7 @@ class TestMcpToolWrapperSyncException:
             raise KeyError("missing_key")
 
         result = _make_wrapper()(tool)()
-        assert result["type"] == "KeyError"
+        assert result["error_type"] == "KeyError"
         assert "details" in result
 
     def test_on_error_hook_called_with_exc_and_context(self):
