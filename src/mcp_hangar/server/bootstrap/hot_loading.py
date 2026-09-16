@@ -9,6 +9,7 @@ from ...domain.contracts.installer import IPackageInstaller
 from ...domain.model import McpServer
 from ...infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 from ...logging_config import get_logger
+from .logs import LogBuffers
 from ..state import get_runtime, get_runtime_mcp_servers
 
 if TYPE_CHECKING:
@@ -79,6 +80,11 @@ def init_hot_loading(
 
         runtime_store = get_runtime_mcp_servers()
 
+        # The port the two handlers attach and release a log buffer through.
+        # They may not reach the buffer registry themselves: `.importlinter`
+        # puts `infrastructure` above `application` (#1506).
+        log_buffers = LogBuffers()
+
         def mcp_server_factory(**kwargs):
             return McpServer(**kwargs)
 
@@ -94,11 +100,13 @@ def init_hot_loading(
             # Asked at load time, not now: the gate is attached to the context
             # later in bootstrap, so a bool captured here would always be False.
             approval_gate_available=_approval_gate_available,
+            log_buffers=log_buffers,
         )
 
         unload_handler = UnloadMcpServerHandler(
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
+            log_buffers=log_buffers,
         )
 
         logger.info("hot_loading_initialized")

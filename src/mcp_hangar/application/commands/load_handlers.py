@@ -23,6 +23,7 @@ from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
+from ..ports.log_buffers import ILogBuffers
 from ..services.package_resolver import PackageResolver
 from ..services.secrets_resolver import SecretsResolver
 from .commands import LoadMcpServerCommand, UnloadMcpServerCommand
@@ -110,6 +111,7 @@ class LoadMcpServerHandler(CommandHandler):
         mcp_server_factory: Callable[..., Any],
         mcp_server_repository: Any,
         approval_gate_available: Callable[[], bool] | None = None,
+        log_buffers: ILogBuffers | None = None,
     ):
         """Initialize the handler.
 
@@ -130,6 +132,10 @@ class LoadMcpServerHandler(CommandHandler):
                 a policy nothing can enforce. Callable rather than a bool
                 because hot-loading is initialised before the gate is attached
                 to the context.
+            log_buffers: Where a loaded server gets the log buffer its output is
+                read from. Omitted means none is attached, and the server's
+                output reaches no log -- which is what the hot-load path did
+                before #1506.
         """
         self._registry_client = registry_client
         self._package_resolver = package_resolver
@@ -140,6 +146,29 @@ class LoadMcpServerHandler(CommandHandler):
         self._mcp_server_factory = mcp_server_factory
         self._mcp_server_repository = mcp_server_repository
         self._approval_gate_available = approval_gate_available
+        self._log_buffers = log_buffers
+
+    def _attach_log_buffer(self, mcp_server_id: str, mcp_server: Any) -> None:
+        """Give the loaded server the log buffer its output is read from.
+
+        Called before the server is started: the stderr reader that fills the
+        buffer is spawned while the client is created, and only when a buffer is
+        set by then. A hot-loaded server was given none at all, so no reader was
+        ever started for it and `GET /api/mcp_servers/{id}/logs` served an empty
+        list for a running server (#1506).
+
+        Through the port because a command handler may not reach the buffer
+        registry, which `.importlinter` puts a layer above it. No port wired
+        means no buffer, which is what this path did before.
+
+        Args:
+            mcp_server_id: The id the buffer is registered under.
+            mcp_server: The freshly built aggregate, not yet started.
+        """
+        if self._log_buffers is None:
+            return
+        if self._log_buffers.attach(mcp_server_id, mcp_server):
+            logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=mcp_server_id)
 
     def _register_tool_policy(self, mcp_server_id: str, command: LoadMcpServerCommand) -> None:
         """Register the loaded server's tool access policy, if it declared one.
@@ -308,6 +337,9 @@ class LoadMcpServerHandler(CommandHandler):
                 env={**installed.env, **secrets_result.resolved},
             )
 
+            # Before `ensure_ready()`, which is what starts the process.
+            self._attach_log_buffer(mcp_server_id, mcp_server)
+
             try:
                 mcp_server.ensure_ready()
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup installed package on startup failure, then re-raise
@@ -425,15 +457,20 @@ class UnloadMcpServerHandler(CommandHandler):
         self,
         runtime_store: RuntimeMcpServerStore,
         event_bus: IEventBus,
+        log_buffers: ILogBuffers | None = None,
     ):
         """Initialize the handler.
 
         Args:
             runtime_store: Store for hot-loaded mcp_servers.
             event_bus: Event bus for publishing events.
+            log_buffers: Where the unloaded server's log buffer is released.
+                Omitted means none is, and its output stays registered under an
+                id that is free again -- what unloading did before #1506.
         """
         self._runtime_store = runtime_store
         self._event_bus = event_bus
+        self._log_buffers = log_buffers
 
     def handle(self, command: UnloadMcpServerCommand) -> dict[str, Any]:
         """Handle the unload mcp_server command.
@@ -473,6 +510,15 @@ class UnloadMcpServerHandler(CommandHandler):
                 )
 
         self._runtime_store.remove(command.mcp_server_id)
+
+        # The buffer registry is a process-wide dict, and the removal above does
+        # not reach it: the unloaded server's output stayed registered under an
+        # id that is free again, for the life of the process (#1506). After the
+        # removal, so nothing can read the server from the store and find its
+        # log already gone.
+        if self._log_buffers is not None:
+            self._log_buffers.release(command.mcp_server_id)
+            logger.info("log_buffer_released", mcp_server_id=command.mcp_server_id)
 
         # Remove tool access policy for unloaded mcp_server
         resolver = get_tool_access_resolver()
