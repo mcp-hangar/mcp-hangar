@@ -93,7 +93,23 @@ def enable_governed_task_relay(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
     ctx.task_upstream_router = _task_upstream_router
 
     register_task_relay_handlers(mcp, store, consent_gate, _task_upstream_router)
+    _install_task_polling_middleware(mcp)
     logger.info("governed_tasks_enabled")
+
+
+def _install_task_polling_middleware(mcp: FastMCP) -> None:
+    """Record, around every request, whether its caller can poll a task (#1405).
+
+    The relay seam hands an upstream's task only to such a caller. The flat call
+    and ``hangar_call`` both run inside the SDK's server middleware, so one
+    binding serves both. Where there is no middleware list nothing is bound, and
+    the seam then hands no caller a task.
+    """
+    from .task_relay_handlers import bind_task_polling
+
+    middleware = getattr(lowlevel_server(mcp), "middleware", None)
+    if isinstance(middleware, list) and bind_task_polling not in middleware:
+        middleware.append(bind_task_polling)
 
 
 def advertise_tasks_capability(mcp: FastMCP, *, relay_tasks_enabled: bool) -> None:

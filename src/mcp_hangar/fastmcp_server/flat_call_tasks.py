@@ -22,6 +22,11 @@ This module fixes both, outside the handler, which is at its complexity ceiling:
 Only a task the seam governed becomes a task result. The decision is made on the
 worker's capture, never on the shape of what the upstream sent, so an upstream
 cannot hand the caller a task result the store has not recorded.
+
+The upstream's task may come in the current flat shape or the older nested one;
+both are captured, governed and answered alike (#1405). A caller that cannot poll
+a task is never handed one: the seam refuses the call instead, and the caller
+gets a tool error naming the extension to declare.
 """
 
 from __future__ import annotations
@@ -46,7 +51,8 @@ def govern_flat_call(results: list[CallResult]) -> tuple[CallResult, CreateTaskR
         The call's result after governance, and the task result to answer its
         caller with when the upstream created a task the store now governs.
         ``None`` for every other result. That includes a task the seam could not
-        govern, which the seam has turned into a failed result.
+        govern, or would not hand this caller, which the seam has turned into a
+        failed result.
     """
     # Lazily: the batch package reaches `server.bootstrap`, which imports the
     # flat projection back (#894).
@@ -61,10 +67,12 @@ def govern_flat_call(results: list[CallResult]) -> tuple[CallResult, CreateTaskR
 
 
 def _created_task(upstream: dict[str, Any]) -> CreateTaskResult:
-    """The SEP-2663 task result for a governed upstream handle.
+    """The SEP-2663 task result for a governed upstream handle, in either shape.
 
     Parsed as the seam parsed it when registering the task, so the caller gets
     the task id the store is keyed on.
     """
-    snapshot = GovernedTaskStore.mint_from_upstream(upstream["task"])
+    from ..server.tools.batch.relay_seam import upstream_task
+
+    snapshot = GovernedTaskStore.mint_from_upstream(upstream_task(upstream) or {})
     return CreateTaskResult(**task_wire_fields(snapshot))

@@ -189,10 +189,13 @@ _READ_URI = f"hangar://{_UPSTREAM}/doc://one"
 
 #: Sent before each topology's probes, unrecorded: mints the task `tasks/*` act
 #: on. On the front door the flat call mints it, so the front door's `tasks/*`
-#: probes act on a task that path created (#1394).
+#: probes act on a task that path created (#1394). Its caller declares the tasks
+#: extension: a task is handed only to a caller that can poll it (#1405).
 _MINT_TASK = {
-    "egress": _Probe("egress", "tools/call", _hangar_call("long_job"), name="hangar_call"),
-    "front_door": _Probe("front_door", "tools/call", {"name": "long_job", "arguments": {}}, name="long_job"),
+    "egress": _Probe("egress", "tools/call", _hangar_call("long_job"), name="hangar_call", capabilities=_TASKS),
+    "front_door": _Probe(
+        "front_door", "tools/call", {"name": "long_job", "arguments": {}}, name="long_job", capabilities=_TASKS
+    ),
 }
 
 #: One probe per served path, in the order they are sent. `tasks/cancel` is
