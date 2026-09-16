@@ -17,7 +17,9 @@ line, whatever happened to it. ``outcome`` is one of six values:
 ``tool_error``
     The caller got ``isError`` and it was not a refusal: the upstream failed or
     answered with an error, or the call could not be completed (timeout, cold
-    start, open circuit). ``reason`` is the executor's error type when it had one.
+    start, open circuit). ``reason`` is the executor's error type when it had one,
+    and ``invalid_result`` when the upstream's answer could not be turned into a
+    tool result at all (#1404).
 ``denied``
     An enforcement refusal: access policy, withdrawal, digest pin, approval,
     validator, egress policy, or a suspended session. ``reason`` is its code.
@@ -50,11 +52,14 @@ caller off, and nothing it chose is echoed into the log -- the rule the session
 guard's own ``session_suspended_call_refused`` line already follows
 (GHSA-fhwh-fmq2-7m5c). Its principal, tenant and verdict are still there.
 
-Nothing here changes what the caller receives: the handler's result or exception
-passes through untouched. The ``not_projected``/``unknown`` split exists only in
-the operator's log. The caller gets the same ``-32601`` either way, and telling
-the two apart does the same work in both cases, a set built from the whole
-catalogue.
+``logging_each_call`` changes nothing about what the caller receives: the
+handler's result or exception passes through it untouched. Building the caller's
+result is :func:`as_client_result`'s job, and doing it there is what makes the
+outcome this line records the one the client got (#1404).
+
+The ``not_projected``/``unknown`` split exists only in the operator's log. The
+caller gets the same ``-32601`` either way, and telling the two apart does the
+same work in both cases, a set built from the whole catalogue.
 
 INFO, the level a ``hangar_call`` call reaches the log at (``domain_event`` for
 ``BatchCallCompleted``).
@@ -69,12 +74,12 @@ import functools
 import time
 from typing import Any
 
-from mcp_hangar._sdk_compat import METHOD_NOT_FOUND, McpError
+from mcp_hangar._sdk_compat import METHOD_NOT_FOUND, CallToolResult, McpError
 
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import get_identity_context
 from ..logging_config import get_logger, truncate_text
-from ..tasks_wire import HEADER_MISMATCH
+from ..tasks_wire import HEADER_MISMATCH, CreateTaskResult
 
 logger = get_logger(__name__)
 
@@ -88,6 +93,10 @@ OUTCOME_REJECTED = "rejected"
 OUTCOME_ERROR = "error"
 
 NOT_PROJECTED = "not_projected"
+#: The reason of a call whose upstream answer could not be made into a tool
+#: result. A constant, never the validator's complaint: that text quotes the
+#: payload it rejected (GHSA-qwq2-7g49-jxc6).
+INVALID_RESULT = "invalid_result"
 UNKNOWN_NAME = "unknown"
 HEADER_MISMATCH_REASON = "header_mismatch"
 
@@ -119,6 +128,10 @@ DENIAL_CODES = SESSION_REFUSALS | frozenset(
         "TenantQuotaExceeded",
     }
 )
+
+#: What a caller whose result could not be built is told. It names no upstream
+#: and quotes nothing the upstream sent.
+INVALID_RESULT_TEXT = "The upstream answered with a result this gateway cannot return as a tool result"
 
 #: The longest value kept of a string the caller chose.
 CALLER_TEXT_LIMIT = 128
@@ -225,3 +238,39 @@ def logging_each_call(call_tool: Callable[..., Awaitable[Any]]) -> Callable[...,
         return result
 
     return logged
+
+
+def as_client_result(call_tool: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Build the result the client receives, inside *call_tool*'s logged scope.
+
+    The SDK validates a handler's return as a ``CallToolResult`` only after the
+    handler -- and so after :func:`logging_each_call` -- has returned. An
+    upstream answer that is not a valid tool result, one with no ``content``,
+    passed through the handler as a success and became a ``-32602`` outside the
+    logged scope: the line said ``ok`` for a call the client received as an
+    error (#1404). Built here, the result the caller gets is decided while the
+    call is still being logged, so the two agree.
+
+    An answer this cannot build a result from is logged ``tool_error`` with
+    :data:`INVALID_RESULT`, and the caller gets the ``isError`` result that an
+    upstream failure already takes on this path, rather than a ``-32602``
+    blaming its own arguments. Wrap it inside :func:`logging_each_call` and
+    outside everything else, on the SDK v2 path: v1's lowlevel server builds the
+    caller's result itself, from shapes ``CallToolResult`` does not accept.
+    """
+
+    @functools.wraps(call_tool)
+    async def answered(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
+        out = await call_tool(name, arguments, mcp_ctx)
+        # Built already: a refusal's result, or a governed task's (#1394).
+        if isinstance(out, (CallToolResult, CreateTaskResult)):
+            return out
+        try:
+            return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
+        except Exception:  # noqa: BLE001 -- whatever the validator objects to, the verdict is the same
+            note_failure(INVALID_RESULT)
+            return CallToolResult.model_validate(
+                {"content": [{"type": "text", "text": INVALID_RESULT_TEXT}], "isError": True}
+            )
+
+    return answered
