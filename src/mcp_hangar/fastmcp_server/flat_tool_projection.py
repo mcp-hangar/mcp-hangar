@@ -1184,6 +1184,13 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                 max_concurrency=1,
                 global_timeout=30.0,
                 fail_fast=False,
+                # The same request context `hangar_call` threads through (#1492).
+                # Without it the executor read an empty `params._meta`, so this
+                # call forwarded no protocol negotiation, no inbound W3C trace
+                # context and no routing headers -- and a current-spec upstream,
+                # which mints a task only for a client that declared the tasks
+                # extension, never made one for a front-door caller.
+                request_ctx=mcp_ctx,
             )
         finally:
             progress_relay.unregister(upstream_token)

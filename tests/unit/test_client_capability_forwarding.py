@@ -17,19 +17,23 @@ one.
 
 The forwarding is conditional on purpose, and each condition excludes a specific
 way of lying to an upstream.
+
+**One reading (#1492).** Whether the caller declared the extension is read once
+per request, by the task relay's server middleware, and bound as
+`caller_polls_tasks_var`. Forwarding reads that bound fact rather than re-reading
+the declaration out of the negotiation a frame later, so what Hangar asks an
+upstream for and what the relay seam may hand back cannot disagree.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
-from mcp_hangar.negotiation import (
-    ProtocolNegotiation,
-    read_protocol_negotiation,
-    set_current_protocol_negotiation,
-)
+from mcp_hangar.context import caller_polls_tasks_var
+from mcp_hangar.negotiation import read_protocol_negotiation
 from mcp_hangar.protocol import (
     TASKS_EXTENSION_ID,
     forwardable_client_capabilities,
@@ -44,11 +48,16 @@ _DECLARED: dict[str, Any] = {"extensions": {TASKS_EXTENSION_ID: {}}}
 
 
 @pytest.fixture
-def declaring_caller():
-    """Bind a request whose caller declared the Tasks extension."""
-    set_current_protocol_negotiation(ProtocolNegotiation(protocol_version="2026-07-28", capabilities=_DECLARED))
+def declaring_caller() -> Iterator[None]:
+    """Bind a request whose caller declared the Tasks extension.
+
+    What the task relay's middleware binds for such a caller: it speaks a
+    revision with `tasks/*` and it declared the extension, so it can poll a task
+    it is handed.
+    """
+    token = caller_polls_tasks_var.set(True)
     yield
-    set_current_protocol_negotiation(ProtocolNegotiation())
+    caller_polls_tasks_var.reset(token)
 
 
 @pytest.fixture
@@ -111,10 +120,18 @@ class TestForwardingTheDeclaration:
         And Hangar would then answer that same client `-32021` on `tasks/get`,
         leaving it holding a handle it cannot use. The two ends have to agree.
         """
-        set_current_protocol_negotiation(ProtocolNegotiation(protocol_version="2026-07-28"))
-
         assert forwardable_client_capabilities() is None
         assert _SPEC_KEY not in inject_protocol_meta({})["_meta"]
+
+    def test_a_path_the_middleware_never_wrapped_declares_nothing(self, relay_wired):
+        """The unbound default, and the same direction the relay seam takes (#1492).
+
+        A request nothing bound is one whose caller cannot poll a task, so the
+        seam would hand it none -- soliciting one from an upstream would create
+        work only to refuse and cancel it.
+        """
+        assert caller_polls_tasks_var.get() is False
+        assert forwardable_client_capabilities() is None
 
     def test_nothing_is_claimed_while_the_relay_is_off(self, declaring_caller, monkeypatch):
         """Claiming it with no governed store promises governance that is not running."""
@@ -124,19 +141,15 @@ class TestForwardingTheDeclaration:
 
         assert forwardable_client_capabilities() is None
 
-    def test_only_the_tasks_extension_is_relayed(self, declaring_caller, relay_wired, monkeypatch):
+    def test_only_the_tasks_extension_is_relayed(self, declaring_caller, relay_wired):
         """Not a passthrough: Hangar claims only what it can itself service.
 
         Forwarding an arbitrary declaration would have Hangar vouch for
-        extensions it does not implement on the caller's behalf.
+        extensions it does not implement on the caller's behalf. What is sent is
+        built here, from the one extension Hangar serves, and never copied from
+        what the caller sent -- so a caller declaring a dozen others still has
+        exactly this one relayed.
         """
-        set_current_protocol_negotiation(
-            ProtocolNegotiation(
-                protocol_version="2026-07-28",
-                capabilities={"extensions": {TASKS_EXTENSION_ID: {}, "com.example/other": {"a": 1}}},
-            )
-        )
-
         assert forwardable_client_capabilities() == {"extensions": {TASKS_EXTENSION_ID: {}}}
 
     def test_a_caller_set_key_is_not_clobbered(self, declaring_caller, relay_wired):
@@ -145,26 +158,28 @@ class TestForwardingTheDeclaration:
 
         assert params["_meta"][_SPEC_KEY] == {"extensions": {}}
 
-    def test_a_broken_negotiation_read_degrades_to_declaring_nothing(self, relay_wired, monkeypatch):
+    def test_a_broken_capability_read_degrades_to_declaring_nothing(self, relay_wired, monkeypatch):
         """Fault barrier: a capability read must never fail an invoke.
 
         Degrading to "declare nothing" is the safe direction -- it loses task
         augmentation, it does not break the call.
 
-        Aimed at the negotiation read, which is what can still raise. It used to
-        point at `get_context`, back when this function reached into the server
-        layer to ask whether the relay was wired.
+        Aimed at the read of the bound fact, which is what can still raise. It
+        used to point at the negotiation read, and before that at `get_context`,
+        back when this function reached into the server layer to ask whether the
+        relay was wired.
 
-        Patched on `negotiation`, not on `protocol`: that import is inside the
-        function because `negotiation` imports `protocol` back, so the name is
-        resolved fresh from the source module on every call.
+        Patched on `context`, not on `protocol`: that import is inside the
+        function, so the name is resolved fresh from the source module on every
+        call.
         """
-        import mcp_hangar.negotiation as negotiation_module
+        import mcp_hangar.context as context_module
 
-        def _boom():
-            raise RuntimeError("no protocol negotiation")
+        class _Boom:
+            def get(self) -> bool:
+                raise RuntimeError("no bound capability")
 
-        monkeypatch.setattr(negotiation_module, "get_current_protocol_negotiation", _boom, raising=False)
+        monkeypatch.setattr(context_module, "caller_polls_tasks_var", _Boom())
 
         assert forwardable_client_capabilities() is None
         assert inject_protocol_meta({})["_meta"][_VERSION_KEY]  # the rest still works
