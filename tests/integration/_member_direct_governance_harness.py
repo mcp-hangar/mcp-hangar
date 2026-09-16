@@ -18,7 +18,8 @@ What runs is production:
 - stateless ``tools/call hangar_call`` POSTs to ``tests/mock_provider.py`` over
   stdio;
 - in ``approval`` mode, the approval gate ``bootstrap()`` wires, which holds a
-  call until its timeout because nobody answers.
+  call until its timeout because nobody answers;
+- in ``l7`` mode, that same gate, with an approver answering it.
 
 In ``auth`` and ``approval`` modes the app is wrapped in the auth enforcement
 ``run_http`` applies. Each call presents an API key minted in the bootstrapped
@@ -36,6 +37,14 @@ Modes:
 - ``approval``: ``auth``, plus a group approval list on ``add`` and a
   ``tenant-a`` approval list on the ungrouped server's ``echo``, both with a
   one-second timeout.
+- ``l7``: auth off, plus an L7 egress policy on ``math-a`` -- the member the
+  group selects -- whose ``requireApproval`` rule covers ``add`` and ``power``,
+  and a thread that answers what the gate raises: ``add`` granted, ``power``
+  denied. The policy is set on the running server, as the REST endpoint sets
+  it; a config file has no shape for one. A call naming the group used to read
+  no policy at all, because a group id is not a server id, so the member's rule
+  never reached a human and the member's own check refused the call at invoke
+  (#1499).
 
 The report is every call's outcome, ``ok`` or the refusal's ``error_type``,
 keyed by tenant, then by the id the call named, then by tool.
@@ -43,10 +52,13 @@ keyed by tenant, then by the id the call named, then by tool.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
 import sys
+import threading
+import time
 from typing import Any
 
 MOCK_PROVIDER = Path(__file__).resolve().parents[1] / "mock_provider.py"
@@ -68,6 +80,9 @@ SOLO = "math-solo"
 TENANTS = ("tenant-a", "tenant-b")
 #: Matches no schema, so the group's pin on `divide` refuses every call that reaches it.
 STALE_DIGEST = "a" * 64
+#: In `l7` mode, `math-a`'s egress policy routes both of these to a human. The
+#: approver grants the first and denies the second, so one run shows both ends.
+L7_GRANTED, L7_DENIED = "add", "power"
 
 ARGUMENTS: dict[str, dict[str, Any]] = {
     "add": {"a": 1, "b": 2},
@@ -86,6 +101,15 @@ CALLS: dict[str, dict[str | None, dict[str, tuple[str, ...]]]] = {
     "approval": {
         TENANTS[0]: {GROUP: ("add",), MEMBER: ("add",), SOLO: ("add", "echo")},
         TENANTS[1]: {SOLO: ("echo",)},
+    },
+    # `math-b` carries no policy of its own: the control for "the rule read is
+    # the selected member's", not "any member's".
+    "l7": {
+        None: {
+            GROUP: (L7_GRANTED, L7_DENIED),
+            MEMBER: (L7_GRANTED, L7_DENIED),
+            SIBLING: (L7_GRANTED, L7_DENIED),
+        }
     },
 }
 
@@ -157,6 +181,54 @@ def _keys(context: Any) -> dict[str, str]:
     return keys
 
 
+def _answer_approvals(gate: Any) -> None:
+    """Be the approver: grant every hold on `L7_GRANTED`, deny every hold on `L7_DENIED`.
+
+    Polls the approval record the way the REST resolve endpoint reads it, off
+    the loop the held call waits on -- which is the arrangement the gate is
+    built for: its wait watches the record as well as the local hold, so a
+    decision made elsewhere lands. Reaches ``_repository`` because the REST
+    route does; there is no public listing surface on the service.
+    """
+    while True:
+        try:
+            for request in asyncio.run(gate._repository.list_pending()):
+                asyncio.run(
+                    gate.resolve(
+                        request.approval_id,
+                        approved=request.tool_name == L7_GRANTED,
+                        decided_by="ops@example",
+                        reason=None if request.tool_name == L7_GRANTED else "not this one",
+                    )
+                )
+        except Exception:  # noqa: BLE001 -- a harness thread must never take the run down
+            pass
+        time.sleep(0.05)
+
+
+def _arm_l7(context: Any) -> None:
+    """Give the member the group selects a `requireApproval` rule, and staff the gate.
+
+    The gate is read off the served context, which is where `bootstrap()` wires
+    it and where the executor's approval gate looks it up.
+    """
+    from mcp_hangar.domain.policies.egress_l7 import L7Policy
+    from mcp_hangar.server.context import get_context
+
+    context.runtime.repository.get(MEMBER).set_l7_policy(
+        L7Policy.from_dict(
+            {
+                "tools": {"requireApproval": [L7_GRANTED, L7_DENIED]},
+                "defaultAction": "Allow",
+                "mode": "Enforce",
+            }
+        )
+    )
+    gate = get_context().approval_gate
+    assert gate is not None, "bootstrap wired no approval gate; nothing would answer"
+    threading.Thread(target=_answer_approvals, args=(gate,), daemon=True).start()
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
@@ -168,6 +240,8 @@ def main(mode: str, out: Path) -> None:
 
     config = _config(mode)
     context = bootstrap(config_dict=config)
+    if mode == "l7":
+        _arm_l7(context)
 
     headers = {
         "MCP-Protocol-Version": MODERN_VERSION,

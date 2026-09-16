@@ -366,9 +366,10 @@ class _Governance:
     pins: tuple[tuple[str, Any, DigestEnforcement], ...]
     #: The policy that routes the tool to a human (`_approval_policy`), or None.
     approval_policy: Any
-    #: The L7 egress policy of the server the call names, which the approval
-    #: gate routes the call on (`BatchExecutor._l7_approval_rule`). None: the
-    #: server has none, or it was not looked up.
+    #: The L7 egress policy of the server the call is ROUTED to, which the
+    #: approval gate routes the call on (`BatchExecutor._l7_approval_rule`).
+    #: For a call naming a group, the member `_gate_resolve_target` selected
+    #: (#1499). None: that server has none, or it was not looked up.
     l7_policy: Any = None
 
 
@@ -403,8 +404,8 @@ def _decide_governance(
         mcp_server: The id the call named: a group or a server.
         is_group: Whether that id names a group, as `_gate_resolve_target` found it.
         target_server_id: The server the call goes to. For a group, the member it selected.
-        servers: The server repository the L7 egress policy of *mcp_server* is
-            read from. None: it is not read.
+        servers: The server repository the L7 egress policy of the call's
+            target server is read from. None: it is not read.
     """
     # Which groups own a member named directly, read with the overlays that
     # govern it: never the previous file's groups with the new file's
@@ -438,7 +439,15 @@ def _decide_governance(
         withdrawn=_withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups),
         pins=tuple((scope, pin, proj_registry.digest_enforcement(scope)) for scope, pin in pins),
         approval_policy=_approval_policy(resolver, tool, tenant_id, scopes),
-        l7_policy=_l7_policy_of(servers, mcp_server),
+        # The L7 policy of the server the call is ROUTED to, not of the id it
+        # names. A group id is not a server id, so a call naming a group read
+        # no policy at all: the member's `requireApproval` rule never reached
+        # a human, and the member's own L7 check then refused the call on
+        # invoke -- the operator configured "ask" and got "refuse" (#1499).
+        # `_gate_resolve_target` has already selected the member, so reading
+        # its policy here selects nothing and the decision stays
+        # side-effect-free under `read_as_one_set`.
+        l7_policy=_l7_policy_of(servers, target_server_id if is_group and target_server_id else mcp_server),
     )
 
 
