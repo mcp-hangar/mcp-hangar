@@ -34,9 +34,16 @@ task it was handed with ``tasks/get``.
 One thing is changed, and it is not on the path under test: ``rate_limit`` is
 raised, as ``_member_direct_governance_harness.py`` raises it.
 
+A third upstream answers in SEP-2663's flat task shape, ``resultType: "task"``,
+where the other two nest the task (#1405). Every call above is made by a caller
+that declared the tasks extension. Each tenant then calls ``job`` and
+``flat_job`` again without declaring it: a caller that cannot poll a task must
+not be handed one.
+
 The report holds, for each tenant and tool: the call's outcome, whether the
 call reached an upstream, and what ``tasks/get`` answered for the task it was
-handed.
+handed. It also holds the undeclared calls' outcomes, and the id of every task
+the governed task store recorded.
 """
 
 from __future__ import annotations
@@ -65,6 +72,9 @@ TENANTS = ("tenant-a", "tenant-b")
 #: do not collide across the group and the ungrouped server.
 GROUP_TOOLS = ("job", "job_denied", "job_withdrawn", "job_withdrawn_a", "job_held")
 SOLO_TOOLS = ("solo_job", "solo_held_a")
+#: A server in no group whose upstream answers in SEP-2663's flat task shape (#1405).
+FLAT_SERVER = "job-flat"
+FLAT_TOOLS = ("flat_job",)
 
 _TASK_IDS = itertools.count(1)
 _LOCK = threading.Lock()
@@ -74,6 +84,8 @@ class _TaskUpstream(BaseHTTPRequestHandler):
     """An MCP upstream whose every ``tools/call`` answers with a new task handle."""
 
     tools: ClassVar[tuple[str, ...]] = ()
+    #: Answer in SEP-2663's flat shape, ``resultType: "task"``, rather than the nested one.
+    flat: ClassVar[bool] = False
     #: The tools a ``tools/call`` reached, in order.
     reached: ClassVar[list[str]] = []
     tasks: ClassVar[dict[str, dict[str, Any]]] = {}
@@ -114,9 +126,10 @@ class _TaskUpstream(BaseHTTPRequestHandler):
                 }
                 self.reached.append(name)
                 self.tasks[task["taskId"]] = task
-            answer = {"result": {"task": task}}
+            answer = {"result": _flat(task, "task") if self.flat else {"task": task}}
         elif method == "tasks/get" and params.get("taskId") in self.tasks:
-            answer = {"result": self.tasks[params["taskId"]]}
+            polled = self.tasks[params["taskId"]]
+            answer = {"result": _flat(polled, "complete") if self.flat else polled}
         elif method in ("tasks/update", "tasks/cancel") and followed in self.tasks:
             with _LOCK:
                 self.follow_ups.append((method, followed))
@@ -135,17 +148,25 @@ class _TaskUpstream(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _upstream(tools: tuple[str, ...]) -> tuple[str, type[_TaskUpstream]]:
+def _flat(task: dict[str, Any], result_type: str) -> dict[str, Any]:
+    """*task* in SEP-2663's flat shape: its fields at the top level, ``ttl`` as ``ttlMs``."""
+    fields = {key: value for key, value in task.items() if key != "ttl"}
+    return {"resultType": result_type, **fields, "ttlMs": task["ttl"]}
+
+
+def _upstream(tools: tuple[str, ...], *, flat: bool = False) -> tuple[str, type[_TaskUpstream]]:
     """Serve an upstream exposing *tools*: its endpoint, and its handler class holding what it saw."""
     handler: type[_TaskUpstream] = type(
-        "_ThisUpstream", (_TaskUpstream,), {"tools": tools, "reached": [], "tasks": {}, "follow_ups": []}
+        "_ThisUpstream",
+        (_TaskUpstream,),
+        {"tools": tools, "flat": flat, "reached": [], "tasks": {}, "follow_ups": []},
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{server.server_address[1]}/mcp", handler
 
 
-def _config(topology: str, group_endpoint: str, solo_endpoint: str) -> dict[str, Any]:
+def _config(topology: str, group_endpoint: str, solo_endpoint: str, flat_endpoint: str | None = None) -> dict[str, Any]:
     group: dict[str, Any] = {
         "mode": "group",
         "strategy": "priority",
@@ -176,6 +197,7 @@ def _config(topology: str, group_endpoint: str, solo_endpoint: str) -> dict[str,
             SIBLING: {"mode": "remote", "endpoint": group_endpoint},
             SOLO: solo,
             GROUP: group,
+            **({FLAT_SERVER: {"mode": "remote", "endpoint": flat_endpoint}} if flat_endpoint else {}),
         },
     }
 
@@ -211,9 +233,20 @@ def _post(
     return _jsonrpc(client.post("/mcp", headers=headers, content=json.dumps(body)).text)
 
 
-def _flat_call(client: Any, key: str, tool: str) -> dict[str, Any]:
-    """A front door's flat ``tools/call`` of *tool*."""
-    payload = _post(client, key, "tools/call", {"name": tool, "arguments": {}}, name=tool)
+def _tasks_capability() -> dict[str, Any]:
+    """What a caller declares to be handed a task it can poll (#1405)."""
+    from mcp_hangar.tasks_wire import EXTENSION_ID
+
+    return {"extensions": {EXTENSION_ID: {}}}
+
+
+def _flat_call(client: Any, key: str, tool: str, capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A front door's flat ``tools/call`` of *tool*.
+
+    Made by a caller that declared the tasks extension, unless *capabilities* say otherwise.
+    """
+    capabilities = _tasks_capability() if capabilities is None else capabilities
+    payload = _post(client, key, "tools/call", {"name": tool, "arguments": {}}, name=tool, capabilities=capabilities)
     if "error" in payload:
         return {"outcome": f"error {payload['error'].get('code')}"}
     result = payload.get("result") or {}
@@ -224,10 +257,17 @@ def _flat_call(client: Any, key: str, tool: str) -> dict[str, Any]:
     return {"outcome": "ok", "detail": json.dumps(result)[:300]}
 
 
-def _hangar_call(client: Any, key: str, target: str, tool: str) -> dict[str, Any]:
-    """``hangar_call`` of *tool* on *target*."""
+def _hangar_call(
+    client: Any, key: str, target: str, tool: str, capabilities: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """``hangar_call`` of *tool* on *target*.
+
+    Made by a caller that declared the tasks extension, unless *capabilities* say otherwise.
+    """
+    capabilities = _tasks_capability() if capabilities is None else capabilities
     call = {"calls": [{"mcp_server": target, "tool": tool, "arguments": {}}]}
-    payload = _post(client, key, "tools/call", {"name": "hangar_call", "arguments": call}, name="hangar_call")
+    params = {"name": "hangar_call", "arguments": call}
+    payload = _post(client, key, "tools/call", params, name="hangar_call", capabilities=capabilities)
     if "error" in payload:
         return {"outcome": f"error {payload['error'].get('code')}"}
     batch = json.loads(payload["result"]["content"][0]["text"])
@@ -237,10 +277,19 @@ def _hangar_call(client: Any, key: str, target: str, tool: str) -> dict[str, Any
     if not result["success"]:
         return {"outcome": "refused", "detail": str(result["error_type"])}
     upstream = result.get("result")
+    if isinstance(upstream, dict) and upstream.get("resultType") == "task":  # SEP-2663's flat shape
+        return {"outcome": "task", "task_id": upstream.get("taskId")}
     task = upstream.get("task") if isinstance(upstream, dict) else None
     if isinstance(task, dict):
         return {"outcome": "task", "task_id": task.get("taskId")}
     return {"outcome": "ok", "detail": json.dumps(upstream)[:300]}
+
+
+def _target(tool: str) -> str:
+    """The server ``hangar_call`` names for *tool*."""
+    if tool in GROUP_TOOLS:
+        return GROUP
+    return FLAT_SERVER if tool in FLAT_TOOLS else SOLO
 
 
 def _poll(client: Any, key: str, task_id: str, capabilities: dict[str, Any]) -> str:
@@ -266,19 +315,22 @@ def main(topology: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
     group_endpoint, group_upstream = _upstream(GROUP_TOOLS)
     solo_endpoint, solo_upstream = _upstream(SOLO_TOOLS)
+    flat_endpoint, flat_upstream = _upstream(FLAT_TOOLS, flat=True)
 
     from starlette.testclient import TestClient
 
     import mcp_hangar
     from mcp_hangar.server.api.middleware import create_auth_enforced_app
     from mcp_hangar.server.bootstrap import bootstrap
+    from mcp_hangar.server.context import get_context
     from mcp_hangar.server.lifecycle import mcp_app_for_serving, warm_the_front_door_catalogue
     from mcp_hangar.tasks_wire import EXTENSION_ID
 
     # A config file, as `serve --http` reads one. `tool_access.mode` is applied
     # while the file is loaded, so a config dict would leave the default topology.
     config_file = out.parent / "config.yaml"
-    config_file.write_text(json.dumps(_config(topology, group_endpoint, solo_endpoint)))  # JSON is YAML
+    config = _config(topology, group_endpoint, solo_endpoint, flat_endpoint)
+    config_file.write_text(json.dumps(config))  # JSON is YAML
     context = bootstrap(config_path=str(config_file))
     # What `run_http` starts at boot. It returns at once on egress.
     warm_the_front_door_catalogue(context.runtime)
@@ -287,28 +339,37 @@ def main(topology: str, out: Path) -> None:
     tasks_capability = {"extensions": {EXTENSION_ID: {}}}
 
     def reached() -> int:
-        return len(group_upstream.reached) + len(solo_upstream.reached)
+        return len(group_upstream.reached) + len(solo_upstream.reached) + len(flat_upstream.reached)
 
     report: dict[str, dict[str, dict[str, Any]]] = {}
+    undeclared: dict[str, dict[str, dict[str, Any]]] = {}
     with TestClient(app, base_url=BASE_URL) as client:
+
+        def call(tenant: str, tool: str, capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+            before = reached()
+            if topology == FRONT_DOOR:
+                outcome = _flat_call(client, keys[tenant], tool, capabilities)
+            else:
+                outcome = _hangar_call(client, keys[tenant], _target(tool), tool, capabilities)
+            outcome["reached_upstream"] = reached() > before
+            return outcome
+
         for tenant in TENANTS:
-            calls: dict[str, dict[str, Any]] = {}
-            for tool in (*GROUP_TOOLS, *SOLO_TOOLS):
-                before = reached()
-                if topology == FRONT_DOOR:
-                    outcome = _flat_call(client, keys[tenant], tool)
-                else:
-                    outcome = _hangar_call(client, keys[tenant], GROUP if tool in GROUP_TOOLS else SOLO, tool)
-                outcome["reached_upstream"] = reached() > before
-                calls[tool] = outcome
+            calls = {tool: call(tenant, tool) for tool in (*GROUP_TOOLS, *SOLO_TOOLS, *FLAT_TOOLS)}
             for outcome in calls.values():
                 if outcome.get("task_id"):
                     outcome["polled"] = _poll(client, keys[tenant], outcome["task_id"], tasks_capability)
             report[tenant] = calls
+            # Allowed tools again, by a caller that did not declare the tasks extension (#1405).
+            undeclared[tenant] = {tool: call(tenant, tool, capabilities={}) for tool in ("job", *FLAT_TOOLS)}
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
-    out.write_text(json.dumps({"hangar": mcp_hangar.__file__, "calls": report}))
+    # Every task the store recorded, to compare with the tasks callers were handed.
+    recorded = sorted(task_id for _server, task_id in get_context().governed_task_store._tasks)
+    out.write_text(
+        json.dumps({"hangar": mcp_hangar.__file__, "calls": report, "undeclared": undeclared, "recorded": recorded})
+    )
     sys.stdout.flush()
     sys.stderr.flush()
     # The worker threads are daemons mid-sleep; nothing to wait for.
