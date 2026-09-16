@@ -15,6 +15,7 @@ from the server process's stderr as soon as that process starts.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from ...domain.model import McpServer
 from ...logging_config import get_logger
@@ -70,6 +71,29 @@ def release_log_buffer(mcp_server_id: str) -> None:
     from ...infrastructure.persistence.log_buffer import remove_log_buffer
 
     remove_log_buffer(mcp_server_id)
+
+
+class LogBuffers:
+    """The :class:`~mcp_hangar.application.ports.log_buffers.ILogBuffers` adapter.
+
+    The command handlers that load, unload and delete a server are handed this
+    rather than the registry: `.importlinter` puts `infrastructure` above
+    `application`, so `application.commands` may import neither the registry nor
+    this module. Composition injects the port instead -- `hot_loading.py` for
+    the load and unload handlers, `cqrs.py` for the delete handler (#1506).
+
+    Stateless, and thin on purpose: both calls go to the helpers above, which
+    are the ones bootstrap and the configuration commit already use, so the
+    sizing and the wiring stay written once.
+    """
+
+    def attach(self, mcp_server_id: str, mcp_server: Any) -> bool:
+        """Attach a buffer unless the server holds one, as :func:`ensure_log_buffer` does."""
+        return ensure_log_buffer(mcp_server_id, mcp_server)
+
+    def release(self, mcp_server_id: str) -> None:
+        """Drop the registered buffer, as :func:`release_log_buffer` does."""
+        release_log_buffer(mcp_server_id)
 
 
 def init_log_buffers(mcp_servers: Mapping[str, McpServer]) -> None:

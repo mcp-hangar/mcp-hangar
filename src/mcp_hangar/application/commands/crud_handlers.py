@@ -29,6 +29,7 @@ from ...domain.contracts.fleet import IFleetWriter
 from ...domain.services.fleet_snapshot import snapshot_of
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER, MCP_SERVER_GROUP
+from ..ports.log_buffers import ILogBuffers
 from .crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -349,6 +350,7 @@ class DeleteMcpServerHandler(CommandHandler):
         repository: IMcpServerRepository,
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
+        log_buffers: ILogBuffers | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -357,10 +359,14 @@ class DeleteMcpServerHandler(CommandHandler):
             event_bus: Event bus for publishing domain events.
             fleet_writer: Where the removal is recorded. A row left behind
                 resurrects the server on the next restart.
+            log_buffers: Where the deleted server's log buffer is released.
+                Omitted means none is, and its output stays registered under an
+                id that is free again -- what deleting did before #1506.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
+        self._log_buffers = log_buffers
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -400,6 +406,15 @@ class DeleteMcpServerHandler(CommandHandler):
             )
 
         self._repository.remove(command.mcp_server_id)
+
+        # The buffer registry is a process-wide dict that the removal above does
+        # not reach, so a deleted server's output stayed registered under an id
+        # that is free again (#1506) -- the leak a reload's removal had until
+        # #1502. Through the port: a command handler may not reach the registry,
+        # which sits a layer above it.
+        if self._log_buffers is not None:
+            self._log_buffers.release(command.mcp_server_id)
+            logger.info("log_buffer_released", mcp_server_id=command.mcp_server_id)
 
         # After its last lifecycle events, above. The metrics handler drops the
         # server's gauges on this one (#1361).
@@ -686,6 +701,7 @@ def register_crud_handlers(
     groups: dict | None = None,
     fleet_writer: IFleetWriter | None = None,
     coordinated: Callable[[], bool] | None = None,
+    log_buffers: ILogBuffers | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -698,6 +714,7 @@ def register_crud_handlers(
         fleet_writer: Where fleet changes are recorded so a restart can rebuild
             them. None leaves the fleet in memory only, as before.
         coordinated: Whether this gateway shares its state with peers.
+        log_buffers: Where a deleted server's log buffer is released (#1506).
     """
     # McpServer handlers
     command_bus.register(
@@ -716,7 +733,9 @@ def register_crud_handlers(
     )
     command_bus.register(
         DeleteMcpServerCommand,
-        DeleteMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+        DeleteMcpServerHandler(
+            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, log_buffers=log_buffers
+        ),
     )
 
     # Group handlers (require groups dict)

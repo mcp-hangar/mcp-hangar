@@ -15,7 +15,7 @@ from ...application.commands import (
     StopMcpServerCommand,
     UnloadMcpServerCommand,
 )
-from ...application.mcp.tooling import key_global, mcp_tool_wrapper
+from ...application.mcp.tooling import ToolErrorPayload, key_global, mcp_tool_wrapper
 from ...application.queries import ListMcpServersQuery
 from ...application.read_models.mcp_server_views import REVIVED_BY_START, DeadInfo, dead_dict, dead_info
 from ...domain.exceptions import (
@@ -826,8 +826,9 @@ def register_load_tools(mcp: FastMCP) -> None:
             graceful: bool - If True, wait for idle state before stopping (default: true)
 
         Returns:
+            On success:
             {
-                status: "success"|"failed",
+                status: "success",
                 message: str,
                 mcp_servers_added: [str],
                 mcp_servers_removed: [str],
@@ -835,6 +836,8 @@ def register_load_tools(mcp: FastMCP) -> None:
                 mcp_servers_unchanged: [str],
                 duration_ms: float
             }
+            On failure, the payload every tool error uses:
+            {error: str, error_type: str, details: {}}
 
         Example:
             hangar_reload_config()
@@ -864,7 +867,9 @@ def hangar_reload_config(graceful: bool = True) -> dict:
                   If False, immediately stop mcp_servers.
 
     Returns:
-        Dictionary with reload status and statistics
+        On success, a dictionary with the reload's status and statistics. On
+        failure, the one error payload an MCP tool answers with: `error`,
+        `error_type` and `details` (#1509).
     """
     ctx = get_context()
 
@@ -886,8 +891,14 @@ def hangar_reload_config(graceful: bool = True) -> dict:
         }
 
     except Exception as e:  # noqa: BLE001 -- fault-barrier: reload failure must return error result, not crash MCP tool
-        return {
-            "status": "failed",
-            "message": f"Configuration reload failed: {str(e)}",
-            "error_type": type(e).__name__,
-        }
+        # The payload every other tool error answers with (#1495). This barrier
+        # used to answer `status`/`message`/`error_type` -- the right key in a
+        # shape of its own, so a client read a failed reload differently from
+        # every other tool failure, including the ones this same tool's wrapper
+        # maps when the barrier does not catch first (#1509). The message text is
+        # unchanged; it is now `error`.
+        return ToolErrorPayload(
+            error=f"Configuration reload failed: {e}",
+            error_type=type(e).__name__,
+            details={},
+        ).to_dict()
