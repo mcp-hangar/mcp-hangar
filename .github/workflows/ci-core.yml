@@ -46,11 +46,16 @@ jobs:
         # for exactly that reason.
         run: pip install -e ".[dev]"
 
-      - name: Ruff check (lint + isort)
-        run: ruff check src/mcp_hangar
+      - name: Ruff check (lint, no import sorting)
+        # `tests` is in scope because it is what contributors already lint --
+        # AGENTS.md tells them `ruff check src/ tests/`. Leaving CI at `src`
+        # meant findings in tests/ were reported by hand, over and over, with
+        # no gate to land the fix against. Import order is NOT checked: `I` is
+        # not in ruff's `select` (#1496).
+        run: ruff check src/mcp_hangar tests
 
       - name: Ruff format check
-        run: ruff format --check src/mcp_hangar
+        run: ruff format --check src/mcp_hangar tests
 
       - name: Type check
         run: mypy src/mcp_hangar

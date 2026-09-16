@@ -3,21 +3,27 @@
 # Setup: pre-commit install
 # Run manually: pre-commit run --all-files
 #
-# Ruff handles linting, import sorting (isort), and formatting (black).
-# No need for separate black/isort hooks — one tool, zero conflicts.
+# Ruff handles linting and formatting (black). It does NOT sort imports here:
+# `I` is absent from `select` in pyproject.toml, so import order is unchecked
+# by the hook and by CI alike. Enabling it is a one-time reformat of 46 files
+# and is still open (#1496).
+#
+# The `rev` below must equal the `ruff==` pin in the dev extra of
+# pyproject.toml, which is the ruff CI installs. Two pins are two formatters;
+# tests/unit/test_pre_commit_ruff_matches_the_dev_pin.py fails when they drift.
 
 repos:
-  # Ruff - Fast Python linter + formatter (replaces black, isort, flake8)
+  # Ruff - Fast Python linter + formatter (replaces black and flake8)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.13
+    rev: v0.16.7
     hooks:
       - id: ruff
-        name: ruff check (lint + isort)
+        name: ruff check (lint, no import sorting)
         args: ["--fix"]
-        files: ^src/
+        files: ^(src|tests)/
       - id: ruff-format
         name: ruff format
-        files: ^src/
+        files: ^(src|tests)/
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
