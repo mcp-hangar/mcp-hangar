@@ -30,6 +30,17 @@ A third server, ``job-flat``, answers in SEP-2663's flat task shape rather than
 the nested one. Its task is governed and polled the same way. A caller that did
 not declare the tasks extension is refused a task on both paths, and the task
 it was refused is not recorded (#1405).
+
+A fourth, ``job-spec``, is the upstream SEP-2663 describes: it creates a task
+only for a caller that declared the extension. The front door dispatched its
+flat call without the request context, so the caller's declaration was never
+read and never forwarded, and this upstream never created a task there -- only
+the three that create one unasked ever produced one on a front door. Each tenant
+calls it twice, declaring and not, and the two answers differ (#1492).
+
+A task refused to a caller that cannot poll it is one nobody will ever collect,
+so its upstream is asked to cancel it. The upstreams record every
+``tasks/cancel`` they are sent.
 """
 
 from __future__ import annotations
@@ -57,6 +68,7 @@ TOOLS = (
     "solo_job",
     "solo_held_a",
     "flat_job",
+    "spec_job",
 )
 REFUSED = {
     "tenant-a": {"job_denied", "job_withdrawn", "job_withdrawn_a", "job_held", "solo_held_a"},
@@ -66,6 +78,9 @@ REFUSED = {
 HELD = {"tenant-a": {"job_held", "solo_held_a"}, "tenant-b": {"job_held"}}
 #: Answered by its upstream in SEP-2663's flat task shape.
 FLAT_TOOL = "flat_job"
+#: Served by an upstream that creates a task only for a caller that declared the
+#: tasks extension, as SEP-2663 says one does.
+SPEC_TOOL = "spec_job"
 #: What a caller that did not declare the tasks extension is told, on each path.
 CANNOT_POLL = {"front_door": "io.modelcontextprotocol/tasks", "egress": "TasksNotNegotiated"}
 
@@ -183,6 +198,55 @@ class TestACallerThatCannotPollIsNotHandedATask:
     def test_it_is_told_what_to_declare(self, runs, topology: str, tenant: str) -> None:
         for tool, call in runs[topology]["undeclared"][tenant].items():
             assert CANNOT_POLL[topology] in call["detail"], (tool, call)
+
+
+@pytest.mark.parametrize("tenant", TENANTS)
+@pytest.mark.parametrize("topology", TOPOLOGIES)
+class TestACurrentSpecUpstreamMakesATaskForADeclaringCaller:
+    """The caller's declaration has to reach the upstream for any of this to run (#1492).
+
+    `job-spec` creates a task only for a caller that declared the tasks
+    extension. On the front door the flat call ran the executor without the
+    request context, so nothing was forwarded and this upstream answered an
+    ordinary tool result -- the whole relay was unreachable through a front door
+    for every spec-following upstream.
+    """
+
+    def test_a_declaring_caller_is_handed_a_task_it_can_poll(self, runs, topology: str, tenant: str) -> None:
+        call = _calls(runs, topology, tenant)[SPEC_TOOL]
+
+        assert call["outcome"] == "task", call
+        assert call["polled"] == "working", call
+
+    def test_a_caller_that_declared_nothing_gets_no_task(self, runs, topology: str, tenant: str) -> None:
+        """The control: the upstream is reached either way, and answers differently.
+
+        Without it, a task could be explained by an upstream that creates one
+        unasked rather than by anything Hangar forwarded.
+        """
+        call = runs[topology]["spec_undeclared"][tenant]
+
+        assert call["reached_upstream"], call
+        assert call["outcome"] == "ok", call
+
+
+@pytest.mark.parametrize("topology", TOPOLOGIES)
+class TestATaskNoCallerIsHandedIsCancelledUpstream:
+    """A task the relay refuses is one nobody will ever poll (#1492).
+
+    The upstream has already created it, so left alone it runs to its own TTL
+    producing a result no `tasks/*` call can reach. Each tenant's undeclared
+    `job` and `flat_job` is one such task.
+    """
+
+    def test_each_refused_task_was_cancelled(self, runs, topology: str) -> None:
+        cancelled = runs[topology]["cancelled"]
+
+        assert len(cancelled) == 2 * len(TENANTS), cancelled
+
+    def test_no_task_a_caller_holds_was_cancelled(self, runs, topology: str) -> None:
+        """Only the unhanded ones: every recorded task is still the caller's to use."""
+        assert set(runs[topology]["cancelled"]).isdisjoint(runs[topology]["recorded"])
 
 
 @pytest.mark.parametrize("topology", TOPOLOGIES)

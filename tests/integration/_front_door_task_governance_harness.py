@@ -40,10 +40,23 @@ that declared the tasks extension. Each tenant then calls ``job`` and
 ``flat_job`` again without declaring it: a caller that cannot poll a task must
 not be handed one.
 
+A fourth upstream, ``job-spec``, is the one a spec-following server actually is
+(#1492): it creates a task only when the request's ``_meta`` declares the tasks
+extension, and answers an ordinary tool result otherwise. It is what shows that
+the caller's declaration reached the upstream at all -- the other three create a
+task unasked, so they cannot. Each tenant calls its ``spec_job`` twice, once
+declaring and once not.
+
+The upstreams also record every ``tasks/cancel`` they are sent. A task refused
+to a caller that cannot poll it is one nobody will ever collect, so the seam
+asks its upstream to cancel it; the report waits for those cancels rather than
+racing them, since they are sent off the request path.
+
 The report holds, for each tenant and tool: the call's outcome, whether the
 call reached an upstream, and what ``tasks/get`` answered for the task it was
-handed. It also holds the undeclared calls' outcomes, and the id of every task
-the governed task store recorded.
+handed. It also holds the undeclared calls' outcomes, the spec upstream's
+undeclared call, the id of every task the governed task store recorded, and the
+id of every task an upstream was asked to cancel.
 """
 
 from __future__ import annotations
@@ -55,6 +68,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from typing import Any, ClassVar
 
 BASE_URL = "http://127.0.0.1:8000"
@@ -75,6 +89,10 @@ SOLO_TOOLS = ("solo_job", "solo_held_a")
 #: A server in no group whose upstream answers in SEP-2663's flat task shape (#1405).
 FLAT_SERVER = "job-flat"
 FLAT_TOOLS = ("flat_job",)
+#: A server in no group whose upstream creates a task only for a caller that
+#: declared the tasks extension, as SEP-2663 says one does (#1492).
+SPEC_SERVER = "job-spec"
+SPEC_TOOLS = ("spec_job",)
 
 _TASK_IDS = itertools.count(1)
 _LOCK = threading.Lock()
@@ -86,6 +104,15 @@ class _TaskUpstream(BaseHTTPRequestHandler):
     tools: ClassVar[tuple[str, ...]] = ()
     #: Answer in SEP-2663's flat shape, ``resultType: "task"``, rather than the nested one.
     flat: ClassVar[bool] = False
+    #: Create a task only for a caller that declared the tasks extension, as
+    #: SEP-2663 says an upstream does. The others create one unasked.
+    spec_only: ClassVar[bool] = False
+    #: What ``initialize`` reports. A revision Hangar treats as legacy makes it
+    #: withhold the whole protocol envelope, the caller's declaration included.
+    #: NOT ``protocol_version``: that name is ``BaseHTTPRequestHandler``'s own,
+    #: for the HTTP version it answers in, and setting it to an MCP revision
+    #: makes every response an unparseable status line.
+    mcp_protocol_version: ClassVar[str] = "2025-06-18"
     #: The tools a ``tools/call`` reached, in order.
     reached: ClassVar[list[str]] = []
     tasks: ClassVar[dict[str, dict[str, Any]]] = {}
@@ -107,7 +134,7 @@ class _TaskUpstream(BaseHTTPRequestHandler):
         if method == "initialize":
             answer = {
                 "result": {
-                    "protocolVersion": "2025-06-18",
+                    "protocolVersion": self.mcp_protocol_version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "task-upstream", "version": "0"},
                 }
@@ -115,18 +142,25 @@ class _TaskUpstream(BaseHTTPRequestHandler):
         elif method == "tools/list":
             answer = {"result": {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in self.tools]}}
         elif method == "tools/call":
+            created: dict[str, Any] | None = None
             with _LOCK:
                 name = str(params.get("name"))
-                task = {
-                    "taskId": f"task-{name}-{next(_TASK_IDS)}",
-                    "status": "working",
-                    "createdAt": "2020-01-01T00:00:00Z",
-                    "lastUpdatedAt": "2020-01-01T00:00:00Z",
-                    "ttl": 60_000,
-                }
                 self.reached.append(name)
-                self.tasks[task["taskId"]] = task
-            answer = {"result": _flat(task, "task") if self.flat else {"task": task}}
+                if not self.spec_only or _declares_tasks(params):
+                    created = {
+                        "taskId": f"task-{name}-{next(_TASK_IDS)}",
+                        "status": "working",
+                        "createdAt": "2020-01-01T00:00:00Z",
+                        "lastUpdatedAt": "2020-01-01T00:00:00Z",
+                        "ttl": 60_000,
+                    }
+                    self.tasks[created["taskId"]] = created
+            if created is None:
+                # What SEP-2663 has a spec-following upstream answer a caller that
+                # declared nothing: an ordinary tool result, and no task.
+                answer = {"result": {"content": [{"type": "text", "text": "done"}]}}
+            else:
+                answer = {"result": _flat(created, "task") if self.flat else {"task": created}}
         elif method == "tasks/get" and params.get("taskId") in self.tasks:
             polled = self.tasks[params["taskId"]]
             answer = {"result": _flat(polled, "complete") if self.flat else polled}
@@ -154,19 +188,53 @@ def _flat(task: dict[str, Any], result_type: str) -> dict[str, Any]:
     return {"resultType": result_type, **fields, "ttlMs": task["ttl"]}
 
 
-def _upstream(tools: tuple[str, ...], *, flat: bool = False) -> tuple[str, type[_TaskUpstream]]:
+def _declares_tasks(params: dict[str, Any]) -> bool:
+    """Did this request's ``_meta`` declare the tasks extension, as a client does?
+
+    What SEP-2663 has an upstream gate task creation on, and what Hangar relays
+    on its caller's behalf when the caller can poll a task.
+    """
+    from mcp_hangar.tasks_wire import EXTENSION_ID
+
+    meta = params.get("_meta") or {}
+    capabilities = meta.get("io.modelcontextprotocol/clientCapabilities") or {}
+    extensions = capabilities.get("extensions") if isinstance(capabilities, dict) else None
+    return isinstance(extensions, dict) and EXTENSION_ID in extensions
+
+
+def _upstream(
+    tools: tuple[str, ...],
+    *,
+    flat: bool = False,
+    spec_only: bool = False,
+    mcp_protocol_version: str = "2025-06-18",
+) -> tuple[str, type[_TaskUpstream]]:
     """Serve an upstream exposing *tools*: its endpoint, and its handler class holding what it saw."""
     handler: type[_TaskUpstream] = type(
         "_ThisUpstream",
         (_TaskUpstream,),
-        {"tools": tools, "flat": flat, "reached": [], "tasks": {}, "follow_ups": []},
+        {
+            "tools": tools,
+            "flat": flat,
+            "spec_only": spec_only,
+            "mcp_protocol_version": mcp_protocol_version,
+            "reached": [],
+            "tasks": {},
+            "follow_ups": [],
+        },
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{server.server_address[1]}/mcp", handler
 
 
-def _config(topology: str, group_endpoint: str, solo_endpoint: str, flat_endpoint: str | None = None) -> dict[str, Any]:
+def _config(
+    topology: str,
+    group_endpoint: str,
+    solo_endpoint: str,
+    flat_endpoint: str | None = None,
+    spec_endpoint: str | None = None,
+) -> dict[str, Any]:
     group: dict[str, Any] = {
         "mode": "group",
         "strategy": "priority",
@@ -198,6 +266,7 @@ def _config(topology: str, group_endpoint: str, solo_endpoint: str, flat_endpoin
             SOLO: solo,
             GROUP: group,
             **({FLAT_SERVER: {"mode": "remote", "endpoint": flat_endpoint}} if flat_endpoint else {}),
+            **({SPEC_SERVER: {"mode": "remote", "endpoint": spec_endpoint}} if spec_endpoint else {}),
         },
     }
 
@@ -289,7 +358,9 @@ def _target(tool: str) -> str:
     """The server ``hangar_call`` names for *tool*."""
     if tool in GROUP_TOOLS:
         return GROUP
-    return FLAT_SERVER if tool in FLAT_TOOLS else SOLO
+    if tool in FLAT_TOOLS:
+        return FLAT_SERVER
+    return SPEC_SERVER if tool in SPEC_TOOLS else SOLO
 
 
 def _poll(client: Any, key: str, task_id: str, capabilities: dict[str, Any]) -> str:
@@ -316,6 +387,10 @@ def main(topology: str, out: Path) -> None:
     group_endpoint, group_upstream = _upstream(GROUP_TOOLS)
     solo_endpoint, solo_upstream = _upstream(SOLO_TOOLS)
     flat_endpoint, flat_upstream = _upstream(FLAT_TOOLS, flat=True)
+    # A current-spec upstream: it reports a revision Hangar sends the protocol
+    # envelope to, and creates a task only for a caller that declared the
+    # extension in it.
+    spec_endpoint, spec_upstream = _upstream(SPEC_TOOLS, spec_only=True, mcp_protocol_version=MODERN_VERSION)
 
     from starlette.testclient import TestClient
 
@@ -329,7 +404,7 @@ def main(topology: str, out: Path) -> None:
     # A config file, as `serve --http` reads one. `tool_access.mode` is applied
     # while the file is loaded, so a config dict would leave the default topology.
     config_file = out.parent / "config.yaml"
-    config = _config(topology, group_endpoint, solo_endpoint, flat_endpoint)
+    config = _config(topology, group_endpoint, solo_endpoint, flat_endpoint, spec_endpoint)
     config_file.write_text(json.dumps(config))  # JSON is YAML
     context = bootstrap(config_path=str(config_file))
     # What `run_http` starts at boot. It returns at once on egress.
@@ -338,11 +413,21 @@ def main(topology: str, out: Path) -> None:
     app = create_auth_enforced_app(mcp_app_for_serving(context.mcp_server), context.auth_components)
     tasks_capability = {"extensions": {EXTENSION_ID: {}}}
 
+    upstreams = (group_upstream, solo_upstream, flat_upstream, spec_upstream)
+
     def reached() -> int:
-        return len(group_upstream.reached) + len(solo_upstream.reached) + len(flat_upstream.reached)
+        return sum(len(upstream.reached) for upstream in upstreams)
+
+    def cancelled() -> list[str]:
+        """Every task an upstream has been asked to cancel so far."""
+        with _LOCK:
+            return sorted(
+                task_id for upstream in upstreams for method, task_id in upstream.follow_ups if method == "tasks/cancel"
+            )
 
     report: dict[str, dict[str, dict[str, Any]]] = {}
     undeclared: dict[str, dict[str, dict[str, Any]]] = {}
+    spec_undeclared: dict[str, dict[str, Any]] = {}
     with TestClient(app, base_url=BASE_URL) as client:
 
         def call(tenant: str, tool: str, capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -355,20 +440,41 @@ def main(topology: str, out: Path) -> None:
             return outcome
 
         for tenant in TENANTS:
-            calls = {tool: call(tenant, tool) for tool in (*GROUP_TOOLS, *SOLO_TOOLS, *FLAT_TOOLS)}
+            calls = {tool: call(tenant, tool) for tool in (*GROUP_TOOLS, *SOLO_TOOLS, *FLAT_TOOLS, *SPEC_TOOLS)}
             for outcome in calls.values():
                 if outcome.get("task_id"):
                     outcome["polled"] = _poll(client, keys[tenant], outcome["task_id"], tasks_capability)
             report[tenant] = calls
             # Allowed tools again, by a caller that did not declare the tasks extension (#1405).
             undeclared[tenant] = {tool: call(tenant, tool, capabilities={}) for tool in ("job", *FLAT_TOOLS)}
+            # The spec upstream again, undeclared: it is the one that then makes
+            # no task, which is what shows the declaration is what reaches it.
+            spec_undeclared[tenant] = call(tenant, SPEC_TOOLS[0], capabilities={})
+
+    # The cancel for a task no caller is handed is best effort and sent off the
+    # request path, so wait for it rather than racing it (#1492): `job` and
+    # `flat_job`, refused to an undeclared caller, for each tenant.
+    expected_cancels = 2 * len(TENANTS)
+    deadline = time.monotonic() + 15
+    while len(cancelled()) < expected_cancels and time.monotonic() < deadline:
+        time.sleep(0.05)
+    cancels = cancelled()
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
     # Every task the store recorded, to compare with the tasks callers were handed.
     recorded = sorted(task_id for _server, task_id in get_context().governed_task_store._tasks)
     out.write_text(
-        json.dumps({"hangar": mcp_hangar.__file__, "calls": report, "undeclared": undeclared, "recorded": recorded})
+        json.dumps(
+            {
+                "hangar": mcp_hangar.__file__,
+                "calls": report,
+                "undeclared": undeclared,
+                "spec_undeclared": spec_undeclared,
+                "recorded": recorded,
+                "cancelled": cancels,
+            }
+        )
     )
     sys.stdout.flush()
     sys.stderr.flush()
