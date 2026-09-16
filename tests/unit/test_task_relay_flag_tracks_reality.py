@@ -86,20 +86,20 @@ class TestTheWiringSeamKeepsThemInStep:
 
     def test_a_capability_is_not_claimed_after_the_disabled_path(self):
         """The failure this prevents, stated end to end."""
+        from mcp_hangar.context import caller_polls_tasks_var
         from mcp_hangar.fastmcp_server.task_relay_wiring import enable_governed_task_relay
-        from mcp_hangar.negotiation import ProtocolNegotiation, set_current_protocol_negotiation
-        from mcp_hangar.protocol import TASKS_EXTENSION_ID, forwardable_client_capabilities
+        from mcp_hangar.protocol import forwardable_client_capabilities
 
-        set_current_protocol_negotiation(
-            ProtocolNegotiation(
-                protocol_version="2026-07-28",
-                capabilities={"extensions": {TASKS_EXTENSION_ID: {}}},
-            )
-        )
-        set_task_relay_wired(True)
-        enable_governed_task_relay(Mock(), relay_tasks_enabled=False)
+        # What the task relay's middleware binds for a caller that declared the
+        # extension -- the one reading forwarding is derived from (#1492).
+        token = caller_polls_tasks_var.set(True)
+        try:
+            set_task_relay_wired(True)
+            enable_governed_task_relay(Mock(), relay_tasks_enabled=False)
 
-        assert forwardable_client_capabilities() is None
+            assert forwardable_client_capabilities() is None
+        finally:
+            caller_polls_tasks_var.reset(token)
 
 
 class TestTheProtocolModuleStaysALeaf:

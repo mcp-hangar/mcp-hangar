@@ -10,7 +10,8 @@ That is what the flat call did until #1394.
 An upstream answers with a task in one of two shapes, and :func:`upstream_task`
 reads both, so they are captured and governed alike (#1405). A task goes only to
 a caller that can poll it. Any other caller is refused here, before anything is
-recorded, because ``tasks/*`` would refuse it the task anyway.
+recorded, because ``tasks/*`` would refuse it the task anyway -- and the upstream
+is asked, best effort, to cancel the task nobody is being handed (#1492).
 
 It lives apart from ``hangar_call`` so the flat call can reach it. The flat
 projection imports it lazily, for the import cycle the batch package is in (#894).
@@ -18,6 +19,7 @@ projection imports it lazily, for the import cycle the batch package is in (#894
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -27,7 +29,7 @@ from ....domain.services.task_ownership import TaskOwner
 from ....logging_config import get_logger
 from ....tasks_wire import EXTENSION_ID
 from ...context import get_context
-from .models import CallResult
+from .models import CallResult, RelayCapture
 
 logger = get_logger(__name__)
 
@@ -40,6 +42,92 @@ _CANNOT_POLL = (
     f"declare the {EXTENSION_ID} extension, or its protocol revision has no tasks/*. "
     "The task was not handed over."
 )
+
+#: How long the best-effort ``tasks/cancel`` for an unhanded task may take.
+#: One attempt, then give up: the caller's refusal does not wait on it and
+#: nothing downstream depends on the answer.
+_CANCEL_TIMEOUT = 10.0
+
+
+def _unhanded_task_id(upstream: Any) -> str | None:
+    """The id of a task no caller is being handed, or ``None`` if it has none.
+
+    Read through :func:`upstream_task`, so it is the id the store would have
+    been keyed on had the task been governed. An unreadable handle yields
+    ``None`` and nothing is sent: an id Hangar cannot name is an id no
+    ``tasks/cancel`` could carry.
+    """
+    task = upstream_task(upstream) or {}
+    for key in ("taskId", "task_id", "id"):
+        value = task.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _cancel_unhanded_task(capture: RelayCapture) -> None:
+    """Ask the upstream to cancel a task no caller is handed. Best effort (#1492).
+
+    The upstream has already created the task and the seam is about to refuse
+    it, so nothing will ever poll it: left alone it runs until its own TTL, and
+    the work is being done for nobody. SEP-2663 makes cancellation cooperative,
+    so this is a request and not a guarantee -- which is why the caller's
+    refusal neither waits for it nor changes with its outcome.
+
+    **Off the request path.** ``relay_request`` is a blocking network call and
+    this seam runs on the loop serving every other request on the connection, so
+    the cancel goes on one short-lived daemon thread with a bounded timeout.
+    One attempt, no retry, no backlog: a failure is logged and dropped.
+
+    **Logged by outcome type only.** ``cancelled``, ``refused`` (the upstream
+    answered an error, of which only the JSON-RPC code is recorded) or
+    ``failed`` (the relay itself raised, of which only the exception class is).
+    No upstream text is logged, here or anywhere on this seam.
+
+    Silent no-ops, both fail-safe: no router on the application context (the
+    relay is not wired, so there is nothing to relay through), and a handle
+    carrying no readable task id.
+    """
+    task_id = _unhanded_task_id(capture.upstream)
+    if task_id is None:
+        return
+    try:
+        router = getattr(get_context(), "task_upstream_router", None)
+    except Exception:  # noqa: BLE001 -- no app context (stdio/local): nothing to cancel through
+        router = None
+    if router is None:
+        return
+
+    target_server_id = capture.target_server_id
+    mcp_server = capture.logical_mcp_server
+    tool = capture.tool
+
+    def _cancel() -> None:
+        try:
+            # The param shape the served `tasks/cancel` relays upstream, so an
+            # upstream sees one kind of cancel whoever asked for it.
+            response = router(target_server_id, "tasks/cancel", {"task_id": task_id}, _CANCEL_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 -- fault barrier: a cancel must never surface anywhere
+            logger.info(
+                "task_relay_cancel_unhanded_task",
+                outcome="failed",
+                error_type=type(exc).__name__,
+                mcp_server=mcp_server,
+                tool=tool,
+                task_id=task_id,
+            )
+            return
+        error = response.get("error") if isinstance(response, dict) else None
+        logger.info(
+            "task_relay_cancel_unhanded_task",
+            outcome="refused" if error else "cancelled",
+            error_code=error.get("code") if isinstance(error, dict) else None,
+            mcp_server=mcp_server,
+            tool=tool,
+            task_id=task_id,
+        )
+
+    threading.Thread(target=_cancel, name="hangar-task-cancel", daemon=True).start()
 
 
 def upstream_task(result: Any) -> dict[str, Any] | None:
@@ -87,7 +175,9 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
         TaskRelayNotSupported rejection (never hand back an ungoverned handle).
       - the caller cannot poll a task (``caller_polls_tasks_var``, #1405) ->
         rewrite to a ``TasksNotNegotiated`` refusal. Nothing is recorded: no
-        ``tasks/*`` call of this caller's could ever reach the task.
+        ``tasks/*`` call of this caller's could ever reach the task. The upstream
+        is asked to cancel it, best effort and off the request path (#1492), so
+        work nobody can collect does not run on to its TTL.
       - mint/register/emit fails -> rewrite to a DISTINCT
         ``TaskRelayRegistrationFailed`` failure; ``relay_and_govern``'s atomic
         rollback guarantees zero governed state survives.
@@ -134,6 +224,7 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
                 mcp_server=capture.logical_mcp_server,
                 tool=capture.tool,
             )
+            _cancel_unhanded_task(capture)
             executed[i] = CallResult(
                 index=r.index,
                 call_id=r.call_id,

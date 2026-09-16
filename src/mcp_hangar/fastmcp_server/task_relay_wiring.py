@@ -102,13 +102,29 @@ def _install_task_polling_middleware(mcp: FastMCP) -> None:
 
     The relay seam hands an upstream's task only to such a caller. The flat call
     and ``hangar_call`` both run inside the SDK's server middleware, so one
-    binding serves both. Where there is no middleware list nothing is bound, and
-    the seam then hands no caller a task.
+    binding serves both.
+
+    **This binding now carries two behaviours, not one (#1492).** The same fact
+    also decides what Hangar declares to an upstream on the caller's behalf, so
+    a request it never wrapped both declares nothing upstream and is handed no
+    task. Those two failing together is the honest direction -- a task is never
+    solicited that could not then be handed over -- but it is silent, so when
+    the hook cannot be installed at all, say so rather than leaving an operator
+    to infer it from an upstream that never creates a task.
     """
     from .task_relay_handlers import bind_task_polling
 
     middleware = getattr(lowlevel_server(mcp), "middleware", None)
-    if isinstance(middleware, list) and bind_task_polling not in middleware:
+    if not isinstance(middleware, list):
+        # Fail-closed, and loudly. Not an error: the relay's other surfaces are
+        # wired and `tasks/*` still serves a task created some other way.
+        logger.warning(
+            "task_polling_middleware_not_installed",
+            reason="sdk_server_exposes_no_middleware_list",
+            consequence=("no caller's tasks declaration is forwarded upstream, and no caller is handed a task"),
+        )
+        return
+    if bind_task_polling not in middleware:
         middleware.append(bind_task_polling)
 
 

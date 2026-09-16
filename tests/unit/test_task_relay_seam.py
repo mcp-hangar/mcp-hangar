@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -36,7 +37,7 @@ from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityCon
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, hangar_call
 from mcp_hangar.server.tools.batch.models import CallResult, RelayCapture
 from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling, caller_polls_tasks
-from mcp_hangar.server.tools.batch.relay_seam import govern_relayed_tasks, upstream_task
+from mcp_hangar.server.tools.batch.relay_seam import _CANCEL_TIMEOUT, govern_relayed_tasks, upstream_task
 from mcp_hangar.tasks_wire import EXTENSION_ID
 
 _SERVER = "server_a"
@@ -224,9 +225,13 @@ def test_worker_relay_branch_does_not_touch_group_health(worker_ctx: Mock) -> No
 # =============================================================================
 
 
-def _seam_ctx(store: GovernedTaskStore) -> Mock:
+def _seam_ctx(store: GovernedTaskStore, router: Any = None) -> Mock:
     ctx = Mock()
     ctx.governed_task_store = store
+    # Explicit, because a bare Mock() would hand the seam an auto-created upstream
+    # router and the best-effort cancel (#1492) would fire into it. A test that
+    # wants one passes it.
+    ctx.task_upstream_router = router
     return ctx
 
 
@@ -556,6 +561,123 @@ def test_a_request_nothing_bound_is_one_whose_caller_cannot_poll() -> None:
 
     assert executed[0].error_type == "TasksNotNegotiated"
     assert store._tasks == {}
+
+
+class TestATaskNoCallerIsHandedIsCancelledUpstream:
+    """#1492: the upstream made the task, and nothing will ever poll it.
+
+    The seam refuses such a task rather than handing it over, so left alone it
+    runs to its own TTL producing a result nobody can collect. The cancel is a
+    request, not a guarantee -- SEP-2663 makes cancellation cooperative -- so
+    nothing the caller sees depends on it.
+    """
+
+    @staticmethod
+    def _refuse(router: Any) -> tuple[list[CallResult], GovernedTaskStore]:
+        """Govern a captured task for a caller that cannot poll one."""
+        store = GovernedTaskStore()
+        executed = [_result_with_capture(_capture(identity=_identity("tenant-a", "alice")))]
+        token = caller_polls_tasks_var.set(False)
+        try:
+            with patch(
+                "mcp_hangar.server.tools.batch.relay_seam.get_context",
+                return_value=_seam_ctx(store, router),
+            ):
+                govern_relayed_tasks(executed)
+        finally:
+            caller_polls_tasks_var.reset(token)
+        return executed, store
+
+    def test_the_upstream_is_asked_to_cancel_it(self) -> None:
+        sent: list[tuple[Any, ...]] = []
+        done = threading.Event()
+
+        def router(*call: Any) -> dict[str, Any]:
+            sent.append(call)
+            done.set()
+            return {"result": {}}
+
+        executed, store = self._refuse(router)
+
+        assert done.wait(5), "the seam sent no cancel"
+        # The task id the store would have been keyed on, in the param shape the
+        # served `tasks/cancel` relays.
+        assert sent == [(_SERVER, "tasks/cancel", {"task_id": "t1"}, _CANCEL_TIMEOUT)]
+        # And the refusal is what it was: still refused, still nothing recorded.
+        assert executed[0].error_type == "TasksNotNegotiated"
+        assert store._tasks == {}
+
+    def test_the_caller_does_not_wait_for_it(self) -> None:
+        """Reaching the assertions at all is the proof.
+
+        The router blocks until released, so a cancel sent on the request path
+        would hold the seam -- and the loop serving every other request on the
+        connection -- open for as long as the upstream took to answer.
+        """
+        started = threading.Event()
+        release = threading.Event()
+
+        def router(*_call: Any) -> dict[str, Any]:
+            started.set()
+            release.wait(5)
+            return {"result": {}}
+
+        try:
+            executed, _store = self._refuse(router)
+
+            assert started.wait(5), "the seam sent no cancel"
+            assert executed[0].error_type == "TasksNotNegotiated"
+        finally:
+            release.set()
+
+    def test_an_upstream_that_will_not_cancel_changes_nothing(self) -> None:
+        """Cancellation is cooperative: a refusal is an answer, not a failure."""
+        done = threading.Event()
+
+        def router(*_call: Any) -> dict[str, Any]:
+            done.set()
+            return {"error": {"code": -32601, "message": "Unknown method: tasks/cancel"}}
+
+        executed, store = self._refuse(router)
+
+        assert done.wait(5)
+        assert executed[0].error_type == "TasksNotNegotiated"
+        assert store._tasks == {}
+
+    def test_a_relay_that_raises_never_surfaces(self) -> None:
+        raised = threading.Event()
+
+        def router(*_call: Any) -> dict[str, Any]:
+            raised.set()
+            raise RuntimeError("relay unavailable")
+
+        executed, store = self._refuse(router)
+
+        assert raised.wait(5)
+        assert executed[0].error_type == "TasksNotNegotiated"
+        assert store._tasks == {}
+
+    def test_no_router_is_a_silent_no_op(self) -> None:
+        """Nothing to relay through: the relay is not wired in this process."""
+        executed, store = self._refuse(None)
+
+        assert executed[0].error_type == "TasksNotNegotiated"
+        assert store._tasks == {}
+
+    def test_a_task_handed_to_its_caller_is_not_cancelled(self) -> None:
+        """The negative control: only a task nobody gets is cancelled."""
+        sent: list[tuple[Any, ...]] = []
+        store = GovernedTaskStore()
+        executed = [_result_with_capture(_capture(identity=_identity("tenant-a", "alice")))]
+
+        with patch(
+            "mcp_hangar.server.tools.batch.relay_seam.get_context",
+            return_value=_seam_ctx(store, lambda *call: sent.append(call)),
+        ):
+            govern_relayed_tasks(executed)
+
+        assert executed[0].success is True
+        assert sent == []
 
 
 def _request(version: str | None, declared: bool) -> SimpleNamespace:

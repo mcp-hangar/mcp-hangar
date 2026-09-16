@@ -1,15 +1,18 @@
 """Shared MCP protocol context for the outbound path.
 
-Leaf module (no internal imports) so both the domain startup handshake and the
-transport clients can use these without crossing layer boundaries or risking an
-import cycle.
+Near-leaf module, so both the domain startup handshake and the transport clients
+can use these without crossing layer boundaries or risking an import cycle. The
+two internal modules it does reach are themselves leaves: ``tasks_wire``, for the
+Tasks extension id, and ``context`` (imported inside the one function that needs
+it), for the request-scoped fact the outbound forwarding is derived from.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+
+from .tasks_wire import EXTENSION_ID as TASKS_EXTENSION_ID
 
 # MCP protocol version Hangar advertises to upstream MCP servers. Targets the
 # 2026-07-28 revision; a legacy upstream downgrades in its initialize response.
@@ -68,8 +71,9 @@ _META_CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
 # (non-spec) spelling is still understood; the spec key wins.
 _META_CAPABILITIES_KEY_LEGACY = "io.modelcontextprotocol/capabilities"
 
-#: The Tasks extension identifier, as declared under `clientCapabilities.extensions`.
-TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
+# The Tasks extension identifier, as declared under `clientCapabilities.extensions`,
+# is `tasks_wire.EXTENSION_ID` and is imported above. It was restated here as well,
+# so the wire contract had two definitions that nothing held in step (#1492).
 
 
 def inject_protocol_meta(params: dict[str, Any], *, modern_envelope: bool = True) -> dict[str, Any]:
@@ -144,26 +148,37 @@ def forwardable_client_capabilities() -> dict[str, Any] | None:
     blanket claim either. Two conditions must both hold, and each excludes a
     concrete way of lying:
 
-    * **The caller declared the Tasks extension.** A connection-level claim would
-      let an upstream mint a task for a client that never asked for one -- and
-      that client is then answered ``-32021`` on ``tasks/get``, holding a handle
-      it cannot use. Per-request tracking keeps the two ends consistent; SEP-2663
+    * **The caller can poll a task.** It speaks a revision that has ``tasks/*``
+      and it declared the Tasks extension. A connection-level claim would let an
+      upstream mint a task for a client that never asked for one -- and that
+      client is then answered ``-32021`` on ``tasks/get``, holding a handle it
+      cannot use. Per-request tracking keeps the two ends consistent; SEP-2663
       provides exactly this opt-in for the purpose.
     * **Hangar's relay is actually wired.** With the kill-switch off there is no
       governed store and no ``tasks/*`` surface, so claiming the capability would
       promise governance that is not running.
 
+    **One reading of the caller's negotiation, not two (#1492).** The first
+    condition is ``caller_polls_tasks_var``: the fact the task relay's server
+    middleware reads off the request context once, when it wraps the request, and
+    binds for its duration. The same bound fact decides whether a task the
+    upstream answers with may be handed to this caller, so what Hangar asks an
+    upstream for and what Hangar can then hand over cannot disagree -- and a task
+    is no longer solicited for a caller the relay seam would have to refuse.
+    This used to re-read the caller's declaration out of the negotiation the
+    executor parses from ``params._meta``, which is the SDK's parse of that same
+    wire field, one frame later.
+
+    A path the middleware never wrapped declares nothing, which is the same
+    fail-closed direction the seam takes: that path is handed no task either.
+
     Fault-barriered: any failure yields ``None``, which degrades to the previous
     behaviour (declare nothing) rather than breaking an invoke.
     """
     try:
-        from .negotiation import get_current_protocol_negotiation
+        from .context import caller_polls_tasks_var
 
-        negotiation = get_current_protocol_negotiation()
-        if negotiation is None:
-            return None
-        extensions = negotiation.capabilities.get("extensions")
-        if not isinstance(extensions, Mapping) or TASKS_EXTENSION_ID not in extensions:
+        if not caller_polls_tasks_var.get():
             return None
 
         if not is_task_relay_wired():

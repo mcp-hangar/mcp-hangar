@@ -102,12 +102,42 @@ class TestGovernedTaskRelayKillSwitch:
         low = self._served_low(enabled=False)
         assert low.get_request_handler("tasks/update") is None
 
+    def test_default_off_installs_no_task_polling_middleware(self, _reset_ctx):
+        """Dark parity: the polling hook is part of the surface the flag gates."""
+        from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling
+
+        low = self._served_low(enabled=False)
+
+        assert bind_task_polling not in (getattr(low, "middleware", None) or [])
+
     # -- enabled (flag True) -------------------------------------------------
 
     def test_enabled_registers_the_sep_2663_tasks_handlers(self, _reset_ctx):
         low = self._served_low(enabled=True)
         for method in _TASK_METHODS:
             assert low.get_request_handler(method) is not None, method
+
+    def test_enabled_installs_the_task_polling_middleware(self, _reset_ctx):
+        """The hook two behaviours now hang off, asserted on the served server (#1492).
+
+        `bind_task_polling` records, per request, whether the caller can poll a
+        task. The relay seam reads that to decide whether an upstream's task may
+        be handed over, and `forwardable_client_capabilities()` reads the same
+        fact to decide what Hangar declares to an upstream on the caller's
+        behalf. An SDK change that drops the middleware hook would turn both off
+        at once and in silence -- no task ever solicited, none ever handed over,
+        every other assertion in this file still green. This is the one that
+        fails the build instead.
+
+        Counted, not just found: the wiring is called on both the factory and
+        the bootstrap path, and appending the same hook twice would run it twice
+        per request.
+        """
+        from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling
+
+        low = self._served_low(enabled=True)
+
+        assert low.middleware.count(bind_task_polling) == 1
 
     def test_enabled_does_not_register_the_methods_sep_2663_removed(self, _reset_ctx):
         """Not registering them is how they return -32601; nothing else implements that."""
@@ -214,3 +244,69 @@ class TestTheShippedDefault:
             "the HTTP-serve bootstrap no longer defaults the governed relay on, "
             "or the flag moved -- ADR-015 Decision 5 gates that change"
         )
+
+
+class _WarningRecorder:
+    """The wiring's logger, as far as this test needs one.
+
+    The warning is asserted on the logger rather than through `caplog`: these
+    loggers render straight to stderr, so `caplog.text` is empty even while the
+    line is plainly emitted. Recording the call also lets the assertion name the
+    event and its fields exactly, rather than matching rendered text.
+    """
+
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, dict]] = []
+
+    def warning(self, event: str, **fields: object) -> None:
+        self.warnings.append((event, dict(fields)))
+
+    def info(self, event: str, **fields: object) -> None:
+        pass
+
+
+class TestTheRelaySaysSoWhenItCannotInstallThePollingHook:
+    """The silent-failure guard for the hook two behaviours hang off (#1492).
+
+    `bind_task_polling` is appended to the SDK server's middleware list. Where
+    the SDK exposes no such list the relay stays fail-closed -- nothing is bound,
+    so no caller is handed a task and no caller's declaration is forwarded
+    upstream -- but an operator would see only an upstream that never creates a
+    task, with nothing pointing at the cause. So the wiring says it.
+
+    Not gated on `HAS_NATIVE_TASKS`: the function under test is driven directly.
+    """
+
+    @staticmethod
+    def _install(middleware: object) -> _WarningRecorder:
+        """Install the hook against an SDK server exposing *middleware*, recording warnings."""
+        from types import SimpleNamespace
+
+        from mcp_hangar.fastmcp_server import task_relay_wiring
+
+        low = SimpleNamespace() if middleware is None else SimpleNamespace(middleware=middleware)
+        recorder = _WarningRecorder()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(task_relay_wiring, "lowlevel_server", lambda _mcp: low)
+            patch.setattr(task_relay_wiring, "logger", recorder)
+            task_relay_wiring._install_task_polling_middleware(object())
+        return recorder
+
+    def test_it_names_what_stops(self) -> None:
+        recorder = self._install(middleware=None)
+
+        assert [event for event, _fields in recorder.warnings] == ["task_polling_middleware_not_installed"]
+        # Both behaviours named, so the line stands on its own.
+        consequence = recorder.warnings[0][1]["consequence"]
+        assert "no caller's tasks declaration is forwarded upstream" in consequence
+        assert "no caller is handed a task" in consequence
+
+    def test_it_stays_quiet_when_the_hook_installs(self) -> None:
+        """The control: the warning must mean something when it appears."""
+        from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling
+
+        installed: list = []
+        recorder = self._install(middleware=installed)
+
+        assert recorder.warnings == []
+        assert installed == [bind_task_polling]
