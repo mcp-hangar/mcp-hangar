@@ -1,7 +1,5 @@
 """The token-bucket rate limiter in `domain.security`: buckets, composition, cleanup."""
 
-import time
-
 import pytest
 
 from mcp_hangar.domain.security import rate_limiter as rate_limiter_module

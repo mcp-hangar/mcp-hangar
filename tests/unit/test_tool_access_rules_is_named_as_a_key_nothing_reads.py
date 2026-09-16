@@ -79,7 +79,9 @@ def test_a_typo_beside_it_is_still_reported():
 
     assert len(problems) == 2
     assert problems[0].startswith(NAMED)
-    assert problems[1].startswith("tool_access has unknown key(s) ['mdoe']; allowed keys: ['mode', 'required_catalogue']")
+    assert problems[1].startswith(
+        "tool_access has unknown key(s) ['mdoe']; allowed keys: ['mode', 'required_catalogue']"
+    )
 
 
 def test_a_file_that_sets_it_loads_with_a_warning(tmp_path, monkeypatch):
