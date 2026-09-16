@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from mcp_hangar.domain.security import rate_limiter as rate_limiter_module
 from mcp_hangar.domain.security.rate_limiter import (  # noqa: E402
     CompositeRateLimiter,
     InMemoryRateLimiter,
@@ -14,6 +15,19 @@ from mcp_hangar.domain.security.rate_limiter import (  # noqa: E402
     get_rate_limiter,
     reset_rate_limiter,
 )
+
+
+class _Clock:
+    """Stands in for the `time` module the limiter reads, so a test decides how long it waited."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return self.now
 
 
 class TestRateLimitConfigValidation:
@@ -187,18 +201,34 @@ class TestInMemoryRateLimiterExtended:
         assert stats["config"]["burst_size"] == 20
         assert stats["config"]["scope"] == "global"
 
-    def test_cleanup_removes_old_buckets(self):
-        config = RateLimitConfig(requests_per_second=10, burst_size=5)
-        limiter = InMemoryRateLimiter(config, cleanup_interval=0.01)
-        limiter.consume("key1")
-        # Force last_cleanup to be old
-        limiter._last_cleanup = time.monotonic() - 1.0
-        # Touch to trigger cleanup with old last_used
-        limiter._bucket_last_used["key1"] = time.monotonic() - 1.0
-        limiter.consume("key2")  # triggers cleanup
-        stats = limiter.get_stats()
-        # key1 should have been cleaned up
-        assert stats["active_buckets"] <= 2
+    def test_a_bucket_idle_past_the_cleanup_window_grants_only_its_refill(self, monkeypatch: pytest.MonkeyPatch):
+        """Waiting past the window does not hand a caller back a full bucket (#1481)."""
+        clock = _Clock()
+        monkeypatch.setattr(rate_limiter_module, "time", clock)
+        limiter = InMemoryRateLimiter(RateLimitConfig(requests_per_second=1, burst_size=5), cleanup_interval=1.0)
+        assert all(limiter.consume("key").allowed for _ in range(5))
+
+        clock.now += 2.0  # idle past the cleanup window: two tokens refilled
+        admitted = [limiter.consume("key").allowed for _ in range(3)]
+
+        assert admitted == [True, True, False]
+        assert limiter.get_stats()["active_buckets"] == 1
+
+    def test_cleanup_drops_a_bucket_that_has_refilled(self, monkeypatch: pytest.MonkeyPatch):
+        """A new bucket would be full too, so dropping a full one changes no answer."""
+        clock = _Clock()
+        monkeypatch.setattr(rate_limiter_module, "time", clock)
+        limiter = InMemoryRateLimiter(RateLimitConfig(requests_per_second=1, burst_size=5), cleanup_interval=1.0)
+        limiter.consume("refilled")
+        limiter.consume("draining")
+        limiter.consume("draining")
+        limiter.consume("draining")
+
+        clock.now += 2.0  # "refilled" is full again, "draining" is not
+        limiter.consume("new")  # triggers cleanup
+
+        assert limiter.get_stats()["active_buckets"] == 2
+        assert limiter.consume("draining").remaining == 3
 
     def test_check_returns_retry_after_when_empty(self):
         config = RateLimitConfig(requests_per_second=1, burst_size=1)

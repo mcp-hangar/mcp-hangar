@@ -28,8 +28,10 @@ from ...domain.exceptions import (
 from ...domain.value_objects import GroupState, McpServerState
 from ..context import get_context
 from ..validation import (
-    check_rate_limit,
+    charge_tool,
+    charged_by_the_command_bus,
     not_rate_limited,
+    RateLimited,
     tool_error_hook,
     tool_error_mapper,
     validate_mcp_server_id_input,
@@ -166,8 +168,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
     @mcp.tool(name="hangar_start")
     @mcp_tool_wrapper(
         tool_name="hangar_start",
-        rate_limit_key=lambda mcp_server: f"hangar_start:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_start",
+        check_rate_limit=charged_by_the_command_bus,
         validate=validate_mcp_server_id_input,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
@@ -212,6 +214,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
 
         # Check if it's a group first
         if ctx.group_exists(mcp_server):
+            # A group starts its members itself, not through the command bus,
+            # so the call is charged here (#1481).
+            charge_tool("hangar_start")
             group = ctx.get_group(mcp_server)
             assert group is not None
             started = group.start_all()
@@ -228,7 +233,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
         if not ctx.mcp_server_exists(mcp_server):
             raise ValueError(f"unknown_mcp_server: {mcp_server}")
 
-        # Send command via CQRS command bus
+        # Send command via CQRS command bus, which charges it: one budget for
+        # every start, whichever server a call names (#1481).
         command = StartMcpServerCommand(mcp_server_id=mcp_server)
         result = ctx.command_bus.send(command)
         assert isinstance(result, dict)
@@ -237,8 +243,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
     @mcp.tool(name="hangar_stop")
     @mcp_tool_wrapper(
         tool_name="hangar_stop",
-        rate_limit_key=lambda mcp_server: f"hangar_stop:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_stop",
+        check_rate_limit=charged_by_the_command_bus,
         validate=validate_mcp_server_id_input,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
@@ -274,6 +280,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
 
         # Check if it's a group first
         if ctx.group_exists(mcp_server):
+            # A group stops its members itself, not through the command bus,
+            # so the call is charged here (#1481).
+            charge_tool("hangar_stop")
             group = ctx.get_group(mcp_server)
             assert group is not None
             group.stop_all()
@@ -620,8 +629,8 @@ def register_load_tools(mcp: FastMCP) -> None:
     @mcp.tool(name="hangar_load")
     @mcp_tool_wrapper(
         tool_name="hangar_load",
-        rate_limit_key=lambda name, **kwargs: f"hangar_load:{name}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_load",
+        check_rate_limit=RateLimited("hangar_load"),
         validate=lambda name, **kwargs: _validate_mcp_server_name(name),
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
@@ -735,8 +744,8 @@ def register_load_tools(mcp: FastMCP) -> None:
     @mcp.tool(name="hangar_unload")
     @mcp_tool_wrapper(
         tool_name="hangar_unload",
-        rate_limit_key=lambda mcp_server=None, **kw: f"hangar_unload:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_unload",
+        check_rate_limit=RateLimited("hangar_unload"),
         validate=lambda mcp_server=None, **kw: validate_mcp_server_id_input(mcp_server),
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
@@ -800,7 +809,7 @@ def register_load_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_reload_config",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_reload_config"),
+        check_rate_limit=charged_by_the_command_bus,
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,

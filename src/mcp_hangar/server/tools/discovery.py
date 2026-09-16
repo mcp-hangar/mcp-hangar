@@ -8,8 +8,8 @@ from mcp_hangar._sdk_compat import FastMCP
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
 from ..validation import (
-    check_rate_limit,
     not_rate_limited,
+    RateLimited,
     tool_error_hook,
     tool_error_mapper,
     validate_mcp_server_id_input,
@@ -23,7 +23,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_discover",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_discover"),
+        check_rate_limit=RateLimited("hangar_discover"),
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
@@ -194,8 +194,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
     @mcp.tool(name="hangar_approve")
     @mcp_tool_wrapper(
         tool_name="hangar_approve",
-        rate_limit_key=lambda mcp_server: f"hangar_approve:{mcp_server}",
-        check_rate_limit=check_rate_limit,
+        rate_limit_key=lambda *_a, **_k: "hangar_approve",
+        check_rate_limit=RateLimited("hangar_approve"),
         validate=validate_mcp_server_id_input,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
@@ -238,7 +238,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
     @mcp_tool_wrapper(
         tool_name="hangar_sources",
         rate_limit_key=key_global,
-        check_rate_limit=lambda key: check_rate_limit("hangar_sources"),
+        check_rate_limit=RateLimited("hangar_sources"),
         validate=None,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
