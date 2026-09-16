@@ -13,6 +13,7 @@ from ...logging_config import get_logger
 from ..config import ServerConfigLoader
 from .components import register_auth_cqrs
 from .composition import close_at_shutdown
+from .logs import LogBuffers
 from ..context import get_context
 from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
@@ -114,6 +115,9 @@ def init_cqrs(
         GROUPS,
         _fleet_writer(runtime),
         coordinated=_coordinated,
+        # So deleting a server releases the buffer its output was read from,
+        # rather than leaving it registered under an id that is free (#1506).
+        log_buffers=LogBuffers(),
     )
 
     if discovery_registry is not None:
