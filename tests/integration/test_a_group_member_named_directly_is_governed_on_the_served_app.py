@@ -21,6 +21,13 @@ gives ``math-a`` a member-level deny on ``echo``. ``math-solo`` is in no group.
 ``approval`` mode adds two approval lists, each with a one-second timeout: one
 on the group for ``add``, and one on ``math-solo`` for ``tenant-a`` and
 ``echo``. The approval gate used to read only the named server's own list.
+
+``l7`` mode puts an L7 egress policy on ``math-a``, the member the group
+selects, whose ``requireApproval`` rule covers ``add`` and ``power``, and
+staffs the gate with an approver who grants ``add`` and denies ``power``. The
+gate used to look that policy up by the id the call named, and a group id is
+not a server id, so a call naming the group asked nobody and was refused at
+invoke by the member's own check (#1499).
 """
 
 from __future__ import annotations
@@ -35,8 +42,12 @@ from typing import Any
 import pytest
 
 HARNESS = Path(__file__).with_name("_member_direct_governance_harness.py")
-MODES = ("open", "auth", "approval")
+MODES = ("open", "auth", "approval", "l7")
 TIMED_OUT = "approval_timeout"
+#: What a call refused by the approver is told.
+APPROVER_SAID_NO = "approval_denied"
+#: The two tools `math-a`'s L7 policy routes to a human in `l7` mode.
+L7_GRANTED, L7_DENIED = "add", "power"
 
 # As `_member_direct_governance_harness.py` names them.
 GROUP, MEMBER, SIBLING, SOLO = "math-pool", "math-a", "math-b", "math-solo"
@@ -145,3 +156,28 @@ class TestApprovalListsWithAuthOn:
 
     def test_a_tool_on_no_approval_list_is_not_held(self, runs) -> None:
         assert _outcomes(runs, "approval", "tenant-a")[SOLO]["add"] == "ok"
+
+
+class TestAnL7RuleOnTheSelectedMemberReachesAHuman:
+    """A call naming the group is sent for approval under the member's rule (#1499).
+
+    An approver answers in the harness: ``add`` granted, ``power`` denied.
+    Before the fix, a call naming the group read no L7 policy at all, so the
+    gate asked nobody and the member's own check refused the call at invoke.
+    """
+
+    def test_a_group_call_runs_once_the_members_rule_is_approved(self, runs) -> None:
+        assert _outcomes(runs, "l7")[GROUP][L7_GRANTED] == "ok", runs["l7"]["hangar"]
+
+    def test_a_denied_approval_refuses_the_group_call(self, runs) -> None:
+        assert _outcomes(runs, "l7")[GROUP][L7_DENIED] == APPROVER_SAID_NO
+
+    def test_a_call_naming_the_member_behaves_as_before(self, runs) -> None:
+        outcomes = _outcomes(runs, "l7")
+
+        assert outcomes[MEMBER] == {L7_GRANTED: "ok", L7_DENIED: APPROVER_SAID_NO}
+        assert outcomes[GROUP] == outcomes[MEMBER]
+
+    def test_the_sibling_that_declares_no_policy_is_untouched(self, runs) -> None:
+        """The rule read is the selected member's, not any member's."""
+        assert _outcomes(runs, "l7")[SIBLING] == {L7_GRANTED: "ok", L7_DENIED: "ok"}
