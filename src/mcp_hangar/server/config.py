@@ -153,8 +153,13 @@ class _StagedConfig:
             adopt_header_exposure_policies(self.header_exposure, replace=replace)
 
             # A server this configuration keeps is the running object (#1470),
-            # put back under its own id.
+            # put back under its own id. One it rebuilt is a new object, built
+            # from the file alone, and what no file declares is carried onto it
+            # here rather than dropped (#1498).
             for mcp_server_id, mcp_server in self.servers.items():
+                running = repository.get(mcp_server_id)
+                if running is not None and running is not mcp_server:
+                    _carry_runtime_state(mcp_server_id, running, mcp_server)
                 repository.add(mcp_server_id, mcp_server)
             if replace:
                 _BUILT_FROM.clear()
@@ -215,6 +220,39 @@ def _kept_or_built(mcp_server_id: str, built_with: dict[str, Any], built: McpSer
     if running is not previous[1] or _runtime_editable(running) != _runtime_editable(built):
         return built
     return running
+
+
+def _carry_runtime_state(mcp_server_id: str, running: McpServer, built: McpServer) -> None:
+    """Carry onto *built* what *running* holds and no configuration file declares.
+
+    A reload rebuilds a server whose settings changed, and builds it from the
+    file alone. The file is not the only source of what a server carries. The
+    REST endpoint and the fleet projection put an L7 egress policy on the
+    running object (`set_l7_policy`), and bootstrap attaches its log buffer
+    (`set_log_buffer`); neither has a config-file key to be rebuilt from. A
+    rebuild dropped both, so an unrelated `env` edit silently lifted the egress
+    policy an operator had pushed, and the reload reported success (#1498).
+
+    Carried at commit, not at build: a policy set while the reload was still
+    building its servers is carried too, as a stored tool-access policy written
+    in that window is (#1424). The commit holds the swap, so the read and the
+    hand-over cannot straddle another writer.
+
+    What the file says wins: anything already on *built* is left alone, so a
+    policy a future file declares for that server replaces the runtime one
+    rather than being overwritten by it.
+    """
+    if built.l7_policy is None and running.l7_policy is not None:
+        built.set_l7_policy(running.l7_policy)
+        # Never silently: an operator's policy moving to a new object is a
+        # thing to find in the log after the reload that moved it.
+        logger.info(
+            "l7_policy_carried_to_rebuilt_mcp_server",
+            mcp_server_id=mcp_server_id,
+            policy_id=running.l7_policy.policy_id if running.l7_policy is not None else None,
+        )
+    if built._log_buffer is None and running._log_buffer is not None:
+        built.set_log_buffer(running._log_buffer)
 
 
 def _runtime_editable(server: McpServer) -> tuple[Any, ...]:

@@ -398,7 +398,12 @@ class TestTheBuilderWritesOnlyKeysTheGatewayReads:
 
         builder = HangarConfig().add_mcp_server("boxed", mode=mode, image="img:1", command=["serve", "--stdio"])
         added: dict[str, Any] = {}
-        repository = SimpleNamespace(add=lambda server_id, server: added.update({server_id: server}))
+        repository = SimpleNamespace(
+            add=lambda server_id, server: added.update({server_id: server}),
+            # What `commit` reads to carry an L7 policy onto a rebuilt server (#1498):
+            # here nothing is running under that id yet.
+            get=lambda server_id: added.get(server_id),
+        )
         monkeypatch.setattr(server_config, "_mcp_server_repository", lambda: repository)
         server_config._load_mcp_server_config("boxed", builder.to_dict()["mcp_servers"]["boxed"])
 
