@@ -89,7 +89,7 @@ def test_logging_a_client_error_does_not_read_a_live_process_pipe(live_pipe: tup
     os.write(write_end, b"still running\n")
     server = McpServer(mcp_server_id="live-pipe", mode="subprocess", command=["unused"])
 
-    returned, _ = _within(lambda: server._log_client_error(_live_client(stderr), "initialize failed"))
+    returned, _ = _within(lambda: server._log_client_error(_live_client(stderr)))
 
     assert returned, "_log_client_error waited on a live process's stderr"
 

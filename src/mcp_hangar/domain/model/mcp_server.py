@@ -1187,7 +1187,7 @@ class McpServer(AggregateRoot):
             logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
         elif init_error is not None:
             error_msg = init_error.get("message", "unknown")
-            self._log_client_error(client, error_msg)
+            self._log_client_error(client)
 
             # Collect full diagnostics for user-friendly error
             diagnostics = self._startup_diagnostics(client)
@@ -1359,17 +1359,21 @@ class McpServer(AggregateRoot):
                 method=method,
             )
 
-    def _log_client_error(self, client: Any, error_msg: str) -> None:
-        """Log detailed error info including stderr and exit code for debugging."""
+    def _log_client_error(self, client: Any) -> None:
+        """Log that a process upstream refused ``initialize``: its exit code and stderr size.
+
+        Not its stderr, and not the error it answered with: both are the
+        upstream's text. The caller gets them in the ``McpServerStartError`` the
+        start raises, and this line carries only the bounded values.
+        """
         proc = getattr(client, "process", None)
         if not proc:
             return
 
-        # Log exit code
+        exit_code: int | None = None
         try:
             rc = proc.poll()
-            if rc is not None:
-                logger.error(f"mcp_server_process_exit_code: {rc}")
+            exit_code = rc if isinstance(rc, int) else None
         except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
@@ -1377,8 +1381,12 @@ class McpServer(AggregateRoot):
         # read here: read() returns only at EOF, and an upstream that answered
         # with an error is usually still running, so the start would never fail.
         last_stderr = getattr(client, "_last_stderr", None)
-        if last_stderr:
-            logger.error(f"mcp_server_stderr: {last_stderr}")
+        logger.error(
+            "mcp_server_initialize_refused",
+            mcp_server_id=self.mcp_server_id,
+            exit_code=exit_code,
+            stderr_bytes=len(last_stderr.encode("utf-8", "replace")) if isinstance(last_stderr, str) else 0,
+        )
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
         """Collect diagnostic information from a failed client/process.
@@ -1554,7 +1562,10 @@ class McpServer(AggregateRoot):
 
         self._health.record_failure()
 
-        error_str = str(error) if error else "unknown error"
+        # The type only, in the log line and in the event: a start failure's text
+        # can carry what the upstream printed, and McpServerDegraded reaches the
+        # event store, the audit log and every event handler.
+        error_type = bounded_error_type(type(error).__qualname__) if error is not None else OTHER_ERROR_TYPE
 
         if self._state != McpServerState.INITIALIZING:
             # Stopped while it was starting. The stop stands: reading DEAD here
@@ -1579,18 +1590,13 @@ class McpServer(AggregateRoot):
                     mcp_server_id=self.mcp_server_id,
                     consecutive_failures=self._health.consecutive_failures,
                     total_failures=self._health.total_failures,
-                    reason=error_str,
+                    reason=error_type,
                 )
             )
         else:
             self._mark_dead(DEAD_START_FAILED)
 
-        # The type only: a start failure's text can carry what the upstream printed.
-        logger.error(
-            "mcp_server_start_failed",
-            mcp_server_id=self.mcp_server_id,
-            error_type=bounded_error_type(type(error).__qualname__) if error is not None else OTHER_ERROR_TYPE,
-        )
+        logger.error("mcp_server_start_failed", mcp_server_id=self.mcp_server_id, error_type=error_type)
 
     def _enforce_l7_policy(
         self,
