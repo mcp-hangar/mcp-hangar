@@ -7,6 +7,7 @@ for accessing rate limiter and security handler, following DIP.
 from dataclasses import dataclass
 
 from .. import metrics as prometheus_metrics
+from ..errors import bounded_error_type
 from ..application.mcp.tooling import ToolErrorPayload
 from ..domain.security.input_validator import (
     validate_arguments,
@@ -100,7 +101,8 @@ def tool_error_mapper(exc: Exception) -> ToolErrorPayload:
 def tool_error_hook(exc: Exception, context: dict) -> None:
     """Best-effort hook for logging/security telemetry on tool failures.
 
-    Gets security handler from application context (DIP).
+    Gets security handler from application context (DIP). Sends the error's
+    type only: a tool's error text can carry what the upstream returned.
 
     Args:
         exc: The exception that occurred.
@@ -110,7 +112,7 @@ def tool_error_hook(exc: Exception, context: dict) -> None:
         ctx = get_context()
         ctx.security_handler.log_validation_failed(
             field="tool",
-            message=f"{type(exc).__name__}: {str(exc) or 'unknown error'}",
+            message=bounded_error_type(type(exc).__qualname__),
             mcp_server_id=context.get("mcp_server_id"),
             value=context.get("mcp_server_id"),
         )
