@@ -170,8 +170,21 @@ def _tools_call_response(request_id, params):
         return _result(request_id, {"content": [{"type": "text", "text": str(e)}], "isError": True})
 
 
+def _announce():
+    """Write ``MOCK_STDERR_BANNER`` to stderr once, at startup, when it is set.
+
+    Off unless the variable holds a line. A server's log buffer is filled by the
+    gateway's stderr reader, so this is how a test gets a line it can name into
+    the log the ``/logs`` API serves (tests/integration/_added_server_logs_harness.py).
+    """
+    banner = os.environ.get("MOCK_STDERR_BANNER")
+    if banner:
+        print(banner, file=sys.stderr, flush=True)
+
+
 def main():
     """Run a simple JSON-RPC server for testing."""
+    _announce()
     while True:
         try:
             line = sys.stdin.readline()
