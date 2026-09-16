@@ -34,7 +34,7 @@ from ....domain.events import (
     BatchInvocationRequested,
     ToolWithdrawnRejected,
 )
-from ....context import bind_routing_headers, get_identity_context
+from ....context import bind_routing_headers, get_identity_context, release_routing_headers
 from ....domain.value_objects.truncation import ContinuationOwner
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
@@ -61,7 +61,11 @@ from ....metrics import (
     TENANT_QUOTA_REFUSALS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
-from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
+from ....negotiation import (
+    read_protocol_negotiation,
+    reset_current_protocol_negotiation,
+    set_current_protocol_negotiation,
+)
 from ....retry import configured_retry_policy, retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
 from ...state import GROUPS
@@ -1209,23 +1213,6 @@ class BatchExecutor:
         """
         ctx = get_context()
 
-        # Stateless negotiation (SEP-2575): the client conveys its protocolVersion
-        # and capabilities per request in params._meta (no initialize handshake).
-        # Read them once at ingress and publish to a request-scoped contextvar that
-        # batch worker threads inherit via copy_context(). Additive: no gating here.
-        # Over streamable-HTTP the inbound _meta lives on the FastMCP request_ctx
-        # (the ApplicationContext has no request_context), so read from request_ctx;
-        # when it is None (stdio / no request) the helper yields None and negotiation
-        # falls back to the default supported version -- unchanged behavior.
-        set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(request_ctx)))
-
-        # The same request's SEP-2243 routing headers, for an L7 policy that
-        # selects on Mcp-Param-* (#1058). Bound here rather than only on the
-        # front door so a selector is never silently inert on this surface --
-        # a policy that reports enforcing while a rule cannot fire is the
-        # failure this module already refuses for secret-pattern groups.
-        bind_routing_headers(request_ctx)
-
         start_time = time.perf_counter()
         cancel_event = threading.Event()
         results: list[CallResult | None] = [None] * len(calls)
@@ -1251,6 +1238,28 @@ class BatchExecutor:
             self._active_batches += 1
             BATCH_CONCURRENCY_GAUGE.set(self._active_batches)
 
+        # Stateless negotiation (SEP-2575): the client conveys its protocolVersion
+        # and capabilities per request in params._meta (no initialize handshake).
+        # Read them once at ingress and publish to a request-scoped contextvar that
+        # batch worker threads inherit via copy_context(). Additive: no gating here.
+        # Over streamable-HTTP the inbound _meta lives on the FastMCP request_ctx
+        # (the ApplicationContext has no request_context), so read from request_ctx;
+        # when it is None (stdio / no request) the helper yields None and negotiation
+        # falls back to the default supported version -- unchanged behavior.
+        negotiation_token = set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(request_ctx)))
+
+        # The same request's SEP-2243 routing headers, for an L7 policy that
+        # selects on Mcp-Param-* (#1058). Bound here rather than only on the
+        # front door so a selector is never silently inert on this surface --
+        # a policy that reports enforcing while a rule cannot fire is the
+        # failure this module already refuses for secret-pattern groups.
+        routing_token = bind_routing_headers(request_ctx)
+
+        # Both bindings are this call's, so both tokens are reset in the finally
+        # below, the way the identity binding is (see hangar_call). A caller that
+        # reaches execute() on a context it keeps -- rather than through the
+        # asyncio.to_thread copy both surfaces used to take -- would otherwise
+        # hand the next call the headers this one routed on (#1503).
         try:
             with tracer.start_as_current_span("batch.execute") as batch_span:
                 batch_span.set_attribute("batch.id", batch_id)
@@ -1471,6 +1480,8 @@ class BatchExecutor:
                 )
 
         finally:
+            release_routing_headers(routing_token)
+            reset_current_protocol_negotiation(negotiation_token)
             with self._active_lock:
                 self._active_batches -= 1
                 BATCH_CONCURRENCY_GAUGE.set(self._active_batches)
