@@ -2,7 +2,9 @@
 Domain exceptions for MCP Hangar.
 
 All domain-specific exceptions should be defined here.
-These exceptions carry context and can be serialized to structured error responses.
+These exceptions carry context; the surface that answers decides the shape it is
+rendered in -- the REST error envelope in `server/api/middleware.py`, and the one
+MCP tool error payload in `application/mcp/tooling.py`.
 """
 
 import math
@@ -13,6 +15,13 @@ class MCPError(Exception):
     """Base exception for all MCP registry errors.
 
     Provides structured error information with context for debugging and logging.
+
+    It carries the fields and serializes none of them. A `to_dict()` here used to
+    render a fifth key, `type`, naming the class -- a second serializer that no
+    caller reached and that therefore drifted out of agreement with the payload a
+    tool answers with (#1509). A client reads one of two shapes, each built where
+    it is answered: the REST envelope's `code`/`message`/`details`, or the tool
+    error payload's `error`/`error_type`/`details` (`ToolErrorPayload`, #1495).
     """
 
     def __init__(
@@ -27,16 +36,6 @@ class MCPError(Exception):
         self.mcp_server_id = mcp_server_id
         self.operation = operation
         self.details = details or {}
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to structured error dictionary for API responses."""
-        return {
-            "error": self.message,
-            "mcp_server_id": self.mcp_server_id,
-            "operation": self.operation,
-            "details": self.details,
-            "type": self.__class__.__name__,
-        }
 
     def __repr__(self) -> str:
         return (
