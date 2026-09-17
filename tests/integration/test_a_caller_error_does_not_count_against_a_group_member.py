@@ -34,10 +34,18 @@ MODES = ("caller", "rate_limited")
 # As `_group_recovery_harness.py` names them.
 MEMBER, REPEATS = "math-a", 3
 #: Each caller error, and a piece of what the upstream answered.
+#:
+#: ``application_error`` and ``invalid_params`` are ``tests/mock_provider.py``'s
+#: own literals, so they say the same thing on every interpreter. ``tool_error``
+#: is not: the mock lets ``power`` raise and surfaces ``str(ZeroDivisionError)``,
+#: whose wording CPython owns and reworded in 3.14 -- "0.0 cannot be raised to a
+#: negative power" up to 3.13, "zero to a negative power" from 3.14. Pin the part
+#: both wordings share, which is still the upstream's own text and no other
+#: error's: nothing generic and nothing empty passes it.
 CALLER_ERRORS = {
     "application_error": "division by zero",
     "invalid_params": "Invalid params",
-    "tool_error": "cannot be raised to a negative power",
+    "tool_error": "negative power",
 }
 
 
