@@ -142,6 +142,22 @@ jobs:
       # real containers (tests/feature, tests/integration/containers) were gated
       # behind `--run-containers` / `--run-slow`, which nothing ever passed, so
       # they skipped on every run while three docker builds paid for them.
+      #
+      # The WHOLE tree, `tests/integration` included, on all four versions.
+      # That is deliberately broader than ci-core.yml's `test` job, which runs
+      # `--ignore=tests/integration` and leaves that directory to two dedicated
+      # jobs there: `integration` (3.11, the floor) and `integration-newest`
+      # (the ceiling). The two workflows reach the same coverage by different
+      # routes, and the invariant is that nothing this job runs is unreachable
+      # from a PR.
+      #
+      # They disagreed once, silently, and it cost a release: integration ran
+      # on 3.11 alone in the merge path and on all four here, so a 3.14-only
+      # integration failure first appeared in this job with the tag already cut
+      # and the GitHub Release already flagged Latest. That was v2.21.0 (#1518).
+      # If a version is added to this matrix, add it to ci-core.yml's `test`
+      # matrix and reconsider its `NEWEST_PYTHON` -- otherwise this job becomes
+      # the first thing that looks, again.
       - name: Run tests
         run: |
           python -m pytest tests/ -v --tb=short --color=yes
