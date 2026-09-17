@@ -28,6 +28,15 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # The newest supported interpreter, spelled once. It must stay equal to the
+  # last entry of the `test` matrix below and to the highest
+  # `Programming Language :: Python` classifier in pyproject.toml; raising the
+  # ceiling means editing all three. `integration-newest` reads it -- expressed
+  # as an env var rather than a one-entry matrix so that the check name it
+  # reports does not carry the version and does not change when this does.
+  NEWEST_PYTHON: "3.14"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -121,12 +130,22 @@ jobs:
         # `--ignore`, not a list of directories: a new test directory is picked
         # up here by default rather than by remembering to add it.
         #
-        # Integration is excluded because it has its own job below. Run bare,
-        # this matrix executed `tests/integration` three times, `decision-coverage`
-        # a fourth and the `integration` job a fifth -- five runs of the same
-        # in-process suite for one signal. The suite launches no containers and
-        # touches no version-specific surface the unit tests do not, so one
-        # version is the signal and three is the bill.
+        # Integration is excluded because it has its own jobs below. Run bare,
+        # this matrix would execute `tests/integration` four times over, on top
+        # of `decision-coverage` and the two integration jobs -- seven runs of
+        # the same in-process suite for one signal. The suite launches no
+        # containers, so the cost is runner minutes and nothing else.
+        #
+        # This note used to carry a second reason: that the suite "touches no
+        # version-specific surface the unit tests do not". That was false, and
+        # #1518 is the bill. An integration assertion pinned the CPython wording
+        # for `0 ** -1`, 3.14 reworded it, and because integration ran on 3.11
+        # alone in the merge path the first run that looked was the v2.21.0
+        # release -- after the tag was cut. The surface is real, but it is a
+        # CEILING surface: a newer interpreter finds it, a middle one repeats
+        # the finding. So it is covered by one more job, `integration-newest`
+        # below, and not by folding the suite back into this matrix.
+        #
         # No coverage here: the report is measured once, by `decision-coverage`,
         # on the pinned selection the floors were measured against. Measuring it
         # three more times produced three more numbers nobody could reconcile.
@@ -187,6 +206,15 @@ jobs:
           path: coverage.json
           retention-days: 7
 
+  # The integration signal is split across the two jobs below: `integration`
+  # pins the supported FLOOR (3.11) and `integration-newest` pins the CEILING
+  # (3.14). Between them a version-specific integration failure is caught by a
+  # PR instead of by a release.
+  #
+  # Counterpart: release.yml's `test` job runs `python -m pytest tests/` -- the
+  # whole tree, integration included -- across the same four versions. That is
+  # deliberately broader than anything here, and the invariant is that nothing
+  # it runs is unreachable from a PR. See the note there.
   integration:
     runs-on: ubuntu-latest
     needs: [test]
@@ -197,6 +225,39 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.11"
+
+      - name: Install dependencies
+        # With the SDK, as in `test` -- see the note there.
+        run: pip install -e ".[dev,opentelemetry]"
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --tb=short --timeout=60
+
+  integration-newest:
+    # The same selection as `integration` above, on the newest supported
+    # interpreter instead of the floor. Keep the two commands identical: the
+    # point of this job is that the only variable is the Python version.
+    #
+    # A SEPARATE JOB, not a `strategy.matrix` on `integration`, and that is not
+    # a style choice. `integration` is a required status check on `main`. Adding
+    # a matrix to it renames the reported context to `integration (3.11)`, so
+    # the required context `integration` would never report again and every open
+    # PR would wedge as pending. A plain second job also keeps this context name
+    # stable across a ceiling bump: raising `python-version` below to 3.15 leaves
+    # the check named `integration-newest`, where a matrix would rename it to
+    # `integration-newest (3.15)` and break branch protection a second time.
+    #
+    # NOTE: a new job does not gate merges until it is added to the required
+    # checks on `main`. The exact context name to add is `integration-newest`.
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python ${{ env.NEWEST_PYTHON }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.NEWEST_PYTHON }}
 
       - name: Install dependencies
         # With the SDK, as in `test` -- see the note there.
