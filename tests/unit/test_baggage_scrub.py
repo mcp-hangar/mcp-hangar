@@ -109,7 +109,21 @@ class TestTheChokepoint:
         assert _baggage_keys(carrier) == [], carrier
         assert TRACE_ID in carrier["traceparent"]
 
-    @pytest.mark.parametrize("otel_available", [True, False], ids=["sdk", "no-sdk"])
+    # Only the `sdk` half needs the SDK, so only it carries the marker. Patching
+    # OTEL_AVAILABLE True describes a state that exists solely when the import
+    # block at the top of `tracing.py` succeeded -- and that block imports
+    # `opentelemetry.sdk` before the API, so on a `.[dev]` checkout `trace` is
+    # None and `_tracing_active()` raises AttributeError instead of answering.
+    # Unmarked, the case crashed rather than skipping, and CI never saw it: the
+    # only job installing `.[dev]` alone is `lint`, which runs no tests (#1523).
+    #
+    # The `no-sdk` half asserts the removal that runs with no OTel at all, which
+    # is the point of the chokepoint, so it stays unmarked and keeps its
+    # coverage on a `.[dev]` checkout.
+    @pytest.mark.parametrize(
+        "otel_available",
+        [pytest.param(True, id="sdk", marks=pytest.mark.otel_sdk), pytest.param(False, id="no-sdk")],
+    )
     def test_a_carrier_loses_its_baggage_even_with_tracing_off(self, otel_available: bool) -> None:
         carrier = {"traceparent": TRACEPARENT, "baggage": CALLER_META_BAGGAGE, "Baggage": "user.id=carol"}
 
