@@ -15,19 +15,19 @@ for good: the window bounds it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 import importlib
 import json
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from structlog.testing import capture_logs
 import yaml
+from structlog.testing import capture_logs
 
 from mcp_hangar.application.commands import StartMcpServerCommand
 from mcp_hangar.application.commands.handlers import StartMcpServerHandler
@@ -43,14 +43,14 @@ from mcp_hangar.server import catalogue_readiness
 from mcp_hangar.server.bootstrap import ApplicationContext
 from mcp_hangar.server.catalogue_readiness import (
     CatalogueRetry,
-    configure_required_catalogue,
     RequiredCatalogue,
     Requirement,
+    configure_required_catalogue,
     required_catalogue,
 )
 from mcp_hangar.server.config import apply_process_config, load_configuration
 from mcp_hangar.server.config_schema import validate_config
-from mcp_hangar.server.lifecycle import build_readiness_report, ServerLifecycle
+from mcp_hangar.server.lifecycle import ServerLifecycle, build_readiness_report
 from tests.unit.test_a_given_up_server_reads_dead import _Fleet, _pipeline
 
 #: The package, not the `bootstrap` function `mcp_hangar.server` re-exports under the same name.

@@ -27,9 +27,9 @@ is cheap to fix.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from tests._hangar_executable import hangar_executable
 

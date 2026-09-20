@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from mcp_hangar.infrastructure.async_executor import async_executor, AsyncExecutor, submit_async
+from mcp_hangar.infrastructure.async_executor import AsyncExecutor, async_executor, submit_async
 
 
 class TestAsyncExecutor:

@@ -19,12 +19,12 @@ again.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import json
-from pathlib import Path
 import platform
 import shutil
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 HANGAR_ENTRY_NAME = "mcp-hangar"
 

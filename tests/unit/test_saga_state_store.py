@@ -6,17 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from mcp_hangar.infrastructure.persistence.database_common import (
-    MigrationRunner,
-    SQLiteConfig,
-    SQLiteConnectionFactory,
-)
-from mcp_hangar.infrastructure.persistence.saga_state_store import (
-    SAGA_STORE_MIGRATIONS,
-    NullSagaStateStore,
-    SagaStateStore,
-)
-
 # Import application.commands FIRST to break circular import chain:
 # Importing commands triggers: commands.__init__ -> reload_handler -> server.config
 # -> server.state -> application.sagas (completing the sagas package init).
@@ -29,6 +18,16 @@ from mcp_hangar.application.sagas.mcp_server_failover_saga import (
     McpServerFailoverEventSaga,
 )
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
+from mcp_hangar.infrastructure.persistence.database_common import (
+    MigrationRunner,
+    SQLiteConfig,
+    SQLiteConnectionFactory,
+)
+from mcp_hangar.infrastructure.persistence.saga_state_store import (
+    SAGA_STORE_MIGRATIONS,
+    NullSagaStateStore,
+    SagaStateStore,
+)
 from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 

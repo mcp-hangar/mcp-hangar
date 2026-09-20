@@ -27,7 +27,6 @@ from mcp_hangar.application.read_models.mcp_server_views import (
 )
 from mcp_hangar.domain.exceptions import McpServerNotFoundError
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

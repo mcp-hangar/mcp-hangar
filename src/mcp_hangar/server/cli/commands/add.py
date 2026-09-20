@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Annotated, cast
 
 import questionary
+import typer
 from rich import box
 from rich.console import Console
 from rich.table import Table
-import typer
 
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
-from ..services import ConfigFileManager, get_all_mcp_servers, get_mcp_server, McpServerDefinition, search_mcp_servers
+from ..services import ConfigFileManager, McpServerDefinition, get_all_mcp_servers, get_mcp_server, search_mcp_servers
 
 console = Console()
 

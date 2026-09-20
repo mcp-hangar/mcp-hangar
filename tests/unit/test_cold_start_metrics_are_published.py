@@ -31,8 +31,8 @@ from mcp_hangar.domain.contracts.metrics_publisher import (
 )
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.infrastructure.metrics_publisher import PrometheusMetricsPublisher
-from mcp_hangar.server.bootstrap.observability import init_metrics_publisher
 from mcp_hangar.metrics import PROVIDER_COLD_START_IN_PROGRESS, PROVIDER_COLD_START_SECONDS
+from mcp_hangar.server.bootstrap.observability import init_metrics_publisher
 
 
 @pytest.fixture(autouse=True)

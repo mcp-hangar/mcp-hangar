@@ -3,9 +3,9 @@
 Covers SQLiteEventStore and InMemoryEventStore from persistence module.
 """
 
+import threading
 from collections.abc import Iterator
 from pathlib import Path
-import threading
 
 import pytest
 

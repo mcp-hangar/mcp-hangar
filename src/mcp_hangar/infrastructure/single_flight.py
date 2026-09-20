@@ -11,9 +11,9 @@ This is useful for:
 Thread-safe implementation using threading primitives.
 """
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-import threading
 from typing import Any, TypeVar, cast
 
 from ..logging_config import get_logger

@@ -37,10 +37,10 @@ Per process, read at startup
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from collections.abc import Hashable, Mapping
 import math
 import threading
+from collections import OrderedDict
+from collections.abc import Hashable, Mapping
 from typing import Any, Protocol
 
 from ..context import get_identity_context

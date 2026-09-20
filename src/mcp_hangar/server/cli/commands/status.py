@@ -8,16 +8,16 @@ Shows the health and status of all configured MCP servers with:
 """
 
 import json
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Annotated, cast
 
+import typer
 from rich import box
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-import typer
 
 from ..main import GlobalOptions
 

@@ -10,21 +10,20 @@ Provides production-ready storage backends with:
 Requires: psycopg2 (installed by the `postgres` extra)
 """
 
-from collections.abc import Callable
-from datetime import datetime, timedelta, UTC
 import hmac
 import json
 import secrets
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore
+from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
-from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
-from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = structlog.get_logger(__name__)
 

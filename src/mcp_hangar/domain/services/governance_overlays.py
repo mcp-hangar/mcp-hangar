@@ -33,9 +33,9 @@ waiting for that lock would never end.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-import threading
 from typing import TypeVar
 
 _T = TypeVar("_T")

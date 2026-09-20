@@ -6,12 +6,12 @@ from collections.abc import Iterator
 
 import pytest
 
+import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.application.services.interceptor_registry import (
     BUILTIN_VALIDATORS,
     build_validator_pipeline,
 )
 from mcp_hangar.domain.contracts.validator import ValidationContext
-import mcp_hangar.server.tools.batch as batch
 
 
 def _ctx(payload: dict) -> ValidationContext:

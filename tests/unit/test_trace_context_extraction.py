@@ -10,9 +10,7 @@ crashing.
 import threading
 from unittest.mock import MagicMock, patch
 
-
 from mcp_hangar.server.tools.batch.models import CallSpec
-
 
 # A valid W3C traceparent header value
 VALID_TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"

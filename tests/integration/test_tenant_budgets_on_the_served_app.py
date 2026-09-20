@@ -25,14 +25,14 @@ write_item, tenant:a, tenant:b).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
-from datetime import datetime
 import json
 import re
 import threading
 import time
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -47,7 +47,7 @@ from mcp_hangar.fastmcp_server import flat_call_log
 from mcp_hangar.server.config import _init_tenant_limits_from_config
 from mcp_hangar.server.context import get_context
 from mcp_hangar.server.tools.batch.tenant_admission import get_tenant_admission, reset_tenant_admission
-from tests.integration._front_door_harness import FrontDoor, front_door, jsonrpc, SERVER, TENANT_A, TENANT_B
+from tests.integration._front_door_harness import SERVER, TENANT_A, TENANT_B, FrontDoor, front_door, jsonrpc
 
 READ = "read_item"
 SLOW = "slow_item"

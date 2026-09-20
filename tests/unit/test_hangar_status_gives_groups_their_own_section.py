@@ -19,9 +19,9 @@ vocabularies and they stay two. So the tests pin that:
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Any
-import unicodedata
 
 import pytest
 

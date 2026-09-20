@@ -20,11 +20,11 @@ served app, and ``tests/live/test_t3_export.py`` over a real OTLP receiver.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
 import logging
-from pathlib import Path
 import threading
 import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 

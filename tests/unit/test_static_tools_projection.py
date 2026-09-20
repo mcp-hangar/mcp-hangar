@@ -9,10 +9,10 @@ WARNING naming the unconfirmed tool. These tests pin that behavior.
 
 from typing import Any
 
+from mcp_hangar.domain.model.provider import McpServer
 from structlog.testing import capture_logs
 
 from mcp_hangar.domain.exceptions import ToolNotFoundError
-from mcp_hangar.domain.model.provider import McpServer
 from mcp_hangar.domain.value_objects import ProviderMode, ProviderState
 
 STATIC_TOOLS = [

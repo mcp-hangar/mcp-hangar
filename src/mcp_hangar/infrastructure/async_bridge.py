@@ -11,10 +11,10 @@ is expensive to rediscover: see the note on the daemon thread below.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
 import threading
-from typing import Any
 import weakref
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from mcp_hangar.application.ports.async_task import IBlockingAsyncRunner
 

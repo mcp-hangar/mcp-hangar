@@ -259,11 +259,10 @@ def maybe_register_subscription_relay(mcp: Any) -> bool:
     from mcp.server.subscriptions import ListenHandler
     from mcp_types import SubscriptionsListenRequestParams
 
-    from .asgi import bind_caller_identity, release_caller_identity
-    from .prompt_proxy import _upstream_ids
-
     # Lazily, like the rest: `server` imports this module back (#894).
     from ..server.session_guard import refuse_request_if_session_suspended
+    from .asgi import bind_caller_identity, release_caller_identity
+    from .prompt_proxy import _upstream_ids
 
     handler = ListenHandler(_bus)
 

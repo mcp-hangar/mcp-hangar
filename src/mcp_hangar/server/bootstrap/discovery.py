@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
+from ...domain.contracts.fleet import NotTheManagerError
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance
 from ...infrastructure.discovery.registry import (
@@ -13,8 +15,6 @@ from ...infrastructure.discovery.registry import (
     UnknownDiscoverySourceError,
     create_source,
 )
-from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
-from ...domain.contracts.fleet import NotTheManagerError
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 from .coordination import may_manage

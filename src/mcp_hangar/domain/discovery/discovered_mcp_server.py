@@ -4,10 +4,10 @@ Value object representing a discovered mcp_server with fingerprinting
 and TTL-based lifecycle tracking.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, UTC
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 

@@ -8,7 +8,7 @@ from mcp_hangar._sdk_compat import FastMCP
 from ...application.group_events import publish_group_events
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
-from ..validation import not_rate_limited, RateLimited, tool_error_hook, tool_error_mapper, validate_group_id_input
+from ..validation import RateLimited, not_rate_limited, tool_error_hook, tool_error_mapper, validate_group_id_input
 
 
 def register_group_tools(mcp: FastMCP) -> None:

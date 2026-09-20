@@ -9,9 +9,8 @@ from mcp_hangar.domain.security.ssrf import validate_no_ssrf
 from mcp_hangar.infrastructure.identity.header_extractor import HeaderIdentityExtractor
 from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 from mcp_hangar.infrastructure.identity.trusted_proxy import TrustedProxyResolver
-from mcp_hangar.server.api.router import create_api_router
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
-
+from mcp_hangar.server.api.router import create_api_router
 
 pytestmark = pytest.mark.security
 

@@ -41,7 +41,6 @@ from mcp_hangar.fastmcp_server.flat_tool_projection import (
     register_flat_tool_handlers,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -551,8 +550,7 @@ class TestFlatCallToolHandler:
     @pytest.mark.asyncio
     async def test_unknown_flat_name_raises_mcp_error_32601(self, registry, resolver):
         """Calling an unknown flat tool name raises McpError with -32601."""
-        from mcp_hangar._sdk_compat import McpError
-        from mcp_hangar._sdk_compat import METHOD_NOT_FOUND
+        from mcp_hangar._sdk_compat import METHOD_NOT_FOUND, McpError
 
         _populate_registry(registry, "server_a", ["read_item"])
         _, call_fn = self._capture_handlers(registry, resolver)
@@ -738,8 +736,8 @@ class TestFlatCallToolHandler:
         _populate_registry(registry, "server_a", ["read_item"])
         _, call_fn = self._capture_handlers(registry, resolver)
 
-        from mcp_hangar.server.tools.batch.models import BatchResult, CallResult
         from mcp_hangar._sdk_compat import CallToolResult
+        from mcp_hangar.server.tools.batch.models import BatchResult, CallResult
 
         mock_batch_result = BatchResult(
             batch_id="enf-test",

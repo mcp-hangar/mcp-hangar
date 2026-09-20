@@ -15,9 +15,9 @@ what the executor enters around each invoke; the servers are never started.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from pathlib import Path
-import threading
 from typing import Any
 from unittest.mock import Mock
 
@@ -31,12 +31,12 @@ from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.server import config as server_config
-from mcp_hangar.server.config import load_configuration, ServerConfigLoader
-from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.config import ServerConfigLoader, load_configuration
+from mcp_hangar.server.state import GROUPS, get_runtime
 from mcp_hangar.server.tools import batch
 from mcp_hangar.server.tools.batch.concurrency import (
-    ConcurrencyManager,
     DEFAULT_PROVIDER_CONCURRENCY,
+    ConcurrencyManager,
     get_concurrency_manager,
     reset_concurrency_manager,
 )

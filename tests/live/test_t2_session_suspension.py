@@ -34,16 +34,16 @@ Skip-safe like the rest of the tier. Run with::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import httpx
 import pytest

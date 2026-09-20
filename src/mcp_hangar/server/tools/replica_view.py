@@ -31,8 +31,8 @@ state is #1358 and is not a reporting concern.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ...application.read_models.mcp_server_views import DeadInfo, dead_info

@@ -25,12 +25,11 @@ resolved: the constant exists in b2.
 from __future__ import annotations
 
 from types import SimpleNamespace
-
-from mcp_hangar import tasks_wire
 from typing import Any
 
 import mcp_types.methods as sdk_methods
 
+from mcp_hangar import tasks_wire
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.fastmcp_server.task_relay_handlers import register_task_relay_handlers
 

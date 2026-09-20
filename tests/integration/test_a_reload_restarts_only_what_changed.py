@@ -15,9 +15,9 @@ every server setting, is in ``tests/unit/test_a_reload_applies_the_whole_configu
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest

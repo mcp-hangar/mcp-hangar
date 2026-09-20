@@ -43,7 +43,8 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import Context, FastMCP
 else:
     try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
-        from mcp.server.mcpserver import Context, MCPServer as FastMCP
+        from mcp.server.mcpserver import Context
+        from mcp.server.mcpserver import MCPServer as FastMCP
     except ImportError:  # SDK v1
         from mcp.server.fastmcp import Context, FastMCP
 

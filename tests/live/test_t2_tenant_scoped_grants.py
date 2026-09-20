@@ -31,11 +31,11 @@ Run with::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from dataclasses import dataclass
 import json
 import sys
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 
 import httpx
 import pytest

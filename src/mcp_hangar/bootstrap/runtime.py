@@ -9,18 +9,18 @@ without starting any background threads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from typing import Any, cast, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Protocol, cast, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ..domain.contracts.persistence import IAuditRepository, IMcpServerConfigRepository
-from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
+from ..domain.repository import IMcpServerRepository, InMemoryMcpServerRepository
 from ..domain.security.input_validator import InputValidator
-from ..domain.security.rate_limiter import get_rate_limiter, InMemoryRateLimiter, RateLimitConfig
+from ..domain.security.rate_limiter import InMemoryRateLimiter, RateLimitConfig, get_rate_limiter
 from ..infrastructure.caller_rate_limit import configure_caller_rate_limit, parse_per_caller
-from ..infrastructure.command_bus import CommandBus, get_command_bus, RateLimitMiddleware
+from ..infrastructure.command_bus import CommandBus, RateLimitMiddleware, get_command_bus
 from ..infrastructure.event_bus import EventBus, get_event_bus
 from ..infrastructure.persistence import (
     Database,
@@ -31,7 +31,7 @@ from ..infrastructure.persistence import (
     SQLiteAuditRepository,
     SQLiteMcpServerConfigRepository,
 )
-from ..infrastructure.query_bus import get_query_bus, QueryBus
+from ..infrastructure.query_bus import QueryBus, get_query_bus
 
 # Default command-bus rate limit (used when neither config nor env is set).
 DEFAULT_RATE_LIMIT_RPS = "10"

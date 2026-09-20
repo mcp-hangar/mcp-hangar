@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from starlette.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

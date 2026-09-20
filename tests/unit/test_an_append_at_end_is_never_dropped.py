@@ -25,13 +25,13 @@ What is pinned here:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 import os
-from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4

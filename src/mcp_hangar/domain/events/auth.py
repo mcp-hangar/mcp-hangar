@@ -8,7 +8,6 @@ from typing import Any
 
 from .base import DomainEvent
 
-
 # Authentication & Authorization Events
 
 

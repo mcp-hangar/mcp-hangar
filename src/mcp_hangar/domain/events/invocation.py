@@ -8,7 +8,6 @@ from typing import Any
 from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
-
 # Tool Invocation Events
 
 

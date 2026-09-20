@@ -22,9 +22,9 @@ Opt-in, like the other `live` tests. See
 
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-import os
 
 import pytest
 

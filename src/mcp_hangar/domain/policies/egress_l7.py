@@ -23,14 +23,14 @@ this module is the engine and its contract.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from enum import StrEnum
-from fnmatch import fnmatchcase
 import hashlib
 import json
 import logging
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
+from fnmatch import fnmatchcase
 from typing import Any
 
 from ..._sdk_compat import is_modern_protocol_version

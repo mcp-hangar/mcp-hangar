@@ -33,14 +33,14 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from mcp_hangar.application.queries import register_all_handlers as register_query_handlers
-from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
-from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
-from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
-from mcp_hangar.approvals.service import ApprovalGateService
 from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
     reset_tool_projection_registry,
 )
+from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 from mcp_hangar.auth.bootstrap import bootstrap_auth
 from mcp_hangar.auth.config import ApiKeyAuthConfig, AuthConfig, RoleAssignment, StorageConfig
 from mcp_hangar.bootstrap.runtime import create_runtime

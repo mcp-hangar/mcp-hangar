@@ -23,6 +23,7 @@ from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
 from ...trusted_hosts import trusted_hosts
+from ..bootstrap.components import attach_component_app_state, get_component_api_routes
 from .middleware import (
     AuthMiddlewareHTTP,
     AuthorizationEnforcementMiddleware,
@@ -30,7 +31,6 @@ from .middleware import (
     error_handler,
     get_cors_config,
 )
-from ..bootstrap.components import attach_component_app_state, get_component_api_routes
 
 
 def create_api_router(auth_components: Any = None) -> Starlette:

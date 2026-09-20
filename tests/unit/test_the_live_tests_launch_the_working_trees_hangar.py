@@ -10,11 +10,11 @@ but built from somewhere else.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 

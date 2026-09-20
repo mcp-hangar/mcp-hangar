@@ -38,18 +38,18 @@ from mcp_hangar.domain.security.input_validator import (
 )
 from mcp_hangar.domain.security.rate_limiter import InMemoryRateLimiter, RateLimitConfig, RateLimitResult, TokenBucket
 from mcp_hangar.domain.security.sanitizer import (
+    Sanitizer,
     sanitize_command_argument,
     sanitize_environment_value,
     sanitize_log_message,
-    Sanitizer,
 )
 from mcp_hangar.domain.security.secrets import (
+    SecretsMask,
+    SecureEnvironment,
     create_secure_env_for_provider,
     is_sensitive_key,
     mask_sensitive_value,
     redact_secrets_in_string,
-    SecretsMask,
-    SecureEnvironment,
 )
 
 # Mark all tests in this module as security tests
@@ -817,6 +817,7 @@ class TestSecureProviderLauncher:
     def test_container_launcher_network_modes(self, network_mode, expected_flag):
         """Test ContainerLauncher correctly sets network modes."""
         from unittest.mock import patch
+
         from mcp_hangar.infrastructure.launchers import ContainerConfig, ContainerLauncher
 
         with patch.object(ContainerLauncher, "_detect_runtime", return_value="docker"):

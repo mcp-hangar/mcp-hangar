@@ -12,7 +12,6 @@ import yaml
 from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
 from mcp_hangar.domain.value_objects import LoadBalancerStrategy
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

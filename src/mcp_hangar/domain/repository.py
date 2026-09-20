@@ -5,9 +5,9 @@ The Repository pattern separates domain logic from data access logic,
 allowing the persistence mechanism to change without affecting business code.
 """
 
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-import threading
 from typing import Any
 
 from mcp_hangar.domain.contracts.lock import ILock

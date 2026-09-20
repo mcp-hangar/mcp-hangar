@@ -34,7 +34,6 @@ from urllib.parse import urlparse
 
 from ..value_objects.provenance import Provenance
 
-
 #: Refused for a human-supplied endpoint: every private range.
 _BLOCKED_NETWORKS = (
     ipaddress.ip_network("10.0.0.0/8"),

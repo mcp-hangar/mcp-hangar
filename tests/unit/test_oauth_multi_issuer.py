@@ -43,7 +43,6 @@ from mcp_hangar.domain.exceptions import (
     TokenLifetimeExceededError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Neutral placeholders
 # ---------------------------------------------------------------------------

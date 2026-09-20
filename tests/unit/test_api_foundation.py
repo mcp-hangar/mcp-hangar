@@ -8,7 +8,7 @@ All tests are unit tests that mock external dependencies.
 
 import json
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from unittest.mock import Mock, patch
 
@@ -27,7 +27,6 @@ from mcp_hangar.domain.exceptions import (
     ToolTimeoutError,
     ValidationError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Error handler tests

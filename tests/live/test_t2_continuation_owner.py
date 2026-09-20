@@ -22,13 +22,13 @@ Run with::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import secrets
 import sys
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 

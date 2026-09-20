@@ -9,28 +9,26 @@ Tests:
 4. Round-trip serialize -> deserialize for all 18 EVENT_TYPE_MAP types
 """
 
+import dataclasses
 import json
 from datetime import UTC, datetime
 
 import pytest
-
-from hypothesis import HealthCheck, given, settings, strategies as st
-
-import dataclasses
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from mcp_hangar.domain.events import (
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
-    DomainEvent,
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
+    DomainEvent,
     EgressBlocked,
     EgressPolicyCleared,
     EgressPolicySet,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
-    PolicyPushRejected,
     McpServerApproved,
     McpServerCapabilityQuarantined,
     McpServerCapabilityQuarantineReleased,
@@ -43,6 +41,7 @@ from mcp_hangar.domain.events import (
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
+    PolicyPushRejected,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,

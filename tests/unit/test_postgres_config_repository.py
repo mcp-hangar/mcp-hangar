@@ -8,8 +8,8 @@ Python-side behaviour -- optimistic locking, soft vs hard delete, JSON
 round-tripping -- never a real database.
 """
 
-from contextlib import contextmanager
 import json
+from contextlib import contextmanager
 from unittest.mock import MagicMock, Mock
 
 import pytest

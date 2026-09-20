@@ -12,12 +12,11 @@ Provides:
 """
 
 import logging
+import math
 import os
 import re
-import math
 from typing import Any
-from urllib.parse import parse_qs
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers, State
@@ -26,18 +25,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ...application.ports.bus import HandlerNotRegisteredError
 from ...domain.contracts.authentication import AuthRequest
 from ...domain.contracts.authorization import GrantScope
-from ...application.ports.bus import HandlerNotRegisteredError
 from ...domain.exceptions import (
     AccessDeniedError,
     AuthenticationError,
     AuthorizationError,
+    ConfigurationRestartRequiredError,
+    ConfigurationUnavailableError,
     MCPError,
     McpServerDegradedError,
     McpServerNotFoundError,
-    ConfigurationRestartRequiredError,
-    ConfigurationUnavailableError,
     McpServerNotHereError,
     McpServerNotReadyError,
     MissingCredentialsError,

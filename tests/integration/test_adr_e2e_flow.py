@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.mutators.response_truncator import ResponseTruncator
 from mcp_hangar.application.services.mutator_pipeline import MutatorPipeline
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.contracts.mutator import MutationContext
 from mcp_hangar.domain.events import DigestMismatchEvent, DomainEvent, ResponseTruncated
@@ -26,7 +26,6 @@ from mcp_hangar.domain.value_objects.tool_digest import (
 )
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.server.api.ws.filters import matches_filters
-
 
 SAMPLE_TOOL: dict[str, Any] = {
     "name": "get_weather",

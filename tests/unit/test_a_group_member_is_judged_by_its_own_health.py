@@ -16,8 +16,8 @@ JSON-RPC code the aggregate puts on its error.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable, Iterator
 import inspect
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
@@ -49,9 +49,9 @@ from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 from mcp_hangar.server.tools.batch import executor as executor_module
 from mcp_hangar.server.tools.batch.member_health import (
     MEMBER_HEALTH_REFUSALS,
-    member_outcome,
-    MemberOutcome,
     NOT_MEMBER_REFUSALS,
+    MemberOutcome,
+    member_outcome,
 )
 
 HEALTHY, UNHEALTHY, UNJUDGED = MemberOutcome.HEALTHY, MemberOutcome.UNHEALTHY, MemberOutcome.UNJUDGED

@@ -30,12 +30,8 @@ slope over the second half exceeds ``SOAK_BOUND_MIB_PER_MIN``.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
-from datetime import UTC, datetime
-from importlib.metadata import version
 import json
 import os
-from pathlib import Path
 import platform
 import resource
 import socket
@@ -44,6 +40,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MODES = ("off", "sdk_memory", "sdk_otlp_local", "sdk_otlp_unreachable")
@@ -157,7 +157,8 @@ def _sink(port: int) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     import grpc
-    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2 as pb, trace_service_pb2_grpc as rpc
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2 as pb
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2_grpc as rpc
 
     received = [0]
 

@@ -10,13 +10,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcp_hangar.infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
-
 from mcp_hangar.server import (
+    GC_WORKER_INTERVAL_SECONDS,
+    HEALTH_CHECK_INTERVAL_SECONDS,
     _auto_add_volumes,
     _ensure_data_dir,
     parse_args,
-    GC_WORKER_INTERVAL_SECONDS,
-    HEALTH_CHECK_INTERVAL_SECONDS,
 )
 
 

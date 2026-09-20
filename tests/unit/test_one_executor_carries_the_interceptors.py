@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 import mcp_hangar
-from mcp_hangar.domain.contracts.validator import ValidationContext
 import mcp_hangar.server.tools.batch as batch
+from mcp_hangar.domain.contracts.validator import ValidationContext
 
 SRC = Path(mcp_hangar.__file__).resolve().parent
 #: The module that configures the interceptors, and so the one that builds the executor.

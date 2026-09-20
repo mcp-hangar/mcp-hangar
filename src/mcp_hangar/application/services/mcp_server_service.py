@@ -2,13 +2,13 @@
 
 from typing import Any, cast
 
+from ...domain.contracts.event_bus import IEventBus
 from ...domain.exceptions import McpServerNotFoundError
 from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
-from ...domain.contracts.event_bus import IEventBus
 from ...logging_config import get_logger
-from ...stream_ids import MCP_SERVER
 from ...observability.tracing import get_tracer
+from ...stream_ids import MCP_SERVER
 
 logger = get_logger(__name__)
 

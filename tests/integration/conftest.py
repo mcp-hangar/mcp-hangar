@@ -6,8 +6,8 @@ check itself, and why it is package-scoped, are in `tests/_thread_guard.py`,
 shared with `tests/unit/conftest.py`.
 """
 
-from collections.abc import Iterator
 import threading
+from collections.abc import Iterator
 
 import pytest
 

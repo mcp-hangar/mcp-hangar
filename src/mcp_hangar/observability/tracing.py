@@ -43,18 +43,18 @@ Example:
         do_work()
 """
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
 import os
 import sys
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import GenAI, MCP
+from mcp_hangar.observability.conventions import MCP, GenAI
 
 logger = get_logger(__name__)
 
@@ -79,23 +79,23 @@ SPAN_ATTRIBUTE_LENGTH_LIMIT_ENV = "MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT"
 
 # Check if OpenTelemetry is available
 try:
-    from opentelemetry.sdk.resources import OTELResourceDetector, Resource, SERVICE_NAME
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import SERVICE_NAME, OTELResourceDetector, Resource
+    from opentelemetry.sdk.trace import SpanLimits, TracerProvider
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
         SpanExporter,
         SpanExportResult,
     )
-    from opentelemetry.sdk.trace import SpanLimits, TracerProvider
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_OFF,
         ALWAYS_ON,
         ParentBased,
         TraceIdRatioBased,
     )
-    from opentelemetry import trace
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
     OTEL_AVAILABLE = True
 except ImportError:

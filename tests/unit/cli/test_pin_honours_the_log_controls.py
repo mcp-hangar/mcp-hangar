@@ -18,15 +18,15 @@ Without it, a stub that logged nothing would pass every one of them.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import structlog
-from typer.testing import CliRunner
 import yaml
+from typer.testing import CliRunner
 
 from mcp_hangar import gc as gc_module
 from mcp_hangar.logging_config import get_logger

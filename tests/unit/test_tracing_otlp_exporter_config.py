@@ -268,7 +268,7 @@ class TestRealExporters:
     # -- the bootstrap's mapping ------------------------------------------
 
     def test_config_yaml_reaches_the_exporter_and_the_env_still_beats_it(self, build, channels, monkeypatch) -> None:  # noqa: ANN001
-        from mcp_hangar.server.bootstrap.observability import _parse_observability_config, TracingConfig
+        from mcp_hangar.server.bootstrap.observability import TracingConfig, _parse_observability_config
 
         assert TracingConfig().otlp_endpoint is None
         assert _parse_observability_config({}).tracing.otlp_endpoint is None

@@ -1,12 +1,11 @@
 """Unit tests for interceptors/list endpoint."""
 
 import pytest
-from starlette.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.routing import Route
+from starlette.testclient import TestClient
 
 from mcp_hangar._sdk_compat import FastMCP
-
 from mcp_hangar.fastmcp_server.interceptors_list import (
     MUTATOR_ID,
     VALIDATOR_ID,

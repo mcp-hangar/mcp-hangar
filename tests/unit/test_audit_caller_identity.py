@@ -8,8 +8,8 @@ them. A failed call's duration was hard-coded to 0.0.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 

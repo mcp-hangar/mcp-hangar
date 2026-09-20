@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from mcp.shared.inbound import encode_header_value
+
 from mcp_hangar.domain.model.mcp_server_group import CanaryPolicy, McpServerGroup
 from mcp_hangar.domain.value_objects import McpServerState
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
@@ -34,7 +35,6 @@ from mcp_hangar.fastmcp_server.front_door_routing import (
     route_from_body,
 )
 from mcp_hangar.tasks_wire import HEADER_MISMATCH
-
 
 # --------------------------------------------------------------------------- #
 # ASGI harness

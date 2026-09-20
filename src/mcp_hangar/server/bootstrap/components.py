@@ -13,10 +13,10 @@ gone and the built-in modules are loaded directly. The public functions and the
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from collections.abc import Callable
 
 from ...application.ports.observability import ObservabilityPort
 from ...logging_config import get_logger

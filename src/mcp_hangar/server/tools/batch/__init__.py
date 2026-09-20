@@ -20,8 +20,8 @@ Example:
     ])
 """
 
-from typing import Any
 import uuid
+from typing import Any
 
 from mcp_hangar._sdk_compat import Context, FastMCP
 
@@ -31,21 +31,18 @@ from ....domain.value_objects.identity import IdentityContext
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
 from ....observability.tracing import get_tracer
+from ...context import get_context
+from ...session_guard import refuse_if_session_suspended
 from .concurrency import (
-    ConcurrencyManager,
     DEFAULT_GLOBAL_CONCURRENCY,
     DEFAULT_PROVIDER_CONCURRENCY,
+    ConcurrencyManager,
     get_concurrency_manager,
     init_concurrency_manager,
     reset_concurrency_manager,
 )
-from ...context import get_context
-from ...session_guard import refuse_if_session_suspended
 from .executor import BatchExecutor, format_result_dict
 from .models import (
-    BatchResult,
-    CallResult,
-    CallSpec,
     DEFAULT_MAX_CONCURRENCY,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
@@ -54,6 +51,9 @@ from .models import (
     MAX_RESPONSE_SIZE_BYTES,
     MAX_TIMEOUT,
     MAX_TOTAL_RESPONSE_SIZE_BYTES,
+    BatchResult,
+    CallResult,
+    CallSpec,
     RetryMetadata,
     ValidationError,
 )

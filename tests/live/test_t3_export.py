@@ -27,16 +27,16 @@ about a Collector beyond this receiver. Run with::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import time
-from typing import Any
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import pytest
 

@@ -15,10 +15,10 @@ imports it directly -- all connections come from the shared
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
-import json
 from typing import Any
 
 import structlog

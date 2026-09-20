@@ -12,9 +12,9 @@ starts a server.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-import os
 from uuid import uuid4
 
 import pytest

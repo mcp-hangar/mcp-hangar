@@ -5,11 +5,11 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp_hangar.domain.model.provider import VALID_TRANSITIONS
 
 from mcp_hangar.domain.events import McpServerStopped
 from mcp_hangar.domain.exceptions import CannotStartProviderError, ProviderStartError
 from mcp_hangar.domain.model import McpServer, ProviderState
-from mcp_hangar.domain.model.provider import VALID_TRANSITIONS
 from mcp_hangar.domain.value_objects import ProviderMode
 
 

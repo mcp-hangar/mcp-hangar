@@ -11,7 +11,7 @@ how the mocked-cursor pattern is used in `test_postgres_auth_store.py` /
 import json
 import threading
 from contextlib import contextmanager
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
 import pytest

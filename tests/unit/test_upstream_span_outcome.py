@@ -15,10 +15,10 @@ must not depend on whether tracing is on.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 import json
 import subprocess
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 

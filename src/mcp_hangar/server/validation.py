@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import metrics as prometheus_metrics
-from ..errors import bounded_error_type
 from ..application.mcp.tooling import ToolErrorPayload
 from ..domain.exceptions import RateLimitExceeded
 from ..domain.security.input_validator import (
@@ -17,6 +16,7 @@ from ..domain.security.input_validator import (
     validate_timeout,
     validate_tool_name,
 )
+from ..errors import bounded_error_type
 from ..infrastructure.caller_rate_limit import charge
 from .context import get_context
 

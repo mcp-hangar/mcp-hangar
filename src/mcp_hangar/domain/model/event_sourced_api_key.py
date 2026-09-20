@@ -8,10 +8,10 @@ Implements Event Sourcing pattern for API keys where:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
-from ..events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, DomainEvent
+from ..events import ApiKeyCreated, ApiKeyRevoked, DomainEvent, KeyRotated
 from ..value_objects import Principal, PrincipalId, PrincipalType
 from .aggregate import AggregateRoot
 

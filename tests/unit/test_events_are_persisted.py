@@ -16,9 +16,9 @@ import sqlite3
 import pytest
 from structlog.testing import capture_logs
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.crud_commands import CreateGroupCommand
 from mcp_hangar.application.commands.crud_handlers import CreateGroupHandler
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError
 from mcp_hangar.domain.events import ToolInvocationCompleted
 from mcp_hangar.infrastructure.event_bus import EventBus

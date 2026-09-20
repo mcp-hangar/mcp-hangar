@@ -10,8 +10,8 @@ Naming: neutral placeholders only (store, read_item, write_item, tenant:a).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import threading
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 

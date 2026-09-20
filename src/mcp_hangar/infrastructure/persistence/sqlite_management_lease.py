@@ -27,10 +27,10 @@ nothing for fifteen seconds, for the sake of a peer that cannot exist.
 
 from __future__ import annotations
 
-from pathlib import Path
 import sqlite3
 import threading
 import time
+from pathlib import Path
 
 from mcp_hangar.domain.contracts.management_lease import IManagementLease, Lease
 from mcp_hangar.logging_config import get_logger

@@ -56,37 +56,39 @@ surface is fully intact.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
 import functools
 import hashlib
 import json
 import logging
-from types import MappingProxyType
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from mcp.shared.inbound import MCP_PARAM_HEADER_PREFIX, find_invalid_x_mcp_header
 
-from mcp_hangar.domain.exceptions import ConfigurationError
-from mcp_hangar.domain.policies.header_exposure import get_header_exposure_policy
-
-from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
+    FastMCP,
     ListToolsResult,
-    Tool as MCPTool,
     is_modern_protocol_version,
+    lowlevel_server,
     make_mcp_error,
 )
+from mcp_hangar._sdk_compat import (
+    Tool as MCPTool,
+)
+from mcp_hangar.domain.exceptions import ConfigurationError
+from mcp_hangar.domain.policies.header_exposure import get_header_exposure_policy
 
 from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
-from ..logging_config import should_log_now
 from ..domain.services import progress_relay
 from ..domain.services.governance_overlays import read_as_one_set
-from ..domain.services.tool_access_resolver import get_tool_access_resolver, PolicyKind
+from ..domain.services.tool_access_resolver import PolicyKind, get_tool_access_resolver
+from ..logging_config import should_log_now
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import as_client_result, logging_each_call, note_failure

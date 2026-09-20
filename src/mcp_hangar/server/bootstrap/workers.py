@@ -1,7 +1,7 @@
 """Background workers: built by bootstrap, started and stopped here."""
 
-from collections.abc import Sequence
 import time
+from collections.abc import Sequence
 from typing import Any, cast
 
 from ...gc import BackgroundWorker, MetricsSnapshotWorker

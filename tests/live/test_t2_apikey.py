@@ -31,10 +31,10 @@ the module SKIPs rather than fails. A missing ``mcp-hangar`` binary fails it
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 
 import httpx
 import pytest

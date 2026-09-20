@@ -23,12 +23,12 @@ Note:
     pip install mcp-hangar[observability]
 """
 
-from dataclasses import dataclass
 import logging
 import threading
 import time
-from typing import Any
 import uuid
+from dataclasses import dataclass
+from typing import Any
 
 from mcp_hangar.application.ports.observability import ObservabilityPort, SpanHandle, TraceContext
 from mcp_hangar.errors import bounded_error_type

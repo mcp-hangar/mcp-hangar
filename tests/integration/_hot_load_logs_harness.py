@@ -29,16 +29,16 @@ repository, where a hot-loaded server never is.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from _added_server_logs_harness import _LogGateway
-from _reload_keeps_harness import _server, MOCK_PROVIDER
-from _reload_served_harness import _served_app, _write, BASE_URL
+from _reload_keeps_harness import MOCK_PROVIDER, _server
+from _reload_served_harness import BASE_URL, _served_app, _write
 
 #: What each server writes to its own stderr at startup.
 BANNERS = {"kept": "kept is up", "hot-one": "hot-one is up", "hot-two": "hot-two is up"}

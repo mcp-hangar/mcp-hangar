@@ -158,7 +158,7 @@ class TestCanaryConfigParsing:
     @pytest.fixture(autouse=True)
     def reset_globals(self):
         """Isolate the shared repository and GROUPS registry around each test."""
-        from mcp_hangar.server.state import get_runtime, GROUPS
+        from mcp_hangar.server.state import GROUPS, get_runtime
 
         repository = get_runtime().repository
         original_providers = repository.get_all()

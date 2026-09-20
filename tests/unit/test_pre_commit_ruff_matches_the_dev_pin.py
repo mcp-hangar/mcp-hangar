@@ -13,9 +13,11 @@ comparing them, so it cannot be what keeps them equal. This test is: bump one
 pin and it fails until the other follows.
 
 The second test guards the claim rather than the version. Ruff sorts imports
-only when `I` is in `select`, and it is not; a hook named "isort" that sorts
-nothing is worse than no hook, because it is read as coverage. If `I` is ever
-enabled, the names may say isort again -- and until then they may not.
+only when `I` is in `select`; a hook named "isort" that sorts nothing is worse
+than no hook, because it is read as coverage, and a hook that sorts without
+saying so sends the reader to the config to find out. `I` is selected now
+(#1496), so the claim is checked in both directions: the names say isort when
+it is on, and stop saying it the moment the rule leaves `select`.
 """
 
 import pathlib
@@ -29,6 +31,9 @@ CI_CORE = ROOT / ".github" / "workflows" / "ci-core.yml"
 _DEV_PIN = re.compile(r'"ruff==([0-9][^"]*)"')
 _HOOK_REV = re.compile(r"repo:\s*https://github\.com/astral-sh/ruff-pre-commit\s*\n\s*rev:\s*v([0-9][^\s]*)")
 _SELECT = re.compile(r"^select\s*=\s*\[([^\]]*)\]", re.MULTILINE)
+# The `- id: ruff` hook only: `- id: ruff-format` has no line break after `ruff`.
+_HOOK_NAME = re.compile(r"^\s*-\s*id:\s*ruff\s*\n\s*name:\s*(.+)$", re.MULTILINE)
+_CI_STEP_NAME = re.compile(r"^\s*-\s*name:\s*(Ruff check.*)$", re.MULTILINE)
 
 
 def _one(pattern: re.Pattern[str], path: pathlib.Path, what: str) -> str:
@@ -47,15 +52,20 @@ def test_the_hook_pins_the_ruff_the_dev_extra_pins() -> None:
     )
 
 
-def test_nothing_claims_import_sorting_while_i_is_unselected() -> None:
+def test_the_names_say_what_ruff_actually_does_about_imports() -> None:
     selected = [rule.strip().strip('"') for rule in _one(_SELECT, PYPROJECT, "ruff `select`").split(",")]
+    sorts_imports = "I" in selected
 
-    if "I" in selected:
-        return
+    names = {
+        f"{PRE_COMMIT.name} `ruff` hook": _one(_HOOK_NAME, PRE_COMMIT, "`ruff` hook name"),
+        f"{CI_CORE.name} `Ruff check` step": _one(_CI_STEP_NAME, CI_CORE, "`Ruff check` step name"),
+    }
 
-    for path in (PRE_COMMIT, CI_CORE):
-        text = path.read_text(encoding="utf-8").lower()
-        assert "isort" not in text, (
-            f"{path.name} mentions isort, but `I` is not in ruff's `select`, so nothing sorts imports. "
-            "Enable `I` or drop the claim (#1496)."
+    for what, name in names.items():
+        claims_isort = "isort" in name.lower()
+        assert claims_isort == sorts_imports, (
+            f"{what} is named {name!r}, which {'claims' if claims_isort else 'does not claim'} import "
+            f"sorting, but `I` is {'in' if sorts_imports else 'not in'} ruff's `select`. "
+            "The name has to match the rule: say isort while `I` is selected, and drop the word "
+            "the moment it is not (#1496)."
         )

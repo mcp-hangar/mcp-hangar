@@ -7,9 +7,9 @@ cursor, and on the Python-side ApprovalRequest produced -- never on a real
 database.
 """
 
-from contextlib import contextmanager
-from datetime import datetime, UTC
 import json
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
 import pytest

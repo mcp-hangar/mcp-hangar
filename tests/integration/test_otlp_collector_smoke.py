@@ -8,7 +8,6 @@ import pathlib
 
 import yaml
 
-
 EXAMPLES_DIR = pathlib.Path("examples/otel-collector")
 
 

@@ -8,11 +8,11 @@ Entries live in this process only, so a continuation is
 fetchable on the replica that truncated the result.
 """
 
-from collections import OrderedDict
-from dataclasses import dataclass
 import json
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 from ...domain.contracts.response_cache import CacheRetrievalResult, IResponseCache

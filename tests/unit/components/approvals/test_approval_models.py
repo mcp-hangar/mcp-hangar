@@ -1,6 +1,6 @@
 """Unit tests for approval gate models."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 import pytest
 

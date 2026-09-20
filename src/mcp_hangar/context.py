@@ -25,10 +25,10 @@ Usage:
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import Any
-import uuid
 
 import structlog
 

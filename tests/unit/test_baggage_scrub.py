@@ -14,10 +14,10 @@ an embedding application attached to the context from an inbound request.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 import json
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 

@@ -14,9 +14,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from structlog.testing import capture_logs
 import uvicorn
 import yaml
+from structlog.testing import capture_logs
 
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.server.bootstrap import ApplicationContext

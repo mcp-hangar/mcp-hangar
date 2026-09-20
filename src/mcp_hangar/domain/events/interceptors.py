@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .base import DomainEvent
 
-
 # Interceptor Events (MCP PR #2624 / SEP-1763 reconciliation)
 # =============================================================================
 

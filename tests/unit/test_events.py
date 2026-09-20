@@ -2,11 +2,11 @@
 
 import pytest
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.event_handlers import LoggingEventHandler
-from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import McpServerStarted, McpServerStopped, ToolInvocationCompleted
 from mcp_hangar.infrastructure.event_bus import EventBus, get_event_bus, reset_event_bus
+from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 
 
 def test_event_to_dict():

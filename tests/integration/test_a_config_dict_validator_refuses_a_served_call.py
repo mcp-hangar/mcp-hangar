@@ -12,11 +12,11 @@ parity over every section is ``tests/unit/test_a_config_dict_boots_like_a_file.p
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

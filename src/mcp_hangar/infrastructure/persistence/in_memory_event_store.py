@@ -3,9 +3,9 @@
 Useful for testing and development. Events are lost on restart.
 """
 
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-import threading
 from typing import Any, ClassVar
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore

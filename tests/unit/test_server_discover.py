@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from mcp_hangar._sdk_compat import lowlevel_server
 from mcp_hangar.application.read_models.tool_projection import (
     ToolProjectionRegistry,
     reset_tool_projection_registry,
@@ -30,7 +31,6 @@ from mcp_hangar.domain.services.tool_access_resolver import (
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server import flat_tool_projection, server_discover
-from mcp_hangar._sdk_compat import lowlevel_server
 from mcp_hangar.fastmcp_server.server_discover import server_discover_result, tenant_scoped_tools
 
 _PROJ_PATH = "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_projection_registry"

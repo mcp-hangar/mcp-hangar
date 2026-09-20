@@ -1,6 +1,5 @@
 """Unit tests for violation infrastructure: value objects, events, metrics, and handler wiring."""
 
-from mcp_hangar.domain.value_objects.capabilities import ViolationType, ViolationSeverity
 from mcp_hangar.domain.events import (
     CapabilityViolationDetected,
     EgressBlocked,
@@ -8,8 +7,8 @@ from mcp_hangar.domain.events import (
     McpServerCapabilityQuarantineReleased,
     McpServerQuarantined,
 )
+from mcp_hangar.domain.value_objects.capabilities import ViolationSeverity, ViolationType
 from mcp_hangar.observability.conventions import Enforcement
-
 
 # ============================================================================
 # ViolationType enum
@@ -265,8 +264,8 @@ class TestMetricsEventHandlerViolationRouting:
 
     def test_existing_events_still_handled(self) -> None:
         """Ensure adding violation handling does not break existing event routing."""
-        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.domain.events import McpServerStarted
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 
         handler = MetricsEventHandler()
         event = McpServerStarted(

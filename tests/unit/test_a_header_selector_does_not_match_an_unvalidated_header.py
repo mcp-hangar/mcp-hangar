@@ -23,25 +23,25 @@ import anyio
 import pytest
 
 from mcp_hangar.context import (
-    bind_routing_headers,
     PARAM_VALIDATION_KEY,
     PARAM_VALIDATION_RAN,
     PARAM_VALIDATION_SKIPPED,
     PARAM_VALIDATION_STATE_ATTR,
+    bind_routing_headers,
     release_routing_headers,
     routing_headers_var,
     select_routing_headers,
 )
 from mcp_hangar.domain.exceptions import EgressPolicyDeniedError
 from mcp_hangar.domain.policies.egress_l7 import (
-    evaluate,
-    evaluate_headers,
     HEADER_RULES_NOT_CONSULTED,
     HeaderMatch,
     HeaderRules,
     L7Policy,
     ToolAction,
     ToolRules,
+    evaluate,
+    evaluate_headers,
 )
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
