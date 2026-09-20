@@ -14,7 +14,6 @@ import warnings
 from dataclasses import dataclass
 from enum import StrEnum
 
-
 _HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 _DEPRECATED_POLICY_ALIASES: dict[str, str] = {

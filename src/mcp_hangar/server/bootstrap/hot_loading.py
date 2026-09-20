@@ -1,6 +1,6 @@
 """Hot-loading components initialization."""
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.services.package_resolver import PackageResolver
@@ -9,8 +9,8 @@ from ...domain.contracts.installer import IPackageInstaller
 from ...domain.model import McpServer
 from ...infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 from ...logging_config import get_logger
-from .logs import LogBuffers
 from ..state import get_runtime, get_runtime_mcp_servers
+from .logs import LogBuffers
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime

@@ -13,13 +13,12 @@ proper layer separation (infrastructure should not define business commands).
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
+from mcp_hangar.application.ports.bus import HandlerNotRegisteredError, ICommandBus
 from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- re-exported for backward compat
-from mcp_hangar.application.ports.bus import ICommandBus
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
-from mcp_hangar.application.ports.bus import HandlerNotRegisteredError
 
 from .caller_rate_limit import charge
 

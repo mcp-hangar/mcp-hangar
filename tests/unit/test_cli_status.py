@@ -7,11 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mcp_hangar.server.cli.commands.status import (
+    STATE_COLORS,
+    STATE_ICONS,
     _format_memory,
     _format_uptime,
     _get_status_from_config,
-    STATE_COLORS,
-    STATE_ICONS,
 )
 
 

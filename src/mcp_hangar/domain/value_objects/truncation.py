@@ -6,9 +6,9 @@ Contains:
 - ContinuationOwner - the caller a continuation answers to
 """
 
+import uuid
 from dataclasses import dataclass
 from typing import Any
-import uuid
 
 from .identity import IdentityContext
 

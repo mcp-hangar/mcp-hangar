@@ -18,10 +18,10 @@ latency of one row write, on registration only.
 
 from collections.abc import Callable
 
-from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.domain.contracts.fleet import IFleetWriter, NotTheManagerError
 from mcp_hangar.domain.contracts.management_lease import Lease
 from mcp_hangar.domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot
+from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)

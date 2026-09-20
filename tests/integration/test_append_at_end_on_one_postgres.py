@@ -17,13 +17,13 @@ starts a server.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 import os
-from pathlib import Path
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import pytest

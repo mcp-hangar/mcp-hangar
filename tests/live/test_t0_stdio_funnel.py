@@ -30,12 +30,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
-from mcp import ClientSession
 import pytest
+from mcp import ClientSession
 
 from tests._hangar_executable import hangar_executable
 

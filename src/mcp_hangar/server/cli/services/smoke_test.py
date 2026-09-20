@@ -4,9 +4,9 @@ Starts each MCP server, waits for READY state, reports status, then stops.
 Used by `mcp-hangar init` to verify configuration before user closes terminal.
 """
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-import time
 from typing import Any
 
 from rich.console import Console

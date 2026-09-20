@@ -1,6 +1,7 @@
 """Contracts for identity propagation and extraction."""
 
 from typing import Protocol
+
 from mcp_hangar.domain.value_objects.identity import IdentityContext
 
 

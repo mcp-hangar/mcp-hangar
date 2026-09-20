@@ -12,8 +12,8 @@ from mcp_hangar.domain.value_objects.capabilities import (
     EgressRule,
     EnvironmentCapabilities,
     FilesystemCapabilities,
-    NetworkCapabilities,
     McpServerCapabilities,
+    NetworkCapabilities,
     ResourceCapabilities,
     ToolCapabilities,
 )

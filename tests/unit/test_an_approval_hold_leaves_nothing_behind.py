@@ -16,12 +16,12 @@ shape of the REST handler resolving on FastMCP's loop.
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-import os
-import threading
 from typing import Any
 from unittest.mock import Mock, patch
 

@@ -1,8 +1,8 @@
 """Config file manager - handles MCP Hangar config file operations."""
 
+import shutil
 from datetime import datetime
 from pathlib import Path
-import shutil
 
 import yaml
 

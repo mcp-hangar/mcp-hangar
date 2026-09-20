@@ -11,10 +11,10 @@ import threading
 import uuid
 from typing import Any
 
+from ...domain.contracts.command import CommandHandler
 from ...domain.discovery.discovery_source import DiscoveryMode
 from ...domain.exceptions import McpServerNotFoundError
 from ...domain.value_objects.discovery import DiscoverySourceSpec
-from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
 from ..discovery.discovery_registry import DiscoveryRegistry
 from .discovery_commands import (

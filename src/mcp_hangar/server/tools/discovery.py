@@ -8,8 +8,8 @@ from mcp_hangar._sdk_compat import FastMCP
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
 from ..validation import (
-    not_rate_limited,
     RateLimited,
+    not_rate_limited,
     tool_error_hook,
     tool_error_mapper,
     validate_mcp_server_id_input,

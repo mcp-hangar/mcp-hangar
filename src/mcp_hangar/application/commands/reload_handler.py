@@ -1,7 +1,7 @@
 """Command handler for configuration reload."""
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ...domain.contracts.command import CommandHandler

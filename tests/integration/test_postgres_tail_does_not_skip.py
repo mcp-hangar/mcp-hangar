@@ -20,10 +20,10 @@ Opt-in, like the other `live` tests: set `HANGAR_TEST_POSTGRES_DSN`. Locally,
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any
 
 import pytest

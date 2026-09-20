@@ -11,10 +11,10 @@ any token-validation logic. Hangar remains a pure Resource Server.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+from typing import Any
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.trusted_hosts import fallback_host, host_is_trusted
-from typing import Any
 
 _PRM_PATH = "/.well-known/oauth-protected-resource"
 

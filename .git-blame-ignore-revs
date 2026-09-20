@@ -1,0 +1,13 @@
+# Commits that only moved code around. `git blame` skips them so it reports the
+# revision that last changed a line's meaning, not the one that reformatted it.
+#
+# Enable it once in your checkout (CONTRIBUTING.md Quick Start and AGENTS.md
+# both repeat this line):
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Append the full 40-character SHA only after the commit is on main -- a rebased
+# or amended SHA silently stops matching and the entry goes dead.
+
+# style(core): sort imports across src/mcp_hangar and tests -- the one-time
+# reformat of 527 files from selecting ruff's `I` rules (#1496).
+1f87df85a55e41336047822f3142633e3508efb2

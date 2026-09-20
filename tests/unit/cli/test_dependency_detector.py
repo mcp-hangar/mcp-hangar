@@ -3,12 +3,12 @@
 from unittest.mock import patch
 
 from mcp_hangar.server.cli.services.dependency_detector import (
-    clear_cache,
     DependencyStatus,
+    RuntimeInfo,
+    clear_cache,
     detect_dependencies,
     get_install_instructions,
     is_provider_available,
-    RuntimeInfo,
 )
 
 

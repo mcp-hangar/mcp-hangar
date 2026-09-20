@@ -29,6 +29,7 @@ from mcp_hangar.domain.exceptions import (
     RateLimitExceededError,
 )
 from mcp_hangar.domain.value_objects import Principal
+
 from .rate_limiter import AuthRateLimiter
 
 logger = structlog.get_logger(__name__)

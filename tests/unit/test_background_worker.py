@@ -3,8 +3,9 @@
 import time
 from unittest.mock import MagicMock, PropertyMock, patch
 
-from mcp_hangar.domain.model.health_tracker import HealthTracker
 from mcp_hangar.domain.value_objects.provider import ProviderState
+
+from mcp_hangar.domain.model.health_tracker import HealthTracker
 from mcp_hangar.gc import BackgroundWorker
 
 

@@ -10,14 +10,13 @@ Tests cover:
 - All endpoints return 404 when discovery_orchestrator is None
 """
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

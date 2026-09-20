@@ -16,9 +16,9 @@ import re
 from typing import Any
 
 import pytest
+import yaml
 from structlog.testing import capture_logs
 from typer.testing import CliRunner
-import yaml
 
 from mcp_hangar.server.cli.commands.config import app as config_cli
 from mcp_hangar.server.config import load_config_from_file

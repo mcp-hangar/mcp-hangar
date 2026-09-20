@@ -29,8 +29,8 @@ import pathlib
 
 import pytest
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain import events as events_pkg
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
     LEGACY_EVENT_TYPE_NAMES,
     DomainEvent,

@@ -5,7 +5,7 @@ and applies business rules for registration and lifecycle management.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from ...logging_config import get_logger
 from .conflict_resolver import ConflictResolution, ConflictResolver

@@ -9,8 +9,8 @@ from ...domain.contracts.runtime_store import IRuntimeMcpServerStore
 from ...domain.exceptions import McpServerNotFoundError, ToolInvocationError
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
-from ...stream_ids import MCP_SERVER
 from ...metrics import mcp_server_stop_reason, observe_tool_call, record_error, record_mcp_server_start
+from ...stream_ids import MCP_SERVER
 from ..ports.bus import ICommandBus
 from ..ports.config_loader import IConfigLoader
 from .commands import (

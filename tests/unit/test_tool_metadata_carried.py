@@ -23,7 +23,6 @@ from typing import Any
 # first; running this file alone does not. Present on `main` before this change
 # -- verified by importing the module on a clean tree -- and filed separately.
 import mcp_hangar.server  # noqa: F401  -- see above
-
 from mcp_hangar.application.read_models.mcp_server_views import ToolInfo
 from mcp_hangar.domain.model.tool_catalog import ToolCatalog, ToolSchema
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
@@ -99,8 +98,8 @@ class TestDigestsAreUndisturbed:
 class TestFlatProjection:
     def test_the_front_door_carries_the_metadata(self) -> None:
         from mcp_hangar._sdk_compat import Tool as MCPTool
-        from mcp_hangar.fastmcp_server.flat_tool_projection import _build_mcp_tool_list
         from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
+        from mcp_hangar.fastmcp_server.flat_tool_projection import _build_mcp_tool_list
 
         registry = get_tool_projection_registry()
         registry.build_from_tools(

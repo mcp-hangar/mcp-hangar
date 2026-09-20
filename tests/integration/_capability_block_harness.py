@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 PROVIDER = Path(__file__).resolve().parents[1] / "undeclared_tool_provider.py"

@@ -3,9 +3,9 @@
 import pytest
 
 from mcp_hangar.application.queries import register_all_handlers as register_query_handlers
-from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 from mcp_hangar.bootstrap.runtime import create_runtime
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 from mcp_hangar.infrastructure.query_bus import QueryBus
 from mcp_hangar.server.context import init_context, reset_context
 from mcp_hangar.server.tools.hangar import hangar_list

@@ -19,7 +19,6 @@ from mcp_hangar.application.commands.discovery_commands import (
 )
 from mcp_hangar.domain.exceptions import ProviderNotFoundError
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

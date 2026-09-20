@@ -8,9 +8,9 @@ nothing. One file, one truth about how far delivery got.
 
 from __future__ import annotations
 
-from pathlib import Path
 import sqlite3
 import threading
+from pathlib import Path
 
 from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
 from mcp_hangar.logging_config import get_logger

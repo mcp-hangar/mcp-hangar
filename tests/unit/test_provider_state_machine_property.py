@@ -4,17 +4,17 @@ Uses RuleBasedStateMachine to generate random sequences of state transitions
 and verify invariants hold for ALL possible transition orderings.
 """
 
-import pytest
-from hypothesis import HealthCheck, settings
-from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
-from hypothesis import strategies as st
 from unittest.mock import Mock
 
-from mcp_hangar.domain.model.provider import McpServer, VALID_TRANSITIONS
+import pytest
+from hypothesis import HealthCheck, settings
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
+from mcp_hangar.domain.model.provider import VALID_TRANSITIONS, McpServer
 from mcp_hangar.domain.value_objects.provider import ProviderState
-from mcp_hangar.domain.exceptions import InvalidStateTransitionError
-from mcp_hangar.domain.events import McpServerStateChanged
 
+from mcp_hangar.domain.events import McpServerStateChanged
+from mcp_hangar.domain.exceptions import InvalidStateTransitionError
 
 # -- Hypothesis profiles for CI reproducibility --
 

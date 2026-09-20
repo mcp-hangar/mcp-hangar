@@ -17,61 +17,39 @@ The module order below is definition order and it is load-bearing: the
 only import from one listed above it.
 """
 
-from .base import (
-    DomainEvent,
+from .administration import (
+    CustomRoleCreated,
+    CustomRoleDeleted,
+    CustomRoleUpdated,
+    McpServerDeregistered,
+    McpServerRegistered,
+    McpServerUpdated,
+    ProviderDeregistered,
+    ProviderRegistered,
+    ProviderUpdated,
+    ToolAccessPolicyCleared,
+    ToolAccessPolicySet,
 )
-from .producer import (
-    UNKNOWN_PRODUCER,
-    current_instance_id,
-    set_instance_id,
+from .aliases import (
+    ProviderHotLoaded,
+    ProviderHotUnloaded,
+    ProviderLoadAttempted,
+    ProviderLoadFailed,
 )
-from .lifecycle import (
-    DEGRADED_BY_HEALTH_CHECKS,
-    DELIBERATE_STOP_REASONS,
-    STOPPED_BY_GIVING_UP,
-    CircuitBreakerStateChanged,
-    McpServerDegraded,
-    McpServerStarted,
-    McpServerStateChanged,
-    McpServerStopped,
+from .analysis import (
+    DetectionRuleMatched,
+    EnforcementActionTaken,
+    SessionSuspended,
+    SessionUnsuspended,
 )
-from .invocation import (
-    ToolInvocationCompleted,
-    ToolInvocationFailed,
-    ToolInvocationRequested,
-)
-from .tasks import (
-    DigestMismatchInTask,
-    TaskCancelled,
-    TaskCompleted,
-    TaskConsentDecided,
-    TaskCreated,
-    TaskFailed,
-    TaskInputRequired,
-)
-from .health import (
-    HealthCheckFailed,
-    HealthCheckPassed,
-    McpServerIdleDetected,
-)
-from .discovery import (
-    DiscoveryCycleCompleted,
-    DiscoverySourceHealthChanged,
-    McpServerApproved,
-    McpServerDiscovered,
-    McpServerDiscoveryConfigChanged,
-    McpServerDiscoveryLost,
-    McpServerQuarantined,
-    ProviderApproved,
-    ProviderDegraded,
-    ProviderDiscovered,
-    ProviderDiscoveryConfigChanged,
-    ProviderDiscoveryLost,
-    ProviderIdleDetected,
-    ProviderQuarantined,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+from .approvals import (
+    ToolApprovalDenied,
+    ToolApprovalExpired,
+    ToolApprovalGranted,
+    ToolApprovalRequested,
+    ToolRestored,
+    ToolWithdrawn,
+    ToolWithdrawnRejected,
 )
 from .auth import (
     ApiKeyCreated,
@@ -96,30 +74,27 @@ from .auth import (
     TenantReactivated,
     TenantSuspended,
 )
-from .operations import (
-    BatchCallCompleted,
-    BatchInvocationCompleted,
-    BatchInvocationRequested,
-    ConfigurationReloadFailed,
-    ConfigurationReloadRequested,
-    ConfigurationReloaded,
-    McpServerHotLoaded,
-    McpServerHotUnloaded,
-    McpServerLoadAttempted,
-    McpServerLoadFailed,
+from .base import (
+    DomainEvent,
 )
-from .administration import (
-    CustomRoleCreated,
-    CustomRoleDeleted,
-    CustomRoleUpdated,
-    McpServerDeregistered,
-    McpServerRegistered,
-    McpServerUpdated,
-    ProviderDeregistered,
-    ProviderRegistered,
-    ProviderUpdated,
-    ToolAccessPolicyCleared,
-    ToolAccessPolicySet,
+from .discovery import (
+    DiscoveryCycleCompleted,
+    DiscoverySourceHealthChanged,
+    McpServerApproved,
+    McpServerDiscovered,
+    McpServerDiscoveryConfigChanged,
+    McpServerDiscoveryLost,
+    McpServerQuarantined,
+    ProviderApproved,
+    ProviderDegraded,
+    ProviderDiscovered,
+    ProviderDiscoveryConfigChanged,
+    ProviderDiscoveryLost,
+    ProviderIdleDetected,
+    ProviderQuarantined,
+    ProviderStarted,
+    ProviderStateChanged,
+    ProviderStopped,
 )
 from .enforcement import (
     BehavioralDeviationDetected,
@@ -130,35 +105,60 @@ from .enforcement import (
     EgressPolicyEnforced,
     EgressPolicySet,
     EgressPolicyViolationObserved,
-    McpServerCapabilityQuarantineReleased,
     McpServerCapabilityQuarantined,
-    ProviderCapabilityQuarantineReleased,
+    McpServerCapabilityQuarantineReleased,
     ProviderCapabilityQuarantined,
+    ProviderCapabilityQuarantineReleased,
     ResponseTruncated,
 )
-from .analysis import (
-    SessionSuspended,
-    SessionUnsuspended,
-    DetectionRuleMatched,
-    EnforcementActionTaken,
-)
-from .approvals import (
-    ToolApprovalDenied,
-    ToolApprovalExpired,
-    ToolApprovalGranted,
-    ToolApprovalRequested,
-    ToolRestored,
-    ToolWithdrawn,
-    ToolWithdrawnRejected,
+from .health import (
+    HealthCheckFailed,
+    HealthCheckPassed,
+    McpServerIdleDetected,
 )
 from .interceptors import (
     InterceptorInvoked,
 )
-from .aliases import (
-    ProviderHotLoaded,
-    ProviderHotUnloaded,
-    ProviderLoadAttempted,
-    ProviderLoadFailed,
+from .invocation import (
+    ToolInvocationCompleted,
+    ToolInvocationFailed,
+    ToolInvocationRequested,
+)
+from .lifecycle import (
+    DEGRADED_BY_HEALTH_CHECKS,
+    DELIBERATE_STOP_REASONS,
+    STOPPED_BY_GIVING_UP,
+    CircuitBreakerStateChanged,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
+)
+from .operations import (
+    BatchCallCompleted,
+    BatchInvocationCompleted,
+    BatchInvocationRequested,
+    ConfigurationReloaded,
+    ConfigurationReloadFailed,
+    ConfigurationReloadRequested,
+    McpServerHotLoaded,
+    McpServerHotUnloaded,
+    McpServerLoadAttempted,
+    McpServerLoadFailed,
+)
+from .producer import (
+    UNKNOWN_PRODUCER,
+    current_instance_id,
+    set_instance_id,
+)
+from .tasks import (
+    DigestMismatchInTask,
+    TaskCancelled,
+    TaskCompleted,
+    TaskConsentDecided,
+    TaskCreated,
+    TaskFailed,
+    TaskInputRequired,
 )
 
 

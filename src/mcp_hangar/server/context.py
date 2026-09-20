@@ -6,7 +6,8 @@ on low-level modules, both depend on abstractions.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, cast, runtime_checkable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast, runtime_checkable
+
 from ..domain.contracts.event_bus import HandlerKind
 from ..protocol import set_task_relay_wired
 

@@ -15,10 +15,10 @@ from .commands import (
 from .handlers import (
     HealthCheckHandler,
     InvokeToolHandler,
-    register_all_handlers,
     ShutdownIdleMcpServersHandler,
     StartMcpServerHandler,
     StopMcpServerHandler,
+    register_all_handlers,
 )
 from .load_handlers import LoadMcpServerHandler, LoadResult, UnloadMcpServerHandler
 from .reload_handler import ReloadConfigurationHandler

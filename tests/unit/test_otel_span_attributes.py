@@ -5,10 +5,11 @@ without an external collector. Confirms that conventions.py attribute constants
 produce the correct span attribute names and values when the SDK is active.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
-from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
+import pytest
+
+from mcp_hangar.observability.conventions import MCP, GenAI, McpServer
 
 pytestmark = pytest.mark.otel_sdk
 
@@ -22,8 +23,8 @@ def otel_setup():
     This avoids fighting with the global TracerProvider singleton.
     """
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     exporter = InMemorySpanExporter()
     test_provider = TracerProvider()
@@ -49,8 +50,8 @@ class TestOtelSpanAttributesIntegration:
 
     def test_tool_invoke_span_has_correct_name(self, otel_setup) -> None:
         """Span name is 'execute_tool {tool_name}' (OTel GenAI semconv)."""
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
         mock_inner = MagicMock()
         mock_inner.invoke_tool.return_value = {"result": 3}
@@ -65,8 +66,8 @@ class TestOtelSpanAttributesIntegration:
 
     def test_tool_invoke_span_has_mcp_server_id(self, otel_setup) -> None:
         """Span carries mcp.provider.id attribute."""
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
         mock_inner = MagicMock()
         mock_inner.invoke_tool.return_value = {}
@@ -80,8 +81,8 @@ class TestOtelSpanAttributesIntegration:
 
     def test_tool_invoke_span_has_tool_name(self, otel_setup) -> None:
         """Span carries mcp.tool.name attribute."""
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
         mock_inner = MagicMock()
         mock_inner.invoke_tool.return_value = {}
@@ -96,8 +97,9 @@ class TestOtelSpanAttributesIntegration:
     def test_tool_invoke_span_status_ok_on_success(self, otel_setup) -> None:
         """Successful invocation: span status code is UNSET (OK)."""
         from opentelemetry.trace import StatusCode
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
+
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
         mock_inner = MagicMock()
         mock_inner.invoke_tool.return_value = {}
@@ -111,8 +113,8 @@ class TestOtelSpanAttributesIntegration:
 
     def test_tool_invoke_span_status_error_on_failure(self, otel_setup) -> None:
         """Failed invocation: span status is ERROR and exception event is recorded."""
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.domain.exceptions import ToolInvocationError
 
         mock_inner = MagicMock()
@@ -130,8 +132,8 @@ class TestOtelSpanAttributesIntegration:
 
     def test_user_id_and_session_id_appear_in_span(self, otel_setup) -> None:
         """user_id and session_id propagate to span attributes."""
-        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
+        from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
         mock_inner = MagicMock()
         mock_inner.invoke_tool.return_value = {}

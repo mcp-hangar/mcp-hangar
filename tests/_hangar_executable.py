@@ -18,11 +18,11 @@ tested nothing.
 from __future__ import annotations
 
 import functools
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 

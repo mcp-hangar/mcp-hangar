@@ -12,13 +12,13 @@ The lifecycle flow:
 """
 
 import asyncio
-from collections.abc import Callable
-from dataclasses import dataclass
 import ipaddress
-from pathlib import Path
 import signal
 import sys
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -27,11 +27,11 @@ from ..errors import bounded_error_type
 from ..logging_config import get_logger, setup_logging
 from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
-from .cli.cli_compat import CLIConfig
-from .config import http_graceful_shutdown_timeout, load_config_from_file
 from .bootstrap.coordination import get_event_tailer, get_lease_keeper
 from .bootstrap.workers import start_background_workers
 from .catalogue_readiness import CatalogueRetry
+from .cli.cli_compat import CLIConfig
+from .config import http_graceful_shutdown_timeout, load_config_from_file
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 logger = get_logger(__name__)

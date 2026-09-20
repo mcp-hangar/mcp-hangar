@@ -372,14 +372,14 @@ class TestGetLauncher:
 
     def test_get_launcher_remote(self):
         """Should return HttpLauncher for remote mode."""
-        from mcp_hangar.infrastructure.launchers import get_launcher, HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher, get_launcher
 
         launcher = get_launcher("remote")
         assert isinstance(launcher, HttpLauncher)
 
     def test_get_launcher_subprocess(self):
         """Should return SubprocessLauncher for subprocess mode."""
-        from mcp_hangar.infrastructure.launchers import get_launcher, SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import SubprocessLauncher, get_launcher
 
         launcher = get_launcher("subprocess")
         assert isinstance(launcher, SubprocessLauncher)

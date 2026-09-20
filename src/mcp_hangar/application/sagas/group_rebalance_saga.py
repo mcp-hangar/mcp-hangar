@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from ...application.ports.saga import EventTriggeredSaga
 from ...domain.events import (
     DEGRADED_BY_HEALTH_CHECKS,
     DomainEvent,
@@ -24,7 +25,6 @@ from ...domain.events import (
     McpServerStateChanged,
     McpServerStopped,
 )
-from ...application.ports.saga import EventTriggeredSaga
 from ...logging_config import get_logger
 from ..commands import Command
 from ..group_events import publish_group_events

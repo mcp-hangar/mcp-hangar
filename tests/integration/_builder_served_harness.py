@@ -29,9 +29,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 BASE_URL = "http://127.0.0.1:8000"

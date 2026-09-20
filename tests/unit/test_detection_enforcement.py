@@ -13,7 +13,7 @@ from mcp_hangar.application.commands.commands import StopMcpServerCommand
 from mcp_hangar.application.event_handlers import DetectionEnforcementHandler
 from mcp_hangar.application.ports import ICommandBus
 from mcp_hangar.domain.contracts.event_bus import IEventBus
-from mcp_hangar.domain.events import SessionSuspended, DetectionRuleMatched, EnforcementActionTaken
+from mcp_hangar.domain.events import DetectionRuleMatched, EnforcementActionTaken, SessionSuspended
 from mcp_hangar.server.api.sessions import (
     _suspended_sessions,
     get_session_suspension_registry,

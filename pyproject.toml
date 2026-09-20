@@ -164,7 +164,7 @@ line-length = 120
 target-version = "py311"
 extend-exclude = ["packages/operator", "site", "dist"]
 [tool.ruff.lint]
-select = ["E", "F", "N", "W", "UP", "B", "BLE001", "C4", "C90", "SIM"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "BLE001", "C4", "C90", "SIM"]
 ignore = [
     "B007",
     "B011",

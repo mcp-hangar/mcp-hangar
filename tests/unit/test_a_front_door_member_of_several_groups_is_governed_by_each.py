@@ -18,8 +18,8 @@ from mcp_hangar.application.read_models.tool_projection import (
     reset_tool_projection_registry,
 )
 from mcp_hangar.domain.policies.header_exposure import (
-    clear_header_exposure_policies,
     HeaderExposurePolicy,
+    clear_header_exposure_policies,
     set_header_exposure_policy,
 )
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver

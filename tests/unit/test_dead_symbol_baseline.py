@@ -78,8 +78,9 @@ class TestTheScannerItself:
 
     def test_an_aliased_import_counts_as_a_use(self, tmp_path):
         """`from x import y as z` uses y. Missing this made a live helper look dead."""
-        from check_dead_symbols import _referenced_names
         import ast
+
+        from check_dead_symbols import _referenced_names
 
         tree = ast.parse("from a.b import used_name as _local\n")
         assert "used_name" in _referenced_names({tmp_path / "x.py": tree})

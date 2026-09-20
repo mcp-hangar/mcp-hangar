@@ -36,8 +36,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import Generator, Iterator
 import sys
+from collections.abc import Generator, Iterator
 from typing import cast
 
 import pytest
@@ -130,6 +130,7 @@ def _first_call_result(base_url: str, api_key: str, tool: str, arguments: dict |
     per-call result dict (``{success, error_type, ...}``) from the batch envelope.
     """
     from mcp import ClientSession
+
     from tests.live._mcp_client import open_mcp_streams
 
     async def _call() -> dict:

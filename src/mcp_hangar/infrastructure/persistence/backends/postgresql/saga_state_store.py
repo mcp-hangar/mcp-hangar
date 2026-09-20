@@ -12,12 +12,12 @@ from typing import Any
 
 import structlog
 
+from mcp_hangar.domain.contracts.saga_state import ISagaStateStore
 from mcp_hangar.infrastructure.persistence.database_common import (
     IConnectionFactory,
     MigrationRunner,
     postgres_schema_lock,
 )
-from mcp_hangar.domain.contracts.saga_state import ISagaStateStore
 
 logger = structlog.get_logger(__name__)
 

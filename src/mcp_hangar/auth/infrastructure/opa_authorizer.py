@@ -5,7 +5,7 @@ Provides integration with OPA for complex policy-based authorization.
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -13,6 +13,7 @@ from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, Auth
 
 if TYPE_CHECKING:
     import httpx
+
     from .rbac_authorizer import RBACAuthorizer
 
 logger = structlog.get_logger(__name__)

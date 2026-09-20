@@ -22,6 +22,9 @@ See [Git Flow](https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW
 git clone https://github.com/mcp-hangar/mcp-hangar.git
 cd mcp-hangar
 
+# Keep the bulk reformats out of `git blame` (see .git-blame-ignore-revs)
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+
 # Python core development (from the repo root)
 pip install -e ".[dev]"
 pytest

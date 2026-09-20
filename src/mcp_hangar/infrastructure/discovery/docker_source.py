@@ -22,12 +22,12 @@ Label Reference:
 """
 
 import asyncio
-from concurrent.futures import Future
 import os
-from pathlib import Path
 import platform
 import random
 import threading
+from concurrent.futures import Future
+from pathlib import Path
 from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer

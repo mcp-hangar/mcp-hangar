@@ -5,13 +5,11 @@ connection lifecycle management (subscribe on connect, unsubscribe on disconnect
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
-
+from datetime import UTC, datetime
 
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.infrastructure.event_bus import EventBus
-
 
 # ---------------------------------------------------------------------------
 # Test helpers

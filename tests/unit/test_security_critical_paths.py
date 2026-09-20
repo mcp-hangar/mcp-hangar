@@ -11,9 +11,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from mcp_hangar.domain.exceptions import MissingCredentialsError
 from mcp_hangar.server.api.middleware import get_cors_config
 from mcp_hangar.server.api.router import create_api_router
-from mcp_hangar.server.lifecycle import ServerLifecycle
 from mcp_hangar.server.bootstrap import ApplicationContext
-
+from mcp_hangar.server.lifecycle import ServerLifecycle
 
 pytestmark = pytest.mark.security
 

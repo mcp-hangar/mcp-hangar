@@ -10,8 +10,7 @@ from typing import Any
 
 import structlog
 
-from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
-from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
+from mcp_hangar.auth.config import AuthConfig, OIDCIssuerConfig
 from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
 from mcp_hangar.auth.infrastructure.jwt_authenticator import (
     JWKSTokenValidator,
@@ -23,7 +22,8 @@ from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware, 
 from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
 from mcp_hangar.auth.infrastructure.rate_limiter import AuthRateLimitConfig, AuthRateLimiter
 from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
-from mcp_hangar.auth.config import AuthConfig, OIDCIssuerConfig
+from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
+from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
 
 logger = structlog.get_logger(__name__)
 

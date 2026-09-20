@@ -17,6 +17,7 @@ Usage:
         # ... do work
 """
 
+from mcp_hangar.observability.conventions import MCP, Audit, Behavioral, Enforcement, Health, McpServer
 from mcp_hangar.observability.tracing import (
     extract_trace_context,
     get_current_span_id,
@@ -27,7 +28,6 @@ from mcp_hangar.observability.tracing import (
     shutdown_tracing,
     trace_span,
 )
-from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, McpServer
 
 __all__ = [
     # Tracing

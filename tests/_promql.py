@@ -37,10 +37,10 @@ real parser rejects fails here first.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import math
 import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from prometheus_client.parser import text_string_to_metric_families
 

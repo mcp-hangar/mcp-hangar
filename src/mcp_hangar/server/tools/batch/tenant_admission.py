@@ -82,11 +82,11 @@ changes no answer, because a new budget is idle and full.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import math
 import threading
 import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, TypeGuard
 
 #: The entry a tenant that is not listed is held to.

@@ -19,7 +19,6 @@ from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
-
 GATED = ToolAccessPolicy(
     allow_list=("read_*",),
     deny_list=("drop_table",),

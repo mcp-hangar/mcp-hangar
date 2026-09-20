@@ -16,13 +16,13 @@ the black-box one against a running `mcp-hangar` is in `tests/live`.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import sys
 import threading
 import time
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from collections.abc import Callable
 from unittest.mock import Mock
 
 import pytest
@@ -47,14 +47,14 @@ from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_pol
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
-from mcp_hangar.infrastructure.persistence.log_buffer import get_log_buffer, remove_log_buffer
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
+from mcp_hangar.infrastructure.persistence.log_buffer import get_log_buffer, remove_log_buffer
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.api import middleware
-from mcp_hangar.server.config import load_config, load_configuration, ServerConfigLoader
+from mcp_hangar.server.config import ServerConfigLoader, load_config, load_configuration
 from mcp_hangar.server.context import get_context
-from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.state import GROUPS, get_runtime
 from mcp_hangar.server.tools import batch
 from mcp_hangar.server.tools.batch.concurrency import (
     DEFAULT_GLOBAL_CONCURRENCY,

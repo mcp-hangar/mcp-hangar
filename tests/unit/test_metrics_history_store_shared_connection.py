@@ -21,11 +21,11 @@ either problem.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
-from pathlib import Path
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator, Sequence
+from pathlib import Path
 
 import pytest
 

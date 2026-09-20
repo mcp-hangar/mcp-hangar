@@ -8,9 +8,9 @@ still running when the package ends fails it by name, as in
 `tests/integration/conftest.py`.
 """
 
-from collections.abc import Iterator
 import sys
 import threading
+from collections.abc import Iterator
 
 import pytest
 

@@ -6,10 +6,7 @@ These handlers only read data, never modify state.
 
 from typing import Any
 
-from mcp_hangar.domain.contracts.authentication import IApiKeyStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore
-from mcp_hangar.auth.roles import BUILTIN_ROLES
-from mcp_hangar.logging_config import get_logger
+from mcp_hangar.application.queries.queries import QueryHandler
 from mcp_hangar.auth.queries.queries import (
     CheckPermissionQuery,
     GetApiKeyCountQuery,
@@ -21,7 +18,10 @@ from mcp_hangar.auth.queries.queries import (
     ListBuiltinRolesQuery,
     ListPrincipalsQuery,
 )
-from mcp_hangar.application.queries.queries import QueryHandler
+from mcp_hangar.auth.roles import BUILTIN_ROLES
+from mcp_hangar.domain.contracts.authentication import IApiKeyStore
+from mcp_hangar.domain.contracts.authorization import IRoleStore
+from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 

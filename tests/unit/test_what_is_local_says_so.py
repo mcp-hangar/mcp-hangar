@@ -32,8 +32,8 @@ class TestTheSystemEndpointSaysWhichReplicaAnswered:
         # No coordination, no peers, so it is its own manager -- and saying
         # `false` here would send an operator looking for a leader that does
         # not exist.
-        from mcp_hangar.server.bootstrap import coordination
         from mcp_hangar.server.api.system import _instance_info
+        from mcp_hangar.server.bootstrap import coordination
 
         monkeypatch.setattr(coordination, "_keeper", None)
         info = _instance_info()
@@ -46,8 +46,8 @@ class TestTheSystemEndpointSaysWhichReplicaAnswered:
         # while none answers true is a fleet with nothing converging it, and
         # that should be readable directly rather than inferred from what has
         # stopped happening.
-        from mcp_hangar.server.bootstrap import composition, coordination
         from mcp_hangar.server.api.system import _instance_info
+        from mcp_hangar.server.bootstrap import composition, coordination
 
         monkeypatch.setattr(coordination, "_keeper", _NotTheManager())
         # A keeper is not coordination; a *shareable* backend is. Three replicas
@@ -59,8 +59,8 @@ class TestTheSystemEndpointSaysWhichReplicaAnswered:
         assert info["manages_fleet"] is False
 
     def test_the_holder_says_it_does(self, monkeypatch) -> None:
-        from mcp_hangar.server.bootstrap import coordination
         from mcp_hangar.server.api.system import _instance_info
+        from mcp_hangar.server.bootstrap import coordination
 
         monkeypatch.setattr(coordination, "_keeper", _TheManager())
 

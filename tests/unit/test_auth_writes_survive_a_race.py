@@ -24,11 +24,11 @@ two replicas sharing one PostgreSQL.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
 import hashlib
-from pathlib import Path
 import sys
 import threading
+from collections.abc import Callable, Iterator, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest

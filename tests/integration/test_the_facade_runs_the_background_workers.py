@@ -15,12 +15,12 @@ different workers, are in ``tests/unit/test_facade.py``.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

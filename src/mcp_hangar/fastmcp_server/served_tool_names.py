@@ -72,9 +72,9 @@ caller was not served.
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 from collections.abc import Iterable
-import threading
 
 from ..context import get_identity_context
 

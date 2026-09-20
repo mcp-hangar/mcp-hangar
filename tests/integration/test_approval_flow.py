@@ -8,6 +8,9 @@ import asyncio
 
 import pytest
 
+from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
 from mcp_hangar.domain.events import (
     ToolApprovalDenied,
     ToolApprovalExpired,
@@ -15,11 +18,6 @@ from mcp_hangar.domain.events import (
     ToolApprovalRequested,
 )
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
-
-from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
-from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
-from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
-
 
 # ---------------------------------------------------------------------------
 # Fake collaborators

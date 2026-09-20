@@ -11,7 +11,6 @@ from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _reso
 from ...domain.value_objects.provenance import Provenance
 from .commands import Command
 
-
 # =============================================================================
 # McpServer CRUD Commands
 # =============================================================================

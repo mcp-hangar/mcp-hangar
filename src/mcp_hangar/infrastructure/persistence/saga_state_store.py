@@ -10,8 +10,8 @@ from typing import Any
 
 import structlog
 
-from .database_common import IConnectionFactory, MigrationRunner
 from ...domain.contracts.saga_state import ISagaStateStore
+from .database_common import IConnectionFactory, MigrationRunner
 
 logger = structlog.get_logger(__name__)
 

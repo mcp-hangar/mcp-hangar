@@ -45,10 +45,10 @@ vanish.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import threading
 from typing import Any
 
 from mcp_hangar._sdk_compat import (

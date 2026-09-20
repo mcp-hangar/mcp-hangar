@@ -88,8 +88,11 @@ Tool 'echo' schema does not match its pinned digest
 ```
 
 `mcp-hangar pin --check` prints both digests and exits 1, so it belongs in CI or
-a pre-commit hook; `--write` adopts the change if you meant it. The demo upstream
-is [`examples/rugpull/`](examples/rugpull/); the full walkthrough is the
+a pre-commit hook — there is one to copy at the end of
+[`.pre-commit-config.yaml`](.pre-commit-config.yaml), commented, with what it
+needs before it can check anything; `--write` adopts the change if you meant it.
+The demo upstream is [`examples/rugpull/`](examples/rugpull/); the full
+walkthrough is the
 [quickstart](https://mcp-hangar.io/docs/getting-started/quickstart).
 
 Writing the config by hand instead:

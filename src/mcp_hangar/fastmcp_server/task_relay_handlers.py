@@ -108,6 +108,12 @@ from mcp_hangar._sdk_compat import (
     lowlevel_server,
     make_mcp_error,
 )
+from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
+from mcp_hangar.context import caller_polls_tasks_var, get_identity_context, identity_context_var
+from mcp_hangar.domain.services.task_consent import TaskConsentGate
+from mcp_hangar.fastmcp_server.asgi import identity_for_request
+from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
+from mcp_hangar.logging_config import get_logger
 from mcp_hangar.tasks_wire import (
     EXTENSION_ID,
     HEADER_MISMATCH,
@@ -117,12 +123,6 @@ from mcp_hangar.tasks_wire import (
     GetTaskResult,
     missing_capability_error_data,
 )
-from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-from mcp_hangar.context import caller_polls_tasks_var, get_identity_context, identity_context_var
-from mcp_hangar.domain.services.task_consent import TaskConsentGate
-from mcp_hangar.fastmcp_server.asgi import identity_for_request
-from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
-from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 

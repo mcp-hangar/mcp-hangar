@@ -4,13 +4,13 @@ Provides shared connection management, schema migrations, and utilities
 that can be reused across different stores (auth, events, knowledge base).
 """
 
+import sqlite3
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-import sqlite3
-import threading
 from typing import Any, Final, Protocol
 
 import structlog

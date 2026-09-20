@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-from _reload_served_harness import _Client, _served_app, _write, BASE_URL
+from _reload_served_harness import BASE_URL, _Client, _served_app, _write
 
 TESTS = Path(__file__).resolve().parents[1]
 MOCK_PROVIDER = TESTS / "mock_provider.py"

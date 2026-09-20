@@ -161,8 +161,8 @@ class TestTheContract:
         # The row has to mean the same thing in both, or a deployment that
         # migrates from one backend to the other silently starts a second,
         # parallel lease.
-        from mcp_hangar.infrastructure.persistence.backends.postgresql import management_lease as pg
         from mcp_hangar.infrastructure.persistence import sqlite_management_lease as sqlite
+        from mcp_hangar.infrastructure.persistence.backends.postgresql import management_lease as pg
 
         assert pg.FLEET_MANAGEMENT == sqlite.FLEET_MANAGEMENT
 
@@ -199,8 +199,8 @@ class TestTheBackendsProvideIt:
         # a backend that cannot hold the lease cannot run more than one gateway,
         # and finding that out at the first handover is finding out too late.
         from mcp_hangar.infrastructure.persistence.registry import (
-            IncompletePersistenceBackendError,
             REQUIRED_CONCERNS,
+            IncompletePersistenceBackendError,
             create_backend,
             register_backend_factory,
         )

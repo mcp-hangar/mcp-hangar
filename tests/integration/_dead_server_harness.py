@@ -79,13 +79,13 @@ Modes:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve()

@@ -17,12 +17,12 @@ front-door mode with a required catalogue. The unit tests are in
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

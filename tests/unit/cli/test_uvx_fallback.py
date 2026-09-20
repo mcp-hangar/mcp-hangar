@@ -15,9 +15,9 @@ server and this file pins which ones were checked.
 """
 
 import pytest
-
-from mcp_hangar.server.cli.services.dependency_detector import clear_cache, DependencyStatus, RuntimeInfo
 from mcp_hangar.server.cli.services.provider_registry import get_provider
+
+from mcp_hangar.server.cli.services.dependency_detector import DependencyStatus, RuntimeInfo, clear_cache
 
 
 @pytest.fixture(autouse=True)

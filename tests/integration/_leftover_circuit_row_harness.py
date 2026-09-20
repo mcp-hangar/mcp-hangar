@@ -19,13 +19,13 @@ production runs: ``bootstrap()`` on the SQLite persistence backend, and
 
 from __future__ import annotations
 
-from contextlib import closing
 import json
 import os
-from pathlib import Path
 import sqlite3
 import sys
 import time
+from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 MOCK_PROVIDER = Path(__file__).resolve().parents[1] / "mock_provider.py"

@@ -16,9 +16,9 @@ failure in a row, which does open it, so the count is live, not ignored.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest

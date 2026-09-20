@@ -6,12 +6,12 @@ old data based on a configurable retention window.
 """
 
 import time
-from contextlib import contextmanager
 from collections.abc import Generator
+from contextlib import contextmanager
 
-from .database_common import MigrationRunner, SQLiteConfig, SQLiteConnectionFactory
-from ...logging_config import get_logger
 from ...domain.contracts.metrics_history import IMetricsHistoryStore, MetricPoint
+from ...logging_config import get_logger
+from .database_common import MigrationRunner, SQLiteConfig, SQLiteConnectionFactory
 
 logger = get_logger(__name__)
 

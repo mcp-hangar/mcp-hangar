@@ -15,16 +15,16 @@ from pathlib import Path
 import pytest
 
 from mcp_hangar.tasks_wire import (
+    EXTENSION_ID,
+    MISSING_REQUIRED_CLIENT_CAPABILITY,
+    NAME_BEARING_TASK_METHODS,
+    TASKS_METHODS,
     CancelTaskRequestParams,
     CreateTaskResult,
     EmptyResult,
-    EXTENSION_ID,
     GetTaskRequestParams,
     GetTaskResult,
-    MISSING_REQUIRED_CLIENT_CAPABILITY,
-    NAME_BEARING_TASK_METHODS,
     Task,
-    TASKS_METHODS,
     UpdateTaskRequestParams,
     missing_capability_error_data,
 )

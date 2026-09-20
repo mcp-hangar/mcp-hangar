@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from mcp_types import ElicitResult
 
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import identity_context_var
@@ -35,7 +36,6 @@ from mcp_hangar.fastmcp_server.task_relay_handlers import (
     _derive_input_key,
     register_task_relay_handlers,
 )
-from mcp_types import ElicitResult
 
 # ---------------------------------------------------------------------------
 # Fakes + helpers

@@ -4,20 +4,19 @@ Provides durable event persistence suitable for single-node deployments.
 For distributed systems, consider PostgreSQL or EventStoreDB.
 """
 
-from collections.abc import Iterator
-from datetime import datetime, UTC
 import json
-from pathlib import Path
 import sqlite3
 import threading
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, ClassVar
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.exceptions import CompactionError
-from mcp_hangar.logging_config import get_logger
-
 from mcp_hangar.infrastructure.persistence.event_serializer import EventSerializer
+from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -12,7 +12,7 @@ authenticated requests.
 """
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from starlette.requests import Request

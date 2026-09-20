@@ -2,13 +2,13 @@
 
 # pyright: reportUnannotatedClassAttribute=false, reportMissingTypeArgument=false, reportImplicitOverride=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportImplicitStringConcatenation=false, reportUnusedCallResult=false, reportUnusedParameter=false, reportUnknownParameterType=false, reportExplicitAny=false
 
-from dataclasses import dataclass
 import math
 import threading
 import time
-
+from dataclasses import dataclass
 from typing import Any
 
+from ...application.ports.saga import EventTriggeredSaga, ISagaManager
 from ...domain.events import (
     DELIBERATE_STOP_REASONS,
     STOPPED_BY_GIVING_UP,
@@ -19,7 +19,6 @@ from ...domain.events import (
     McpServerStopped,
 )
 from ...domain.exceptions import CannotStartMcpServerError
-from ...application.ports.saga import EventTriggeredSaga, ISagaManager
 from ...logging_config import get_logger
 from ..commands import Command, GiveUpOnMcpServerCommand, StartMcpServerCommand
 

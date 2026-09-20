@@ -24,11 +24,11 @@ Usage example::
 """
 
 import asyncio
+import inspect
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-import inspect
-import time
 from typing import Any, TypeVar
 
 from .domain.exceptions import (

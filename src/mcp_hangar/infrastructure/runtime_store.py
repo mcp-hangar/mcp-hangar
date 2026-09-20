@@ -5,10 +5,10 @@ loaded at runtime from the registry. These mcp_servers are ephemeral and
 do not persist across restarts.
 """
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-import threading
 from typing import TYPE_CHECKING
 
 from ..domain.contracts.runtime_store import IRuntimeMcpServerStore

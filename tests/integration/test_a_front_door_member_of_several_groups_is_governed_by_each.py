@@ -21,12 +21,12 @@ door and on egress.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import itertools
 import json
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

@@ -13,9 +13,9 @@ this output matches by construction rather than by two implementations agreeing.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-import time
 from typing import Any
 
 import yaml

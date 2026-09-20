@@ -14,9 +14,9 @@ question directly, so it answers it.
 from pathlib import Path
 from typing import Annotated
 
-from rich.console import Console
 import typer
 import yaml
+from rich.console import Console
 
 from ....server.config_schema import validate_config
 

@@ -1,6 +1,6 @@
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
-import json
 from typing import Any
 
 import pytest

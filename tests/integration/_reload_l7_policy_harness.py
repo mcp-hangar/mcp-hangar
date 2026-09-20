@@ -26,12 +26,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
 from _reload_keeps_harness import _Gateway, _server
-from _reload_served_harness import _served_app, _write, BASE_URL
+from _reload_served_harness import BASE_URL, _served_app, _write
 
 DIFF_KEYS = ("mcp_servers_added", "mcp_servers_removed", "mcp_servers_updated", "mcp_servers_unchanged")
 SERVERS = ("keep", "edit")

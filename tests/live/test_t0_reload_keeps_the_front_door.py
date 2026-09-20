@@ -23,20 +23,20 @@ Run with::
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from tests.live.conftest import _MATH_SERVER, running_hangar, RunningHangar
+from tests.live.conftest import _MATH_SERVER, RunningHangar, running_hangar
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 

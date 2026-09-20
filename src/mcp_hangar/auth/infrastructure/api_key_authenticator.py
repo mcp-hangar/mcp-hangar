@@ -4,17 +4,18 @@ Provides authenticator and in-memory store for API key authentication.
 Keys are stored as SHA-256 hashes, never in plaintext.
 """
 
-from datetime import datetime, UTC
 import hashlib
 import secrets
 import threading
 import time
+from datetime import UTC, datetime
 
 import structlog
 
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, RevokedCredentialsError
 from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
+
 from .constant_time import constant_time_key_lookup
 
 logger = structlog.get_logger(__name__)

@@ -10,13 +10,13 @@ Kept out of test_observability_tracing.py so that parallel changes to tracing.py
 do not also collide in one test file.
 """
 
-from importlib.metadata import version
 import json
 import os
 import subprocess
 import sys
-from typing import Any
 import uuid
+from importlib.metadata import version
+from typing import Any
 
 import pytest
 

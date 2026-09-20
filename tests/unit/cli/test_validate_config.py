@@ -5,8 +5,8 @@ directly from the file path via importlib.
 """
 
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
