@@ -74,3 +74,39 @@ repos:
   #       pass_filenames: false
   #       always_run: true
   #       args: ['-m', 'not slow', '--tb=short']
+
+  # Tool digest drift (`mcp-hangar pin --check`), the hook README.md sends you
+  # here to copy. Commented, because it is not this repository's check to run:
+  # it guards a fleet's configuration, and this repository configures no fleet.
+  #
+  # `--check` starts every server the config names, reads what each one serves
+  # right now, and exits 1 when a tool's schema no longer matches the digest
+  # written beside it -- a rewritten tool *description* being the change that
+  # alters no parameter and still redirects the model. Before it can say
+  # anything, two things have to be true on the machine running it:
+  #
+  #   1. A config file exists -- `--config <path>`, else $MCP_CONFIG, else
+  #      ./config.yaml. There is none in this tree: `/config.yaml` is
+  #      gitignored, and `examples/rugpull/` carries none with pins on purpose.
+  #      Without one the hook exits 2 on every commit.
+  #   2. `mcp-hangar pin --config <path> --write` has recorded the digests.
+  #      Pins are a subset by design, so a config with none exits 0 having
+  #      checked nothing -- a green hook that is not covering you.
+  #
+  # The cost is real: every configured upstream is launched and handshaken on
+  # each commit, and one that cannot start is exit 2, never a quiet 0. That is
+  # the right answer for CI, and it is why enabling this belongs to whoever
+  # knows their own upstreams. `--quiet` keeps the success chatter out and
+  # still prints drift (#1236).
+  #
+  # - repo: local
+  #   hooks:
+  #     - id: mcp-hangar-pin-check
+  #       name: mcp-hangar pin --check (tool digest drift)
+  #       entry: mcp-hangar pin --check --quiet --config config.yaml
+  #       language: system
+  #       pass_filenames: false
+  #       # Drift arrives from the upstream, not from an edit to the file, so
+  #       # there is no path that predicts it. Narrow this to
+  #       # `files: ^config\.yaml$` and the hook only catches your own edits.
+  #       always_run: true
