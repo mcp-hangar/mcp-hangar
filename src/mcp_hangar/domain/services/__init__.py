@@ -8,16 +8,16 @@ this package offers for launching is the port, ``IMcpServerLauncher``.
 
 from __future__ import annotations
 
+from ..contracts.launcher import IMcpServerLauncher, LaunchResult, TransportClient
 
 # Re-export exception from canonical location for convenience
 from ..exceptions import McpServerStartError
-from ..contracts.launcher import IMcpServerLauncher, LaunchResult, TransportClient
 from .error_diagnostics import collect_startup_diagnostics, get_suggestion_for_error
-from .image_builder import BuildConfig, get_image_builder, ImageBuilder
+from .image_builder import BuildConfig, ImageBuilder, get_image_builder
 from .tool_access_resolver import (
+    ToolAccessResolver,
     get_tool_access_resolver,
     reset_tool_access_resolver,
-    ToolAccessResolver,
 )
 
 
@@ -29,10 +29,10 @@ def __getattr__(name: str) -> object:
         "ToolProjectionRegistry",
     }:
         from mcp_hangar.application.read_models.tool_projection import (
-            get_tool_projection_registry,
-            reset_tool_projection_registry,
             ToolProjection,
             ToolProjectionRegistry,
+            get_tool_projection_registry,
+            reset_tool_projection_registry,
         )
 
         return {

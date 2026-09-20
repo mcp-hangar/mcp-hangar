@@ -23,12 +23,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
-from mcp_hangar._sdk_compat import DEFAULT_NEGOTIATED_VERSION, LATEST_PROTOCOL_VERSION
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mcp_hangar import __version__
+from mcp_hangar._sdk_compat import DEFAULT_NEGOTIATED_VERSION, LATEST_PROTOCOL_VERSION, FastMCP, lowlevel_server
 from mcp_hangar.context import get_identity_context
 from mcp_hangar.logging_config import get_logger
 

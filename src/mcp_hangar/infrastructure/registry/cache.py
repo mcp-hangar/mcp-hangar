@@ -4,10 +4,10 @@ This module provides a thread-safe LRU cache with time-to-live expiration
 for caching registry API responses.
 """
 
-from collections import OrderedDict
-from dataclasses import dataclass
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 

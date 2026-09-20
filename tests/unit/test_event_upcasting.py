@@ -9,9 +9,9 @@ from typing import cast
 import pytest
 
 from mcp_hangar.domain.events import McpServerStarted
+from mcp_hangar.infrastructure.persistence import EventSerializer, SQLiteEventStore, UpcasterChain
 from mcp_hangar.infrastructure.persistence.event_serializer import EVENT_VERSION_MAP
 from mcp_hangar.infrastructure.persistence.event_upcaster import IEventUpcaster
-from mcp_hangar.infrastructure.persistence import EventSerializer, SQLiteEventStore, UpcasterChain
 
 
 class McpServerStartedV1ToV2(IEventUpcaster):

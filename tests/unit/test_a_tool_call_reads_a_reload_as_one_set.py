@@ -26,9 +26,9 @@ member in that window.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 import json
 import threading
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
@@ -38,9 +38,9 @@ import pytest
 
 import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.application.read_models.tool_projection import (
+    ToolProjectionRegistry,
     get_tool_projection_registry,
     reset_tool_projection_registry,
-    ToolProjectionRegistry,
 )
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.model.mcp_server import McpServer
@@ -51,7 +51,7 @@ from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityCon
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.server import config as server_config
-from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.state import GROUPS, get_runtime
 from mcp_hangar.server.tools.batch import executor, hangar_call
 from mcp_hangar.server.tools.batch.executor import BatchExecutor
 from mcp_hangar.server.tools.batch.models import CallSpec

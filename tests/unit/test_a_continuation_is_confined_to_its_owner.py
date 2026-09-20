@@ -24,9 +24,9 @@ from __future__ import annotations
 import json
 import secrets
 import sys
+import uuid
 from types import SimpleNamespace
 from typing import Any
-import uuid
 
 import pytest
 
@@ -182,11 +182,10 @@ def installed_tool_authorizer():
 @pytest.fixture
 def served(monkeypatch):
     """The wrapped continuation tools the shipped server registers."""
-    from mcp_hangar.server.bootstrap import build_serving_mcp_server
-
     # The rate limiter is process state shared across the suite, and it is not
     # what is under test. The check registered for each tool charges through it.
     from mcp_hangar.server import validation
+    from mcp_hangar.server.bootstrap import build_serving_mcp_server
 
     monkeypatch.setattr(validation, "charge_tool", lambda _tool_name: None)
     server = build_serving_mcp_server()

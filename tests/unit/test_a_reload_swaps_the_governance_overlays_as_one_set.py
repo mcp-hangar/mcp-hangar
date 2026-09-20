@@ -25,10 +25,10 @@ against both of them: the one the reload replaces and the one it puts in force.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -46,7 +46,7 @@ from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_reso
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 from mcp_hangar.server import config as server_config
-from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.state import GROUPS, get_runtime
 from mcp_hangar.server.tools.batch import executor
 
 SERVER = "store"

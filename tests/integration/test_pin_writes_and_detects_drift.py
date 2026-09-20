@@ -12,8 +12,8 @@ untouched. Pins cover the description, not only the input schema, which is why a
 tool-poisoning edit that changes no parameter is still caught.
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 import yaml

@@ -54,13 +54,13 @@ Modes:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve()
@@ -332,7 +332,7 @@ def main(mode: str, out: Path) -> None:
     from mcp_hangar.infrastructure.saga_manager import get_saga_manager
     from mcp_hangar.server.bootstrap import bootstrap, workers
     from mcp_hangar.server.bootstrap.composition import get_runtime
-    from mcp_hangar.server.lifecycle import build_readiness_report, metrics_endpoint, ServerLifecycle
+    from mcp_hangar.server.lifecycle import ServerLifecycle, build_readiness_report, metrics_endpoint
 
     workers.HEALTH_CHECK_INTERVAL_SECONDS = 1
     workers.GC_WORKER_INTERVAL_SECONDS = 1

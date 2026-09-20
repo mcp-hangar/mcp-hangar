@@ -6,19 +6,6 @@ All handlers emit domain events via the event bus.
 
 from typing import Any
 
-from mcp_hangar.domain.contracts.authentication import IApiKeyStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore
-from mcp_hangar.domain.events import (
-    CustomRoleCreated,
-    CustomRoleDeleted,
-    CustomRoleUpdated,
-    ToolAccessPolicyCleared,
-    ToolAccessPolicySet,
-)
-from mcp_hangar.domain.value_objects import Permission, Role
-from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
-from mcp_hangar.domain.contracts.command import CommandHandler
-from mcp_hangar.logging_config import get_logger
 from mcp_hangar.auth.commands.commands import (
     AssignRoleCommand,
     ClearToolAccessPolicyCommand,
@@ -31,6 +18,19 @@ from mcp_hangar.auth.commands.commands import (
     SetToolAccessPolicyCommand,
     UpdateCustomRoleCommand,
 )
+from mcp_hangar.domain.contracts.authentication import IApiKeyStore
+from mcp_hangar.domain.contracts.authorization import IRoleStore
+from mcp_hangar.domain.contracts.command import CommandHandler
+from mcp_hangar.domain.events import (
+    CustomRoleCreated,
+    CustomRoleDeleted,
+    CustomRoleUpdated,
+    ToolAccessPolicyCleared,
+    ToolAccessPolicySet,
+)
+from mcp_hangar.domain.value_objects import Permission, Role
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
+from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 

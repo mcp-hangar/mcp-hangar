@@ -25,9 +25,9 @@ tests/integration/test_a_capability_block_stops_the_call_that_found_it.py.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 

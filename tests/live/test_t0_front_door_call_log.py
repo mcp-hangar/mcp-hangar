@@ -18,11 +18,11 @@ Skip-safe like the rest of the tier. Run with::
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import sys
 from typing import Any
 
 import pytest

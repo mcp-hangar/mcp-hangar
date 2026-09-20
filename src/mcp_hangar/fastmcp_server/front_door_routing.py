@@ -29,9 +29,9 @@ requests therefore pass through untouched.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-import json
 from typing import Any, Literal
 
 from mcp.shared.inbound import decode_header_value

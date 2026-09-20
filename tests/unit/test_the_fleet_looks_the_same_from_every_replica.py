@@ -25,8 +25,8 @@ from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered
 from mcp_hangar.domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
-from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
 from mcp_hangar.infrastructure.persistence.in_memory_event_store import InMemoryEventStore

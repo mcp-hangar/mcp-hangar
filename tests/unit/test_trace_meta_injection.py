@@ -9,8 +9,8 @@ Both carriers name the CLIENT span of the send that carries them, as over stdio.
 or carried no traceparent without one (#1271). Hence span IDs, not key presence.
 """
 
-from contextlib import nullcontext
 import copy
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import MagicMock, patch
 

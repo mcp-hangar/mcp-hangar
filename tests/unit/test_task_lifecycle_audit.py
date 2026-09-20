@@ -6,11 +6,11 @@ published on the event bus, and that the full trail is reconstructable per
 task_id.
 """
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.event_handlers.audit_handler import (
     AuditEventHandler,
     InMemoryAuditStore,
 )
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
     TaskCancelled,
     TaskCompleted,

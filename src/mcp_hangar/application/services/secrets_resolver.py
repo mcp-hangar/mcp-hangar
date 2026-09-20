@@ -4,8 +4,8 @@ This module provides functionality to resolve required secrets for MCP mcp_serve
 from environment variables and configuration files.
 """
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ...logging_config import get_logger

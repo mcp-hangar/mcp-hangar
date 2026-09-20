@@ -7,9 +7,9 @@ All example values use NEUTRAL placeholders (no real brand names).
 from unittest.mock import Mock
 
 from starlette.applications import Starlette
+from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
-from starlette.responses import JSONResponse
 
 from mcp_hangar.auth.prm import (
     build_prm_response,
@@ -18,11 +18,10 @@ from mcp_hangar.auth.prm import (
     prm_url,
 )
 from mcp_hangar.server.api.middleware import (
+    _DEFAULT_AUTH_SKIP_PATHS,
     AuthEnforcementMiddleware,
     AuthMiddlewareHTTP,
-    _DEFAULT_AUTH_SKIP_PATHS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper factories

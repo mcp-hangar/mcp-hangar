@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
-
 # Approval Gate Events (v0.13.0 -- Human-in-the-Loop)
 # =============================================================================
 

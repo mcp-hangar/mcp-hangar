@@ -32,12 +32,12 @@ from mcp_hangar.application.commands.crud_handlers import (
 )
 from mcp_hangar.domain.contracts.fleet import IFleetWriter
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
+from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from mcp_hangar.domain.services.fleet_snapshot import server_from_snapshot, snapshot_of
 from mcp_hangar.domain.value_objects.provenance import Provenance
 from mcp_hangar.infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
 from mcp_hangar.infrastructure.persistence.fleet_writer import RepositoryFleetWriter
-from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.infrastructure.persistence.recovery_service import RecoveryService
 
 

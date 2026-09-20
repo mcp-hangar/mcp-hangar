@@ -15,23 +15,19 @@ All types are re-exported here for backward compatibility.
 """
 
 # Common / shared value objects
-from .common import CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
-
 # Capability declarations (Phase 1 enforcement)
 from .capabilities import (
     EgressRule,
     EnvironmentCapabilities,
     FilesystemCapabilities,
-    NetworkCapabilities,
     McpServerCapabilities,
+    NetworkCapabilities,
     ResourceCapabilities,
     ToolCapabilities,
     ViolationSeverity,
     ViolationType,
 )
-
-# Log value objects
-from .log import LogLine
+from .common import CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
 
 # Configuration
 from .config import (
@@ -48,20 +44,26 @@ from .config import (
     TimeoutSeconds,
 )
 
+# Discovery
+from .discovery import DiscoverySourceSpec
+
 # Health status
 from .health import HealthCheckInterval, HealthStatus
+
+# Log value objects
+from .log import LogLine
 
 # McpServer lifecycle and identity
 from .mcp_server import (
     GroupId,
     GroupState,
     LoadBalancerStrategy,
-    MemberPriority,
-    MemberWeight,
     McpServerConfig,
     McpServerId,
     McpServerMode,
     McpServerState,
+    MemberPriority,
+    MemberWeight,
 )
 
 # Security - Authentication & Authorization
@@ -70,14 +72,11 @@ from .security import Permission, Principal, PrincipalId, PrincipalType, Role
 # Tool Access Policy
 from .tool_access_policy import ToolAccessPolicy
 
-# Truncation
-from .truncation import ContinuationId, TruncationConfig
-
-# Discovery
-from .discovery import DiscoverySourceSpec
-
 # Tool Digest (SEP-1766)
 from .tool_digest import DigestEnforcement, DigestPolicy, DigestUnknownPolicy, ToolDigest
+
+# Truncation
+from .truncation import ContinuationId, TruncationConfig
 
 # UI resources (MCP Apps / SEP-1865)
 from .ui_resource import (

@@ -14,7 +14,6 @@ from starlette.testclient import TestClient
 
 from mcp_hangar.application.queries.queries import GetToolInvocationHistoryQuery
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

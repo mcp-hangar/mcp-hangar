@@ -36,13 +36,13 @@ from __future__ import annotations
 from typing import Any
 
 from ...domain.contracts.persistence import IMcpServerConfigRepository
-from ..ports.async_task import IBlockingAsyncRunner
 from ...domain.events import DomainEvent, McpServerDeregistered, McpServerRegistered
 from ...domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot
 from ...logging_config import get_logger
+from ..ports.async_task import IBlockingAsyncRunner
 
 logger = get_logger(__name__)
 

@@ -23,12 +23,12 @@ Naming: neutral placeholders only (store, read_item, write_item, tenant:a, tenan
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
-import threading
 from types import SimpleNamespace
 from typing import Any, ClassVar
 

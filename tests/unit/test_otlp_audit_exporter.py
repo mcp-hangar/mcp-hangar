@@ -14,7 +14,7 @@ class TestOTLPAuditExporter:
 
     def test_export_tool_invocation_success_emits_log_record(self) -> None:
         from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
-        from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
+        from mcp_hangar.observability.conventions import MCP, GenAI, McpServer
 
         exporter = OTLPAuditExporter()
 

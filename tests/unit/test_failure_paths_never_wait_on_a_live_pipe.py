@@ -18,15 +18,15 @@ regression fails the test rather than hanging the suite.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 import contextlib
 import os
-from queue import Queue
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
+from queue import Queue
 from types import SimpleNamespace
-from typing import Any, IO
+from typing import IO, Any
 from unittest.mock import MagicMock, patch
 
 import pytest

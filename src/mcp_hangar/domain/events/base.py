@@ -2,12 +2,12 @@
 
 """The DomainEvent base and its replay seam."""
 
-from abc import ABC
-from dataclasses import dataclass, field, fields
 import functools
 import time
-from typing import Any
 import uuid
+from abc import ABC
+from dataclasses import dataclass, field, fields
+from typing import Any
 
 from ...logging_config import env_length_limit, truncate_text
 from .producer import UNKNOWN_PRODUCER, current_instance_id

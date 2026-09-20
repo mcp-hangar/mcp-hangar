@@ -8,7 +8,6 @@ the application context.
 from typing import Any
 
 from mcp_hangar.logging_config import get_logger
-
 from mcp_hangar.metrics import APPROVAL_DELIVERIES_TOTAL
 
 from .delivery.event_stream import EventStreamApprovalDelivery

@@ -14,10 +14,10 @@ a bus nobody subscribed to satisfies that assertion and produces no metric.
 
 from __future__ import annotations
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar import metrics as m
 from mcp_hangar.application.event_handlers.cost_handler import CostAttributionEventHandler
 from mcp_hangar.domain.contracts.cost import InvocationContext
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import CostReportGenerated, ToolInvocationCompleted
 from mcp_hangar.domain.value_objects.cost import CostRecord
 from mcp_hangar.infrastructure.event_bus import EventBus

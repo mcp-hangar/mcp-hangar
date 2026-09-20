@@ -19,7 +19,6 @@ from typer.testing import CliRunner
 
 from mcp_hangar.server.cli.commands.auth import app
 
-
 # Typer collapses a single-command group, so `bootstrap-admin` is not an
 # argument here even though it is on the real command line.
 runner = CliRunner()

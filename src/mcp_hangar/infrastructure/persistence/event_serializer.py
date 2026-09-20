@@ -5,11 +5,11 @@
 Handles conversion of domain events to/from JSON for storage in event store.
 """
 
-from collections.abc import Iterator
 import dataclasses
-from datetime import datetime
 import inspect
 import json
+from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 from mcp_hangar.domain.events import LEGACY_EVENT_TYPE_NAMES, DomainEvent, canonical_event_type

@@ -7,12 +7,12 @@ canary bucketing mirror without relying on conftest-symbol importability.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import hashlib
 import json
 import os
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 # The group + canary sweep issues a burst of ``hangar_call`` invocations (warm +
 # pin probes + a per-tenant determinism loop) far above the command-bus rate
@@ -205,6 +205,7 @@ def serving_member(harness: GroupHarness, tenant_id: str | None = None, tool: st
     import time
 
     from mcp import ClientSession
+
     from tests.live._mcp_client import open_mcp_streams
 
     headers: dict[str, str] = {}

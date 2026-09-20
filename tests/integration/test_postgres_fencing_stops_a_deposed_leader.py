@@ -12,9 +12,9 @@ Opt-in, like the other `live` tests. See
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
 import time
+from contextlib import contextmanager
 
 import pytest
 

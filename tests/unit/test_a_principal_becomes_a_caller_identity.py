@@ -17,10 +17,8 @@ part both paths shared, so it is the part that stays.
 
 from __future__ import annotations
 
-
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server.asgi import _principal_to_identity_context
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for the mapping helper (no ASGI overhead)

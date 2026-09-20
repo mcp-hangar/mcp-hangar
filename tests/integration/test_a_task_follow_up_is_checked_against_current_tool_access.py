@@ -21,11 +21,11 @@ Then each owner polls, updates and cancels each task, and calls its tool again.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

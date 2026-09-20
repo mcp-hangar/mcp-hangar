@@ -20,24 +20,24 @@ from pathlib import Path
 from typing import Annotated, cast
 
 import questionary
+import typer
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-import typer
 
 from ..errors import CLIError, PermissionError
 from ..main import GlobalOptions
 from ..services import (
+    PROVIDER_BUNDLES,
     ConfigFileManager,
     DependencyStatus,
+    McpServerDefinition,
     detect_dependencies,
     filter_bundle_by_availability,
     get_install_instructions,
     get_mcp_server,
     get_mcp_servers_by_category_filtered,
-    PROVIDER_BUNDLES,
-    McpServerDefinition,
     run_smoke_test,
 )
 from ..services.mcp_clients import McpClient, client_by_key, detect_clients, write_hangar_entry

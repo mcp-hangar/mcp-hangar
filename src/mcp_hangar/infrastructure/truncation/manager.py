@@ -7,7 +7,7 @@ with smart truncation that preserves JSON structure and line boundaries.
 from __future__ import annotations
 
 import json
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...domain.contracts.response_cache import IResponseCache
 from ...domain.value_objects.truncation import ContinuationId, ContinuationOwner, TruncationConfig

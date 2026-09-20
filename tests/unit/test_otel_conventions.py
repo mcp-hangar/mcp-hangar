@@ -1,6 +1,7 @@
 """Unit tests for MCP OTEL semantic conventions."""
 
 from mcp_hangar.observability.conventions import (
+    MCP,
     Audit,
     Behavioral,
     Caller,
@@ -8,7 +9,6 @@ from mcp_hangar.observability.conventions import (
     Enforcement,
     GenAI,
     Health,
-    MCP,
     McpServer,
 )
 

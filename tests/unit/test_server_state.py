@@ -3,13 +3,12 @@
 import warnings
 from unittest.mock import MagicMock
 
-
 from mcp_hangar.server import state
 from mcp_hangar.server.state import (
+    GROUPS,
     get_discovery_orchestrator,
     get_group_rebalance_saga,
     get_runtime,
-    GROUPS,
     set_discovery_orchestrator,
     set_group_rebalance_saga,
 )

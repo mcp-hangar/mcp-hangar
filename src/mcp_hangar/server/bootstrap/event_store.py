@@ -1,7 +1,7 @@
 """Event store initialization."""
 
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...domain.contracts.event_store import NullEventStore
 from ...domain.exceptions import ConfigurationError

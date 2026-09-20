@@ -19,8 +19,8 @@ from ...application.mcp.tooling import ToolErrorPayload, key_global, mcp_tool_wr
 from ...application.queries import ListMcpServersQuery
 from ...application.read_models.mcp_server_views import REVIVED_BY_START, DeadInfo, dead_dict, dead_info
 from ...domain.exceptions import (
-    MissingSecretsError,
     McpServerNotHotLoadedError,
+    MissingSecretsError,
     RegistryAmbiguousSearchError,
     RegistryServerNotFoundError,
     UnverifiedMcpServerError,
@@ -28,10 +28,10 @@ from ...domain.exceptions import (
 from ...domain.value_objects import GroupState, McpServerState
 from ..context import get_context
 from ..validation import (
+    RateLimited,
     charge_tool,
     charged_by_the_command_bus,
     not_rate_limited,
-    RateLimited,
     tool_error_hook,
     tool_error_mapper,
     validate_mcp_server_id_input,

@@ -7,11 +7,11 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 - Standard histogram buckets for different use cases
 """
 
+import threading
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
-import threading
-import time
 
 # =============================================================================
 # Core Metric Types

@@ -15,16 +15,16 @@ registered below, with the only tier that uses it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import closing, contextmanager
-from dataclasses import dataclass
-from pathlib import Path
 import os
 import shutil
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 import pytest

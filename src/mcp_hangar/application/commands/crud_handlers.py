@@ -11,6 +11,8 @@ import threading
 from collections.abc import Callable
 from typing import Any, cast
 
+from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.fleet import IFleetWriter
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
@@ -22,11 +24,9 @@ from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
-from ...domain.value_objects.provenance import Provenance
-from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
-from ...domain.contracts.command import CommandHandler
-from ...domain.contracts.fleet import IFleetWriter
 from ...domain.services.fleet_snapshot import snapshot_of
+from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
 from ..group_events import publish_group_events

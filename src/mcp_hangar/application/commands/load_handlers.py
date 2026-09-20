@@ -1,28 +1,28 @@
 """Command handlers for hot-loading mcp_servers from the registry."""
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-import time
 from typing import Any
-from collections.abc import Callable
 
+from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.event_bus import IEventBus
 from ...domain.contracts.installer import IPackageInstaller
 from ...domain.contracts.registry import IRegistryClient, ServerDetails
 from ...domain.events import McpServerHotLoaded, McpServerHotUnloaded, McpServerLoadAttempted, McpServerLoadFailed
 from ...domain.exceptions import (
-    MissingSecretsError,
     McpServerNotHotLoadedError,
+    MissingSecretsError,
     RegistryAmbiguousSearchError,
     RegistryServerNotFoundError,
     UnverifiedMcpServerError,
 )
-from ...redactor import OutputRedactor
 from ...domain.model.mcp_server_config import parse_tools_access_config
 from ...domain.services import get_tool_access_resolver
-from ...domain.contracts.command import CommandHandler
-from ...domain.contracts.event_bus import IEventBus
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
+from ...redactor import OutputRedactor
 from ..ports.log_buffers import ILogBuffers
 from ..services.package_resolver import PackageResolver
 from ..services.secrets_resolver import SecretsResolver

@@ -17,8 +17,8 @@ Naming: neutral placeholders only (store, write_item, tenant:a).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import pytest

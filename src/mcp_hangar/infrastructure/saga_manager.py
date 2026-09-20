@@ -4,10 +4,12 @@ Sagas coordinate long-running business processes that span multiple aggregates
 or services. They react to domain events and emit commands.
 """
 
-from collections.abc import Callable
 import threading
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 
 from ..application.ports.saga import (  # noqa: F401 -- re-exported for backward compat
     EventTriggeredSaga,
@@ -19,11 +21,10 @@ from ..application.ports.saga import (  # noqa: F401 -- re-exported for backward
 )
 from ..domain.events import DomainEvent
 from ..errors import bounded_error_type
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
+from ..lock_hierarchy import LockLevel, TrackedLock
 from ..logging_config import get_logger
 from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
-from ..lock_hierarchy import LockLevel, TrackedLock
 
 if TYPE_CHECKING:
     from ..application.commands import Command

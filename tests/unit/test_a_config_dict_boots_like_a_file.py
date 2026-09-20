@@ -21,16 +21,16 @@ fails the parity check.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 import importlib
-from pathlib import Path
 import sys
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from structlog.testing import capture_logs
 import yaml
+from structlog.testing import capture_logs
 
 from mcp_hangar.domain.contracts.validator import ValidationContext
 from mcp_hangar.domain.exceptions import ConfigurationError

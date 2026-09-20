@@ -1,8 +1,7 @@
 """Tests for init command with dependency detection."""
 
-from unittest.mock import patch
-
 import re
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner

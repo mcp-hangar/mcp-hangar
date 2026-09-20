@@ -8,7 +8,6 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any
 
-
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
 
 

@@ -1,15 +1,14 @@
 """RFC 5424 syslog audit exporter for compliance events."""
 
-from collections.abc import Callable
 import logging
 import os
 import socket
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
-
 
 logger = logging.getLogger(__name__)
 

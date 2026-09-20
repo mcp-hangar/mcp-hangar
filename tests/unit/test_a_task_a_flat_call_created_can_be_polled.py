@@ -24,8 +24,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from mcp_hangar._sdk_compat import INVALID_PARAMS
-from mcp_hangar.context import caller_polls_tasks_var
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
+from mcp_hangar.context import caller_polls_tasks_var
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server.flat_call_tasks import govern_flat_call
 from mcp_hangar.server.tools.batch.models import CallResult, RelayCapture

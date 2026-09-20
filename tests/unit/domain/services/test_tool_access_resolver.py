@@ -6,9 +6,9 @@ import pytest
 
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import (
+    ToolAccessResolver,
     get_tool_access_resolver,
     reset_tool_access_resolver,
-    ToolAccessResolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
 

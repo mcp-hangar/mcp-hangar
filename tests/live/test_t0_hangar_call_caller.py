@@ -20,10 +20,10 @@ as the rest of T0. See ``docs/internal/LIVE_VERIFICATION.md``.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator, Iterator
 import json
-from pathlib import Path
 import sys
+from collections.abc import Generator, Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -77,6 +77,7 @@ mcp_servers:
 def _hangar_call(base_url: str, api_key: str | None, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """One ``hangar_call`` over streamable-HTTP, with *api_key* or none; its result[0]."""
     from mcp import ClientSession
+
     from tests.live._mcp_client import open_mcp_streams
 
     headers = {"X-API-Key": api_key} if api_key else {}

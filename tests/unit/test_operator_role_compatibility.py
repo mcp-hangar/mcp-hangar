@@ -30,7 +30,6 @@ import pytest
 from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.server.api.route_permissions import resolve_rule
 
-
 OPERATOR_CALLS = [
     ("GET", "/mcp_servers/srv1"),
     ("GET", "/mcp_servers/srv1/health"),

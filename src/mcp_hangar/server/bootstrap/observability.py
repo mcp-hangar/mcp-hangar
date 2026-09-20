@@ -45,9 +45,9 @@ Or via config.yaml:
         scrub_outputs: true
 """
 
-from dataclasses import dataclass
 import os
 import platform
+from dataclasses import dataclass
 from typing import Any
 
 from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
@@ -286,6 +286,7 @@ def init_metrics_publisher() -> None:
     import time
 
     from mcp_hangar import __version__
+
     from ...metrics import BUILD_INFO, PROCESS_START_TIME
 
     BUILD_INFO.info(version=__version__, python=platform.python_version())

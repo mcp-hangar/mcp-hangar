@@ -29,9 +29,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from mcp_hangar._sdk_compat import Context
-
 import mcp_hangar.server.tools.batch as batch
+from mcp_hangar._sdk_compat import Context
 from mcp_hangar.negotiation import get_current_protocol_negotiation
 from mcp_hangar.protocol import _META_PROTOCOL_VERSION_KEY, SUPPORTED_PROTOCOL_VERSION
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, hangar_call

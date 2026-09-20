@@ -24,23 +24,23 @@ from typing import Any
 import pytest
 
 from mcp_hangar._sdk_compat import McpError
+from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
+from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.events import TaskCancelled, TaskCompleted
+from mcp_hangar.domain.services.task_consent import TaskConsentGate
+from mcp_hangar.domain.services.task_ownership import TaskOwner
+from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
+from mcp_hangar.domain.value_objects.security import PrincipalType
+from mcp_hangar.fastmcp_server.task_relay_handlers import (
+    _cancel_confirmed,
+    register_task_relay_handlers,
+)
 from mcp_hangar.tasks_wire import (
     EXTENSION_ID,
     HEADER_MISMATCH,
     MISSING_REQUIRED_CLIENT_CAPABILITY,
     EmptyResult,
     GetTaskResult,
-)
-from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-from mcp_hangar.context import identity_context_var
-from mcp_hangar.domain.events import TaskCancelled, TaskCompleted
-from mcp_hangar.domain.services.task_consent import TaskConsentGate
-from mcp_hangar.domain.services.task_ownership import TaskOwner
-from mcp_hangar.domain.value_objects.security import PrincipalType
-from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
-from mcp_hangar.fastmcp_server.task_relay_handlers import (
-    _cancel_confirmed,
-    register_task_relay_handlers,
 )
 
 # ---------------------------------------------------------------------------

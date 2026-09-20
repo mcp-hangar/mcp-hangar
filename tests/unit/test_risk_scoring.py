@@ -1,8 +1,8 @@
 """Unit tests for risk scoring."""
 
+import importlib
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
-import importlib
 from typing import Protocol, cast
 
 import pytest

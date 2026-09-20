@@ -5,12 +5,12 @@ import json
 import uuid
 from typing import cast
 
-from ....domain.events import DomainEvent
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from ....infrastructure.event_bus import get_event_bus
 from ....domain.contracts.event_bus import HandlerKind
+from ....domain.events import DomainEvent
 from ....domain.exceptions import AccessDeniedError
+from ....infrastructure.event_bus import get_event_bus
 from ....logging_config import get_logger
 from ..middleware import get_cors_config
 from ..serializers import HangarJSONEncoder

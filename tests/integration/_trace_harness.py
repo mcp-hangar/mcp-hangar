@@ -28,13 +28,13 @@ receives) and an in-process HTTP upstream here (it records headers and ``_meta``
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, ClassVar
 
 MOCK_PROVIDER = Path(__file__).resolve().parents[1] / "mock_provider.py"

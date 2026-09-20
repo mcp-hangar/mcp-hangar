@@ -4,9 +4,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from mcp_hangar.domain.exceptions import MissingCredentialsError
+from mcp_hangar.server.api.ws.manager import EventStreamQueue
 from mcp_hangar.server.bootstrap import ApplicationContext
 from mcp_hangar.server.lifecycle import ServerLifecycle
-from mcp_hangar.server.api.ws.manager import EventStreamQueue
 
 
 async def test_websocket_without_valid_auth_is_rejected() -> None:

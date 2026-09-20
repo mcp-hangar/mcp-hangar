@@ -17,9 +17,9 @@ are in `tests/unit/test_a_hot_loaded_server_gets_a_log_buffer.py`.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest

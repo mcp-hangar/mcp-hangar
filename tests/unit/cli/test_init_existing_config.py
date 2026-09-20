@@ -1,12 +1,12 @@
 """Tests for init command existing config handling."""
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 import yaml
+from typer.testing import CliRunner
 
 from mcp_hangar.server.cli.services.config_file import ConfigFileManager
 from mcp_hangar.server.cli.services.dependency_detector import clear_cache

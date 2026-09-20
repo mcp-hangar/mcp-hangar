@@ -14,8 +14,8 @@ from ..ports.bus import IQueryBus
 from ..read_models import HealthInfo, McpServerDetails, McpServerSummary, SystemMetrics, ToolInfo
 from ..read_models.mcp_server_views import dead_info
 from .queries import (
-    GetMcpServerHealthQuery,
     GetL7PolicyQuery,
+    GetMcpServerHealthQuery,
     GetMcpServerQuery,
     GetMcpServerToolsQuery,
     GetSystemMetricsQuery,

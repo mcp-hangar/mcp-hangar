@@ -6,8 +6,8 @@ accessor, and the stderr-redaction contract used by the log buffer / /logs API.
 
 from __future__ import annotations
 
-from mcp_hangar.redactor import get_default_redactor
 from mcp_hangar.logging_config import _redact_secret_values
+from mcp_hangar.redactor import get_default_redactor
 
 AWS = "AKIAIOSFODNN7EXAMPLE"
 GHP = "ghp_" + "a" * 36

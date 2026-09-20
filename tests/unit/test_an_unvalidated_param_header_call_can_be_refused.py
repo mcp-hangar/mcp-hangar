@@ -20,11 +20,11 @@ import anyio
 import pytest
 
 from mcp_hangar.context import PARAM_VALIDATION_STATE_ATTR
+from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.server.config import _init_param_validation_from_config
 from mcp_hangar.server.config_schema import validate_config
-from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.tasks_wire import HEADER_MISMATCH
 
 MODERN = "2026-07-28"

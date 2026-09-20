@@ -5,7 +5,7 @@ with OIDC support (JWKS validation, standard claims).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 

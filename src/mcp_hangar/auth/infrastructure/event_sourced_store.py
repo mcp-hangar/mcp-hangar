@@ -7,25 +7,25 @@ and rebuilding state on load. Provides:
 - Event publishing via EventBus
 """
 
-from datetime import datetime, timedelta, UTC
 import hashlib
 import secrets
 import threading
-from typing import Protocol, TypeVar
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Protocol, TypeVar
 
-from .constant_time import constant_time_key_lookup
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore
+from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import ApiKeyCreated, DomainEvent
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot, EventSourcedApiKey
 from mcp_hangar.domain.model.event_sourced_role_assignment import EventSourcedRoleAssignment, RoleAssignmentSnapshot
-from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Principal, Role
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.domain.contracts.authorization import validate_role_scope
+
+from .constant_time import constant_time_key_lookup
 
 logger = get_logger(__name__)
 

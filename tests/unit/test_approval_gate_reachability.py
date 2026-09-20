@@ -26,8 +26,8 @@ from starlette.testclient import TestClient
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.model.mcp_server_config import (
     McpServerConfig,
-    parse_tools_access_config,
     ToolsConfig,
+    parse_tools_access_config,
 )
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
@@ -43,7 +43,7 @@ from mcp_hangar.server.context import get_context
 @pytest.fixture(autouse=True)
 def _clean_policies():
     """Config loading writes to process-global registries. Put them back."""
-    from mcp_hangar.server.state import get_runtime, GROUPS
+    from mcp_hangar.server.state import GROUPS, get_runtime
 
     repository = get_runtime().repository
     original_servers = repository.get_all()

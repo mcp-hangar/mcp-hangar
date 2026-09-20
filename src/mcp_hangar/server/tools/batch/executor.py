@@ -9,24 +9,25 @@ Provides parallel execution of batch invocations with:
 - Response truncation
 """
 
-from collections.abc import Coroutine
-from concurrent.futures import as_completed, ThreadPoolExecutor
-from contextlib import ExitStack
 import asyncio
 import contextvars
-from dataclasses import dataclass, replace
-from functools import partial
 import json
 import threading
 import time
-from typing import Any, cast, Literal, TypeVar
-
+from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
+from dataclasses import dataclass, replace
+from functools import partial
+from typing import Any, Literal, TypeVar, cast
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....application.group_events import publish_group_events
+from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....application.services.mutator_pipeline import MutatorPipeline
-from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
 from ....application.services.validator_pipeline import ValidatorPipeline
+from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
+from ....context import bind_routing_headers, get_identity_context, release_routing_headers
 from ....domain.contracts.mutator import MutationContext
 from ....domain.contracts.validator import ValidationContext
 from ....domain.events import (
@@ -35,22 +36,19 @@ from ....domain.events import (
     BatchInvocationRequested,
     ToolWithdrawnRejected,
 )
-from ....context import bind_routing_headers, get_identity_context, release_routing_headers
-from ....domain.value_objects.truncation import ContinuationOwner
-from ....application.read_models.tool_projection import get_tool_projection_registry
-from ....domain.services import get_tool_access_resolver
-from ....domain.services.digest_validator import DigestValidator
-from ....domain.services.governance_overlays import read_as_one_set
-from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
+from ....domain.exceptions import CannotStartMcpServerError
 from ....domain.model.mcp_server import (
     DEAD_NOT_REVIVED_BY_CALLS,
     START_REFUSED_IN_BACKOFF,
     START_REFUSED_NOT_REVIVED_BY_CALLS,
 )
-from ....domain.exceptions import CannotStartMcpServerError
+from ....domain.services import get_tool_access_resolver
+from ....domain.services.digest_validator import DigestValidator
+from ....domain.services.governance_overlays import read_as_one_set
+from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
+from ....domain.value_objects.truncation import ContinuationOwner
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -67,14 +65,15 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....retry import configured_retry_policy, retry_sync, RetryPolicy, RetryResult
+from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
+from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
-from .member_health import member_outcome, MemberOutcome
+from .member_health import MemberOutcome, member_outcome
+from .models import MAX_RESPONSE_SIZE_BYTES, BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
 from .relay_seam import upstream_task
-from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
-from .tenant_admission import CONCURRENCY, get_tenant_admission, Grant, NO_BUDGET, RATE, Refusal, Reservation
+from .tenant_admission import CONCURRENCY, NO_BUDGET, RATE, Grant, Refusal, Reservation, get_tenant_admission
 
 logger = get_logger(__name__)
 

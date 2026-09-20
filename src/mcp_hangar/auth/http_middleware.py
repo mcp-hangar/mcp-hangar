@@ -11,18 +11,17 @@ normalization helpers to extract headers/source IP consistently with
 
 from __future__ import annotations
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.base import RequestResponseEndpoint
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
+from mcp_hangar.auth.infrastructure.middleware import AuthContext, AuthenticationMiddleware
 from mcp_hangar.domain.contracts.authentication import AuthRequest
 from mcp_hangar.domain.exceptions import AccessDeniedError, AuthenticationError
 from mcp_hangar.domain.value_objects import Principal
 from mcp_hangar.infrastructure.identity import TrustedProxyResolver, normalize_http_headers, resolve_source_ip
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.auth.infrastructure.middleware import AuthContext, AuthenticationMiddleware
 
 logger = get_logger(__name__)
 

@@ -1,6 +1,6 @@
 """Tests for Audit Event Handler."""
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 import pytest
 

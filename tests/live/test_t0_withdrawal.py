@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from collections.abc import Generator, Iterator
 from pathlib import Path
-import sys
 from typing import Any, cast
 
 import pytest
@@ -92,6 +92,7 @@ def _hangar_call(base_url: str, api_key: str, tool: str, arguments: dict[str, An
     (``success`` / ``error_type`` / ``result``).
     """
     from mcp import ClientSession
+
     from tests.live._mcp_client import open_mcp_streams
 
     headers = {"X-API-Key": api_key}

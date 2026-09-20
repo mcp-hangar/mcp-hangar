@@ -20,8 +20,8 @@ import pytest
 
 from mcp_hangar.infrastructure.persistence import registry
 from mcp_hangar.infrastructure.persistence.registry import (
-    IncompletePersistenceBackendError,
     REQUIRED_CONCERNS,
+    IncompletePersistenceBackendError,
     UnknownPersistenceBackendError,
     available_backends,
     create_backend,

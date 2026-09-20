@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -287,7 +287,7 @@ def front_door(workdir: Path) -> dict[str, Any]:
 
     from mcp_hangar.gc import ConfigReloadWorker
     from mcp_hangar.server.bootstrap import bootstrap
-    from mcp_hangar.server.lifecycle import _setup_signal_handlers, ServerLifecycle, warm_the_front_door_catalogue
+    from mcp_hangar.server.lifecycle import ServerLifecycle, _setup_signal_handlers, warm_the_front_door_catalogue
 
     keys = _seed_keys(workdir / "auth.db")
     path = workdir / "config.yaml"

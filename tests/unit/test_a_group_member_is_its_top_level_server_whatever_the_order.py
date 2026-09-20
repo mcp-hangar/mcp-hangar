@@ -24,7 +24,7 @@ from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import _StagedConfig, build_config, load_config
-from mcp_hangar.server.state import get_runtime, GROUPS
+from mcp_hangar.server.state import GROUPS, get_runtime
 
 GROUP = "pool"
 MEMBER = "m1"

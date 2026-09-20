@@ -22,7 +22,6 @@ from mcp_hangar.application.commands.crud_commands import (
 )
 from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

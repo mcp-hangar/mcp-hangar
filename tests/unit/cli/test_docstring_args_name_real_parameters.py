@@ -17,8 +17,8 @@ defaults, prose lines and continuation lines are left alone.
 """
 
 import ast
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 

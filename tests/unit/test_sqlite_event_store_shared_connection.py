@@ -18,9 +18,9 @@ File-backed stores open a connection per call and never had either problem.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
 import sys
 import threading
+from collections.abc import Callable, Iterator, Sequence
 
 import pytest
 

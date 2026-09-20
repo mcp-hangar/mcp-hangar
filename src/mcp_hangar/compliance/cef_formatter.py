@@ -10,10 +10,9 @@ Reference: ArcSight Common Event Format (CEF) Rev 25.
 This module is part of the compliance layer.
 """
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
-
 
 # CEF header constants
 CEF_VERSION = "0"

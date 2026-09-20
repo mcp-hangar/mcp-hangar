@@ -19,7 +19,6 @@ sanitized projection.
 
 from mcp_hangar.domain.security.argument_redaction import hash_arguments, redact_arguments
 
-
 GITHUB_PAT_A = "ghp_" + "A" * 36
 GITHUB_PAT_B = "ghp_" + "B" * 36
 JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"

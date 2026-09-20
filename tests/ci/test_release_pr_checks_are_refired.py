@@ -18,8 +18,8 @@ day.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "refire_release_pr_checks.sh"
 _BRANCH = "release-please--branches--main--components--mcp-hangar"

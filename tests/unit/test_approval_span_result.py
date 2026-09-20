@@ -23,10 +23,10 @@ without the SDK. The span tests read the label from a real SDK exporter.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch

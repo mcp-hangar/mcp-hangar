@@ -12,7 +12,7 @@ import pytest
 
 from mcp_hangar.server.bootstrap import ApplicationContext
 from mcp_hangar.server.cli import CLIConfig
-from mcp_hangar.server.lifecycle import _setup_signal_handlers, run_server, ServerLifecycle
+from mcp_hangar.server.lifecycle import ServerLifecycle, _setup_signal_handlers, run_server
 
 
 def _close_run_coro(coro: object, *args: object, **kwargs: object) -> None:

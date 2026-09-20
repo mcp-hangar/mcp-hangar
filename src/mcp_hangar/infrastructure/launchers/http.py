@@ -4,10 +4,11 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import cast
 
-from mcp_hangar.logging_config import get_logger
 from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
 from mcp_hangar.domain.value_objects.provenance import Provenance
+from mcp_hangar.logging_config import get_logger
+
 from .base import McpServerLauncher
 
 logger = get_logger(__name__)

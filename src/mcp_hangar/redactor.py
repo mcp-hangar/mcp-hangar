@@ -18,8 +18,8 @@ always works.
 ``mcp_hangar.domain.security`` for callers that used that surface.
 """
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 
 @dataclass

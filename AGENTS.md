@@ -17,6 +17,7 @@
 ```bash
 # Setup
 uv sync
+git config blame.ignoreRevsFile .git-blame-ignore-revs  # skip bulk reformats in git blame
 
 # Test
 uv run pytest tests/ -x -q

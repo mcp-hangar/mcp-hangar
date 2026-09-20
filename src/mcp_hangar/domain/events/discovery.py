@@ -9,7 +9,6 @@ from .base import DomainEvent
 from .health import McpServerIdleDetected
 from .lifecycle import McpServerDegraded, McpServerStarted, McpServerStateChanged, McpServerStopped
 
-
 # Discovery Events
 
 

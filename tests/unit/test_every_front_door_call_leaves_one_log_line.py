@@ -18,11 +18,11 @@ bridge, the session guard and the handler are the shipped ones.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable, Iterator
 import inspect
 import io
 import json
 import logging
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 

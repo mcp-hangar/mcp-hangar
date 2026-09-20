@@ -34,9 +34,9 @@ from mcp_hangar.domain.events import TaskCreated
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
+from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling, caller_polls_tasks
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, hangar_call
 from mcp_hangar.server.tools.batch.models import CallResult, RelayCapture
-from mcp_hangar.fastmcp_server.task_relay_handlers import bind_task_polling, caller_polls_tasks
 from mcp_hangar.server.tools.batch.relay_seam import _CANCEL_TIMEOUT, govern_relayed_tasks, upstream_task
 from mcp_hangar.tasks_wire import EXTENSION_ID
 

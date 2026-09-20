@@ -47,11 +47,11 @@ import time
 import uuid
 from typing import Any
 
-from mcp_hangar._sdk_compat import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mcp_hangar import __version__
+from mcp_hangar._sdk_compat import FastMCP
 from mcp_hangar.domain.events import InterceptorInvoked
 from mcp_hangar.domain.value_objects.hook import HookPhase
 from mcp_hangar.infrastructure.event_bus import get_event_bus

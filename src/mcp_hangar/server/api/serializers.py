@@ -10,7 +10,7 @@ Provides:
 import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from starlette.responses import JSONResponse
 

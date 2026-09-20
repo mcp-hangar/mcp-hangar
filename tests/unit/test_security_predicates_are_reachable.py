@@ -28,15 +28,15 @@ the client starts, so every thread the served app starts inherits it.
 
 from __future__ import annotations
 
+import inspect
+import json
+import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import inspect
-import json
 from pathlib import Path
-import sys
-import threading
 from types import FrameType
 from typing import Any
 

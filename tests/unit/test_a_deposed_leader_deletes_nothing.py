@@ -174,9 +174,8 @@ class TestTheCallPath:
         assert "Provenance.DISCOVERY" in source
 
     async def test_the_handler_fences_a_discovery_deletion_and_not_an_operators(self) -> None:
-        from mcp_hangar.application.commands.crud_commands import DeleteMcpServerCommand
+        from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
         from mcp_hangar.application.commands.crud_handlers import CreateMcpServerHandler, DeleteMcpServerHandler
-        from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand
         from mcp_hangar.domain.repository import InMemoryMcpServerRepository
         from mcp_hangar.domain.value_objects.provenance import Provenance
 

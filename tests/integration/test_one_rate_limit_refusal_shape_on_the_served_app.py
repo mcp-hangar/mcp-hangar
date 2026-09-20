@@ -21,9 +21,9 @@ Naming: neutral placeholders only (store, read_item, tenant:a).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-import json
 from typing import Any
 
 from mcp_hangar.bootstrap.runtime import install_command_bus_rate_limit
@@ -32,7 +32,7 @@ from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
 from mcp_hangar.domain.security.rate_limiter import reset_rate_limiter
 from mcp_hangar.infrastructure.caller_rate_limit import reset_caller_rate_limit
 from mcp_hangar.server.context import get_context
-from tests.integration._front_door_harness import FrontDoor, front_door, jsonrpc, SERVER, TENANT_A
+from tests.integration._front_door_harness import SERVER, TENANT_A, FrontDoor, front_door, jsonrpc
 
 READ = "read_item"
 

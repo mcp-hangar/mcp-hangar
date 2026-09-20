@@ -83,8 +83,8 @@ class TestGeneratedClientEntryStarts:
 
         from mcp_hangar.server.cli.main import app
         from mcp_hangar.server.cli.services.mcp_clients import (
-            client_by_key,
             HANGAR_ENTRY_NAME,
+            client_by_key,
             write_hangar_entry,
         )
 

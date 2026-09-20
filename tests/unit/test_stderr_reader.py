@@ -7,11 +7,10 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
+from mcp_hangar.domain.model.provider import McpServer
 
 from mcp_hangar.domain.contracts.log_buffer import IProviderLogBuffer
-from mcp_hangar.domain.model.provider import McpServer
 from mcp_hangar.infrastructure.persistence.log_buffer import ProviderLogBuffer
-
 
 # ---------------------------------------------------------------------------
 # Helpers

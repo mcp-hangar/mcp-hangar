@@ -10,7 +10,6 @@ from typing import Any, Final
 
 from ..discovery.discovery_source import DiscoveryMode
 
-
 #: Namespace for ids derived from a source declared in `config.yaml`. A source
 #: registered through the API gets a fresh UUID; one declared in configuration
 #: has no natural identity, so it gets a stable one derived from its type --

@@ -16,11 +16,11 @@ section is ``tests/unit/test_a_reload_applies_the_whole_configuration.py``.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

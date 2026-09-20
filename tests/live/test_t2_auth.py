@@ -24,11 +24,11 @@ the whole module SKIPs rather than fails. Run with::
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from pathlib import Path
 import json
 import sys
 import time
+from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import jwt
