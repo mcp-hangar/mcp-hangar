@@ -79,6 +79,8 @@ def ctx():
     group = Mock()
     group.select_member_for.return_value = member
     group.select_member.return_value = member
+    # Drained after the call reports its outcome (#1410).
+    group.collect_events.return_value = []
 
     context = Mock()
     context.event_bus = Mock()

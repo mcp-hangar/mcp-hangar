@@ -30,6 +30,10 @@ class RecordingEventBus(IEventBus):
     def publish(self, event: object) -> None:
         self.published.append(event)
 
+    def publish_local(self, event: object) -> None:
+        # Delivered and not recorded, so it joins `published` and no stream.
+        self.published.append(event)
+
     def publish_aggregate_events(self, aggregate_type: str, aggregate_id: str, events: list) -> int:
         # Records the stream it was told to append to as well as the events, so
         # a caller naming the wrong aggregate is visible to a test rather than

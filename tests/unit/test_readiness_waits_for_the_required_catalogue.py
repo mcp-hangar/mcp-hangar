@@ -860,7 +860,8 @@ class TestARefusedColdStartIsCodedAsTheExecutorsOwnRefusal:
         fleet = _Fleet()
         with fleet.server._lock:
             fleet.server._mark_dead(DEAD_CAPABILITY_BLOCKED)
-        pipeline = _pipeline(SimpleNamespace(command_bus=fleet.bus), "cold")
+        # `event_bus`: reporting the refusal to the group drains it (#1410).
+        pipeline = _pipeline(SimpleNamespace(command_bus=fleet.bus, event_bus=MagicMock()), "cold")
         pipeline.is_group = True
         pipeline.group_obj = MagicMock()
 

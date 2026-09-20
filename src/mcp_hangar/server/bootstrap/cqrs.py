@@ -258,7 +258,8 @@ def init_saga(full_config: dict[str, Any] | None = None) -> None:
     # and is pointed at `GROUPS` only at the end. The saga kept the empty one,
     # found no group for any member, and so no passing health check ever put a
     # member back in rotation (#1355).
-    group_saga = GroupRebalanceSaga(groups=GROUPS)
+    # The bus, so a group drains on the check that changed it (#1410).
+    group_saga = GroupRebalanceSaga(groups=GROUPS, event_bus=ctx.event_bus)
     ctx.group_rebalance_saga = group_saga
     set_group_rebalance_saga(group_saga)
     saga_manager.register_event_saga(group_saga)

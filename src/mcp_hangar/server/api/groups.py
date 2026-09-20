@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...application.group_events import publish_group_events
 from ...application.commands.crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -71,6 +72,10 @@ async def rebalance_group(request: Request) -> HangarJSONResponse:
     if group is None:
         raise McpServerNotFoundError(mcp_server_id=group_id)
     await run_in_threadpool(group.rebalance)
+    # On this request, as the tool surface does (#1410). Both rebalance the
+    # same aggregate, so one of them draining and the other not would make
+    # whether an operator hears about it depend on which surface they used.
+    await run_in_threadpool(publish_group_events, ctx.event_bus, group)
     return HangarJSONResponse({"status": "rebalanced", "group_id": group_id})
 
 

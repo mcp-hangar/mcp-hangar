@@ -259,7 +259,9 @@ class TestDigestPinAtColdStartThroughAGroup:
             has_tools=False,
             health=Mock(should_degrade=Mock(return_value=False)),
         )
-        group = Mock(select_member_for=Mock(return_value=member))
+        # `collect_events`: the executor drains the group after reporting the
+        # call's outcome to it (#1410), and a real aggregate hands back a list.
+        group = Mock(select_member_for=Mock(return_value=member), collect_events=Mock(return_value=[]))
 
         # The group id resolves to no server -- that is what makes it a group.
         mock_context.get_mcp_server.side_effect = lambda server_id: None if server_id == _GROUP else member

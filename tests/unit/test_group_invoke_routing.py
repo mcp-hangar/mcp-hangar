@@ -86,6 +86,8 @@ class TestGroupInvokeRouting:
     def test_group_call_dispatches_to_selected_member(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
+        # Drained after the call reports its outcome (#1410).
+        group.collect_events.return_value = []
         group.select_member_for.return_value = _member(_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
@@ -103,6 +105,8 @@ class TestGroupInvokeRouting:
     def test_group_with_no_available_member_fails_cleanly(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
+        # Drained after the call reports its outcome (#1410).
+        group.collect_events.return_value = []
         group.select_member_for.return_value = None  # all members out of rotation / circuit open
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
@@ -120,6 +124,8 @@ class TestCanaryRoutingAndHealthFeedback:
     def test_tenant_id_is_passed_to_member_selection(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
+        # Drained after the call reports its outcome (#1410).
+        group.collect_events.return_value = []
         group.select_member_for.return_value = _member(_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
@@ -132,6 +138,8 @@ class TestCanaryRoutingAndHealthFeedback:
     def test_successful_call_reports_member_success(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
+        # Drained after the call reports its outcome (#1410).
+        group.collect_events.return_value = []
         group.select_member_for.return_value = _member(_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
@@ -145,6 +153,8 @@ class TestCanaryRoutingAndHealthFeedback:
     def test_failed_call_reports_member_failure(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
+        # Drained after the call reports its outcome (#1410).
+        group.collect_events.return_value = []
         group.select_member_for.return_value = _member(_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
