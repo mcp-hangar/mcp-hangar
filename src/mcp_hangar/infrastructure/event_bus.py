@@ -292,6 +292,46 @@ class EventBus(IEventBus):
         # event ever written about the same server.
         self.publish_to_stream(stream_id, [event], APPEND_AT_END)
 
+    def publish_local(self, event: DomainEvent) -> None:
+        """Deliver an event about **this replica's own** state, and keep no record of it.
+
+        For a fact that is true of this process rather than of the aggregate
+        it names: which members this pod is routing to, and whether this pod's
+        circuit breaker is open. Three replicas serving one group have three
+        rotations and three breakers (#1358), so "the circuit opened" is not a
+        statement about the group, and the group's stream is not where it
+        belongs. `application.group_events` decides which events these are and
+        is the only caller.
+
+        This is not the `publish`-that-forgets that #772 deleted, and the
+        difference is the whole reason it may exist. That one was a second
+        general-purpose door: two methods for the same events, one of which
+        silently kept no record, and 34 call sites took the forgetful one. This
+        one is for a class of event that has no record to keep, it says so in
+        its name, and a test pins which events reach it. An event published
+        here is delivered exactly as `publish` delivers it -- every handler
+        this replica registered, effects included -- so nothing that listens
+        today hears less.
+
+        Not appending them is also what keeps a peer from applying another
+        replica's breaker transitions by construction: the tailer can only
+        deliver what is in the log.
+
+        Args:
+            event: The domain event to deliver here and nowhere else.
+
+        Raises:
+            TypeError: If given something that is not a DomainEvent.
+        """
+        if not isinstance(event, DomainEvent):
+            # As `publish` does, and for the same reason: a delivery to no one
+            # is worse than a crash.
+            raise TypeError(
+                f"publish_local() takes a single DomainEvent, got {type(event).__name__}. "
+                "To publish several, call publish_local() for each."
+            )
+        self._deliver(event)
+
     def deliver_tailed(self, event: DomainEvent) -> None:
         """Hand an event this instance did **not** produce to its projections.
 

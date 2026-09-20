@@ -23,6 +23,7 @@ from typing import Any, cast, Literal, TypeVar
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
+from ....application.group_events import publish_group_events
 from ....application.services.mutator_pipeline import MutatorPipeline
 from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
 from ....application.services.validator_pipeline import ValidatorPipeline
@@ -2019,13 +2020,22 @@ class BatchExecutor:
 
     @staticmethod
     def _report_member(p: "_CallPipeline", outcome: MemberOutcome) -> None:
-        """Tell a group what *outcome* says about the member that took the call (#1409)."""
+        """Tell a group what *outcome* says about the member that took the call (#1409).
+
+        Then drain it, so what the group made of the outcome -- a member out of
+        rotation, the circuit opened -- reaches a subscriber on this call rather
+        than on whenever somebody next edits the group (#1410).
+        """
         if not (p.is_group and p.group_obj is not None):
             return
         if outcome is MemberOutcome.HEALTHY:
             p.group_obj.report_success(p.target_server_id)
         elif outcome is MemberOutcome.UNHEALTHY:
             p.group_obj.report_failure(p.target_server_id)
+        else:
+            # UNJUDGED: the group was told nothing, so it recorded nothing.
+            return
+        publish_group_events(p.ctx.event_bus, p.group_obj)
 
     @staticmethod
     def _refused_start(p: "_CallPipeline", e: CannotStartMcpServerError) -> CallResult:

@@ -3,8 +3,9 @@
 Run as a script, in its own interpreter, by
 ``test_a_passing_health_check_returns_a_member_to_rotation.py``,
 ``test_scattered_health_check_failures_do_not_open_a_group_circuit.py``,
-``test_each_replica_exposes_its_group_circuit.py`` and
-``test_a_caller_error_does_not_count_against_a_group_member.py``:
+``test_each_replica_exposes_its_group_circuit.py``,
+``test_a_caller_error_does_not_count_against_a_group_member.py`` and
+``test_a_groups_events_reach_a_subscriber_on_the_call.py``:
 ``python _group_recovery_harness.py <mode> <out.json>``. Not collected by pytest.
 
 A separate process because ``bootstrap()`` fills process-global state -- the
@@ -43,6 +44,9 @@ Modes:
   admits one call. The calls after it are refused by Hangar, before the member
   is asked (#1409). The rate limit refuses ``hangar_group_list`` too, so this
   mode reads the group in this process.
+- ``events``: a one-member group failed out by calls and brought back by a
+  health check, recording the group events an ordinary subscriber has heard by
+  the time each call returned (#1410).
 
 ``single`` and ``pair`` also scrape ``mcp_hangar_group_circuit_open`` from the
 endpoint ``serve --http`` mounts at ``/metrics`` (#1357). They scrape right after
@@ -77,6 +81,7 @@ MEMBERS = {
     "scattered": ["math-a"],
     "caller": ["math-a"],
     "rate_limited": ["math-a"],
+    "events": ["math-a"],
 }
 #: The member whose upstream is healthy again by the time the worker runs.
 RECOVERING = "math-a"
@@ -374,6 +379,50 @@ def _rate_limited(client: Any, report: dict[str, Any]) -> None:
     ]
 
 
+def _events(
+    context: Any,
+    client: Any,
+    report: dict[str, Any],
+    flag: Path,
+    seen: list[dict[str, Any]],
+    passed: dict[str, int],
+) -> None:
+    """Fail the member out through calls, then let a health check bring it back (#1410).
+
+    Snapshots, after every call and after the recovery, the group events a
+    subscriber has heard *by then*. A call returns to this process only once
+    the served app has answered it, so an event in the snapshot taken after a
+    call is one that went out during that call. The tests read the snapshots as
+    deltas; the first of them also carries whatever config loading left on the
+    aggregate, which nothing drained before the first call either.
+    """
+    from mcp_hangar.server.state import GROUPS
+
+    report["calls"]["before"] = _call(client, "add", {"a": 1, "b": 2})
+    report["events"] = {"before": list(seen)}
+
+    # Two failures: the first counts against the member and changes nothing
+    # anyone can see, the second takes it out of rotation and opens the circuit.
+    flag.touch()
+    report["failures"] = []
+    for _ in range(2):
+        call = _call(client, "add", {"a": 1, "b": 2})
+        report["failures"].append({"call": call, "events": list(seen), "status": _status(client)})
+    flag.unlink()
+    report["events"]["tripped"] = list(seen)
+
+    worker = _worker(context, "health_check")
+    worker.start()
+    member = GROUPS[GROUP].get_member(RECOVERING)
+    deadline = time.monotonic() + DEADLINE_S
+    while time.monotonic() < deadline and not member.in_rotation and passed.get(RECOVERING, 0) < 3:
+        time.sleep(0.05)
+    worker.stop()
+
+    report["events"]["recovered"] = list(seen)
+    report["status"]["after"] = _status(client)
+
+
 def main(mode: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
 
@@ -405,6 +454,7 @@ def main(mode: str, out: Path) -> None:
     passed: dict[str, int] = {}
     stopped: list[list[str]] = []
     checks: list[dict[str, Any]] = []
+    seen: list[dict[str, Any]] = []
 
     def observe(event: DomainEvent) -> None:
         if isinstance(event, HealthCheckPassed):
@@ -414,6 +464,17 @@ def main(mode: str, out: Path) -> None:
         if mode == "scattered" and isinstance(event, (HealthCheckPassed, HealthCheckFailed)):
             checks.append(_after_check(isinstance(event, HealthCheckPassed)))
             _steer(flag, len(checks))
+        # Every event this group raised, as an ordinary subscriber hears it
+        # (#1410). Nothing here asks the group anything: the fields are read off
+        # the event, which is the whole point of publishing it.
+        if mode == "events" and getattr(event, "group_id", None) == GROUP:
+            seen.append(
+                {
+                    "type": type(event).__name__,
+                    "member_id": getattr(event, "member_id", None),
+                    "in_rotation": getattr(event, "in_rotation", None),
+                }
+            )
 
     # Watches only. Subscribed after the saga manager, so it hears an event
     # after the saga has.
@@ -432,6 +493,8 @@ def main(mode: str, out: Path) -> None:
             _caller(client, report, flag)
         elif mode == "rate_limited":
             _rate_limited(client, report)
+        elif mode == "events":
+            _events(context, client, report, flag, seen, passed)
         else:
             _recover(context, client, metrics, report, mode, passed, flag)
 

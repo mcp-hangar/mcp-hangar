@@ -110,3 +110,18 @@ class IEventBus(ABC):
         Returns:
             The stream version after the append.
         """
+
+    @abstractmethod
+    def publish_local(self, event: DomainEvent) -> None:
+        """Deliver an event about this replica's own state, without recording it.
+
+        On the port because the application layer is what needs it: a group's
+        rotation and circuit breaker live in each replica's memory, so the
+        events a group raises about them are true of this process and not of
+        the group. `application.group_events` decides which events those are.
+
+        Delivery is identical to `publish`; only the append is left out.
+
+        Args:
+            event: The domain event to deliver here and nowhere else.
+        """

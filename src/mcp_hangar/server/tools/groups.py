@@ -5,6 +5,7 @@ Uses ApplicationContext for dependency injection (DIP).
 
 from mcp_hangar._sdk_compat import FastMCP
 
+from ...application.group_events import publish_group_events
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
 from ..validation import not_rate_limited, RateLimited, tool_error_hook, tool_error_mapper, validate_group_id_input
@@ -119,6 +120,10 @@ def register_group_tools(mcp: FastMCP) -> None:
         g = ctx.get_group(group)
         assert g is not None
         g.rebalance()
+        # What the rebalance changed goes out now, not on the group's next
+        # edit (#1410). The reply below is read from the same group, so a
+        # subscriber and the caller see one state.
+        publish_group_events(ctx.event_bus, g)
 
         in_rotation = [m.id for m in g.members if m.in_rotation]
         return {

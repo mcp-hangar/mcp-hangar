@@ -42,6 +42,8 @@ def _make_mock_group(
 ) -> Mock:
     """Create a mock ProviderGroup."""
     group = Mock()
+    # Rebalancing drains the group (#1410); a real aggregate hands back a list.
+    group.collect_events.return_value = []
     group.id = group_id
     group.strategy = Mock()
     group.strategy.value = strategy

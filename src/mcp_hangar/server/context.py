@@ -51,6 +51,14 @@ class IEventBus(Protocol):
         """Publish an event."""
         ...
 
+    def publish_local(self, event: Any) -> None:
+        """Deliver an event about this replica's own state, without recording it."""
+        ...
+
+    def publish_aggregate_events(self, aggregate_type: str, aggregate_id: str, events: list[Any]) -> int:
+        """Append an aggregate's events to its stream, then publish them."""
+        ...
+
     def subscribe_to_all(self, handler: Any, *, kind: HandlerKind) -> None:
         """Subscribe to all events.
 

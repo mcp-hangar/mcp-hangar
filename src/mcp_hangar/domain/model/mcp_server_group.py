@@ -282,9 +282,11 @@ class McpServerGroup(AggregateRoot):
         Every transition goes through the breaker's state-change callback:
         opening on failures in a row, closing at ``min_healthy``,
         ``rebalance()``'s reset. So the listener hears each one, on the path
-        that made it (#1357). The group's own events cannot do that: nothing
-        drains them on the call path or in the health checks, so they never
-        reach the bus from either.
+        that made it (#1357), including transitions no domain event is recorded
+        for. The group's own events could not do that when this was written --
+        nothing drained them on the call path or in the health checks -- and
+        since #1410 every such path drains, so they now go out at the same
+        moment this listener is called.
 
         Under the group's lock, so the state handed over now cannot land after
         a transition that followed it.

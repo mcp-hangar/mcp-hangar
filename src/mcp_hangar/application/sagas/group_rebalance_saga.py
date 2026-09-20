@@ -27,6 +27,7 @@ from ...domain.events import (
 from ...application.ports.saga import EventTriggeredSaga
 from ...logging_config import get_logger
 from ..commands import Command
+from ..group_events import publish_group_events
 
 if TYPE_CHECKING:
     from ...domain.model.mcp_server_group import McpServerGroup
@@ -48,6 +49,7 @@ class GroupRebalanceSaga(EventTriggeredSaga):
         self,
         group_lookup: Callable[[str], str | None] | None = None,
         groups: dict[str, McpServerGroup] | None = None,
+        event_bus: Any = None,
     ):
         """
         Initialize the saga.
@@ -58,10 +60,14 @@ class GroupRebalanceSaga(EventTriggeredSaga):
                           without a groups mapping.
             groups: The live groups mapping -- the one members are added to,
                     not a copy -- for applying changes.
+            event_bus: Where a group's events go once this saga has reported to
+                       it (#1410). Without one the saga still reports, and the
+                       events wait on the aggregate as they did before.
         """
         super().__init__()
         self._group_lookup = group_lookup
         self._groups = groups
+        self._event_bus = event_bus
         self._member_to_group: dict[str, str] = {}
 
     @property
@@ -128,6 +134,12 @@ class GroupRebalanceSaga(EventTriggeredSaga):
 
         for group_id, group in self._groups_of(mcp_server_id):
             self._apply(event, mcp_server_id, group_id, group)
+            # On this check, not on whenever the group is next edited (#1410).
+            # A passing check that returns a member to rotation and closes the
+            # circuit is the case that matters: nothing else was going to
+            # publish it, and a restart lost it.
+            if group is not None and self._event_bus is not None:
+                publish_group_events(self._event_bus, group)
 
         return []
 

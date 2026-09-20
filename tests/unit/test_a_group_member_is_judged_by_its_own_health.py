@@ -307,6 +307,9 @@ def group_call() -> Iterator[GroupCall]:
     ctx.get_mcp_server.return_value = None  # a group is not in the server repository
     ctx.mcp_server_exists.return_value = False
     group = Mock()
+    # The executor drains the group after reporting to it (#1410). A real
+    # aggregate hands back a list; this double is only asked what it heard.
+    group.collect_events.return_value = []
 
     def run(
         invoke: BaseException | None = None, start: BaseException | None = None, state: str = "ready", retries: int = 1

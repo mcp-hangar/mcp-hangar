@@ -5,11 +5,15 @@ is that listener. The two places a group starts being served attach it: loading
 the config at bootstrap, and ``GroupCreated`` from the group API.
 ``MetricsEventHandler`` drops a deleted group's series.
 
-The listener writes directly, not through the bus. On the call path and in the
-health checks nothing drains a group's events, so its circuit events never
-reach the bus from either. And putting breaker transitions on the shared log is
-the design #1358 defers. The gauge is replica-local on purpose (#1380), and so
-is what writes it.
+The listener writes directly, not through the bus. It was built that way
+because nothing drained a group's events on the call path or in the health
+checks, so its circuit events never reached the bus from either; #1410 fixed
+that, and they do now. It stays that way because the gauge is replica-local on
+purpose (#1380) and the callback is the only source that cannot be anything
+else: it fires for every transition of this pod's breaker, including ones no
+domain event is recorded for. The events say the same thing and are published
+locally for the same reason -- putting breaker transitions on the shared log is
+the design #1358 defers.
 """
 
 from __future__ import annotations
