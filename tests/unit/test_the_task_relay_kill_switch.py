@@ -17,16 +17,16 @@ code called; it now calls the same two wiring functions `server/bootstrap` calls
 (#956).
 """
 
+import pytest
+
 from mcp_hangar import __version__, tasks_wire
 from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS, lowlevel_server, new_mcp_server
-from mcp_hangar.protocol import HANGAR_SERVER_NAME
 from mcp_hangar.fastmcp_server.task_relay_wiring import (
     advertise_tasks_capability,
     enable_governed_task_relay,
 )
+from mcp_hangar.protocol import HANGAR_SERVER_NAME
 from mcp_hangar.server.context import get_context, reset_context
-
-import pytest
 
 # The SEP-2663 method set, sourced from the wire module so this file cannot claim
 # a surface the server does not serve. `tasks/result` and `tasks/list` are absent:

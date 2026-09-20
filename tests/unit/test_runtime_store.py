@@ -1,7 +1,7 @@
 """Tests for the runtime provider store."""
 
-from datetime import datetime
 import threading
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest

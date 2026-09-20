@@ -8,7 +8,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
 
-from ...application.group_events import publish_group_events
 from ...application.commands.crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -16,11 +15,12 @@ from ...application.commands.crud_commands import (
     RemoveGroupMemberCommand,
     UpdateGroupCommand,
 )
+from ...application.group_events import publish_group_events
 from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
-from .serializers import HangarJSONResponse
 from .request_body import missing_fields
+from .serializers import HangarJSONResponse
 
 
 async def list_groups(request: Request) -> HangarJSONResponse:

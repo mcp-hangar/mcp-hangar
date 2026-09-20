@@ -14,17 +14,17 @@ Naming: neutral placeholders only (store, read_item, tenant:a, tenant:b).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 import json
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from mcp_hangar.bootstrap.runtime import install_command_bus_rate_limit
 from mcp_hangar.domain.security.rate_limiter import reset_rate_limiter
 from mcp_hangar.infrastructure.caller_rate_limit import reset_caller_rate_limit
 from mcp_hangar.server.context import get_context
-from tests.integration._front_door_harness import FrontDoor, front_door, jsonrpc, SERVER, TENANT_A, TENANT_B
+from tests.integration._front_door_harness import SERVER, TENANT_A, TENANT_B, FrontDoor, front_door, jsonrpc
 
 READ = "read_item"
 

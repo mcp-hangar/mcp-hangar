@@ -7,12 +7,12 @@ from unittest.mock import Mock, patch
 import pytest
 import yaml
 
-from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
-from mcp_hangar.server.config import ServerConfigLoader
 from mcp_hangar.application.commands import ReloadConfigurationCommand
+from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
 from mcp_hangar.domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.model import McpServer
+from mcp_hangar.server.config import ServerConfigLoader
 
 
 class TestReloadConfigurationHandler:

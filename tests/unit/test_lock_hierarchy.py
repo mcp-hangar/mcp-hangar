@@ -5,12 +5,12 @@ import threading
 import pytest
 
 from mcp_hangar.lock_hierarchy import (
-    clear_thread_locks,
-    get_current_thread_locks,
     LockLevel,
     LockOrderViolation,
     TrackedLock,
     TrackedRLock,
+    clear_thread_locks,
+    get_current_thread_locks,
 )
 
 

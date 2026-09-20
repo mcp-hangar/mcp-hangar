@@ -9,11 +9,11 @@ answers queries by ``service.instance.id``, so each run reads only its own data.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import threading
-import time
 from typing import Any, TypeVar
 
 import pytest

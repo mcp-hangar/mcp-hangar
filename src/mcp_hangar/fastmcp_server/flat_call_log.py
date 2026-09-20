@@ -67,11 +67,11 @@ INFO, the level a ``hangar_call`` call reaches the log at (``domain_event`` for
 
 from __future__ import annotations
 
+import functools
+import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-import functools
-import time
 from typing import Any
 
 from mcp_hangar._sdk_compat import METHOD_NOT_FOUND, CallToolResult, McpError

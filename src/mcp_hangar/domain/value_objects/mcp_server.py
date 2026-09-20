@@ -9,9 +9,9 @@ Contains:
 - GroupId, MemberWeight, MemberPriority - group value objects
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
 from typing import Any
 
 

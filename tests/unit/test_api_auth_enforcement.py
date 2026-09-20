@@ -12,7 +12,6 @@ from starlette.testclient import TestClient
 
 from mcp_hangar.server.api.router import create_api_router
 
-
 # ---------------------------------------------------------------------------
 # Helper: stub auth_components
 # ---------------------------------------------------------------------------
@@ -146,8 +145,9 @@ class TestCheckPermissionEnforcement:
     """
 
     def test_check_permission_enforces_when_authz_is_wired(self, monkeypatch):
-        import pytest
         from unittest.mock import MagicMock
+
+        import pytest
 
         from mcp_hangar.server.api import mcp_servers as api
 
@@ -206,8 +206,9 @@ class TestCheckPermissionEnforcement:
 
     def test_check_permission_still_denies_anonymous_when_auth_is_enabled(self, monkeypatch):
         """The other half of #600: enabling auth must not fail open."""
-        import pytest
         from unittest.mock import MagicMock
+
+        import pytest
 
         from mcp_hangar.domain.exceptions import MissingCredentialsError
         from mcp_hangar.server.api import mcp_servers as api

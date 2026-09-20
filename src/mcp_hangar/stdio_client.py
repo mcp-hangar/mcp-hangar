@@ -1,15 +1,15 @@
 """Thread-safe stdio client with proper message correlation."""
 
-from dataclasses import dataclass
 import json
 import os
-from queue import Empty, Queue
 import select
 import subprocess
 import threading
 import time
-from typing import Any, TYPE_CHECKING
 import uuid
+from dataclasses import dataclass
+from queue import Empty, Queue
+from typing import TYPE_CHECKING, Any
 
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError

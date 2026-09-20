@@ -7,10 +7,15 @@ import threading
 
 import structlog
 
-from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IRoleStore
 from mcp_hangar.auth.roles import BUILTIN_ROLES
+from mcp_hangar.domain.contracts.authorization import (
+    AuthorizationRequest,
+    AuthorizationResult,
+    IAuthorizer,
+    IRoleStore,
+    validate_role_scope,
+)
 from mcp_hangar.domain.value_objects import Permission, Principal, Role
-from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -317,8 +322,8 @@ class InMemoryRoleStore(IRoleStore):
 
     def delete_role(self, role_name: str) -> None:
         """Delete a custom role and its assignments."""
-        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
         from mcp_hangar.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
 
         with self._lock:
             if role_name in BUILTIN_ROLES:
@@ -339,8 +344,8 @@ class InMemoryRoleStore(IRoleStore):
         description: str | None,
     ) -> Role:
         """Update a custom role's permissions and description."""
-        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
         from mcp_hangar.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
 
         with self._lock:
             if role_name in BUILTIN_ROLES:

@@ -15,8 +15,8 @@ from __future__ import annotations
 import contextvars
 
 from mcp_hangar.negotiation import (
-    get_current_protocol_negotiation,
     ProtocolNegotiation,
+    get_current_protocol_negotiation,
     read_protocol_negotiation,
     set_current_protocol_negotiation,
 )

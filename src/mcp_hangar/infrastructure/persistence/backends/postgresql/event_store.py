@@ -44,18 +44,17 @@ uses instead, and for the measurement that ruled out the obvious alternative.
 settled log by position is still exactly right.
 """
 
-from collections.abc import Iterator
-from datetime import datetime, UTC
 import json
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore, TailCursor
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.exceptions import CompactionError
-from mcp_hangar.logging_config import get_logger
-
 from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.infrastructure.persistence.event_serializer import EventSerializer
+from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 

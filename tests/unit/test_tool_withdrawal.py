@@ -23,7 +23,6 @@ from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_re
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

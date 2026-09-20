@@ -125,7 +125,7 @@ def _a_real_certificate() -> str:
     The bundle test has to load something OpenSSL accepts; a hand-written PEM
     is a fixture that fails for reasons unrelated to the thing under test.
     """
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
 
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization

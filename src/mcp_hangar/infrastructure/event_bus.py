@@ -4,22 +4,21 @@ The event bus allows decoupled communication between components via domain event
 Supports optional event persistence via IEventStore.
 """
 
-from collections.abc import Callable
 import threading
+from collections.abc import Callable
 from typing import Final
 
 from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
-from mcp_hangar.domain.contracts.event_bus import IEventBus
+from mcp_hangar.domain.contracts.event_bus import HandlerKind, IEventBus
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
-from mcp_hangar.stream_ids import stream_id_for, stream_id_for_event
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_error
 from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
+from mcp_hangar.stream_ids import stream_id_for, stream_id_for_event
 
 logger = get_logger(__name__)
 

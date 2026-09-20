@@ -25,19 +25,19 @@ is not this checkout's, fails it (``tests/_hangar_executable.py``). Run with::
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass
 import json
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 
 import httpx
 import pytest
 
-from tests.live import _group_support as gs
 from tests._hangar_executable import hangar_executable
-from tests.live.conftest import _free_port, _MATH_SERVER, _POLL_INTERVAL_S, _STARTUP_TIMEOUT_S
+from tests.live import _group_support as gs
+from tests.live.conftest import _MATH_SERVER, _POLL_INTERVAL_S, _STARTUP_TIMEOUT_S, _free_port
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -194,6 +194,7 @@ def _mcp_call(harness: _AccessHarness, tool: str, arguments: dict) -> object:
     import asyncio
 
     from mcp import ClientSession
+
     from tests.live._mcp_client import open_mcp_streams
 
     headers = {"X-API-Key": harness.api_key}

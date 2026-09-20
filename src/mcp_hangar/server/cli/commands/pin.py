@@ -41,9 +41,9 @@ import os
 from pathlib import Path
 from typing import Annotated
 
-from rich.console import Console
 import typer
 import yaml
+from rich.console import Console
 
 from ..services.pinning import (
     Observation,

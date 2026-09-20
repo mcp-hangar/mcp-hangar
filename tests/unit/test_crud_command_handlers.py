@@ -17,18 +17,8 @@ Tests cover:
 from unittest.mock import MagicMock
 
 import pytest
-
-from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerUpdated
-from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
 from mcp_hangar.domain.model.provider import McpServer
-from mcp_hangar.domain.model.mcp_server_group import (
-    GroupCreated,
-    GroupDeleted,
-    GroupUpdated,
-    McpServerGroup,
-)
-from mcp_hangar.domain.repository import InMemoryMcpServerRepository
-from mcp_hangar.domain.value_objects import ProviderState
+
 from mcp_hangar.application.commands.crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -49,7 +39,16 @@ from mcp_hangar.application.commands.crud_handlers import (
     UpdateGroupHandler,
     UpdateProviderHandler,
 )
-
+from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerUpdated
+from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
+from mcp_hangar.domain.model.mcp_server_group import (
+    GroupCreated,
+    GroupDeleted,
+    GroupUpdated,
+    McpServerGroup,
+)
+from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.value_objects import ProviderState
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,7 +1,8 @@
 """Tests for outbound W3C TraceContext injection in HTTP provider calls."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestHttpTraceContextInjection:
@@ -39,10 +40,10 @@ class TestHttpTraceContextInjection:
     @pytest.mark.otel_sdk
     def test_outbound_headers_contain_traceparent_when_trace_active(self) -> None:
         """Headers passed to HTTP request include traceparent when an active trace exists."""
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
         from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
         from mcp_hangar.http_client import AuthConfig, HttpClient, HttpClientConfig
 
@@ -100,6 +101,7 @@ class TestStdioTraceContextInjection:
     @staticmethod
     def _mock_client():
         import subprocess
+
         from mcp_hangar.stdio_client import StdioClient
 
         mock_popen = MagicMock(spec=subprocess.Popen)
@@ -117,8 +119,8 @@ class TestStdioTraceContextInjection:
         import json
         from queue import Queue
 
-        from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
 
         client, mock_popen = self._mock_client()
 
@@ -147,8 +149,8 @@ class TestStdioTraceContextInjection:
         """Injecting `_meta` must not mutate the caller's params dict."""
         from queue import Queue
 
-        from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
 
         client, _ = self._mock_client()
         caller_params: dict = {"name": "t", "arguments": {}}

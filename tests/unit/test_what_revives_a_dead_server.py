@@ -25,10 +25,10 @@ from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import HealthCheckPassed, McpServerDeregistered, McpServerStarted, McpServerStateChanged
 from mcp_hangar.domain.exceptions import CannotStartMcpServerError, McpServerStartError
 from mcp_hangar.domain.model.mcp_server import DEAD_CAPABILITY_BLOCKED, DEAD_CRASHED, DEAD_GIVEN_UP, McpServer
-from mcp_hangar.infrastructure.observability.metrics_event_handler import remove_series_of_deregistered
 from mcp_hangar.domain.model.mcp_server_group import GroupMemberHealthChanged, McpServerGroup
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.value_objects import McpServerState
+from mcp_hangar.infrastructure.observability.metrics_event_handler import remove_series_of_deregistered
 from tests.unit.test_a_given_up_server_reads_dead import _Fleet, _pipeline, _scraped, _state_changes
 
 DEAD = McpServerState.DEAD

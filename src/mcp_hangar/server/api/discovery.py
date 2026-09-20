@@ -5,7 +5,6 @@ sources, pending mcp_servers, quarantined mcp_servers, approve/reject.
 """
 
 from starlette.requests import Request
-
 from starlette.routing import Route
 
 from ...application.commands.discovery_commands import (
@@ -19,9 +18,8 @@ from ...domain.discovery import DiscoveryMode
 from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
-from .serializers import HangarJSONResponse
 from .request_body import missing_fields
-
+from .serializers import HangarJSONResponse
 
 #: The discovery source-management surface (register/update/deregister a source,
 #: trigger a scan, toggle enabled) ships in 2.5.0 as **Preview**, not GA: it was

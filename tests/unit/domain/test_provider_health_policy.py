@@ -9,8 +9,6 @@ Covers all public functions and the private _normalize_state helper:
 """
 
 import pytest
-
-from mcp_hangar.domain.value_objects import HealthStatus, ProviderState
 from mcp_hangar.domain.policies.provider_health import (
     ProviderHealthClassification,
     _normalize_state,
@@ -18,6 +16,8 @@ from mcp_hangar.domain.policies.provider_health import (
     classify_provider_health_from_provider,
     to_health_status_string,
 )
+
+from mcp_hangar.domain.value_objects import HealthStatus, ProviderState
 
 
 class _FakeHealth:

@@ -3,11 +3,11 @@
 import pytest
 
 from mcp_hangar.domain.contracts.mutator import (
+    _INT32_MAX,
+    _INT32_MIN,
     IMutator,
     MutationContext,
     MutationResult,
-    _INT32_MAX,
-    _INT32_MIN,
 )
 
 

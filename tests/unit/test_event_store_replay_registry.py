@@ -33,9 +33,9 @@ from mcp_hangar.auth.infrastructure.event_sourced_store import (
     EventSourcedRoleStore,
     _hash_key,
 )
-from mcp_hangar.domain.exceptions import RevokedCredentialsError
 from mcp_hangar.domain import events as events_pkg
 from mcp_hangar.domain.events import LEGACY_EVENT_TYPE_NAMES, DomainEvent
+from mcp_hangar.domain.exceptions import RevokedCredentialsError
 from mcp_hangar.infrastructure.persistence.event_serializer import EVENT_TYPE_MAP
 from mcp_hangar.infrastructure.persistence.sqlite_event_store import SQLiteEventStore
 

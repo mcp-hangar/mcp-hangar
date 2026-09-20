@@ -4,9 +4,9 @@ Projections listen to domain events and build optimized read models
 for queries. They are part of CQRS read side.
 """
 
-from dataclasses import dataclass, replace
-from datetime import datetime, UTC
 import threading
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import IEventStore

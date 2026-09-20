@@ -34,9 +34,9 @@ from mcp_hangar._sdk_compat import FastMCP
 from mcp_hangar.application.commands.crud_commands import CreateGroupCommand, UpdateGroupCommand
 from mcp_hangar.application.commands.crud_handlers import CreateGroupHandler, UpdateGroupHandler
 from mcp_hangar.application.group_events import (
-    publish_group_events,
     REPLICA_LOCAL_GROUP_EVENTS,
     SHARED_GROUP_EVENTS,
+    publish_group_events,
 )
 from mcp_hangar.application.read_models.tool_projection import reset_tool_projection_registry
 from mcp_hangar.application.sagas import GroupRebalanceSaga

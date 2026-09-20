@@ -14,8 +14,8 @@ config reader ever took it, and it gets the same message.
 import re
 
 import pytest
-from structlog.testing import capture_logs
 import yaml
+from structlog.testing import capture_logs
 
 from mcp_hangar.domain.model import McpServerGroup
 from mcp_hangar.server.config import load_config, load_config_from_file

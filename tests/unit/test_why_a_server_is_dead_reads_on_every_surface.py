@@ -10,9 +10,9 @@ tests/integration/test_a_dead_servers_reason_reads_the_same_on_every_surface.py.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from datetime import datetime
-import json
 from typing import Any
 from unittest.mock import Mock
 

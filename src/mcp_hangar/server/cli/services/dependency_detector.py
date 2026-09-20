@@ -4,9 +4,9 @@ Detects available runtimes (npx, uvx, docker, podman) and filters
 MCP servers based on what can actually be executed.
 """
 
+import shutil
 from dataclasses import dataclass
 from functools import lru_cache
-import shutil
 
 
 @dataclass(frozen=True)

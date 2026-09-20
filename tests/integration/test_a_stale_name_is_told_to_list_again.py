@@ -30,11 +30,17 @@ from mcp_hangar.fastmcp_server import flat_tool_projection, served_tool_names
 from mcp_hangar.fastmcp_server.served_tool_names import ServedNames
 from tests.integration._front_door_harness import (
     LEGACY as _LEGACY,
+)
+from tests.integration._front_door_harness import (
     METHOD_NOT_FOUND,
     SERVER,
     TENANT_A,
     TENANT_B,
+)
+from tests.integration._front_door_harness import (
     front_door as _front_door,
+)
+from tests.integration._front_door_harness import (
     jsonrpc as _jsonrpc,
 )
 

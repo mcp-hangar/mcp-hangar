@@ -4,8 +4,10 @@ Verifies _verify_capability_drift() behavior across enforcement modes,
 and that McpServerRecoverySaga correctly filters capability_violation events.
 """
 
-from mcp_hangar.domain.events import CapabilityViolationDetected, McpServerDegraded, McpServerStateChanged
 from mcp_hangar.domain.model.provider import McpServer
+
+from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
+from mcp_hangar.domain.events import CapabilityViolationDetected, McpServerDegraded, McpServerStateChanged
 from mcp_hangar.domain.value_objects import ProviderMode, ProviderState
 from mcp_hangar.domain.value_objects.capabilities import (
     McpServerCapabilities,
@@ -13,7 +15,6 @@ from mcp_hangar.domain.value_objects.capabilities import (
     ViolationSeverity,
     ViolationType,
 )
-from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 

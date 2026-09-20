@@ -61,14 +61,14 @@ id of every task an upstream was asked to cancel.
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import itertools
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, ClassVar
 
 BASE_URL = "http://127.0.0.1:8000"

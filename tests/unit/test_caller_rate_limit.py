@@ -8,9 +8,9 @@ real transport in tests/integration/test_caller_rate_limit_on_the_served_app.py.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
@@ -30,9 +30,9 @@ from mcp_hangar.domain.security.rate_limiter import (
 )
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.infrastructure.caller_rate_limit import (
+    CallerBuckets,
     caller_of,
     caller_rate_limit,
-    CallerBuckets,
     charge,
     configure_caller_rate_limit,
     parse_per_caller,
@@ -41,7 +41,7 @@ from mcp_hangar.infrastructure.caller_rate_limit import (
 from mcp_hangar.infrastructure.command_bus import CommandBus, RateLimitMiddleware
 from mcp_hangar.server import validation
 from mcp_hangar.server.api.middleware import error_handler
-from mcp_hangar.server.validation import charged_by_the_command_bus, not_rate_limited, RateLimited, READ_ONLY_TOOLS
+from mcp_hangar.server.validation import READ_ONLY_TOOLS, RateLimited, charged_by_the_command_bus, not_rate_limited
 
 #: Tokens per second: nothing refills while a test runs.
 NEVER = 0.001

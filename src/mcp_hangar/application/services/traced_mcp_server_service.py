@@ -17,11 +17,10 @@ import logging
 import time
 from typing import Any
 
-from ..ports.observability import ObservabilityPort, TraceContext
 from ...domain.contracts.risk import IRiskScorer, NullRiskScorer
 from ...observability.conventions import MCP, Risk, set_governance_attributes
 from ...observability.tracing import get_tracer
-
+from ..ports.observability import ObservabilityPort, TraceContext
 from .mcp_server_service import McpServerService
 
 logger = logging.getLogger(__name__)

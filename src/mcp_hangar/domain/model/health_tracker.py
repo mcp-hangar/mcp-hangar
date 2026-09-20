@@ -1,8 +1,8 @@
 """Health tracking entity for mcp_servers."""
 
-from dataclasses import dataclass, field
 import random
 import time
+from dataclasses import dataclass, field
 from typing import cast
 
 

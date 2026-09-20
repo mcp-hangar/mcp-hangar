@@ -85,7 +85,8 @@ class TestTheModuleIsSharedKernel:
 
     def test_the_infrastructure_re_export_still_works(self):
         """`from mcp_hangar.infrastructure import TrackedLock` is the documented surface."""
-        from mcp_hangar.infrastructure import LockLevel as ReExportedLevel, TrackedLock as ReExported
+        from mcp_hangar.infrastructure import LockLevel as ReExportedLevel
+        from mcp_hangar.infrastructure import TrackedLock as ReExported
 
         assert ReExported is TrackedLock
         assert ReExportedLevel is LockLevel

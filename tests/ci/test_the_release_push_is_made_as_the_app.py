@@ -16,13 +16,13 @@ would attribute the push to.
 from __future__ import annotations
 
 import base64
-from collections.abc import Iterator
 import http.server
 import os
-from pathlib import Path
 import re
 import subprocess
 import threading
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import yaml

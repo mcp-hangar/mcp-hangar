@@ -14,10 +14,10 @@ that decides when a start may run.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 

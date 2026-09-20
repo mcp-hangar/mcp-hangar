@@ -13,8 +13,8 @@ codebase produces most reliably.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 
 import pytest
 

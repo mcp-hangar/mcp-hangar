@@ -19,10 +19,10 @@ tools on that server, and nothing about prompts on another -- the same
 always had, applied per kind rather than reinvented for the new ones.
 """
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 import logging
 import threading
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, Literal, cast
 
 from ...logging_config import should_log_now

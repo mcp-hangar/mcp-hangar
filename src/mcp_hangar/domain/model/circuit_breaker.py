@@ -9,10 +9,10 @@ States:
 - HALF_OPEN: Probing recovery; limited requests allowed to test the service
 """
 
-from dataclasses import dataclass
-from enum import Enum
 import threading
 import time
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 

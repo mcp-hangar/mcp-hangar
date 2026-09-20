@@ -5,12 +5,12 @@ from unittest.mock import Mock, patch
 import pytest
 
 from mcp_hangar.observability.tracing import (
+    NoOpSpan,
+    NoOpTracer,
     get_current_span_id,
     get_current_trace_id,
     get_tracer,
     is_tracing_enabled,
-    NoOpSpan,
-    NoOpTracer,
     trace_span,
 )
 

@@ -21,9 +21,9 @@ What this pins, and what the unit tests with a stand-in transport cannot:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest

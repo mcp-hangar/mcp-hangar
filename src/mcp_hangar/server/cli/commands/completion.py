@@ -6,8 +6,8 @@ tab completion for mcp-hangar commands.
 
 from typing import Annotated
 
-from rich.console import Console
 import typer
+from rich.console import Console
 
 app = typer.Typer(
     name="completion",

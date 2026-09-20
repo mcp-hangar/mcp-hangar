@@ -13,8 +13,9 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+from mcp_hangar.domain.model.provider import McpServer
+from mcp_hangar.domain.value_objects.provider import ProviderMode
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -26,12 +27,11 @@ from mcp_hangar.application.commands.crud_commands import (
     UpdateMcpServerCommand,
 )
 from mcp_hangar.application.commands.crud_handlers import register_crud_handlers
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerUpdated
 from mcp_hangar.domain.exceptions import ProviderNotFoundError
-from mcp_hangar.domain.model.provider import McpServer
 from mcp_hangar.domain.model.mcp_server_group import GroupDeleted, GroupUpdated
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
-from mcp_hangar.domain.value_objects.provider import ProviderMode
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.server.config_serializer import serialize_full_config, write_config_backup

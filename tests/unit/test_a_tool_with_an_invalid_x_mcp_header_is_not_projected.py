@@ -22,7 +22,6 @@ import pytest
 # See test_tool_metadata_carried.py: importing flat_tool_projection first trips
 # a pre-existing import cycle when this file runs alone.
 import mcp_hangar.server  # noqa: F401
-
 from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar._sdk_compat import McpError
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry

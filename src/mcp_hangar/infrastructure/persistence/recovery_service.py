@@ -5,9 +5,10 @@ restoring system state after restart.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
-from typing import cast, Any
+from datetime import UTC, datetime
+from typing import Any, cast
 
+from ...domain.contracts.event_store import IEventStore
 from ...domain.contracts.persistence import (
     AuditAction,
     AuditEntry,
@@ -19,7 +20,6 @@ from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot, snapshot_of
 from ...logging_config import get_logger
-from ...domain.contracts.event_store import IEventStore
 from ...stream_ids import MCP_SERVER, stream_id_for
 from .audit_repository import SQLiteAuditRepository
 from .config_repository import SQLiteMcpServerConfigRepository

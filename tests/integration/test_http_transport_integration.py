@@ -8,10 +8,10 @@ Tests cover:
 - Error handling for connection failures
 """
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-from threading import Thread
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 from typing import ClassVar
 
 import pytest

@@ -9,7 +9,6 @@ from ..value_objects.compat import (
 )
 from .base import DomainEvent
 
-
 # McpServer CRUD Events
 # =============================================================================
 

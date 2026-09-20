@@ -13,13 +13,12 @@ import pytest
 
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.services.tool_access_resolver import (
-    reset_tool_access_resolver,
     ToolAccessResolver,
+    reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

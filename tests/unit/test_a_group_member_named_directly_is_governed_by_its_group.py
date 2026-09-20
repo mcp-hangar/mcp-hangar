@@ -34,15 +34,15 @@ import pytest
 
 import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.application.commands import InvokeToolCommand
-from mcp_hangar.approvals.models import ApprovalResult
 from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
     reset_tool_projection_registry,
 )
+from mcp_hangar.approvals.models import ApprovalResult
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.events import ToolWithdrawnRejected
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.model.mcp_server_group import LoadBalancerStrategy, McpServerGroup
-from mcp_hangar.domain.events import ToolWithdrawnRejected
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,

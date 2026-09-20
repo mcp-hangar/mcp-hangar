@@ -8,10 +8,10 @@ someone ran `rebalance()`. The served path is proved in
 
 from unittest.mock import MagicMock
 
+from mcp_hangar.domain.events import CircuitBreakerStateChanged
 from mcp_hangar.domain.model.circuit_breaker import CircuitState
 from mcp_hangar.domain.model.mcp_server_group import GroupCircuitClosed, GroupCircuitOpened, McpServerGroup
 from mcp_hangar.domain.value_objects import GroupState, ProviderState
-from mcp_hangar.domain.events import CircuitBreakerStateChanged
 
 
 def _server(server_id: str) -> MagicMock:

@@ -101,15 +101,15 @@ design, and readiness does not depend on backends (#599).
 
 from __future__ import annotations
 
+import threading
+import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-import threading
-import time
 from typing import Any
 
 from ..application.commands import StartMcpServerCommand
-from ..application.read_models.tool_projection import get_tool_projection_registry, ToolProjectionRegistry
+from ..application.read_models.tool_projection import ToolProjectionRegistry, get_tool_projection_registry
 from ..domain.exceptions import CannotStartMcpServerError, ConfigurationError
 from ..domain.model.mcp_server import DEAD_CAPABILITY_BLOCKED, DEAD_GIVEN_UP
 from ..domain.services.tool_access_resolver import is_front_door

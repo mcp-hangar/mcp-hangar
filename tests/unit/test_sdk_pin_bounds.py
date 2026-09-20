@@ -20,12 +20,12 @@ metadata rather than trusting review.
 
 from __future__ import annotations
 
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 from packaging.version import Version
-import pytest
 
 _PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 

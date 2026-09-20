@@ -20,11 +20,11 @@ with::
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass
-import json
-import sys
 from typing import Any
 
 import pytest

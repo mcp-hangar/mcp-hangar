@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import contextlib
 import os
-from pathlib import Path
 import signal
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 

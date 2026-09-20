@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .base import DomainEvent
 
-
 # Batch Invocation Events
 # =============================================================================
 

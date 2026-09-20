@@ -16,8 +16,8 @@ than by accident:
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
+from datetime import datetime
 from typing import Any
 
 from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState

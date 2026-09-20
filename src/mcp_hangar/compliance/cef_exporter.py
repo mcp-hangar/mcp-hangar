@@ -9,13 +9,13 @@ This module is part of the compliance layer.
 
 import logging
 import sys
-from datetime import datetime, UTC
-from pathlib import Path
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
-from .cef_formatter import format_audit_record
 
+from .cef_formatter import format_audit_record
 
 logger = logging.getLogger(__name__)
 

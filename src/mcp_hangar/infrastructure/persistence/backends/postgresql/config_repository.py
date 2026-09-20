@@ -9,8 +9,8 @@ the same mcp_server must get the same `ConcurrentModificationError`, on the
 same conditions, on either backend.
 """
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp_hangar.domain.contracts.persistence import (

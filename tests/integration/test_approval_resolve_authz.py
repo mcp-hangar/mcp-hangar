@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -56,7 +57,6 @@ from mcp_hangar.domain.exceptions import AccessDeniedError, MCPError
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.server import context as context_mod
 from mcp_hangar.server.api.middleware import error_handler
-from datetime import UTC
 
 DENIED_ACTION = "resolve"
 DENIED_RESOURCE = "approval"

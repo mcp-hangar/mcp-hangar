@@ -19,7 +19,11 @@ Contract inventory (6 optional-module contracts + 4 pre-existing):
 
 import pytest
 
-from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
+from mcp_hangar.application.ports.observability import (
+    NullAuditExporter,
+    NullObservabilityAdapter,
+    ObservabilityPort,
+)
 from mcp_hangar.domain.contracts.authentication import (
     AuthRequest,
     IApiKeyStore,
@@ -45,13 +49,8 @@ from mcp_hangar.domain.contracts.event_store import (
     IEventStore,
     NullEventStore,
 )
-from mcp_hangar.application.ports.observability import (
-    NullAuditExporter,
-    NullObservabilityAdapter,
-    ObservabilityPort,
-)
 from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
-
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 # -- Fixtures --
 

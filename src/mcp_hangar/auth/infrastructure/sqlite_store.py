@@ -10,25 +10,24 @@ an optional event_publisher callback. For full CQRS integration,
 inject the EventBus.publish method as the event_publisher.
 """
 
-from collections.abc import Callable
-from datetime import datetime, timedelta, UTC
 import hmac
 import json
-from pathlib import Path
 import secrets
 import sqlite3
-from typing import cast
 import threading
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import cast
 
 import structlog
 
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore
+from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
-from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
-from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -896,8 +895,8 @@ class SQLiteRoleStore(IRoleStore):
         The roles table has ON DELETE CASCADE on role_assignments.role_name,
         so deleting the role row automatically removes assignments.
         """
-        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
         from mcp_hangar.auth.roles import BUILTIN_ROLES as _BUILTIN
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
 
         if role_name in _BUILTIN:
             raise CannotModifyBuiltinRoleError(role_name)
@@ -918,8 +917,8 @@ class SQLiteRoleStore(IRoleStore):
         description: str | None,
     ) -> Role:
         """Update a custom role's permissions and description."""
-        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
         from mcp_hangar.auth.roles import BUILTIN_ROLES as _BUILTIN
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
 
         if role_name in _BUILTIN:
             raise CannotModifyBuiltinRoleError(role_name)

@@ -3,8 +3,8 @@
 import importlib
 
 from .queries import (
-    GetMcpServerHealthQuery,
     GetL7PolicyQuery,
+    GetMcpServerHealthQuery,
     GetMcpServerQuery,
     GetMcpServerToolsQuery,
     GetSystemMetricsQuery,

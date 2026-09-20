@@ -25,9 +25,9 @@ checkout's CLI it fails (``tests/_hangar_executable.py``). Run with::
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import yaml

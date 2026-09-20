@@ -25,7 +25,7 @@ import socket
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mcp_hangar import __version__
 from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
@@ -34,7 +34,7 @@ from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMc
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
 from ...domain.events import set_instance_id
-from ...protocol import HANGAR_SERVER_NAME
+from ...domain.exceptions import ConfigurationError
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
 from ...fastmcp_server.governance_extensions import advertise_governance_extensions
 from ...fastmcp_server.modern_surface import register_modern_surface
@@ -42,19 +42,17 @@ from ...fastmcp_server.prompt_proxy import maybe_register_prompt_proxy
 from ...fastmcp_server.resource_link_read_through import maybe_register_resource_read_through
 from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...fastmcp_server.subscription_relay import maybe_register_subscription_relay
-from ...infrastructure.saga_manager import get_saga_manager, SagaManager
 from ...gc import BackgroundWorker
+from ...infrastructure.saga_manager import SagaManager, get_saga_manager
 from ...logging_config import get_logger
-from ...domain.exceptions import ConfigurationError
+from ...protocol import HANGAR_SERVER_NAME
 from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
-from ..state import get_runtime, GROUPS
-
+from ..state import GROUPS, get_runtime
 from .components import ServerComponents, get_auth_compat_exports, load_components
 from .composition import close_what_bootstrap_started
-
 from .coordination import init_event_tailer, init_lease_keeper
-from .cqrs import init_cqrs, init_auth_cqrs, init_saga
+from .cqrs import init_auth_cqrs, init_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
@@ -62,26 +60,26 @@ from .hot_loading import init_hot_loading
 from .logs import init_log_buffers
 from .observability import init_metrics_publisher, init_observability, shutdown_observability
 from .reachability import (
+    SubsystemRequirement,
     check_subsystem_reachability,
     collect_subsystem_requirements,
     enforce_subsystem_reachability,
-    SubsystemRequirement,
 )
 from .retry_config import init_retry_config
 from .tools import register_all_tools
 from .truncation import init_truncation
 from .workers import (
-    create_background_workers,
-    stop_background_workers,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
+    create_background_workers,
+    stop_background_workers,
 )
 
 WorkerLike = BackgroundWorker | Any
 
 if TYPE_CHECKING:
-    from ...bootstrap.runtime import Runtime
     from ...application.discovery.discovery_registry import DiscoveryRegistry
+    from ...bootstrap.runtime import Runtime
 
 logger = get_logger(__name__)
 

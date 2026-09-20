@@ -15,8 +15,8 @@ not wrong prose, it is a wrong instruction, and it is invisible to every gate
 that checks rendered output because none of this is rendered.
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 CLI = Path(__file__).resolve().parents[3] / "src" / "mcp_hangar" / "server" / "cli"
 

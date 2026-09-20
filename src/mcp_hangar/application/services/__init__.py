@@ -1,7 +1,7 @@
 """Application services - use case orchestration."""
 
-from .package_resolver import PackageResolver, RuntimeAvailability
 from .mcp_server_service import McpServerService
+from .package_resolver import PackageResolver, RuntimeAvailability
 from .secrets_resolver import SecretsResolver, SecretsResult
 from .traced_mcp_server_service import TracedMcpServerService
 

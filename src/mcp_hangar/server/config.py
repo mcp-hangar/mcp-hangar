@@ -6,32 +6,31 @@ Configuration mutates the shared runtime repository and group registry during
 startup so the rest of the server observes the same mcp_server state.
 """
 
+import copy
+import functools
+import os
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-import copy
 from dataclasses import dataclass, field
-import functools
-import os
 from pathlib import Path
-import re
-from typing import TYPE_CHECKING, Any, cast, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 import yaml
 
+from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
-from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..logging_config import get_logger
-
-from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .bootstrap.group_circuit_metric import observe_group_circuit
-from .state import get_group_rebalance_saga, get_runtime, GROUPS
+from .config_schema import ConfigSchemaError, strict_mode, validate_config
+from .state import GROUPS, get_group_rebalance_saga, get_runtime
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, get_concurrency_manager
-from .tools.batch.tenant_admission import configure_tenant_limits, parse_tenant_limits, TenantLimits
+from .tools.batch.tenant_admission import TenantLimits, configure_tenant_limits, parse_tenant_limits
 
 if TYPE_CHECKING:
     from ..application.read_models.tool_projection import ToolProjectionRegistry

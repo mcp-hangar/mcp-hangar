@@ -12,9 +12,9 @@ Usage:
 """
 
 import argparse
+import os
 from dataclasses import dataclass
 from importlib.metadata import version
-import os
 
 
 def _get_version() -> str:

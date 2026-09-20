@@ -364,13 +364,13 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     )
 
     from ..context import get_identity_context
-    from .asgi import bind_caller_identity, release_caller_identity
-    from .flat_tool_projection import build_projected_list_cache_meta
 
     # Every handler below reaches an upstream for the caller (the listings relay
     # to each upstream), so each refuses a suspended session first
     # (GHSA-fhwh-fmq2-7m5c). Lazily, like the rest.
     from ..server.session_guard import refuse_request_if_session_suspended
+    from .asgi import bind_caller_identity, release_caller_identity
+    from .flat_tool_projection import build_projected_list_cache_meta
 
     def _tenant() -> str | None:
         identity = get_identity_context()

@@ -4,23 +4,22 @@ A McpServerGroup is an aggregate root that manages multiple McpServer instances
 as a single logical unit with automatic load balancing and failover.
 """
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
 import hashlib
 import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from ...errors import bounded_error_type
 from ...lock_hierarchy import LockLevel, TrackedLock
 from ...logging_config import get_logger
 from ..events import CircuitBreakerStateChanged, DomainEvent
-from ..exceptions import McpServerStartError, CannotStartMcpServerError
-from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, McpServerState
+from ..exceptions import CannotStartMcpServerError, McpServerStartError
+from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, McpServerState, MemberPriority, MemberWeight
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from .load_balancer import LoadBalancer
 from .mcp_server import DEAD_NOT_ROUTED_BY_GROUPS, McpServer
-
 
 logger = get_logger(__name__)
 

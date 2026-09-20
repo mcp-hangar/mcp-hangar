@@ -1,9 +1,9 @@
 """McpServer aggregate root - the main domain entity."""
 
-from dataclasses import dataclass
 import threading
 import time
-from typing import Any, TYPE_CHECKING, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 from ...errors import OTHER_ERROR_TYPE, bounded_error_type
 from ...logging_config import get_logger
@@ -12,21 +12,20 @@ from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED
 if TYPE_CHECKING:
     from ..policies.egress_l7 import L7Policy
 
-from ..contracts.log_buffer import IMcpServerLogBuffer
 from ...lock_hierarchy import LockLevel, TrackedLock
 from ..contracts.launcher import TransportClient
+from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
-from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     DEGRADED_BY_HEALTH_CHECKS,
     STOPPED_BY_GIVING_UP,
     CapabilityViolationDetected,
     DomainEvent,
-    McpServerCapabilityQuarantined,
     EgressPolicyEnforced,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
+    McpServerCapabilityQuarantined,
     McpServerDegraded,
     McpServerIdleDetected,
     McpServerStarted,
@@ -52,6 +51,7 @@ from ..exceptions import (
 from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
+from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..value_objects.provenance import Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
@@ -1623,9 +1623,9 @@ class McpServer(AggregateRoot):
         # A policy with no mode (programmatic or a mode-less older-operator
         # payload) resolves to Enforce -- it keeps blocking (fail-closed).
         if self._l7_policy is not None:
-            from ..policies.egress_l7 import PolicyMode, ToolAction, evaluate
-
             from mcp_hangar.context import get_routing_headers
+
+            from ..policies.egress_l7 import PolicyMode, ToolAction, evaluate
 
             decision = evaluate(tool_name, arguments, self._l7_policy, get_routing_headers())
             would_block = decision.action in (ToolAction.DENY, ToolAction.REQUIRE_APPROVAL)

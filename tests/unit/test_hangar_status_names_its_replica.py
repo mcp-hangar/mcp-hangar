@@ -20,9 +20,9 @@ describes that replica only. So the tests pin two things:
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import datetime
-import time
 
 import pytest
 

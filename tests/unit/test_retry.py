@@ -6,17 +6,16 @@ import pytest
 
 from mcp_hangar.retry import (
     BackoffStrategy,
+    RetryAttempt,
+    RetryPolicy,
+    RetryResult,
     calculate_backoff,
     get_retry_store,
     retry_async,
     retry_sync,
-    RetryAttempt,
-    RetryPolicy,
-    RetryResult,
     should_retry,
     with_retry,
 )
-
 
 # Local stand-ins: the HangarError hierarchy was deleted in #970. Retryability
 # for generic exceptions is by name/message pattern, which these names hit and

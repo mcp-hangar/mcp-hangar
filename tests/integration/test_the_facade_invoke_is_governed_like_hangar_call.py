@@ -31,11 +31,11 @@ and the caller's authorization in ``tests/unit/test_tool_invoke_authz.py``.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest

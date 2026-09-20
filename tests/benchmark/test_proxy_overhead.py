@@ -20,15 +20,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.commands import InvokeToolCommand
 from mcp_hangar.application.commands.handlers import InvokeToolHandler
 from mcp_hangar.application.event_handlers.audit_handler import (
     AuditEventHandler,
     InMemoryAuditStore,
 )
-from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 from mcp_hangar.context import get_identity_context, identity_context_var
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
@@ -46,7 +45,7 @@ from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
-
+from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 
 # ---------------------------------------------------------------------------
 # Helpers

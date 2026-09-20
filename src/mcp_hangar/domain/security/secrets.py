@@ -9,9 +9,9 @@ Provides secure handling of sensitive data:
 """
 
 import builtins
-from dataclasses import dataclass, field
 import os
 import re
+from dataclasses import dataclass, field
 from re import Pattern
 from typing import Any
 

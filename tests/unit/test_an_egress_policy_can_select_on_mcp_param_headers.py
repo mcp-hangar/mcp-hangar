@@ -28,13 +28,13 @@ from mcp_hangar.context import (
 from mcp_hangar.domain.exceptions import EgressPolicyApprovalRequiredError, EgressPolicyDeniedError
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import (
-    evaluate,
-    evaluate_headers,
     HeaderMatch,
     HeaderRules,
     L7Policy,
     ToolAction,
     ToolRules,
+    evaluate,
+    evaluate_headers,
 )
 
 MODERN = "2026-07-28"

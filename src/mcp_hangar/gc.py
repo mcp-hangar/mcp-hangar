@@ -1,16 +1,16 @@
 """Background workers for garbage collection and health checks."""
 
-from pathlib import Path
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
-from .domain.contracts.mcp_server_runtime import normalize_state_to_str, McpServerMapping, McpServerRuntime
+from .domain.contracts.mcp_server_runtime import McpServerMapping, McpServerRuntime, normalize_state_to_str
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
-from .stream_ids import MCP_SERVER
 from .metrics import observe_health_check, record_error, record_gc_cycle
+from .stream_ids import MCP_SERVER
 
 logger = get_logger(__name__)
 

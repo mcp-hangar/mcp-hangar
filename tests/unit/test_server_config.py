@@ -160,7 +160,7 @@ class TestLoadConfig:
     @pytest.fixture(autouse=True)
     def reset_globals(self):
         """Reset global state before and after each test."""
-        from mcp_hangar.server.state import get_runtime, GROUPS
+        from mcp_hangar.server.state import GROUPS, get_runtime
 
         repository = get_runtime().repository
 

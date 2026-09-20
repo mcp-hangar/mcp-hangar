@@ -6,10 +6,10 @@ server startup and runtime wiring.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from threading import Lock
-from typing import Any, TYPE_CHECKING, cast
-import warnings
+from typing import TYPE_CHECKING, Any, cast
 
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.sagas import GroupRebalanceSaga

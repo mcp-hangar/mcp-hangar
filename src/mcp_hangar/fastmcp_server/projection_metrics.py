@@ -57,11 +57,11 @@ operator configured, and the counter has no labels. The memory holds at most
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from collections.abc import Iterable, Mapping
 import hashlib
 import json
 import threading
+from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from .. import metrics as prometheus_metrics

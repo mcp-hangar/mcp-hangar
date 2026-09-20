@@ -17,9 +17,9 @@ test -- a default-permissive branch with no assertions on it.
 import pytest
 
 from mcp_hangar.domain.exceptions import ConfigurationError
-from mcp_hangar.server.config import _init_topology_mode_from_config
 from mcp_hangar.domain.services import get_tool_access_resolver
 from mcp_hangar.domain.services.tool_access_resolver import is_front_door
+from mcp_hangar.server.config import _init_topology_mode_from_config
 
 
 @pytest.fixture(autouse=True)

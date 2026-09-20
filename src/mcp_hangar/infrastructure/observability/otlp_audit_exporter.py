@@ -33,9 +33,9 @@ AUDIT_ATTRIBUTE_LENGTH_LIMIT_ENV = "MCP_AUDIT_ATTRIBUTE_LENGTH_LIMIT"
 # are the names relied on. ProxyLoggerProvider is what the API hands out until a
 # provider is registered, as ProxyTracerProvider is for traces.
 try:
+    import opentelemetry.sdk._logs as _sdk_logs
     from opentelemetry._logs import LogRecord, SeverityNumber, get_logger_provider, set_logger_provider
     from opentelemetry._logs._internal import ProxyLoggerProvider
-    import opentelemetry.sdk._logs as _sdk_logs
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.version import __version__ as _sdk_version

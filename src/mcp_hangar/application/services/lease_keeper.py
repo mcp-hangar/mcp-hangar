@@ -34,9 +34,9 @@ every 5s, given up if 10s pass without a successful renewal.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import threading
 import time
+from collections.abc import Callable
 
 from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.management_lease import IManagementLease, Lease

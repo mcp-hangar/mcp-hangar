@@ -14,7 +14,7 @@ did before this existed.
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...application.services.lease_keeper import ManagementLeaseKeeper
 from ...domain.events import current_instance_id

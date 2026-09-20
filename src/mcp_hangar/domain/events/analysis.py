@@ -7,7 +7,6 @@ from typing import Any
 
 from .base import DomainEvent
 
-
 # Semantic analysis events (Phase 57-59 -- v10.0 Semantic Analysis Alpha)
 # ---------------------------------------------------------------------------
 

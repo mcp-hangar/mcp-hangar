@@ -4,41 +4,41 @@ import importlib
 import os
 from typing import TYPE_CHECKING
 
-from ..api.sessions import get_session_suspension_registry
 from ...application.event_handlers import (
     DetectionEnforcementHandler,
     LoggingEventHandler,
     get_alert_handler,
     get_audit_handler,
 )
-from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler, remove_series_of_deregistered
-from ...domain.model.mcp_server_group import GroupCreated
-from .group_circuit_metric import observe_created_group
-from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.event_handlers.cost_handler import CostAttributionEventHandler
 from ...application.event_handlers.risk_scoring_handler import RiskScoringEventHandler
+from ...application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from ...application.ports.observability import IAuditExporter, NullAuditExporter
 from ...domain.contracts.cost import NullCostAttributor
+from ...domain.contracts.event_bus import HandlerKind
 from ...domain.contracts.risk import NullRiskScorer
-from ...application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from ...domain.events import (
-    McpServerDeregistered,
-    McpServerRegistered,
-    SessionSuspended,
-    SessionUnsuspended,
     BehavioralDeviationDetected,
     CapabilityViolationDetected,
     DetectionRuleMatched,
+    McpServerDeregistered,
+    McpServerRegistered,
     McpServerStarted,
     McpServerStateChanged,
+    SessionSuspended,
+    SessionUnsuspended,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolRestored,
     ToolWithdrawn,
 )
-from ...domain.contracts.event_bus import HandlerKind
+from ...domain.model.mcp_server_group import GroupCreated
+from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler, remove_series_of_deregistered
+from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...logging_config import get_logger
+from ..api.sessions import get_session_suspension_registry
+from .group_circuit_metric import observe_created_group
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -157,7 +157,6 @@ def init_event_handlers(runtime: "Runtime") -> None:
     config_repository = getattr(runtime, "config_repository", None)
     if config_repository is not None and type(config_repository).__name__ != "InMemoryMcpServerConfigRepository":
         from ...application.event_handlers.fleet_projection import FleetProjection
-
         from ...infrastructure.async_bridge import BackgroundLoop
         from .composition import close_at_shutdown
 

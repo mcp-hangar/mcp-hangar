@@ -1,9 +1,9 @@
 """Audit event handler for compliance and debugging."""
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
-import json
+from datetime import UTC, datetime
 from typing import Any
 
 from ...domain.events import DomainEvent

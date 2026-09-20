@@ -1,6 +1,6 @@
 """CQRS and Saga initialization."""
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...application.commands import register_all_handlers as register_command_handlers
 from ...application.queries import register_all_handlers as register_query_handlers
@@ -11,11 +11,11 @@ from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, S
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
+from ..context import get_context
+from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_saga
 from .components import register_auth_cqrs
 from .composition import close_at_shutdown
 from .logs import LogBuffers
-from ..context import get_context
-from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime

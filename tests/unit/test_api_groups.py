@@ -14,7 +14,6 @@ from unittest.mock import Mock, patch
 import pytest
 from starlette.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

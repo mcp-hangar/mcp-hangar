@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Annotated
 
 import questionary
-from rich.console import Console
 import typer
+from rich.console import Console
 
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions

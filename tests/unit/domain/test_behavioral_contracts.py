@@ -9,14 +9,13 @@ Verifies:
 
 import pytest
 
-from mcp_hangar.domain.value_objects.behavioral import BehavioralMode, NetworkObservation
 from mcp_hangar.domain.contracts.behavioral import (
-    IBehavioralProfiler,
     IBaselineStore,
+    IBehavioralProfiler,
     IDeviationDetector,
     NullBehavioralProfiler,
 )
-
+from mcp_hangar.domain.value_objects.behavioral import BehavioralMode, NetworkObservation
 
 # -- BehavioralMode enum --
 
@@ -208,9 +207,15 @@ class TestNullBehavioralProfiler:
 class TestBehavioralContractReExports:
     def test_all_contracts_importable_from_domain_contracts(self) -> None:
         from mcp_hangar.domain.contracts import (
-            IBehavioralProfiler as ReExportedProfiler,
             IBaselineStore as ReExportedStore,
+        )
+        from mcp_hangar.domain.contracts import (
+            IBehavioralProfiler as ReExportedProfiler,
+        )
+        from mcp_hangar.domain.contracts import (
             IDeviationDetector as ReExportedDetector,
+        )
+        from mcp_hangar.domain.contracts import (
             NullBehavioralProfiler as ReExportedNull,
         )
 
@@ -222,6 +227,8 @@ class TestBehavioralContractReExports:
     def test_value_objects_importable_from_behavioral_module(self) -> None:
         from mcp_hangar.domain.value_objects.behavioral import (
             BehavioralMode as DirectMode,
+        )
+        from mcp_hangar.domain.value_objects.behavioral import (
             NetworkObservation as DirectObs,
         )
 

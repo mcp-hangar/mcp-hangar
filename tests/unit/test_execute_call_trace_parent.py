@@ -14,9 +14,9 @@ is asserted. Moved here from the integration file, which called itself
 end-to-end while never reaching an upstream (#1284).
 """
 
-from types import SimpleNamespace
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 

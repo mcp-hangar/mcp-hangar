@@ -5,12 +5,12 @@ It maintains backward compatibility with the existing argparse-based CLI
 by defaulting to server mode when no subcommand is specified.
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Annotated
 
-from rich.console import Console
 import typer
+from rich.console import Console
 
 from .errors import CLIError, handle_cli_error
 

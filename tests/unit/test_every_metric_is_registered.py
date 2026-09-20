@@ -23,7 +23,7 @@ import pathlib
 import pytest
 
 from mcp_hangar import metrics as prometheus_metrics
-from mcp_hangar.metrics import Counter, Gauge, Histogram, REGISTRY
+from mcp_hangar.metrics import REGISTRY, Counter, Gauge, Histogram
 
 
 def _module_level_metrics() -> dict[str, Counter | Gauge | Histogram]:

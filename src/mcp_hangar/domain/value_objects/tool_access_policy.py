@@ -21,9 +21,9 @@ Merge semantics (for scope resolution):
 - Security flows downhill: mcp_server -> group -> member
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
-from collections.abc import Callable
 
 
 def _matches_any_pattern(name: str, patterns: tuple[str, ...]) -> bool:

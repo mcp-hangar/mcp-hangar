@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .base import DomainEvent
 
-
 # Task Lifecycle Events
 #
 # One logical async task (e.g. an MCP/A2A tasks/* action) spans many round

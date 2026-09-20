@@ -5,8 +5,7 @@ and optional authentication middleware.
 """
 
 import functools
-from typing import Any, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Any
 
 from ..context import bind_routing_headers, identity_context_var, release_routing_headers  # noqa: F401
 from ..domain.contracts.session_suspension import VERIFIED_SESSION_ID_KEY, is_well_formed_session_id

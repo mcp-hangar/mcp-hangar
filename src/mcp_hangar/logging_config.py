@@ -21,18 +21,17 @@ Configuration via environment variables:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping, Sequence
 import functools
 import logging
 import os
 import sys
 import threading
 import time
+from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any, cast
 
 import structlog
 from structlog.types import Processor
-
 
 # Make the pre-`setup_logging` window safe. structlog's out-of-the-box factory
 # is `PrintLoggerFactory()`, which writes to **stdout** -- and on the stdio

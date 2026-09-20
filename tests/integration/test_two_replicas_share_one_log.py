@@ -15,9 +15,9 @@ Opt-in, like the other `live` tests. See
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-import os
 
 import pytest
 

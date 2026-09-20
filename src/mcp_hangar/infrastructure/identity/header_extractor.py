@@ -7,7 +7,6 @@ Suitable for trusted environments where a gateway has already validated identity
 
 from __future__ import annotations
 
-
 import structlog
 
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext

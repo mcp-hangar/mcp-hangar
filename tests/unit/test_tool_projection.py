@@ -20,7 +20,6 @@ from mcp_hangar.application.read_models.tool_projection import (
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

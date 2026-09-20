@@ -4,15 +4,16 @@ This handler bridges domain events to Prometheus metrics, ensuring
 all significant state changes are observable via the /metrics endpoint.
 """
 
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-import time
 
+from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar.domain.events import (
-    ConfigurationReloaded,
-    CostReportGenerated,
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
+    ConfigurationReloaded,
+    CostReportGenerated,
     DigestMismatchInTask,
     DomainEvent,
     EgressBlocked,
@@ -36,7 +37,6 @@ from mcp_hangar.domain.events import (
     ToolInvocationFailed,
 )
 from mcp_hangar.domain.model.mcp_server_group import GroupDeleted
-from mcp_hangar import metrics as prometheus_metrics
 
 
 @dataclass
