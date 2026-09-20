@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.21.0...v2.21.1) (2026-09-20)
+
+### Fixed
+
+- **core:** a group's events now go out on the path that raised them. A member
+  leaving or rejoining rotation, the circuit opening or closing, and a rebalance
+  were recorded on the aggregate and drained only by the group CRUD handlers, so
+  they reached subscribers late, in a batch with whatever else had piled up, or
+  -- if nobody edited the group -- never, and a restart lost them. The executor
+  drains the group after it reports a call's outcome, the rebalance saga after it
+  reports a health check, and both rebalance surfaces after they rebalance.
+
+  These events are delivered to this replica's subscribers and deliberately not
+  appended to the shared event log. A group's rotation and circuit breaker live
+  in each replica's own memory, so "the circuit opened" is a fact about one pod
+  and not about the group; sharing that state across replicas is the open,
+  ADR-gated decision in #1358, and writing breaker transitions to the log is the
+  mechanism it defers. A group's configuration -- created, updated, member added
+  or removed, deleted -- is unchanged and still goes to the group's stream. ([#1526](https://github.com/mcp-hangar/mcp-hangar/pull/1526))
+
 ## [2.21.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.20.0...v2.21.0) (2026-09-16)
 
 ### Added
