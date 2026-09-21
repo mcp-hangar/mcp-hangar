@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.21.1...v2.21.2) (2026-09-21)
+
+### Changed
+
+- **ci:** ruff sorts imports now. `I` joins `select` in `pyproject.toml`, so
+  `ruff check src/mcp_hangar tests` fails on an unsorted import block and
+  `--fix` sorts it, in CI and in the pre-commit hook alike -- both run the same
+  pinned ruff. The hook and the CI step had been named for an isort that was
+  never configured; they are named for what they do now.
+
+  Turning the rule on was a one-time mechanical reformat of 527 files, landed as
+  its own commit and listed in `.git-blame-ignore-revs`. Run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once in your checkout
+  and `git blame` will skip it. `.github/.isort.cfg` is deleted: it configured a
+  `registry` package against a 88-character line, neither of which is this repo,
+  and no workflow read it.
+
+  No runtime change -- import order is the only thing that moved. ([#1531](https://github.com/mcp-hangar/mcp-hangar/pull/1531))
+
+### Fixed
+
+- **core:** approval resolution now returns success after the decision is persisted,
+  even when the request reaches a different Front Door replica than the held call. ([#1537](https://github.com/mcp-hangar/mcp-hangar/pull/1537))
+
 ## [2.21.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.21.0...v2.21.1) (2026-09-20)
 
 ### Fixed
