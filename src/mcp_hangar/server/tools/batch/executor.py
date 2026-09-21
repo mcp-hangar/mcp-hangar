@@ -65,6 +65,7 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
+from ....observability.conventions import MCP, Caller, GenAI, McpServer
 from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
 from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
 from ...context import get_context
@@ -124,6 +125,38 @@ def _call_span_parent(carrier_context: Any) -> dict[str, Any]:
     if carried.is_valid and carried.trace_id != ambient.trace_id:
         return {"links": [trace.Link(carried)]}
     return {}
+
+
+def _identity_span_attributes() -> dict[str, str]:
+    """Identity attributes for the governance enrichment boundary (ADR-029 s4).
+
+    Read once, from the bound identity context and from nothing else. Baggage is
+    not a source: anything that forwards a request can write it, so a caller id
+    taken from there would be a claim this gateway never authenticated. Unknown
+    values are omitted rather than exported empty, so a query on
+    ``mcp.caller.tenant_id`` selects the calls that actually had a tenant
+    instead of every call ever made.
+
+    Deliberately not ``set_governance_attributes``: that helper also asserts
+    ``gen_ai.operation.name=execute_tool`` and ``mcp.method.name=tools/call``,
+    which name the upstream call. ADR-029 keeps those on the one CLIENT span
+    ``execute_tool <tool>``; repeating them here would invite a GenAI-aware
+    backend to count one invocation twice.
+    """
+    identity = get_identity_context()
+    if identity is None:
+        return {}
+    caller = identity.caller
+    candidates = {
+        Caller.TYPE: caller.principal_type,
+        Caller.ID: caller.user_id or caller.agent_id,
+        Caller.TENANT: caller.tenant_id,
+        MCP.USER_ID: caller.user_id,
+        MCP.AGENT_ID: caller.agent_id,
+        MCP.SESSION_ID: caller.session_id,
+        MCP.CORRELATION_ID: identity.correlation_id,
+    }
+    return {key: value for key, value in candidates.items() if value}
 
 
 def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
@@ -1541,9 +1574,11 @@ class BatchExecutor:
             f"batch.call.{call.tool}",
             **_call_span_parent(carrier_context),
         ) as span:
-            span.set_attribute("mcp.server.id", call.mcp_server)
-            span.set_attribute("gen_ai.tool.name", call.tool)
+            span.set_attribute(McpServer.ID, call.mcp_server)
+            span.set_attribute(GenAI.TOOL_NAME, call.tool)
             span.set_attribute("batch.call.id", call.call_id)
+            for key, value in _identity_span_attributes().items():
+                span.set_attribute(key, value)
             result = self._execute_call_inner(
                 call,
                 cancel_event,

@@ -311,6 +311,18 @@ def set_governance_attributes(  # noqa: C901 -- baseline CC=19; split before ext
     Only attributes with non-None values are set. This avoids polluting
     OTLP backends with empty string attributes for optional governance fields.
 
+    **Retained, with no caller in `src/`.** Its one caller was
+    `TracedMcpServerService`, the decorator ADR-029 retires and #1278 deleted.
+    The batch executor's own boundary sets the identity subset directly instead
+    of calling this, because this helper also asserts
+    `gen_ai.operation.name=execute_tool` and `mcp.method.name=tools/call`,
+    which name the upstream call: ADR-029 keeps those on the one CLIENT span
+    `execute_tool <tool>`, and repeating them on the governance span would
+    invite a GenAI-aware backend to count one invocation twice. The function
+    stays because it is public surface an ADR-007 adapter may call with its own
+    process-local invocation data, and removing it would break that without
+    giving anything back.
+
     Args:
         span: OpenTelemetry span (or any object with set_attribute method).
         mcp_server_id: Required. McpServer identifier.
