@@ -80,6 +80,37 @@ class TestResolveTenantScoping:
         assert r.outcome is ResolveOutcome.RESOLVED
 
 
+class TestConcurrentResolution:
+    async def _race(self, *, remove: bool):
+        approval = _approval(None)
+        repository = FakeRepository()
+        await repository.save(approval)
+
+        async def resolve(*_args, **_kwargs):
+            if remove:
+                repository._store.pop(approval.approval_id)
+            else:
+                approval.state = ApprovalState.APPROVED
+            return False
+
+        service = type("RacingService", (), {"_repository": repository, "resolve": resolve})()
+        handler = ResolveApprovalHandler(service, auth_components=None)
+        return await handler.handle(
+            ResolveApprovalCommand(approval_id=approval.approval_id, approved=True, principal=_principal(None))
+        )
+
+    async def test_a_record_removed_during_resolution_is_not_found(self):
+        result = await self._race(remove=True)
+
+        assert result.outcome is ResolveOutcome.NOT_FOUND
+
+    async def test_a_concurrent_decision_reports_the_terminal_state(self):
+        result = await self._race(remove=False)
+
+        assert result.outcome is ResolveOutcome.ALREADY_TERMINAL
+        assert result.state == ApprovalState.APPROVED.value
+
+
 class TestListVisibility:
     def test_visible_only_within_tenant(self):
         a = _approval("tenant:a")

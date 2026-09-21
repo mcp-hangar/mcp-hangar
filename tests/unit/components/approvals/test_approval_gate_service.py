@@ -345,6 +345,27 @@ class TestApprovalGateServiceCheck:
 
 
 class TestApprovalGateServiceResolve:
+    async def test_persisted_resolution_succeeds_without_a_local_waiter(self, service, repo):
+        """A different replica has no local hold, but the shared decision is authoritative."""
+        now = datetime.now(UTC)
+        req = ApprovalRequest(
+            approval_id="remote-001",
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            arguments_hash="abc",
+            requested_at=now,
+            expires_at=now + timedelta(seconds=300),
+            state=ApprovalState.PENDING,
+            channel="dashboard",
+        )
+        await repo.save(req)
+
+        result = await service.resolve("remote-001", True, "admin@test.com")
+
+        assert result is True
+        assert (await repo.get("remote-001")).state is ApprovalState.APPROVED
+
     async def test_resolve_nonexistent_returns_false(self, service):
         result = await service.resolve("nonexistent", True, "admin@test.com")
         assert result is False

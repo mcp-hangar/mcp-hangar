@@ -258,7 +258,15 @@ class ApprovalGateService:
         decided_by: str,
         reason: str | None = None,
     ) -> bool:
-        """Called from REST endpoint. Returns False if approval not found or already terminal."""
+        """Persist a decision and notify a same-process waiter when one exists.
+
+        The approval record is the source of truth shared by every Front Door
+        instance.  A local hold is only the low-latency path for a call waiting
+        on this instance, so its absence must not turn a durable decision into
+        an apparent failure for the resolver.
+
+        Returns False only when the approval is missing or already terminal.
+        """
         request = await self._repository.get(approval_id)
         if request is None or request.is_terminal():
             return False
@@ -268,7 +276,10 @@ class ApprovalGateService:
         state = ApprovalState.APPROVED if approved else ApprovalState.DENIED
         await self._repository.update_state(approval_id, state, decided_by, decided_at, reason)
 
-        return await self._hold_registry.resolve(approval_id, approved)
+        released_locally = await self._hold_registry.resolve(approval_id, approved)
+        if not released_locally:
+            logger.info("approval_resolved_without_local_hold", approval_id=approval_id)
+        return True
 
     async def _wait_for_decision(self, approval_id: str, timeout_seconds: int) -> bool | None:
         """Wait for a decision from either instance that could make one.
