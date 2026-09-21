@@ -76,9 +76,17 @@ def test_one_caller_leads_and_every_other_is_recorded_as_waiting() -> None:
     threads = [threading.Thread(target=caller) for _ in range(WAITERS + 1)]
     for thread in threads:
         thread.start()
-    # The work runs once; releasing it only after every thread is past the
-    # barrier is what makes the other callers genuinely wait.
+    # The work runs once; releasing it only after every other caller has
+    # reported its wait is what makes them genuinely wait. Passing the barrier
+    # is not enough: a thread still on its way into `do()` when the leader
+    # finishes finds no flight and leads a second one.
     assert ran.acquire(timeout=5), "nobody executed the work"
+    pause = threading.Event()
+    for _ in range(500):
+        with observer.lock:
+            if len(observer.waited) == WAITERS:
+                break
+        pause.wait(0.01)
     leader_may_finish.set()
     for thread in threads:
         thread.join(timeout=5)
