@@ -22,10 +22,10 @@ defaulting to the literal ``"unknown"``. Not a fallback for unauthenticated
 callers: the only path, including for fully authenticated ones. That value is
 what landed in ``decided_by``, in the provenance chain.
 
-**The status code lied about the damage.** ``ApprovalGateService.resolve`` writes
-the decision and *then* releases the in-process hold, so with no waiter the caller
-received 409 "Failed to resolve approval" against an approval already recorded as
-decided. The primary test therefore asserts durable state, not the HTTP status.
+**The status code used to lie about the damage.** ``ApprovalGateService.resolve``
+writes the decision and *then* releases the in-process hold. A resolver on another
+replica has no local waiter, but that is normal: the holding replica observes the
+shared record. Resolution must therefore report the durable write as success.
 
 Tests assert the observable contract rather than the implementation: they install
 a real application context whose authorizer denies, and check what the caller and
@@ -214,17 +214,7 @@ class TestResolveRequiresApprovalResolvePermission:
     """F1: the permission is defined, granted, and never enforced."""
 
     async def test_unauthorized_caller_cannot_decide_an_approval(self, stack) -> None:
-        """The damage, asserted on durable state rather than on the status code.
-
-        ``ApprovalGateService.resolve`` writes the decision first and releases the
-        in-process hold second (``service.py:232`` then ``:234``). With no waiter
-        registered the hold release returns False and the route answers 409
-        "Failed to resolve approval" -- *after* the approval has already been
-        recorded as decided. So the HTTP status is not a safe thing to assert on:
-        it can say "failed" while the ledger says "approved by whoever asked".
-
-        This asserts the state, which is what actually matters.
-        """
+        """Authorization must stop the durable write, not merely alter its response."""
         repo, service, client = stack
         approval_id = await _pending_approval(repo, service)
 
@@ -239,12 +229,7 @@ class TestResolveRequiresApprovalResolvePermission:
         )
 
     async def test_resolve_is_refused_with_403(self, stack) -> None:
-        """The epic's stated WS-0 acceptance, kept separate on purpose.
-
-        Today this returns 409 rather than 403 -- not because anything refused
-        the caller, but because the decision succeeded and only the hold release
-        failed. Once WS-1 puts authorization in front, this becomes a real 403.
-        """
+        """The epic's stated WS-0 acceptance, kept separate on purpose."""
         repo, service, client = stack
         approval_id = await _pending_approval(repo, service)
 
@@ -294,7 +279,7 @@ class TestAuthDisabledStillResolves:
         # No app context and no authentication middleware -> auth off.
         resp = client.post(f"/approvals/{approval_id}/resolve", json={"decision": "approve"})
 
-        assert resp.status_code != 401, "auth is disabled; refusing here decides nothing"
+        assert resp.status_code == 200
         stored = await repo.get(approval_id)
         assert stored.state == ApprovalState.APPROVED
 

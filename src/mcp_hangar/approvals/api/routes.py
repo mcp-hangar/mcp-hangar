@@ -231,9 +231,6 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
             {"error": "Approval expired", "state": result.state},
             status_code=409,
         )
-    if result.outcome is ResolveOutcome.HOLD_RELEASE_FAILED:
-        return HangarJSONResponse({"error": "Failed to resolve approval"}, status_code=409)
-
     return HangarJSONResponse(
         {
             "approval_id": approval_id,

@@ -58,7 +58,6 @@ class ResolveOutcome(Enum):
     EXPIRED = "expired"
     NOT_FOUND = "not_found"
     ALREADY_TERMINAL = "already_terminal"
-    HOLD_RELEASE_FAILED = "hold_release_failed"
 
 
 @dataclass(frozen=True)
@@ -192,10 +191,13 @@ class ResolveApprovalHandler(CommandHandler):
         decided_by = str(command.principal.id)
         success = await self._service.resolve(command.approval_id, command.approved, decided_by, command.reason)
         if not success:
-            # The decision is already durable at this point: the service writes
-            # state before releasing the hold, so a failed release does not undo
-            # it. Reported distinctly so the transport does not imply otherwise.
-            return ResolveApprovalResult(ResolveOutcome.HOLD_RELEASE_FAILED)
+            # Another resolver can win between the preflight read and the
+            # service's own read. Report the state that now exists rather than
+            # inventing a failure after a successful decision elsewhere.
+            updated = await repository.get(command.approval_id)
+            if updated is None:
+                return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+            return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=updated.state.value)
 
         updated = await repository.get(command.approval_id)
         return ResolveApprovalResult(
