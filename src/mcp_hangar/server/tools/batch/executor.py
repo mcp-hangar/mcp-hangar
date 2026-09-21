@@ -65,8 +65,14 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, GenAI, McpServer
-from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
+from ....observability.conventions import MCP, Caller, GenAI, McpServer, Retry
+from ....observability.tracing import (
+    extract_trace_context,
+    get_tracer,
+    mark_span_error,
+    record_handled_failure,
+    record_retry_attempt,
+)
 from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
 from ...context import get_context
 from ...state import GROUPS
@@ -125,6 +131,21 @@ def _call_span_parent(carrier_context: Any) -> dict[str, Any]:
     if carried.is_valid and carried.trace_id != ambient.trace_id:
         return {"links": [trace.Link(carried)]}
     return {}
+
+
+def _retry_outcome(result: RetryResult) -> str:
+    """How a retried operation ended, in three words rather than two numbers.
+
+    `exhausted` and `non_retryable` both arrive as "not successful" with an
+    error type, and they mean opposite things to whoever is reading: one says
+    the upstream kept failing and the budget ran out, the other says the first
+    failure was never worth retrying. `retry_sync` records an attempt only when
+    it is about to retry, so an empty attempt list on a failure is exactly the
+    second case.
+    """
+    if result.success:
+        return Retry.SUCCESS
+    return Retry.EXHAUSTED if result.attempts else Retry.NON_RETRYABLE
 
 
 def _identity_span_attributes() -> dict[str, str]:
@@ -2373,11 +2394,17 @@ class BatchExecutor:
         # returns the arguments unchanged, preserving current behavior.
         mutated_arguments = self._mutate("tools/call", "request", call.arguments or {}, call.call_id)
 
+        # Which attempt is running, so each `command.send` span says which one it
+        # is (#1287). A list, not an int, because `do_invoke` closes over it.
+        attempt_index = [0]
+
         def do_invoke() -> dict[str, Any]:
+            attempt_index[0] += 1
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
                 cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
                 cmd_span.set_attribute("gen_ai.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
+                cmd_span.set_attribute(Retry.INDEX, attempt_index[0])
                 command = InvokeToolCommand(
                     mcp_server_id=dispatch_server_id,
                     tool_name=call.tool,
@@ -2407,9 +2434,16 @@ class BatchExecutor:
                     policy=policy,
                     mcp_server=call.mcp_server,
                     operation_name=call.tool,
+                    # One event per retried failure, carrying the reason and the
+                    # backoff about to be waited out. `retry_sync` calls this
+                    # before it sleeps, so the delay recorded is the one taken.
+                    on_retry=lambda index, error, delay: record_retry_attempt(
+                        Retry.LAYER_EXECUTOR, index, type(error).__qualname__, delay
+                    ),
                 )
                 retry_span.set_attribute("retry.attempts", retry_result.attempt_count)
                 retry_span.set_attribute("retry.success", retry_result.success)
+                retry_span.set_attribute(Retry.OUTCOME, _retry_outcome(retry_result))
             if retry_result.success:
                 result = retry_result.result
             else:

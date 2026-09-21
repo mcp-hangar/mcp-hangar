@@ -29,8 +29,10 @@ from .domain.exceptions import ClientError
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
+from .observability.conventions import Retry
 from .observability.tracing import (
     inject_trace_context,
+    record_retry_attempt,
     record_upstream_outcome,
     upstream_call_span,
 )
@@ -489,7 +491,12 @@ class HttpClient:
             prometheus_metrics.HTTP_RETRIES_TOTAL.inc(mcp_server=mcp_server_label, retry_reason=reason)
             # Exponential on the factor, the shape `retry_backoff_factor`
             # names; a factor of 0 disables waiting without disabling retries.
-            time.sleep(backoff * (2**attempt))
+            delay = backoff * (2**attempt)
+            # On the CLIENT span this POST is already inside, so a resend is
+            # visible as what it is (#1287). Separate CLIENT spans per resend
+            # would claim each was its own upstream call, which it is not.
+            record_retry_attempt(Retry.LAYER_HTTP, attempt + 1, reason, delay)
+            time.sleep(delay)
 
         # Unreachable: the loop returns or raises on its last attempt.
         raise ClientError("retry_loop_exhausted")
