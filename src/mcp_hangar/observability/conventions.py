@@ -114,6 +114,36 @@ class MCP:
     RESPONSE_TOKENS = "mcp.tool.response_tokens"
 
 
+class Dispatch:
+    """Attributes describing a command or query dispatch (#1297).
+
+    `CommandBus.send` opened `handler.{Command}` only inside its innermost
+    handler, so a command the rate-limit middleware refused left a lone
+    `rate_limit.check` span with `allowed=false` behind it: no dispatch span, no
+    handler span, nothing naming the command. `QueryBus.execute` opened no span
+    at all, so every management read was invisible.
+
+    ADR-029 s5 keeps this vocabulary separate from `hangar.gate.*`: a gate is a
+    stage of the batch executor's `_GATES` and nothing else, and a command-bus
+    rate limit is middleware. Calling it a gate would make the word mean
+    "anything that can stop a call", which is not a set the code has.
+    """
+
+    #: The command or query class name. A bounded value: a class name, never a
+    #: serialized payload.
+    OPERATION = "hangar.dispatch.operation"
+
+    #: How the dispatch ended.
+    OUTCOME = "hangar.dispatch.outcome"
+
+    #: The dispatch completed and the handler returned.
+    SUCCESS = "success"
+    #: Middleware refused it -- a rate limit is `rejected`, not an error.
+    REJECTED = "rejected"
+    #: The handler or the middleware broke.
+    ERROR = "error"
+
+
 class Enforcement:
     """Attributes describing policy and enforcement decisions."""
 

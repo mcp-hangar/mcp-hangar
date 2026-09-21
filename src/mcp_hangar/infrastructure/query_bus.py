@@ -8,7 +8,10 @@ Each query has exactly one handler that returns data.
 from typing import Any
 
 from mcp_hangar.application.ports.bus import HandlerNotRegisteredError, IQueryBus
+from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.conventions import Dispatch
+from mcp_hangar.observability.tracing import ERROR_TYPE, get_tracer
 
 # Re-export query classes from canonical location for backward compatibility
 from ..application.queries.queries import (  # noqa: F401
@@ -84,7 +87,21 @@ class QueryBus(IQueryBus):
             raise HandlerNotRegisteredError(f"No handler registered for {query_type.__name__}")
 
         logger.debug("query_executing", query_type=query_type.__name__)
-        return handler.handle(query)
+
+        # A query had no span at all, so every management read -- the fleet
+        # listing a REST route serves, the history a tenant-scoped viewer asks
+        # for -- was a gap in the trace between the request arriving and the
+        # response leaving (#1297).
+        with get_tracer(__name__).start_as_current_span(f"dispatch.{query_type.__name__}") as span:
+            span.set_attribute(Dispatch.OPERATION, query_type.__name__)
+            try:
+                result = handler.handle(query)
+            except Exception as e:
+                span.set_attribute(Dispatch.OUTCOME, Dispatch.ERROR)
+                span.set_attribute(ERROR_TYPE, bounded_error_type(type(e).__qualname__))
+                raise
+            span.set_attribute(Dispatch.OUTCOME, Dispatch.SUCCESS)
+            return result
 
     def has_handler(self, query_type: type[Query]) -> bool:
         """Check if a handler is registered for the query type."""
