@@ -196,7 +196,7 @@ def init_tracing(config: TracingConfig) -> bool:
 
         # No init line here: `tracing_initialized` is logged once, by
         # otel_init_tracing, with the exporters it actually attached.
-        return otel_init_tracing(
+        started = otel_init_tracing(
             service_name=config.service_name,
             otlp_endpoint=config.otlp_endpoint,
             jaeger_host=config.jaeger_host,
@@ -204,6 +204,9 @@ def init_tracing(config: TracingConfig) -> bool:
             console_export=config.console_export,
             service_instance_id=current_instance_id(),
         )
+        if started:
+            _install_startup_observer()
+        return started
 
     except ImportError:
         logger.info(
@@ -214,6 +217,25 @@ def init_tracing(config: TracingConfig) -> bool:
     except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing init failure must not crash application
         logger.warning("tracing_initialization_failed", error=str(e))
         return False
+
+
+def _install_startup_observer() -> None:
+    """Let the aggregate report who starts a server and who waits for it (#1279).
+
+    Installed here, beside the tracer it writes to, rather than left for a
+    caller to remember: an adapter nothing installs is what
+    `TracedMcpServerService` was, and the point of #1278 was to stop shipping
+    those. Fault-barriered, because a gateway that will not start because its
+    telemetry could not be wired has its priorities backwards.
+    """
+    try:
+        from ...domain.contracts.startup_observer import set_startup_observer
+        from ...infrastructure.observability.startup_spans import StartupSpanAdapter, aggregate_observer
+
+        set_startup_observer(aggregate_observer(StartupSpanAdapter()))
+        logger.debug("startup_observer_installed")
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: telemetry wiring must not crash boot
+        logger.warning("startup_observer_install_failed", error=str(e))
 
 
 def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:

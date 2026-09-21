@@ -47,6 +47,7 @@ from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....domain.value_objects.truncation import ContinuationOwner
+from ....infrastructure.observability.startup_spans import StartupSpanAdapter
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....metrics import (
@@ -821,7 +822,9 @@ class BatchExecutor:
         validator_pipeline: ValidatorPipeline | None = None,
         mutator_pipeline: MutatorPipeline | None = None,
     ):
-        self._single_flight = SingleFlight(cache_results=False)
+        # The observer names the caller that performs a cold start and links
+        # every caller that waits for it to that start (#1279).
+        self._single_flight = SingleFlight(cache_results=False, observer=StartupSpanAdapter())
         self._active_batches = 0
         self._active_lock = threading.Lock()
         self._concurrency_manager = concurrency_manager

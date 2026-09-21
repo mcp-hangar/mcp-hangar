@@ -16,6 +16,7 @@ from ...lock_hierarchy import LockLevel, TrackedLock
 from ..contracts.launcher import TransportClient
 from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
+from ..contracts.startup_observer import get_startup_observer
 from ..events import (
     DEGRADED_BY_HEALTH_CHECKS,
     STOPPED_BY_GIVING_UP,
@@ -781,12 +782,21 @@ class McpServer(AggregateRoot):
             else:
                 return  # Unknown state, no-op
 
+        # Both roles are reported to the startup observer, outside the lock, so a
+        # trace can tell the caller doing the work from the callers watching it
+        # (#1279). The default observer reports nothing.
+        observer = get_startup_observer()
+        server_id = str(self.mcp_server_id)
+
         if should_start:
             # Path A: We are the starter -- all I/O outside lock
-            self._start()
+            with observer.starting(server_id):
+                self._start()
         else:
             # Path B: We are a waiter -- wait for starter to finish
-            if not ready_event.wait(timeout=30.0):
+            with observer.waiting(server_id):
+                timed_out = not ready_event.wait(timeout=30.0)
+            if timed_out:
                 raise CannotStartMcpServerError(
                     self.mcp_server_id,
                     "startup_timeout: timed out waiting for mcp_server to start",
