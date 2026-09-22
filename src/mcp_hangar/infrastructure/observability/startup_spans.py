@@ -1,0 +1,164 @@
+"""Turns startup role reports into spans (#1279).
+
+Ten concurrent calls to one cold server produce one launch and nine waits. Until
+this adapter existed a trace could not tell them apart: every caller got the
+same `mcp_server.cold_start` span, only the leader's happened to contain the
+start command, and the nine waiters looked like nine slow calls with no
+explanation on them.
+
+It implements both reporting ports, because the same question is asked twice on
+the way in and the answer has to read the same either way:
+
+- `SingleFlightObserver` -- the batch executor's cold-start gate, which
+  deduplicates callers that arrive while the server is still `cold`;
+- `StartupObserver` -- the aggregate's own `ensure_ready`, which catches the
+  callers that arrive after the leader has moved it to `INITIALIZING` and so
+  never reach single flight at all.
+
+**Links, not a shared parent.** ADR-029 s2: many waiters share one cause, and a
+shared cause is a link. Making the leader's span the parent of nine other
+requests' work would file nine unrelated traces under one call and make the
+leader's duration look like the sum of everyone's patience.
+
+The origin travels as a W3C `traceparent` string, never as an SDK object, so
+`SingleFlight` stores data it does not have to understand (ADR-029 s8). A
+waiter that arrives before the leader publishes one gets `None` and is recorded
+with no link, because the alternative is inventing a cause.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
+
+from ...logging_config import get_logger
+from ...observability.conventions import McpServer
+from ...observability.tracing import extract_trace_context, get_tracer, inject_trace_context
+
+logger = get_logger(__name__)
+
+#: The role a caller played in a shared startup.
+ROLE = "hangar.startup.role"
+#: Which of the two waiting mechanisms the caller waited in, so a trace can say
+#: whether single flight or the aggregate's event held it.
+MECHANISM = "hangar.startup.mechanism"
+
+_LEADER = "leader"
+_WAITER = "waiter"
+
+
+class StartupSpanAdapter:
+    """Maps startup role reports to spans, for both waiting mechanisms."""
+
+    def __init__(self, tracer: Any | None = None) -> None:
+        self._tracer = tracer or get_tracer(__name__)
+
+    # -- SingleFlightObserver -------------------------------------------------
+
+    def leading(self, key: str) -> str | None:
+        """Publish the leader's current span as the origin waiters may link to.
+
+        Called on the executing caller, outside the lock, before the start runs.
+        The leader's span is already open -- the executor's
+        `mcp_server.cold_start` -- so this reads the ambient context rather than
+        opening a second one: a start that appeared twice in a trace would be
+        the double-counting this epic exists to remove.
+        """
+        carrier: dict[str, Any] = {}
+        inject_trace_context(carrier)
+        origin = carrier.get("traceparent")
+        return origin if isinstance(origin, str) else None
+
+    @contextmanager
+    def waiting(self, key: str, origin: str | None) -> Iterator[None]:
+        """Span a caller's wait in single flight, linked to the leader's start."""
+        with self._wait_span(key, origin, mechanism="single_flight"):
+            yield
+
+    # -- StartupObserver ------------------------------------------------------
+
+    @contextmanager
+    def starting(self, mcp_server_id: str) -> Iterator[None]:
+        """Mark the ambient span as the one doing the work.
+
+        An attribute rather than a span: the work already has one, and the
+        caller that performs a start is the interesting fact about the span it
+        is already in.
+        """
+        self._mark(ROLE, _LEADER)
+        yield
+
+    @contextmanager
+    def waiting_for_start(self, mcp_server_id: str) -> Iterator[None]:
+        """Span a caller's wait on the aggregate's readiness event.
+
+        These are the callers that arrived after the leader moved the server to
+        `INITIALIZING`, so single flight never saw them. Their wait had no span
+        at all before this.
+        """
+        with self._wait_span(mcp_server_id, None, mechanism="ensure_ready"):
+            yield
+
+    # -- shared ---------------------------------------------------------------
+
+    @contextmanager
+    def _wait_span(self, server_id: str, origin: str | None, *, mechanism: str) -> Iterator[None]:
+        links = self._links(origin)
+        with self._tracer.start_as_current_span("mcp_server.startup_wait", links=links) as span:
+            span.set_attribute(McpServer.ID, server_id)
+            span.set_attribute(ROLE, _WAITER)
+            span.set_attribute(MECHANISM, mechanism)
+            yield
+
+    def _links(self, origin: str | None) -> list[Any]:
+        """One link to the origin, or none at all when it is absent or malformed."""
+        if not origin:
+            return []
+        try:
+            from opentelemetry import trace
+
+            context = extract_trace_context({"traceparent": origin})
+            if context is None:
+                return []
+            span_context = trace.get_current_span(context).get_span_context()
+            return [trace.Link(span_context)] if span_context.is_valid else []
+        except Exception:  # noqa: BLE001 -- fault barrier: a bad carrier must not break a wait
+            logger.debug("startup_wait_link_failed")
+            return []
+
+    def _mark(self, key: str, value: str) -> None:
+        """Set an attribute on the ambient span, if there is a real one."""
+        try:
+            from opentelemetry import trace
+
+            span = trace.get_current_span()
+            if span.get_span_context().is_valid:
+                span.set_attribute(key, value)
+        except Exception:  # noqa: BLE001 -- fault barrier: observation must not break a start
+            logger.debug("startup_role_mark_failed", key=key)
+
+
+class _AggregateView:
+    """The `StartupObserver` face of the adapter.
+
+    The aggregate's port names its waiting hook `waiting`, and single flight's
+    port gives that name a second parameter. Rather than overload one method
+    with an optional argument that means different things to its two callers,
+    the adapter exposes the aggregate's shape here. One object still owns the
+    behaviour, so the two mechanisms cannot drift apart.
+    """
+
+    def __init__(self, adapter: StartupSpanAdapter) -> None:
+        self._adapter = adapter
+
+    def starting(self, mcp_server_id: str) -> Any:
+        return self._adapter.starting(mcp_server_id)
+
+    def waiting(self, mcp_server_id: str) -> Any:
+        return self._adapter.waiting_for_start(mcp_server_id)
+
+
+def aggregate_observer(adapter: StartupSpanAdapter) -> _AggregateView:
+    """The adapter, shaped for `domain.contracts.startup_observer.StartupObserver`."""
+    return _AggregateView(adapter)
