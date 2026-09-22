@@ -20,6 +20,13 @@ from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
+#: Whether tool inputs and outputs are scrubbed before they reach an external
+#: observability backend when nobody said otherwise. Payload content leaves the
+#: process only on an explicit opt-in (#1276). This is the one stated default:
+#: every config that carries a scrub flag reads it from here, so two of them
+#: cannot drift apart again (#1534).
+SCRUB_PAYLOADS_BY_DEFAULT: bool = True
+
 
 @dataclass(frozen=True)
 class TraceContext:

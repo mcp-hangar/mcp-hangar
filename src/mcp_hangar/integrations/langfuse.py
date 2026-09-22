@@ -30,7 +30,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from mcp_hangar.application.ports.observability import ObservabilityPort, SpanHandle, TraceContext
+from mcp_hangar.application.ports.observability import (
+    SCRUB_PAYLOADS_BY_DEFAULT,
+    ObservabilityPort,
+    SpanHandle,
+    TraceContext,
+)
 from mcp_hangar.errors import bounded_error_type
 
 logger = logging.getLogger(__name__)
@@ -70,8 +75,8 @@ class LangfuseConfig:
     host: str = "https://cloud.langfuse.com"
     flush_interval_s: float = 1.0
     sample_rate: float = 1.0
-    scrub_inputs: bool = True
-    scrub_outputs: bool = True
+    scrub_inputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
+    scrub_outputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
 
     def validate(self) -> list[str]:
         """Validate configuration, return list of errors."""
