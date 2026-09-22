@@ -66,11 +66,13 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, GenAI, McpServer, Retry
+from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry
 from ....observability.tracing import (
     extract_trace_context,
     get_tracer,
     mark_span_error,
+    record_call_outcome,
+    record_gate_decision,
     record_handled_failure,
     record_retry_attempt,
 )
@@ -91,6 +93,41 @@ _TENANT_QUOTA_MESSAGES = {
     CONCURRENCY: "This tenant's execution budget is exhausted: too many calls in flight",
     RATE: "This tenant's execution budget is exhausted: calls started too fast",
 }
+
+#: A refusing gate's `hangar.gate.reason`, keyed by the refusal's bounded
+#: `error_type`, never by its message (#1285). A refusal whose type is not here
+#: records no reason rather than an invented one. A gate that knows more than
+#: its `error_type` says -- a tenant budget's `no_budget`/`concurrency`/`rate`,
+#: an unverifiable pin -- names its reason itself with `_CallPipeline.note`.
+_GATE_REASONS = {
+    "CancellationError": "cancelled",
+    "TimeoutError": "batch_timeout",
+    "NoAvailableMemberError": "no_available_member",
+    "McpServerNotFoundError": "server_not_found",
+    "ToolAccessDeniedError": "tool_not_in_access_policy",
+    "ToolAccessDenied": "tool_not_in_access_policy",
+    "ToolWithdrawnError": "tool_withdrawn",
+    "ToolDigestMismatchError": "digest_mismatch",
+    "CircuitBreakerOpen": "circuit_open",
+    "CannotStartMcpServerError": "not_revived_by_calls",
+    "McpServerStartError": "start_failed",
+    "ValidatorDenied": "validator_denied",
+    "TenantQuotaExceeded": "tenant_quota_exceeded",
+    "ApprovalDenied": "approval_denied",
+    "approval_denied": "approval_denied",
+    "approval_timeout": "approval_timeout",
+    "ApprovalNoLongerValid": "approval_no_longer_valid",
+    "ApprovalGateError": "approval_gate_error",
+    "ApprovalRevalidationError": "approval_revalidation_error",
+}
+
+#: Refusals that mean the gate machinery broke, not that it said no: `error`,
+#: not `deny` (ADR-029 s5). The call stops either way.
+_GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalRevalidationError"})
+
+#: Refusals raised past the gates, by the aggregate's L7 policy (#1295): a
+#: call they end is `deny`, as `_log_call_failure` already treats them.
+_REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError"})
 
 
 def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
@@ -646,6 +683,15 @@ class _CallPipeline:
     #: Set by _gate_tenant_budget: the token taken from the caller's tenant
     #: budget, given back if a later gate refuses the call (#1445).
     reservation: Reservation | None = None
+    #: What the running gate says about its own decision, for its span event
+    #: (#1285): ``(outcome, reason, revision)``. Reset before each gate. A gate
+    #: that returns None without a note let the call through (`allow`); one
+    #: that does not apply, or defers, says so here, because None alone cannot.
+    gate_note: tuple[str, str | None, str | None] | None = None
+
+    def note(self, outcome: str, reason: str | None = None, revision: str | None = None) -> None:
+        """Say what the running gate decided, beyond the CallResult or None it returns."""
+        self.gate_note = (outcome, reason, revision)
 
     @property
     def governance(self) -> _Governance:
@@ -1664,6 +1710,7 @@ class BatchExecutor:
 
         refusal = self._run_gates(pipeline)
         if refusal is not None:
+            _observe_call(refusal, refused_by_gate=True)
             return refusal
 
         # The slot of the tenant's execution budget (#1445), taken after every
@@ -1672,9 +1719,13 @@ class BatchExecutor:
         # queues for one. Its token was taken by `_gate_tenant_budget`.
         admitted = self._enforce_tenant_budget(pipeline)
         if isinstance(admitted, CallResult):
+            _observe_gate("tenant_budget", pipeline, admitted)
+            _observe_call(admitted, refused_by_gate=True)
             return admitted
         try:
-            return self._dispatch(pipeline)
+            result = self._dispatch(pipeline)
+            _observe_call(result, refused_by_gate=False)
+            return result
         finally:
             # On every path: a result, a relayed task handle, an exception. A
             # worker thread cannot be cancelled, so a call its batch gave up on
@@ -1690,7 +1741,11 @@ class BatchExecutor:
         passed = False
         try:
             for gate in _GATES:
+                p.gate_note = None
                 refusal = gate(self, p)
+                # `hangar.gate.name` is the stage without its `_gate_` prefix,
+                # so a stage added to `_GATES` takes its name by the same rule.
+                _observe_gate(gate.__name__.removeprefix("_gate_"), p, refusal)
                 if refusal is not None:
                     return refusal
             passed = True
@@ -1732,6 +1787,7 @@ class BatchExecutor:
             approval_id=approval_id,
         )
         TENANT_QUOTA_REFUSALS_TOTAL.inc(budget=refusal.budget, reason=refusal.reason)
+        p.note(Gate.DENY, refusal.reason)
         return p.refuse(_TENANT_QUOTA_MESSAGES[refusal.reason], "TenantQuotaExceeded")
 
     def _dispatch(self, pipeline: "_CallPipeline") -> CallResult:
@@ -1896,6 +1952,8 @@ class BatchExecutor:
         member of that group.
         """
         if not p.governance.withdrawn:
+            if p.projection is None:
+                p.note(Gate.SKIP, "no_projection")
             return None
         return self._withdrawn_refusal(p.call, p.ctx, p.caller_tenant_id, p.elapsed_ms())
 
@@ -1958,6 +2016,8 @@ class BatchExecutor:
             )
             blocked = enforcement == DigestEnforcement.BLOCK
             event = None
+            # The check broke: `error`, whether or not the mode refuses the call.
+            p.note(Gate.ERROR, "digest_unverifiable", pin.sha256)
         if event is not None:
             p.ctx.event_bus.publish(event)
         if blocked:
@@ -1970,6 +2030,8 @@ class BatchExecutor:
             # "for this tenant" was true while a pin could only be declared for
             # one, and became a small lie once an all-tenants pin could refuse a
             # caller who carries no tenant at all (#902).
+            if p.gate_note is None or p.gate_note[0] != Gate.ERROR:
+                p.note(Gate.DENY, "digest_mismatch", pin.sha256)
             return p.refuse(
                 f"Tool '{p.call.tool}' schema does not match its pinned digest",
                 "ToolDigestMismatchError",
@@ -1983,6 +2045,8 @@ class BatchExecutor:
         set_current_tool_pin(
             CurrentToolPin(mcp_server=p.call.mcp_server, tool_name=p.call.tool, pinned_digest=pin.sha256)
         )
+        if p.gate_note is None or p.gate_note[0] == Gate.ALLOW:
+            p.note(Gate.ALLOW, revision=pin.sha256)
         return None
 
     def _gate_digest_pin(self, p: "_CallPipeline") -> CallResult | None:
@@ -2011,9 +2075,11 @@ class BatchExecutor:
         those of the groups of a member named directly.
         """
         if not p.pins():
+            p.note(Gate.SKIP, "no_pin")
             return None
         if p.projection is None:
             p.digest_pin_deferred = True
+            p.note(Gate.DEFERRED, "catalogue_not_loaded")
             return None
         return self._enforce_digest_pins(p, p.projection)
 
@@ -2029,6 +2095,7 @@ class BatchExecutor:
         over (#1361).
         """
         if not p.mcp_server_obj:
+            p.note(Gate.SKIP, "target_not_loaded")
             return None
         if p.mcp_server_obj.state.value == "dead":
             return self._report_refusal(p, self._refuse_dead_target(p))
@@ -2193,13 +2260,21 @@ class BatchExecutor:
                     target_server_id=p.target_server_id,
                 )
                 if refusal is not None:
+                    # A pin re-verified in the callback wrote its own note; the
+                    # refusal's error_type is what the approval gate says.
+                    p.gate_note = None
                     approval_span.set_attribute("approval.result", "revalidation_failed")
                     refusal.elapsed_ms = p.elapsed_ms()
                     return refusal
+            label = None
             if approval_span.is_recording():
                 # Only while someone will read it: without a gate the label
                 # costs a second L7 evaluation of the arguments.
-                approval_span.set_attribute("approval.result", self._approval_pass_label(p, granted_id))
+                label = self._approval_pass_label(p, granted_id)
+                approval_span.set_attribute("approval.result", label)
+            # The label is reused, never recomputed, for the gate's event. Not
+            # recording, there is no span to record it on.
+            p.note(Gate.SKIP if label == "not_required" else Gate.ALLOW, label)
         return None
 
     def _approval_pass_label(self, p: "_CallPipeline", granted_id: str | None) -> str:
@@ -2232,6 +2307,7 @@ class BatchExecutor:
         itself refused, for the command bus's rate limit, does not (#1409).
         """
         if not (p.mcp_server_obj and p.mcp_server_obj.state.value in ("cold", "dead")):
+            p.note(Gate.SKIP, "not_cold")
             return None
         if p.mcp_server_obj.state.value == "dead":
             refusal = self._refuse_dead_target(p)
@@ -2270,12 +2346,15 @@ class BatchExecutor:
         gate.
         """
         if not p.digest_pin_deferred:
+            p.note(Gate.SKIP, "not_deferred")
             return None
         late_projection = p.reresolve_projection()
         if late_projection is not None:
             return self._enforce_digest_pins(p, late_projection)
         if all(enforcement != DigestEnforcement.BLOCK for _scope, _pin, enforcement in p.pins()):
+            p.note(Gate.ALLOW, "digest_unverifiable")
             return None
+        p.note(Gate.DENY, "digest_unverifiable")
         logger.info(
             "tool_digest_pin_unresolvable",
             mcp_server_id=p.call.mcp_server,
@@ -2552,6 +2631,43 @@ class BatchExecutor:
             original_size_bytes=original_size,
             retry_metadata=retry_meta,
         )
+
+
+def _observe_gate(name: str, p: _CallPipeline, refusal: CallResult | None) -> None:
+    """Record what gate *name* decided, from its own note or its result (#1285). Never raises.
+
+    Reads the verdict the gate already returned; it evaluates nothing, so a
+    telemetry failure cannot change a decision.
+    """
+    try:
+        if p.gate_note is not None:
+            outcome, reason, revision = p.gate_note
+        elif refusal is not None:
+            error_type = refusal.error_type or ""
+            outcome = Gate.ERROR if error_type in _GATE_ERRORS else Gate.DENY
+            reason, revision = _GATE_REASONS.get(error_type), None
+        else:
+            outcome, reason, revision = Gate.ALLOW, None, None
+        record_gate_decision(name, outcome, reason, revision, refused=refusal is not None)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a gate
+        logger.debug("gate_observation_failed", gate=name)
+
+
+def _observe_call(result: CallResult, *, refused_by_gate: bool) -> None:
+    """Set the call's `hangar.call.outcome` from its result (#1285). Never raises."""
+    try:
+        error_type = result.error_type or ""
+        if result.success:
+            outcome = Gate.ALLOW
+        elif error_type in _GATE_ERRORS:
+            outcome = Gate.ERROR
+        elif refused_by_gate or error_type in _REFUSED_AT_DISPATCH:
+            outcome = Gate.DENY
+        else:
+            outcome = Gate.ERROR
+        record_call_outcome(outcome)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
+        logger.debug("call_observation_failed")
 
 
 def format_result_dict(result: CallResult) -> dict[str, Any]:

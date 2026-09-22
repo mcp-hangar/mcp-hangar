@@ -144,6 +144,48 @@ class Dispatch:
     ERROR = "error"
 
 
+class Gate:
+    """What each stage of the batch executor's `_GATES` decided about a call (#1285, ADR-029 s5).
+
+    One call passes up to thirteen gates, so a decision is a span EVENT on
+    `batch.call.<tool>`, not an attribute: the last gate to write a scalar
+    would erase every decision before it, and a deferred digest pin has two.
+    The call's summary -- its outcome and the first gate that refused it --
+    is scalar, and carries no history.
+    """
+
+    #: One gate's decision, as an event on `batch.call.<tool>`.
+    DECISION_EVENT = "hangar.gate.decision"
+
+    #: The stage's name in `_GATES` without its `_gate_` prefix.
+    NAME = "hangar.gate.name"
+    #: `allow`, `deny`, `skip`, `deferred` or `error`.
+    OUTCOME = "hangar.gate.outcome"
+    #: A bounded code (see `executor._GATE_REASONS` and the gates that name
+    #: their own); never free text. Omitted when the gate cannot say why.
+    REASON = "hangar.gate.reason"
+    #: The pinned digest a pin gate checked. Omitted for every gate without a
+    #: revision source (ADR-029 s6); never fabricated.
+    REVISION = "hangar.gate.revision"
+
+    #: The gate let the call through.
+    ALLOW = "allow"
+    #: The gate refused the call.
+    DENY = "deny"
+    #: The gate does not apply to this call.
+    SKIP = "skip"
+    #: The gate is decided later, on the same call.
+    DEFERRED = "deferred"
+    #: The gate itself failed.
+    ERROR = "error"
+
+    #: How the call ended, on `batch.call.<tool>`: `allow`, `deny` or `error`.
+    CALL_OUTCOME = "hangar.call.outcome"
+    #: The first gate that refused the call, and its reason.
+    REFUSAL_GATE = "hangar.refusal.gate"
+    REFUSAL_REASON = "hangar.refusal.reason"
+
+
 class Enforcement:
     """Attributes describing policy and enforcement decisions."""
 
