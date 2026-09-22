@@ -69,7 +69,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -137,7 +137,7 @@ Repository = "https://github.com/mcp-hangar/mcp-hangar"
 # `hatch` at plugin-load time, then prove it with `docker build .` and the
 # `build` job -- not with a local `pip install`, which has `hatch` on hand and
 # therefore cannot reproduce the failure.
-requires = ["hatchling==1.32.0"]
+requires = ["hatchling==1.32.3"]
 build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = ["/.github/brand"]
