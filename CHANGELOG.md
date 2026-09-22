@@ -5,6 +5,169 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.22.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.21.2...v2.22.0) (2026-09-22)
+
+### Added
+
+- **core:** a command or query dispatch now leaves a span naming what was
+  dispatched and how it ended. `CommandBus.send` opened `handler.{Command}` only
+  inside its innermost step, so a command the rate-limit middleware refused never
+  reached it: the trace held one `rate_limit.check` span with `allowed=false` and
+  nothing saying which command had been refused. `QueryBus.execute` opened no span
+  at all, so every management read -- a fleet listing, an invocation history --
+  was a gap between the request arriving and the response leaving.
+
+  Both buses now open `dispatch.{Operation}` carrying
+  `hangar.dispatch.operation` (the class name, never a payload) and
+  `hangar.dispatch.outcome`: `success`, `rejected` or `error`. A rate limit is
+  `rejected`, not an error -- middleware answered the question it exists to
+  answer, and an operator counting failures should not be counting refusals.
+
+  The span covers middleware AND handler, so `rate_limit.check` and `handler.*`
+  are now its children, with their own names and attributes unchanged. It nests
+  under whatever span is already active and never starts a trace of its own.
+
+  This covers every entry point at once: REST routes, the MCP management tools
+  that call the buses directly, and the batch executor. ([#1549](https://github.com/mcp-hangar/mcp-hangar/pull/1549))
+- **core:** a retried call now says which layer retried it, how often and how long
+  it waited. Two layers retry one call -- the executor's command send and the HTTP
+  client's resend -- and both reported totals only, so three upstream POSTs might
+  have been one executor attempt that resent twice or three executor attempts, and
+  a trace read the same either way.
+
+  Each `command.send.InvokeToolCommand` span carries its attempt index. Each
+  retried failure adds a `hangar.retry.attempt` event -- on `invoke_with_retry`
+  for the executor layer, on the existing upstream CLIENT span for the HTTP layer
+  -- naming the layer, the index, a bounded reason (an error type, an HTTP status
+  or `connection_error`) and the backoff about to be waited out. `invoke_with_retry`
+  ends with `hangar.retry.outcome`: `success`, `exhausted` or `non_retryable`.
+
+  Events rather than attributes, because one call has many attempts and an
+  attribute holds one value per key -- the last retry would erase every one before
+  it. `exhausted` and `non_retryable` are separated because they arrive looking
+  identical and mean opposite things: the upstream kept failing and the budget ran
+  out, or the first failure was never worth retrying.
+
+  No retry behaviour changes: max attempts, delays, `retry_on` rules, cancellation
+  and the returned envelopes are exactly as they were. ([#1548](https://github.com/mcp-hangar/mcp-hangar/pull/1548))
+- **core:** a tool call's trace now says what each batch gate decided, and which
+  one refused it. Every stage of the executor's gate chain records one
+  `hangar.gate.decision` event on `batch.call.<tool>` (ADR-029), with
+  `hangar.gate.name`, `hangar.gate.outcome` (`allow`, `deny`, `skip`, `deferred`
+  or `error`), a bounded `hangar.gate.reason` code when the gate can say why, and
+  the pinned digest as `hangar.gate.revision` on the pin gates. Before this only
+  three of the thirteen gates had a span, so a refused call's trace could not
+  name the gate that refused it.
+
+  A gate that does not apply now says `skip` rather than looking like a pass, and
+  a digest pin with no catalogue yet records `deferred` and then, on the same
+  span, what the check after the cold start decided. The span also carries
+  `hangar.call.outcome` and, for a refused call, `hangar.refusal.gate` and
+  `hangar.refusal.reason`.
+
+  Additive only: gate order, enforcement, and existing span names, attributes and
+  status are unchanged. Recording never runs a policy again and cannot change a
+  verdict; a failure to record is swallowed. ([#1553](https://github.com/mcp-hangar/mcp-hangar/pull/1553))
+- **core:** a trace can now tell the caller starting a server from the callers
+  waiting for it. Ten concurrent calls to one cold server produce one start and
+  nine waits, and until now every one of them got the same `mcp_server.cold_start`
+  span: the nine watching looked exactly like the one working.
+
+  Each waiting caller gets a `mcp_server.startup_wait` span carrying
+  `hangar.startup.role=waiter` and `hangar.startup.mechanism`, **linked** to the
+  start it waited for rather than parented under it -- many waiters share one
+  cause, and a shared cause is a link (ADR-029 s2). The caller performing the
+  start is marked `hangar.startup.role=leader` on the span it already has.
+
+  Both waiting mechanisms report: single flight, which deduplicates callers that
+  arrive while the server is still cold, and the aggregate's own `ensure_ready`,
+  which catches the callers that arrive after the leader moved it to
+  INITIALIZING and so never reach single flight at all. That second wait had no
+  span of any kind before.
+
+  The aggregate reports through a narrow domain port with a silent default, so
+  `domain/` still imports no tracer and a deployment with tracing off pays a
+  context-manager entry and nothing else. ([#1547](https://github.com/mcp-hangar/mcp-hangar/pull/1547))
+- **core:** tool-call spans now carry the caller's identity. `batch.call.<tool>`
+  -- the one enrichment boundary both `hangar_call` and a front-door flat call
+  pass through (ADR-029) -- gets `mcp.caller.type`, `mcp.caller.id`,
+  `mcp.caller.tenant_id`, `mcp.user.id`, `mcp.agent.id`, `mcp.session.id` and
+  `mcp.correlation_id`, read from the bound identity context and from nothing
+  else. Unknown values are omitted rather than exported empty, so a query on
+  `mcp.caller.tenant_id` selects the calls that actually had a tenant.
+
+  Baggage is deliberately not a source: anything that forwards a request can
+  write it, and a tenant label taken from there would be a claim the gateway
+  never authenticated.
+
+  `TracedMcpServerService` is removed with this change. It was the only caller of
+  `set_governance_attributes` and nothing in `src/` ever constructed it, so the
+  governance attributes it describes were never emitted on a real call path. See
+  the upgrade note. ([#1540](https://github.com/mcp-hangar/mcp-hangar/pull/1540))
+
+### Changed
+
+- **core:** every refused batch call now logs one `batch_call_refused` warning
+  naming the gate that refused it and the bounded reason, the same pair the call's
+  span carries. A refusal was legible in a trace after #1285 and still not in the
+  log: `_log_call_failure` counted a call as refused for two egress error types
+  only, and it runs on the invoke path, which a gate refusal never reaches. Each
+  gate wrote its own line instead -- `tool_withdrawn_rejected`,
+  `tool_digest_pin_rejected`, `tool_access_denied`, `tool_digest_pin_unresolvable`
+  -- under its own name and at its own level, so there was no one query for "which
+  calls were refused". Those four lines are now debug, and both sinks read one
+  classification, so the log and the span cannot disagree (ADR-029 s5). A gate that
+  broke rather than refused still logs `batch_call_failed` at debug. ([#1558](https://github.com/mcp-hangar/mcp-hangar/pull/1558))
+- **core:** a refusal no longer ends its span as an error. An egress policy denial,
+  a call routed to approval and a spent rate-limit budget are decisions the gateway
+  made on purpose, but every span they passed through ended ERROR, so an operator
+  counting error traces counted refusals, and the `hangar.gate.outcome=deny` from
+  the gate vocabulary sat on a span whose status said failure (ADR-029 s5).
+
+  `batch.call.<tool>` now stays UNSET when the call's outcome is `deny`, and so do
+  `dispatch.*`, `handler.*` and `command.send.*` when a refusal escapes them. A
+  failure still ends ERROR: a cold start that did not start, an approval gate that
+  could not be reached, an upstream that broke. Each refusal keeps the bounded
+  `error.type` naming what refused, and `dispatch.*` now reports
+  `hangar.dispatch.outcome=rejected` for every refusal rather than for a rate
+  limit alone -- an L7 denial raised by the aggregate read `error` there. ([#1559](https://github.com/mcp-hangar/mcp-hangar/pull/1559))
+
+### Fixed
+
+- **core:** enabling Langfuse through the environment no longer ships raw tool
+  inputs and outputs by default. `LangfuseConfig` and the `config.yaml` path
+  scrubbed, sending only the keys of each payload, but `bootstrap/runtime.py`
+  defaulted `langfuse_scrub_inputs` and `langfuse_scrub_outputs` to `False` and
+  read `HANGAR_LANGFUSE_SCRUB_INPUTS` / `HANGAR_LANGFUSE_SCRUB_OUTPUTS` as an
+  opt-in, overriding the component's safe default. An operator who set
+  `HANGAR_LANGFUSE_ENABLED=true` and the credentials, and nothing else, sent
+  `input_params` and `output` to Langfuse in full.
+
+  Every scrub flag now reads one default, `SCRUB_PAYLOADS_BY_DEFAULT` in
+  `mcp_hangar.application.ports.observability`, which is `True`. The two
+  environment variables are an opt-out: only `false`, `0`, `no` or `off` turns
+  scrubbing off, and any other value keeps it on. ([#1552](https://github.com/mcp-hangar/mcp-hangar/pull/1552))
+
+### Security
+
+- **security:** the declared dependency floors now name versions that are free of
+  known vulnerabilities and that can actually be installed. pip keeps an installed
+  package while it satisfies the constraint, so the floor is what an existing
+  environment keeps on upgrade, and ours sat on vulnerable releases:
+  `pyjwt[crypto]>=2.13.0` (was `pyjwt>=2.8.0`; CVE-2026-48522/48523/48524/48525/48526
+  and CVE-2026-32597, of which 48524 and 48525 are pre-authentication DoS on the
+  JWKS path), `cryptography>=50.0.0` (was `>=41.0.0`; fixes through
+  CVE-2026-69247/69248/69249), `python-multipart>=0.0.31` (was `>=0.0.22`;
+  CVE-2026-53537 to 53540 and earlier), `pydantic>=2.12.0` (was `>=2.0.0`, below
+  what `mcp==2.0.0` already required) and, for the `dev` extra, `pytest>=9.0.3`
+  (CVE-2025-71176). A new `deps-floor-audit` CI job runs `pip-audit` against both
+  the lowest and the highest resolution of every range, daily and on each PR, and
+  fails when a floor we declare is lower than the one `mcp` imposes. OIDC signing
+  keys are no longer fetched over plain HTTP: a non-https `jwks_uri`, or a
+  non-https issuer used for discovery, now refuses to start instead of logging
+  `jwks_uri_not_https`, and a discovered non-https `jwks_uri` is refused per
+  request. `http://` to localhost, 127.0.0.1 and ::1 stays allowed for development. ([#1555](https://github.com/mcp-hangar/mcp-hangar/pull/1555))
+
 ## [2.21.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.21.1...v2.21.2) (2026-09-21)
 
 ### Changed
