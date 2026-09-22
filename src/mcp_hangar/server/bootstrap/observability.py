@@ -26,6 +26,9 @@ Configuration via environment variables:
     LANGFUSE_SECRET_KEY: Langfuse secret key
     LANGFUSE_HOST: Langfuse host (default: https://cloud.langfuse.com)
     MCP_LANGFUSE_SAMPLE_RATE: Sample rate 0.0-1.0 (default: 1.0)
+    MCP_LANGFUSE_SCRUB_INPUTS, MCP_LANGFUSE_SCRUB_OUTPUTS: Send only the keys of
+        tool inputs and outputs, never their values (default: true). Setting
+        one to false is the opt-in to shipping raw payloads to Langfuse
 
 Or via config.yaml:
     observability:
@@ -50,7 +53,7 @@ import platform
 from dataclasses import dataclass
 from typing import Any
 
-from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
+from ...application.ports.observability import SCRUB_PAYLOADS_BY_DEFAULT, NullObservabilityAdapter, ObservabilityPort
 from ...domain.contracts.metrics_publisher import set_default_metrics_publisher
 from ...infrastructure.metrics_publisher import PrometheusMetricsPublisher
 from ...infrastructure.observability.otlp_audit_exporter import init_audit_log_export, shutdown_audit_log_export
@@ -83,8 +86,8 @@ class LangfuseBootstrapConfig:
     secret_key: str = ""
     host: str = "https://cloud.langfuse.com"
     sample_rate: float = 1.0
-    scrub_inputs: bool = True
-    scrub_outputs: bool = True
+    scrub_inputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
+    scrub_outputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
 
 
 @dataclass
@@ -131,8 +134,12 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         secret_key=os.getenv("LANGFUSE_SECRET_KEY", _expand_env(langfuse_dict.get("secret_key", ""))),
         host=os.getenv("LANGFUSE_HOST", langfuse_dict.get("host", "https://cloud.langfuse.com")),
         sample_rate=float(os.getenv("MCP_LANGFUSE_SAMPLE_RATE", str(langfuse_dict.get("sample_rate", 1.0)))),
-        scrub_inputs=_get_bool_env("MCP_LANGFUSE_SCRUB_INPUTS", langfuse_dict.get("scrub_inputs", True)),
-        scrub_outputs=_get_bool_env("MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", True)),
+        scrub_inputs=_get_bool_env(
+            "MCP_LANGFUSE_SCRUB_INPUTS", langfuse_dict.get("scrub_inputs", SCRUB_PAYLOADS_BY_DEFAULT)
+        ),
+        scrub_outputs=_get_bool_env(
+            "MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", SCRUB_PAYLOADS_BY_DEFAULT)
+        ),
     )
 
     # Audit records go to the tracing endpoint, but only to one set explicitly,
