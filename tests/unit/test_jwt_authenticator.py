@@ -414,35 +414,79 @@ class TestJWKSTokenValidatorInitClient:
             with pytest.raises(InvalidCredentialsError, match="discover OIDC"):
                 validator._init_jwks_client()
 
-    def test_non_https_issuer_logs_warning(self):
+    @pytest.mark.parametrize(
+        "issuer, jwks_uri",
+        [
+            ("https://auth.example.com", None),
+            ("http://localhost:8080/realms/r", None),
+            ("http://127.0.0.1:9000", None),
+            ("http://[::1]:9000", None),
+            # Not fetched when jwks_uri is set: only matched against `iss`.
+            ("http://auth.example.com", "https://auth.example.com/jwks"),
+            ("https://auth.example.com", "http://localhost/jwks"),
+        ],
+    )
+    def test_trusted_key_source_is_accepted(self, issuer, jwks_uri):
         from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
-        config = OIDCConfig(
-            issuer="http://insecure-auth.example.com",
-            audience="y",
-            jwks_uri="https://auth.example.com/jwks",
-        )
-        validator = JWKSTokenValidator(config)
+        JWKSTokenValidator(OIDCConfig(issuer=issuer, audience="y", jwks_uri=jwks_uri))
 
-        with patch("jwt.PyJWKClient"):
-            validator._init_jwks_client()
-            # No exception -- just a warning logged
+    @pytest.mark.parametrize(
+        "issuer, jwks_uri, field, value",
+        [
+            ("http://idp.example.com", None, "issuer", "http://idp.example.com"),
+            ("https://idp.example.com", "http://idp.example.com/jwks", "jwks_uri", "http://idp.example.com/jwks"),
+            ("https://idp.example.com", "file:///etc/passwd", "jwks_uri", "file:///etc/passwd"),
+            ("file:///etc/passwd", None, "issuer", "file:///etc/passwd"),
+            ("https://idp.example.com", "ftp://localhost/jwks", "jwks_uri", "ftp://localhost/jwks"),
+            (
+                "https://idp.example.com",
+                "http://localhost.evil.example/jwks",
+                "jwks_uri",
+                "http://localhost.evil.example/jwks",
+            ),
+            ("idp", None, "issuer", "idp"),
+        ],
+    )
+    def test_untrusted_key_source_refuses_to_start(self, issuer, jwks_uri, field, value):
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.domain.exceptions import ConfigurationError
 
-    def test_non_https_jwks_uri_discovered(self):
+        with pytest.raises(ConfigurationError) as excinfo:
+            JWKSTokenValidator(OIDCConfig(issuer=issuer, audience="y", jwks_uri=jwks_uri))
+        assert field in str(excinfo.value)
+        assert value in str(excinfo.value)
+
+    @pytest.mark.parametrize("discovered", ["http://idp.example.com/jwks", "file:///etc/passwd", 42])
+    def test_untrusted_discovered_jwks_uri_is_refused(self, discovered):
         from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
-        config = OIDCConfig(issuer="https://auth.example.com", audience="y")
-        validator = JWKSTokenValidator(config)
+        validator = JWKSTokenValidator(OIDCConfig(issuer="https://auth.example.com", audience="y"))
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"jwks_uri": "http://insecure/jwks"}
+        mock_response.json.return_value = {"jwks_uri": discovered}
+        mock_response.raise_for_status.return_value = None
+
+        with patch("httpx.get", return_value=mock_response):
+            with patch("jwt.PyJWKClient") as mock_client_cls:
+                with pytest.raises(InvalidCredentialsError, match="not https"):
+                    validator._init_jwks_client()
+                mock_client_cls.assert_not_called()
+        assert validator._jwks_client is None
+
+    def test_discovered_loopback_jwks_uri_is_accepted(self):
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+
+        validator = JWKSTokenValidator(OIDCConfig(issuer="http://localhost:8080/realms/r", audience="y"))
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"jwks_uri": "http://localhost:8080/realms/r/certs"}
         mock_response.raise_for_status.return_value = None
 
         with patch("httpx.get", return_value=mock_response):
             with patch("jwt.PyJWKClient") as mock_client_cls:
                 validator._init_jwks_client()
-                # Should still proceed but with warning logged
-                mock_client_cls.assert_called_once_with("http://insecure/jwks")
+                mock_client_cls.assert_called_once_with("http://localhost:8080/realms/r/certs")
 
     def test_import_error_raises_invalid_credentials(self):
         from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
@@ -540,3 +584,66 @@ class TestStaticSecretTokenValidator:
         token = jwt.encode({"sub": "user1", "iat": now, "exp": now + 3600}, secret, algorithm="HS256")
         claims = validator.validate(token)
         assert claims["sub"] == "user1"
+
+
+class TestJWKSAlgorithmConfusion:
+    """A JWKS public key must never be accepted as an HMAC secret (CVE-2026-48526 class)."""
+
+    ISSUER = "https://idp.example.com"
+    AUDIENCE = "hangar"
+
+    @pytest.fixture
+    def rsa_key(self):
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    @pytest.fixture
+    def validator(self, rsa_key):
+        import jwt
+
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+
+        jwk = jwt.algorithms.RSAAlgorithm.to_jwk(rsa_key.public_key(), as_dict=True)
+        jwk.update(kid="k1", use="sig", alg="RS256")
+        validator = JWKSTokenValidator(
+            OIDCConfig(issuer=self.ISSUER, audience=self.AUDIENCE, jwks_uri=f"{self.ISSUER}/jwks")
+        )
+        # The real PyJWKClient key selection, fed a JWKS instead of the network.
+        with patch.object(jwt.PyJWKClient, "fetch_data", return_value={"keys": [jwk]}):
+            yield validator
+
+    def _claims(self) -> dict:
+        now = int(time.time())
+        return {"sub": "user1", "iss": self.ISSUER, "aud": self.AUDIENCE, "iat": now, "exp": now + 600}
+
+    def test_rs256_token_signed_with_the_private_key_is_accepted(self, validator, rsa_key):
+        import jwt
+
+        token = jwt.encode(self._claims(), rsa_key, algorithm="RS256", headers={"kid": "k1"})
+        assert validator.validate(token)["sub"] == "user1"
+
+    def test_hs256_token_keyed_with_the_jwks_public_key_is_rejected(self, validator, rsa_key):
+        import base64
+        import hashlib
+        import hmac
+        import json
+
+        from cryptography.hazmat.primitives import serialization
+
+        public_pem = rsa_key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        def b64(raw: bytes) -> str:
+            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+        # Hand-rolled: PyJWT refuses to *encode* HS256 with a PEM key, which is
+        # the point -- an attacker is not using PyJWT to mint this.
+        header = b64(json.dumps({"alg": "HS256", "typ": "JWT", "kid": "k1"}).encode())
+        signing_input = f"{header}.{b64(json.dumps(self._claims()).encode())}"
+        signature = hmac.new(public_pem, signing_input.encode(), hashlib.sha256).digest()
+        token = f"{signing_input}.{b64(signature)}"
+
+        with pytest.raises(InvalidCredentialsError):
+            validator.validate(token)

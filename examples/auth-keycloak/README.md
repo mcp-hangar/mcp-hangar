@@ -130,6 +130,12 @@ auth:
       scope: global
 ```
 
+The gateway fetches signing keys from the issuer, so it accepts `http://` only
+for `localhost`, `127.0.0.1` and `::1`. `http://keycloak:8080` names another
+container and is refused at startup. Run Keycloak with TLS (`start` with a
+certificate instead of `start-dev`) and use its `https://` URL, or run the
+gateway on the host and point it at `http://localhost:8080/realms/mcp-hangar`.
+
 ### Keycloak Client Settings
 
 The `mcp-hangar` client in Keycloak is configured with:
