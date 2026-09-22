@@ -142,9 +142,6 @@ __all__ = [
     "StdioClient",
 ]
 
-import sys
-from importlib import import_module
-
 # legacy aliases
 globals().update(
     {
@@ -157,7 +154,4 @@ globals().update(
         "".join(("Pro", "viderStartError")): McpServerStartError,
         "".join(("Pro", "viderDegradedError")): McpServerDegradedError,
     }
-)
-sys.modules[f"{__name__}.application.services.{''.join(('traced_pro', 'vider_service'))}"] = import_module(
-    f"{__name__}.application.services.traced_mcp_server_service"
 )
