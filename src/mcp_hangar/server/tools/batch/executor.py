@@ -856,7 +856,7 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float)
     """
     details = getattr(error, "details", None)
     reason = details.get("reason") if isinstance(details, dict) else None
-    refused = error_type in ("EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError")
+    refused = error_type in _REFUSED_AT_DISPATCH
     log = logger.warning if refused else logger.debug
     log(
         "batch_call_refused" if refused else "batch_call_failed",
@@ -1751,8 +1751,10 @@ class BatchExecutor:
                 refusal = gate(self, p)
                 # `hangar.gate.name` is the stage without its `_gate_` prefix,
                 # so a stage added to `_GATES` takes its name by the same rule.
-                _observe_gate(gate.__name__.removeprefix("_gate_"), p, refusal)
+                name = gate.__name__.removeprefix("_gate_")
+                _observe_gate(name, p, refusal)
                 if refusal is not None:
+                    _log_gate_outcome(p, name, refusal)
                     return refusal
             passed = True
             return None
@@ -1931,7 +1933,8 @@ class BatchExecutor:
 
         if allowed:
             return None
-        logger.info(
+        # debug: the refusal is reported by `batch_call_refused`.
+        logger.debug(
             "tool_access_denied",
             mcp_server_id=p.call.mcp_server,
             tool=p.call.tool,
@@ -1969,7 +1972,8 @@ class BatchExecutor:
         The withdrawal gate and the re-check after an approval hold give this
         same outcome.
         """
-        logger.info("tool_withdrawn_rejected", mcp_server_id=call.mcp_server, tool=call.tool, tenant_id=tenant_id)
+        # debug: the refusal is reported by `batch_call_refused`.
+        logger.debug("tool_withdrawn_rejected", mcp_server_id=call.mcp_server, tool=call.tool, tenant_id=tenant_id)
         ctx.event_bus.publish(ToolWithdrawnRejected(tenant_id=tenant_id, mcp_server=call.mcp_server, tool=call.tool))
         return CallResult(
             index=call.index,
@@ -2027,7 +2031,8 @@ class BatchExecutor:
         if event is not None:
             p.ctx.event_bus.publish(event)
         if blocked:
-            logger.info(
+            # debug: the refusal is reported by `batch_call_refused`.
+            logger.debug(
                 "tool_digest_pin_rejected",
                 mcp_server_id=p.call.mcp_server,
                 tool=p.call.tool,
@@ -2361,7 +2366,8 @@ class BatchExecutor:
             p.note(Gate.ALLOW, "digest_unverifiable")
             return None
         p.note(Gate.DENY, "digest_unverifiable")
-        logger.info(
+        # debug: the refusal is reported by `batch_call_refused`.
+        logger.debug(
             "tool_digest_pin_unresolvable",
             mcp_server_id=p.call.mcp_server,
             tool=p.call.tool,
@@ -2639,6 +2645,53 @@ class BatchExecutor:
         )
 
 
+def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, str | None, str | None]:
+    """What a gate decided: outcome, bounded reason, revision.
+
+    One computation for both sinks. The span event and the log line have to say
+    the same thing about the same gate (ADR-029 s5), and they did not while each
+    derived it for itself: the span read `hangar.gate.outcome=deny` while the log
+    read `batch_call_failed`, or said nothing at all.
+    """
+    if p.gate_note is not None:
+        return p.gate_note
+    if refusal is not None:
+        error_type = refusal.error_type or ""
+        outcome = Gate.ERROR if error_type in _GATE_ERRORS else Gate.DENY
+        return outcome, _GATE_REASONS.get(error_type), None
+    return Gate.ALLOW, None, None
+
+
+def _log_gate_outcome(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
+    """Log the gate that stopped this call: one line, at the level it deserves.
+
+    A refusal is an enforcement decision taken on purpose, so it is a warning and
+    it names the gate and the bounded reason the span carries. `_log_call_failure`
+    said that only for the two L7 error types it knew, and only on the invoke
+    path, which a refused call never reaches: a gate refusal was left to whatever
+    line the gate wrote for itself, under its own name and at its own level, so
+    "which calls were refused yesterday" had no single answer (ADR-029 s5).
+
+    A gate that broke rather than refused keeps `batch_call_failed` at debug, as
+    the invoke path does for a failure.
+    """
+    outcome, reason, _revision = _gate_decision(p, refusal)
+    refused = outcome == Gate.DENY
+    log = logger.warning if refused else logger.debug
+    log(
+        "batch_call_refused" if refused else "batch_call_failed",
+        call_id=p.call.call_id,
+        mcp_server=p.call.mcp_server,
+        tool=p.call.tool,
+        tenant_id=p.caller_tenant_id,
+        gate=gate,
+        reason=reason,
+        error=refusal.error,
+        error_type=refusal.error_type,
+        elapsed_ms=round(refusal.elapsed_ms, 2),
+    )
+
+
 def _observe_gate(name: str, p: _CallPipeline, refusal: CallResult | None) -> None:
     """Record what gate *name* decided, from its own note or its result (#1285). Never raises.
 
@@ -2646,14 +2699,7 @@ def _observe_gate(name: str, p: _CallPipeline, refusal: CallResult | None) -> No
     telemetry failure cannot change a decision.
     """
     try:
-        if p.gate_note is not None:
-            outcome, reason, revision = p.gate_note
-        elif refusal is not None:
-            error_type = refusal.error_type or ""
-            outcome = Gate.ERROR if error_type in _GATE_ERRORS else Gate.DENY
-            reason, revision = _GATE_REASONS.get(error_type), None
-        else:
-            outcome, reason, revision = Gate.ALLOW, None, None
+        outcome, reason, revision = _gate_decision(p, refusal)
         record_gate_decision(name, outcome, reason, revision, refused=refusal is not None)
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a gate
         logger.debug("gate_observation_failed", gate=name)
