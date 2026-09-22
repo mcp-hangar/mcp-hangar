@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
-from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
+from ..application.ports.observability import SCRUB_PAYLOADS_BY_DEFAULT, NullObservabilityAdapter, ObservabilityPort
 from ..domain.contracts.persistence import IAuditRepository, IMcpServerConfigRepository
 from ..domain.repository import IMcpServerRepository, InMemoryMcpServerRepository
 from ..domain.security.input_validator import InputValidator
@@ -152,8 +152,10 @@ class ObservabilityConfig:
         langfuse_secret_key: Langfuse secret API key.
         langfuse_host: Langfuse host URL.
         langfuse_sample_rate: Fraction of traces to sample (0.0 to 1.0).
-        langfuse_scrub_inputs: Whether to redact sensitive inputs.
-        langfuse_scrub_outputs: Whether to redact sensitive outputs.
+        langfuse_scrub_inputs: Whether to send only the keys of tool inputs.
+        langfuse_scrub_outputs: Whether to send only the keys of tool outputs.
+            Both default to scrubbing; raw payloads reach Langfuse only when
+            one is set to false (#1534).
     """
 
     langfuse_enabled: bool = False
@@ -161,8 +163,24 @@ class ObservabilityConfig:
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
     langfuse_sample_rate: float = 1.0
-    langfuse_scrub_inputs: bool = False
-    langfuse_scrub_outputs: bool = False
+    langfuse_scrub_inputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
+    langfuse_scrub_outputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
+
+
+_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
+
+
+def _scrub_flag(env: dict[str, str], key: str) -> bool:
+    """Read a Langfuse scrub flag: an explicit opt-out, never an opt-in (#1534).
+
+    Unset means :data:`SCRUB_PAYLOADS_BY_DEFAULT`. Only a recognisably false
+    value turns scrubbing off; anything else, a typo included, keeps it on, so
+    a malformed setting fails closed rather than shipping raw payloads.
+    """
+    value = env.get(key)
+    if value is None:
+        return SCRUB_PAYLOADS_BY_DEFAULT
+    return value.strip().lower() not in _FALSE_VALUES
 
 
 @dataclass(frozen=True)
@@ -379,8 +397,8 @@ def create_runtime(
             langfuse_secret_key=env.get("LANGFUSE_SECRET_KEY", ""),
             langfuse_host=env.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
             langfuse_sample_rate=float(env.get("HANGAR_LANGFUSE_SAMPLE_RATE", "1.0")),
-            langfuse_scrub_inputs=env.get("HANGAR_LANGFUSE_SCRUB_INPUTS", "false").lower() == "true",
-            langfuse_scrub_outputs=env.get("HANGAR_LANGFUSE_SCRUB_OUTPUTS", "false").lower() == "true",
+            langfuse_scrub_inputs=_scrub_flag(env, "HANGAR_LANGFUSE_SCRUB_INPUTS"),
+            langfuse_scrub_outputs=_scrub_flag(env, "HANGAR_LANGFUSE_SCRUB_OUTPUTS"),
         )
 
     observability: ObservabilityPort = NullObservabilityAdapter()
