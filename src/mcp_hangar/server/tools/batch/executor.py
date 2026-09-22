@@ -70,11 +70,11 @@ from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, R
 from ....observability.tracing import (
     extract_trace_context,
     get_tracer,
-    mark_span_error,
     record_call_outcome,
     record_gate_decision,
     record_handled_failure,
     record_retry_attempt,
+    settle_failed_call,
 )
 from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
 from ...context import get_context
@@ -125,9 +125,13 @@ _GATE_REASONS = {
 #: not `deny` (ADR-029 s5). The call stops either way.
 _GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalRevalidationError"})
 
-#: Refusals raised past the gates, by the aggregate's L7 policy (#1295): a
-#: call they end is `deny`, as `_log_call_failure` already treats them.
-_REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError"})
+#: Refusals raised past the gates rather than returned by one: the aggregate's
+#: L7 policy (#1295) and a spent command-bus rate-limit budget. A call they end
+#: is `deny`, not `error` -- each is the gateway answering on purpose, which is
+#: what `ExpectedRefusal` marks. `tests/unit/test_refusal_span_status.py` holds
+#: this set to the exceptions carrying that marker, so a new one cannot be
+#: recorded as a failure here while the tracer treats it as a refusal.
+_REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError", "RateLimitExceeded"})
 
 
 def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
@@ -1658,12 +1662,14 @@ class BatchExecutor:
                 call_start,
             )
             # The inner call handles failures as data (CallResult), so the span
-            # never sees an exception. Mark it ERROR explicitly so failing tool
-            # calls are filterable as error traces instead of looking successful.
-            # The error's class names it; its message can hold what the tool
-            # returned, so it stays off the span (GHSA-qwq2-7g49-jxc6).
+            # never sees an exception. Settle its status explicitly: a failure is
+            # ERROR, so failing tool calls are filterable as error traces instead
+            # of looking successful, while a refusal the gateway made on purpose
+            # stays UNSET (ADR-029 s5). The error's class names it either way;
+            # its message can hold what the tool returned, so it stays off the
+            # span (GHSA-qwq2-7g49-jxc6).
             if not result.success:
-                mark_span_error(span, result.error_type)
+                settle_failed_call(span, result.error_type)
             return result
 
     def _execute_call_inner(

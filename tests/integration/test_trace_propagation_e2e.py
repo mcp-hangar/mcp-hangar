@@ -161,11 +161,22 @@ class TestAGovernanceDenial:
         assert tree.batch["success"] is False
         assert tree.batch["results"][0]["error_type"] == "ToolAccessDeniedError", tree.batch
 
-    def test_the_call_span_ends_in_error_and_nothing_reaches_the_upstream(self, run):
+    def test_the_call_span_is_not_an_error_and_nothing_reaches_the_upstream(self, run):
+        """A governance denial is a decision, not a failure (#1556, ADR-029 s5).
+
+        It ended ERROR until the status rules landed, so an operator counting
+        error traces counted refused calls. What names the refusal is the
+        outcome and the gate, and the bounded `error.type` still says what
+        refused.
+        """
         tree = Tree(run, "denied")
+        call = tree.one("batch.call.multiply")
 
         tree.assert_served_under_the_caller()
-        assert tree.one("batch.call.multiply")["status"] == "ERROR"
+        assert call["status"] == "UNSET"
+        assert call["attributes"]["hangar.call.outcome"] == "deny"
+        assert call["attributes"]["hangar.refusal.gate"] == "tool_access"
+        assert call["attributes"]["error.type"] == "ToolAccessDeniedError"
         assert [s["name"] for s in tree.spans if s["kind"] == "CLIENT"] == []
         assert tree.stdio_calls == []
 

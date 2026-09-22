@@ -10,6 +10,8 @@ MCP tool error payload in `application/mcp/tooling.py`.
 import math
 from typing import Any
 
+from mcp_hangar.errors import ExpectedRefusal
+
 
 class MCPError(Exception):
     """Base exception for all MCP registry errors.
@@ -337,7 +339,7 @@ class ToolAccessDeniedError(ToolError):
         self.tool_name = tool_name
 
 
-class EgressPolicyDeniedError(ToolError):
+class EgressPolicyDeniedError(ToolError, ExpectedRefusal):
     """Raised when an MCPEgressPolicy denies a tool call.
 
     Either the tool name matched a deny rule (or fell to a Deny default), or the
@@ -360,7 +362,7 @@ class EgressPolicyDeniedError(ToolError):
         self.policy_id = policy_id
 
 
-class EgressPolicyApprovalRequiredError(ToolError):
+class EgressPolicyApprovalRequiredError(ToolError, ExpectedRefusal):
     """Raised when an MCPEgressPolicy routes a tool call to approval.
 
     On the governed invoke path (#921) the approval gate asks a human first
@@ -502,7 +504,7 @@ _RATE_LIMIT_BUDGETS = {
 }
 
 
-class RateLimitExceeded(MCPError):
+class RateLimitExceeded(MCPError, ExpectedRefusal):
     """Raised when rate limit is exceeded.
 
     A refusal given a `retry_after` reads the same on every path (#1471). Its
