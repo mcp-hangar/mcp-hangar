@@ -13,14 +13,37 @@ Thread-safe implementation using threading primitives.
 
 import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import Any, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from ..logging_config import get_logger
 
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+
+class SingleFlightObserver(Protocol):
+    """Reports which caller executes and which ones wait (#1279).
+
+    Both hooks are called OUTSIDE the lock. Instrumentation inside it would
+    hold every other caller for the duration of whatever the observer does,
+    which is the opposite of what measuring a wait is for.
+    """
+
+    def leading(self, key: str) -> str | None:
+        """This caller will execute. Returns an origin token for the waiters.
+
+        The token is opaque data here -- a W3C ``traceparent`` string in the
+        tracing adapter (ADR-029 s8) -- so this module never holds an SDK
+        object and never has to know what causality means.
+        """
+        ...
+
+    def waiting(self, key: str, origin: str | None) -> AbstractContextManager[None]:
+        """This caller will wait for *origin*'s execution, around the wait."""
+        ...
 
 
 @dataclass
@@ -31,6 +54,10 @@ class _CallState:
     result: Any = None
     exception: Exception | None = None
     completed: bool = False
+    #: What the executing caller published for the waiters, if anything. Read
+    #: without the lock: a waiter that arrives before the leader publishes gets
+    #: None, which the adapter treats as "no link" rather than inventing one.
+    origin: str | None = None
 
 
 class SingleFlight:
@@ -56,16 +83,44 @@ class SingleFlight:
         # result1 == result2, but expensive_operation only ran once
     """
 
-    def __init__(self, cache_results: bool = False):
+    def __init__(self, cache_results: bool = False, observer: SingleFlightObserver | None = None):
         """Initialize SingleFlight.
 
         Args:
             cache_results: If True, results are cached permanently (useful for cold starts).
                           If False, only in-flight deduplication (no caching after completion).
+            observer: Optional. Told which caller executes and which ones wait,
+                     always outside the lock. None reports nothing.
         """
         self._lock = threading.Lock()
         self._calls: dict[str, _CallState] = {}
         self._cache_results = cache_results
+        self._observer = observer
+
+    def _leading(self, key: str) -> str | None:
+        """Tell the observer this caller executes, fault-barriered.
+
+        An observer that raises must not turn a cold start into a failed call:
+        the point of this hook is to describe the start, not to be able to stop
+        it.
+        """
+        if self._observer is None:
+            return None
+        try:
+            return self._observer.leading(key)
+        except Exception:  # noqa: BLE001 -- fault barrier: observation must not break a start
+            logger.debug("single_flight_observer_failed", key=key, hook="leading")
+            return None
+
+    def _waiting(self, key: str, origin: str | None) -> AbstractContextManager[None]:
+        """Tell the observer this caller waits, fault-barriered as above."""
+        if self._observer is None:
+            return nullcontext()
+        try:
+            return self._observer.waiting(key, origin)
+        except Exception:  # noqa: BLE001 -- fault barrier: observation must not break a wait
+            logger.debug("single_flight_observer_failed", key=key, hook="waiting")
+            return nullcontext()
 
     def do(self, key: str, fn: Callable[[], T]) -> T:
         """Execute function for key, or wait for in-flight execution.
@@ -115,7 +170,8 @@ class SingleFlight:
         if not execute:
             # Wait for the executing thread to complete
             logger.debug("single_flight_waiting", key=key)
-            state.event.wait()
+            with self._waiting(key, state.origin):
+                state.event.wait()
 
             if state.exception:
                 raise state.exception
@@ -123,6 +179,7 @@ class SingleFlight:
 
         # We are the executor
         logger.debug("single_flight_executing", key=key)
+        state.origin = self._leading(key)
         try:
             result = fn()
             state.result = result

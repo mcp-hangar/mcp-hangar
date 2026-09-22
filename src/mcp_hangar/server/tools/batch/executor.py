@@ -47,6 +47,7 @@ from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....domain.value_objects.truncation import ContinuationOwner
+from ....infrastructure.observability.startup_spans import StartupSpanAdapter
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....metrics import (
@@ -65,7 +66,14 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error, record_handled_failure
+from ....observability.conventions import MCP, Caller, GenAI, McpServer, Retry
+from ....observability.tracing import (
+    extract_trace_context,
+    get_tracer,
+    mark_span_error,
+    record_handled_failure,
+    record_retry_attempt,
+)
 from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
 from ...context import get_context
 from ...state import GROUPS
@@ -124,6 +132,53 @@ def _call_span_parent(carrier_context: Any) -> dict[str, Any]:
     if carried.is_valid and carried.trace_id != ambient.trace_id:
         return {"links": [trace.Link(carried)]}
     return {}
+
+
+def _retry_outcome(result: RetryResult) -> str:
+    """How a retried operation ended, in three words rather than two numbers.
+
+    `exhausted` and `non_retryable` both arrive as "not successful" with an
+    error type, and they mean opposite things to whoever is reading: one says
+    the upstream kept failing and the budget ran out, the other says the first
+    failure was never worth retrying. `retry_sync` records an attempt only when
+    it is about to retry, so an empty attempt list on a failure is exactly the
+    second case.
+    """
+    if result.success:
+        return Retry.SUCCESS
+    return Retry.EXHAUSTED if result.attempts else Retry.NON_RETRYABLE
+
+
+def _identity_span_attributes() -> dict[str, str]:
+    """Identity attributes for the governance enrichment boundary (ADR-029 s4).
+
+    Read once, from the bound identity context and from nothing else. Baggage is
+    not a source: anything that forwards a request can write it, so a caller id
+    taken from there would be a claim this gateway never authenticated. Unknown
+    values are omitted rather than exported empty, so a query on
+    ``mcp.caller.tenant_id`` selects the calls that actually had a tenant
+    instead of every call ever made.
+
+    Deliberately not ``set_governance_attributes``: that helper also asserts
+    ``gen_ai.operation.name=execute_tool`` and ``mcp.method.name=tools/call``,
+    which name the upstream call. ADR-029 keeps those on the one CLIENT span
+    ``execute_tool <tool>``; repeating them here would invite a GenAI-aware
+    backend to count one invocation twice.
+    """
+    identity = get_identity_context()
+    if identity is None:
+        return {}
+    caller = identity.caller
+    candidates = {
+        Caller.TYPE: caller.principal_type,
+        Caller.ID: caller.user_id or caller.agent_id,
+        Caller.TENANT: caller.tenant_id,
+        MCP.USER_ID: caller.user_id,
+        MCP.AGENT_ID: caller.agent_id,
+        MCP.SESSION_ID: caller.session_id,
+        MCP.CORRELATION_ID: identity.correlation_id,
+    }
+    return {key: value for key, value in candidates.items() if value}
 
 
 def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
@@ -788,7 +843,9 @@ class BatchExecutor:
         validator_pipeline: ValidatorPipeline | None = None,
         mutator_pipeline: MutatorPipeline | None = None,
     ):
-        self._single_flight = SingleFlight(cache_results=False)
+        # The observer names the caller that performs a cold start and links
+        # every caller that waits for it to that start (#1279).
+        self._single_flight = SingleFlight(cache_results=False, observer=StartupSpanAdapter())
         self._active_batches = 0
         self._active_lock = threading.Lock()
         self._concurrency_manager = concurrency_manager
@@ -1541,9 +1598,11 @@ class BatchExecutor:
             f"batch.call.{call.tool}",
             **_call_span_parent(carrier_context),
         ) as span:
-            span.set_attribute("mcp.server.id", call.mcp_server)
-            span.set_attribute("gen_ai.tool.name", call.tool)
+            span.set_attribute(McpServer.ID, call.mcp_server)
+            span.set_attribute(GenAI.TOOL_NAME, call.tool)
             span.set_attribute("batch.call.id", call.call_id)
+            for key, value in _identity_span_attributes().items():
+                span.set_attribute(key, value)
             result = self._execute_call_inner(
                 call,
                 cancel_event,
@@ -2338,11 +2397,17 @@ class BatchExecutor:
         # returns the arguments unchanged, preserving current behavior.
         mutated_arguments = self._mutate("tools/call", "request", call.arguments or {}, call.call_id)
 
+        # Which attempt is running, so each `command.send` span says which one it
+        # is (#1287). A list, not an int, because `do_invoke` closes over it.
+        attempt_index = [0]
+
         def do_invoke() -> dict[str, Any]:
+            attempt_index[0] += 1
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
                 cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
                 cmd_span.set_attribute("gen_ai.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
+                cmd_span.set_attribute(Retry.INDEX, attempt_index[0])
                 command = InvokeToolCommand(
                     mcp_server_id=dispatch_server_id,
                     tool_name=call.tool,
@@ -2372,9 +2437,16 @@ class BatchExecutor:
                     policy=policy,
                     mcp_server=call.mcp_server,
                     operation_name=call.tool,
+                    # One event per retried failure, carrying the reason and the
+                    # backoff about to be waited out. `retry_sync` calls this
+                    # before it sleeps, so the delay recorded is the one taken.
+                    on_retry=lambda index, error, delay: record_retry_attempt(
+                        Retry.LAYER_EXECUTOR, index, type(error).__qualname__, delay
+                    ),
                 )
                 retry_span.set_attribute("retry.attempts", retry_result.attempt_count)
                 retry_span.set_attribute("retry.success", retry_result.success)
+                retry_span.set_attribute(Retry.OUTCOME, _retry_outcome(retry_result))
             if retry_result.success:
                 result = retry_result.result
             else:

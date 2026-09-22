@@ -114,6 +114,36 @@ class MCP:
     RESPONSE_TOKENS = "mcp.tool.response_tokens"
 
 
+class Dispatch:
+    """Attributes describing a command or query dispatch (#1297).
+
+    `CommandBus.send` opened `handler.{Command}` only inside its innermost
+    handler, so a command the rate-limit middleware refused left a lone
+    `rate_limit.check` span with `allowed=false` behind it: no dispatch span, no
+    handler span, nothing naming the command. `QueryBus.execute` opened no span
+    at all, so every management read was invisible.
+
+    ADR-029 s5 keeps this vocabulary separate from `hangar.gate.*`: a gate is a
+    stage of the batch executor's `_GATES` and nothing else, and a command-bus
+    rate limit is middleware. Calling it a gate would make the word mean
+    "anything that can stop a call", which is not a set the code has.
+    """
+
+    #: The command or query class name. A bounded value: a class name, never a
+    #: serialized payload.
+    OPERATION = "hangar.dispatch.operation"
+
+    #: How the dispatch ended.
+    OUTCOME = "hangar.dispatch.outcome"
+
+    #: The dispatch completed and the handler returned.
+    SUCCESS = "success"
+    #: Middleware refused it -- a rate limit is `rejected`, not an error.
+    REJECTED = "rejected"
+    #: The handler or the middleware broke.
+    ERROR = "error"
+
+
 class Enforcement:
     """Attributes describing policy and enforcement decisions."""
 
@@ -225,6 +255,51 @@ class Risk:
     SESSION_ANOMALY_SCORE = "mcp.risk.session_anomaly_score"
 
 
+class Retry:
+    """Attributes describing a retried call (#1287).
+
+    Two layers retry one call -- the executor's command send and the HTTP
+    client's resend -- and both reported totals only, so three upstream POSTs
+    might have been one executor attempt that resent twice or three executor
+    attempts, and a trace read the same either way.
+
+    The per-attempt facts are a span EVENT, never a scalar attribute: one call
+    has many attempts, an attribute holds one value per key, and the last retry
+    would erase every one before it (ADR-029 s5).
+    """
+
+    #: One failed attempt that will be retried, as a span event.
+    ATTEMPT_EVENT = "hangar.retry.attempt"
+
+    #: Which layer retried: "executor" (the command send) or "http" (the POST).
+    LAYER = "hangar.retry.layer"
+
+    #: 1-based index of the attempt that failed. Also set on each
+    #: `command.send.InvokeToolCommand` span, so an attempt names itself.
+    INDEX = "hangar.retry.index"
+
+    #: Why it is being retried: a bounded error type, an HTTP status, or
+    #: "connection_error". Never an error's message.
+    REASON = "hangar.retry.reason"
+
+    #: Seconds this retry waits before the next attempt -- the backoff,
+    #: recorded per retry and separate from the time the attempt itself took.
+    BACKOFF_S = "hangar.retry.backoff_s"
+
+    #: How the retried operation ended: "success", "exhausted" or
+    #: "non_retryable". The last two arrive looking identical and mean opposite
+    #: things -- the upstream kept failing and the budget ran out, or the first
+    #: failure was never worth retrying.
+    OUTCOME = "hangar.retry.outcome"
+
+    SUCCESS = "success"
+    EXHAUSTED = "exhausted"
+    NON_RETRYABLE = "non_retryable"
+
+    LAYER_EXECUTOR = "executor"
+    LAYER_HTTP = "http"
+
+
 class Caller:
     """Attributes identifying the caller (human or agent) behind a request.
 
@@ -310,6 +385,18 @@ def set_governance_attributes(  # noqa: C901 -- baseline CC=19; split before ext
 
     Only attributes with non-None values are set. This avoids polluting
     OTLP backends with empty string attributes for optional governance fields.
+
+    **Retained, with no caller in `src/`.** Its one caller was
+    `TracedMcpServerService`, the decorator ADR-029 retires and #1278 deleted.
+    The batch executor's own boundary sets the identity subset directly instead
+    of calling this, because this helper also asserts
+    `gen_ai.operation.name=execute_tool` and `mcp.method.name=tools/call`,
+    which name the upstream call: ADR-029 keeps those on the one CLIENT span
+    `execute_tool <tool>`, and repeating them on the governance span would
+    invite a GenAI-aware backend to count one invocation twice. The function
+    stays because it is public surface an ADR-007 adapter may call with its own
+    process-local invocation data, and removing it would break that without
+    giving anything back.
 
     Args:
         span: OpenTelemetry span (or any object with set_attribute method).
