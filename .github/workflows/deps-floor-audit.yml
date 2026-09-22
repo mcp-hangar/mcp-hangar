@@ -1,0 +1,75 @@
+# Audits the dependency floors, not just the top of each range.
+#
+# Every other job installs the newest version each constraint admits, so a floor
+# is never exercised and can sit on a vulnerable release indefinitely. It
+# matters anyway: pip leaves an installed package alone while it satisfies the
+# constraint, so the floor is what an existing environment keeps on upgrade.
+# pyjwt `>=2.8.0` and cryptography `>=41.0.0` stood for months that way (#1554).
+#
+# Daily as well as on PRs: an advisory published between releases makes a
+# floor vulnerable without any change here.
+
+name: Dependency floor audit
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deps-floor-audit:
+    name: deps-floor-audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Install the project and the audit tools
+        run: |
+          uv venv --python 3.11
+          uv pip install -e . pip-audit packaging
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # The floor may not claim less than `mcp`, which we pin, already forces.
+      - name: Declared floors are installable
+        run: python scripts/check_dependency_floors.py floors
+
+      # Both ends of every range, on the oldest and newest supported Python
+      # (markers select different floors on each). `--all-extras` so a new extra
+      # is audited without anyone remembering to add it here. Resolved and
+      # pinned by uv first, so pip-audit reads the pins instead of installing.
+      - name: Audit the lowest and highest resolutions
+        run: |
+          ignores=$(python scripts/check_dependency_floors.py audit-ignores)
+          status=0
+          for python in 3.11 3.14; do
+            for resolution in lowest-direct highest; do
+              out="resolved-${python}-${resolution}.txt"
+              # uv reads an existing output file as pins to prefer, which would
+              # quietly audit a previous resolution instead of this one.
+              rm -f "$out"
+              uv pip compile --quiet pyproject.toml --all-extras \
+                --python-version "$python" --resolution "$resolution" -o "$out"
+              echo "::group::pip-audit ${python} ${resolution}"
+              # shellcheck disable=SC2086 # ignores is a list of flags
+              if ! pip-audit -r "$out" --strict --disable-pip --no-deps \
+                  --progress-spinner off --desc on $ignores; then
+                echo "::error::known vulnerability at the ${resolution} resolution on Python ${python}"
+                status=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit "$status"
