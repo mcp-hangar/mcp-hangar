@@ -54,7 +54,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, GenAI, Retry
+from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry
 
 logger = get_logger(__name__)
 
@@ -917,6 +917,53 @@ def record_retry_attempt(layer: str, index: int, reason: str, backoff_s: float) 
         )
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a retry
         logger.debug("retry_event_failed", layer=layer, index=index)
+
+
+def _ambient_span() -> Any:
+    """The current span when it is a real one, else None: with tracing off there is nothing to write."""
+    from opentelemetry import trace as _trace
+
+    span = _trace.get_current_span()
+    return span if span.get_span_context().is_valid else None
+
+
+def record_gate_decision(
+    name: str, outcome: str, reason: str | None = None, revision: str | None = None, *, refused: bool = False
+) -> None:
+    """Record one batch gate's decision as an event on the ambient `batch.call.<tool>` span (#1285).
+
+    An event, because a call passes many gates and a deferred digest pin
+    decides twice (ADR-029 s5). Observes a verdict already made and never
+    raises: a telemetry failure must not change what the gate decided.
+    `reason` and `revision` are omitted when None, never exported empty.
+    `refused` marks the gate that stopped the call, which the call's summary names.
+    """
+    try:
+        span = _ambient_span()
+        if span is None:
+            return
+        attributes = {Gate.NAME: name, Gate.OUTCOME: outcome}
+        if reason is not None:
+            attributes[Gate.REASON] = bounded_error_type(reason)
+        if revision is not None and bounded_error_type(revision) == revision:  # a malformed one is omitted
+            attributes[Gate.REVISION] = revision
+        span.add_event(Gate.DECISION_EVENT, attributes)
+        if refused:
+            span.set_attribute(Gate.REFUSAL_GATE, name)
+            if reason is not None:
+                span.set_attribute(Gate.REFUSAL_REASON, bounded_error_type(reason))
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a gate
+        logger.debug("gate_event_failed", gate=name)
+
+
+def record_call_outcome(outcome: str) -> None:
+    """Set `hangar.call.outcome` on the ambient `batch.call.<tool>` span. Never raises."""
+    try:
+        span = _ambient_span()
+        if span is not None:
+            span.set_attribute(Gate.CALL_OUTCOME, outcome)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
+        logger.debug("call_outcome_failed")
 
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
