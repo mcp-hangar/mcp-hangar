@@ -1,0 +1,11 @@
+# Advisories the `deps-floor-audit` job may pass over. Read by
+# `scripts/check_dependency_floors.py audit-ignores`.
+#
+# Every entry needs all three fields. `reason` says why the advisory cannot be
+# reached in this codebase -- not that a fix is coming. An entry past `expires`
+# fails the build, so an exception is re-argued instead of outliving its reason.
+#
+# [[ignore]]
+# id = "PYSEC-0000-0000"
+# reason = "the vulnerable function is never called: ..."
+# expires = 2026-12-31

@@ -4,8 +4,10 @@ Provides authenticator and token validator for JWT-based authentication
 with OIDC support (JWKS validation, standard claims).
 """
 
+import ipaddress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -15,10 +17,44 @@ if TYPE_CHECKING:
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest, IAuthenticator, ITokenValidator
 from mcp_hangar.domain.contracts.session_suspension import VERIFIED_SESSION_ID_KEY, is_well_formed_session_id
-from mcp_hangar.domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, TokenLifetimeExceededError
+from mcp_hangar.domain.exceptions import (
+    ConfigurationError,
+    ExpiredCredentialsError,
+    InvalidCredentialsError,
+    TokenLifetimeExceededError,
+)
 from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
 
 logger = structlog.get_logger(__name__)
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def is_trusted_key_source(url: str) -> bool:
+    """Whether signing keys may be fetched from ``url``.
+
+    ``https://`` to any host, or ``http://`` to loopback for development and
+    tests. Nothing else: whoever can answer a plain-http fetch chooses the keys
+    every token is verified against, and a ``file://`` or other scheme reaches
+    whatever the fetching library will open (CVE-2026-48522 in PyJWT's
+    ``PyJWKClient``, which had no scheme allowlist).
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    scheme = parts.scheme.lower()
+    return scheme == "https" or (scheme == "http" and _is_loopback_host(host))
 
 
 @dataclass
@@ -394,6 +430,28 @@ class JWKSTokenValidator(ITokenValidator):
         self._config = config
         self._jwks_client: PyJWKClient | None = None
         self._jwks_uri: str | None = None
+        self._refuse_untrusted_key_source()
+
+    def _refuse_untrusted_key_source(self) -> None:
+        """Refuse, at startup, a configured URL the signing keys would come from.
+
+        That is ``jwks_uri`` when set, otherwise the issuer, whose discovery
+        document names the JWKS. An issuer is not fetched when ``jwks_uri`` is
+        set, so it is only a string to match ``iss`` against and is not checked.
+
+        Raises:
+            ConfigurationError: Naming the field and its value.
+        """
+        field_name, url = (
+            ("jwks_uri", self._config.jwks_uri) if self._config.jwks_uri else ("issuer", self._config.issuer)
+        )
+        if not is_trusted_key_source(url):
+            raise ConfigurationError(
+                f"auth.oidc {field_name} {url!r} is not an https:// URL. Signing keys are fetched from it, "
+                "so whoever answers a plain-http request chooses the keys tokens are verified against. "
+                "Use https://; http:// is accepted only for localhost, 127.0.0.1 and ::1.",
+                details={"field": field_name, "value": url, "issuer": self._config.issuer},
+            )
 
     def validate(self, token: str) -> dict:
         """Validate JWT and return claims.
@@ -520,12 +578,15 @@ class JWKSTokenValidator(ITokenValidator):
                         auth_method="jwt",
                     )
 
-                # Security check: JWKS URI should also use HTTPS
-                if not jwks_uri.startswith("https://"):
-                    logger.warning(
-                        "jwks_uri_not_https",
-                        jwks_uri=jwks_uri,
-                        warning="JWKS URI should use HTTPS to prevent key tampering",
+                # The discovery document is fetched over https (checked at
+                # startup), but the jwks_uri it names is whatever the IdP says.
+                # Refuse rather than warn: this runs on a request, so the refusal
+                # is a 401 and the next request asks discovery again.
+                if not isinstance(jwks_uri, str) or not is_trusted_key_source(jwks_uri):
+                    logger.warning("jwks_uri_not_https", issuer=self._config.issuer, jwks_uri=jwks_uri)
+                    raise InvalidCredentialsError(
+                        message="OIDC discovery returned a jwks_uri that is not https",
+                        auth_method="jwt",
                     )
 
                 logger.info(
