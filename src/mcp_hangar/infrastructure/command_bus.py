@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from mcp_hangar.application.ports.bus import HandlerNotRegisteredError, ICommandBus
 from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- re-exported for backward compat
-from mcp_hangar.domain.exceptions import RateLimitExceeded
-from mcp_hangar.errors import bounded_error_type
+from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.conventions import Dispatch
 from mcp_hangar.observability.tracing import ERROR_TYPE, get_tracer
@@ -156,13 +155,12 @@ class CommandBus(ICommandBus):
             span.set_attribute(Dispatch.OPERATION, command_type.__name__)
             try:
                 result = chain(command)
-            except RateLimitExceeded as e:
-                # A refusal, not a failure: middleware answered the question it
-                # exists to answer (ADR-029 s5). The span's STATUS is a separate
-                # matter -- `_TextFreeTracer` marks every escaping exception
-                # ERROR, and telling a refusal from a failure there belongs to
-                # #1285/#1295, which own that change deliberately rather than
-                # leaving each caller to invent it.
+            except ExpectedRefusal as e:
+                # A refusal, not a failure: the middleware or the handler
+                # answered the question it exists to answer (ADR-029 s5). Every
+                # refusal, not the rate limit alone -- an L7 denial raised by the
+                # aggregate reaches this same dispatch and read `error` here,
+                # while the span it ends is now UNSET like any other refusal.
                 span.set_attribute(Dispatch.OUTCOME, Dispatch.REJECTED)
                 span.set_attribute(ERROR_TYPE, bounded_error_type(type(e).__qualname__))
                 raise

@@ -51,7 +51,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mcp_hangar.errors import bounded_error_type
+from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
 from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry
@@ -227,9 +227,14 @@ class _TextFreeTracer:
             try:
                 yield span
             except Exception as error:
-                mark_span_error(span)
+                # An expected refusal is not a failure (ADR-029 s5): it keeps the
+                # `error.type` that names it and leaves the status UNSET, with no
+                # `exception` event -- that event is what a backend reads as "this
+                # span threw". Anything else ends ERROR, as it always has.
+                if not isinstance(error, ExpectedRefusal):
+                    mark_span_error(span)
+                    _record_exception_type(span, error)
                 _set_error_type_if_absent(span, type(error).__qualname__)
-                _record_exception_type(span, error)
                 raise
 
     def start_span(self, name: str, **kwargs: Any) -> Any:
@@ -964,6 +969,31 @@ def record_call_outcome(outcome: str) -> None:
             span.set_attribute(Gate.CALL_OUTCOME, outcome)
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
         logger.debug("call_outcome_failed")
+
+
+def settle_failed_call(span: Any, error_type: str | None) -> None:
+    """End a failed `batch.call.<tool>` span: ERROR, unless it recorded a refusal.
+
+    The executor handles a refusal as data rather than raising it, so nothing
+    escapes this span and `_TextFreeTracer` never sees it. The outcome already
+    written by `record_call_outcome` is what says which it was: `deny` is the
+    gateway refusing on purpose and stays UNSET (ADR-029 s5), everything else is
+    a failure and ends ERROR. A call whose outcome was never recorded -- the
+    observer's fault barrier swallowed it -- ends ERROR, which is what this span
+    did for every failure before.
+    """
+    if _recorded_call_outcome(span) == Gate.DENY:
+        _set_error_type_if_absent(span, bounded_error_type(error_type))
+        return
+    mark_span_error(span, error_type)
+
+
+def _recorded_call_outcome(span: Any) -> str | None:
+    """`hangar.call.outcome` as already set on ``span``, or None when absent/unreadable."""
+    try:
+        return (getattr(span, "attributes", None) or {}).get(Gate.CALL_OUTCOME)
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        return None
 
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
