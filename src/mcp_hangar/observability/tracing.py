@@ -54,7 +54,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, GenAI
+from mcp_hangar.observability.conventions import MCP, GenAI, Retry
 
 logger = get_logger(__name__)
 
@@ -876,6 +876,47 @@ def _answer_error_type(answer: Any) -> str | None:
         return str(code) if type(code) is int else "_OTHER"
     result = answer.get("result")
     return "tool_error" if isinstance(result, dict) and result.get("isError") else None
+
+
+def record_retry_attempt(layer: str, index: int, reason: str, backoff_s: float) -> None:
+    """Record one retried failure on the ambient span (#1287).
+
+    Lives here, with the other span writers, because this module is the only
+    one allowed to write a span's status or events -- a rule
+    `test_only_the_tracing_module_writes_span_status_or_events` enforces, and
+    the reason error text cannot leak onto a span by accident
+    (GHSA-qwq2-7g49-jxc6). Both retry layers call it, so the vocabulary cannot
+    drift between them.
+
+    An event rather than an attribute: a call has many attempts, and the last
+    retry would overwrite every one before it.
+
+    Args:
+        layer: `Retry.LAYER_EXECUTOR` or `Retry.LAYER_HTTP`.
+        index: 1-based index of the attempt that failed.
+        reason: A bounded error type, an HTTP status, or "connection_error".
+        backoff_s: Seconds waited before the next attempt.
+    """
+    # Gated on the ambient span, not on global tracing state: with tracing off
+    # `get_current_span` is the API's invalid span and this returns at the next
+    # line, while a test that installs its own provider still gets its events.
+    try:
+        from opentelemetry import trace as _trace
+
+        span = _trace.get_current_span()
+        if not span.get_span_context().is_valid:
+            return
+        span.add_event(
+            Retry.ATTEMPT_EVENT,
+            {
+                Retry.LAYER: layer,
+                Retry.INDEX: index,
+                Retry.REASON: bounded_error_type(reason),
+                Retry.BACKOFF_S: backoff_s,
+            },
+        )
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a retry
+        logger.debug("retry_event_failed", layer=layer, index=index)
 
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
