@@ -3,6 +3,7 @@
 import pytest
 
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
+from mcp_hangar.domain.exceptions import EgressPolicyDeniedError
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.services.fleet_snapshot import server_from_snapshot
@@ -405,7 +406,9 @@ class TestRecoveryCarriesStoredL7PolicyOntoDeclaredServers:
 
     @pytest.mark.security
     @pytest.mark.asyncio
-    async def test_a_malformed_stored_policy_is_a_failed_recovery_not_a_quiet_skip(self, repos):
+    async def test_a_malformed_stored_policy_denies_every_tool_rather_than_none(self, repos):
+        # The server the file built stays in the fleet either way. Left with no
+        # policy it would serve every call the operator meant to govern.
         _, config_repo, _ = repos
         await config_repo.save(self._row("math", description="as stored", l7_policy={"tools": {"deny": "add"}}))
         provider_repo = InMemoryMcpServerRepository()
@@ -414,6 +417,10 @@ class TestRecoveryCarriesStoredL7PolicyOntoDeclaredServers:
 
         status = await self._recover(repos, provider_repo)
 
-        assert status["failed_count"] == 1
-        assert status["skipped_count"] == 0
-        assert "math" in status["errors"]
+        assert provider_repo.get("math") is declared
+        assert declared.l7_policy == L7Policy()
+        with pytest.raises(EgressPolicyDeniedError):
+            declared.invoke_tool("add", {"a": 1, "b": 2})
+        # It is serving, so it is not reported as a server that failed to come back.
+        assert status["failed_count"] == 0
+        assert status["skipped_count"] == 1

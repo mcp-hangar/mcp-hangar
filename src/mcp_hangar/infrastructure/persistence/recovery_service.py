@@ -185,16 +185,29 @@ class RecoveryService:
         The same rule a reload applies (#1498): what the file says wins, so a
         policy already on the built server is left alone.
 
-        A malformed stored payload raises from `L7Policy.from_dict`; the caller
-        counts it as a failed recovery and logs it at error, rather than leaving
-        the server silently unguarded.
+        A stored payload that no longer parses fails closed: the server the file
+        built stays in the fleet, so leaving it with no policy would serve every
+        call the operator meant to govern. It gets a policy that denies every
+        tool instead, until the operator delivers one again, which replaces it.
+        A server registered over REST with the same row is not restored at all,
+        so both refuse rather than one of them serving ungoverned.
         """
         if config.l7_policy is None:
             return
         mcp_server = self._mcp_server_repo.get(config.mcp_server_id)
         if not isinstance(mcp_server, McpServer) or mcp_server.l7_policy is not None:
             return
-        policy = L7Policy.from_dict(config.l7_policy)
+        try:
+            policy = L7Policy.from_dict(config.l7_policy)
+        except (ValueError, TypeError) as e:
+            mcp_server.set_l7_policy(L7Policy())
+            logger.error(
+                "l7_policy_unreadable_denying_all",
+                mcp_server_id=config.mcp_server_id,
+                error=str(e),
+                detail="every tool call to this server is denied until the operator delivers its policy again",
+            )
+            return
         mcp_server.set_l7_policy(policy)
         logger.info(
             "l7_policy_restored_to_declared_mcp_server",

@@ -4,7 +4,7 @@ The operator delivers an `MCPEgressPolicy` to the gateway as a compiled L7
 policy, over `POST /api/mcp_servers/{id}/l7_policy`, and re-delivers it only on
 its next reconcile. Whatever the gateway does not keep across a restart is
 therefore not enforced between the restart and that reconcile -- 2h16m in the
-report behind #1306 -- while the CR still reads `Enforce`. The network backstop
+report behind #1306 -- while the CR still reads `Compiled`. The network backstop
 is not affected: it lives in the cluster, not in the gateway.
 
 Until this release, a restart dropped the policy of every server `config.yaml`
@@ -22,6 +22,14 @@ how the gateway stores its fleet:
 This covers servers declared in `config.yaml` and servers registered over the
 REST API alike. Deleting the policy is kept the same way, so a restart does not
 bring back a policy the operator removed.
+
+Two failures at start are not covered by the table. A stored policy that no
+longer parses fails closed: the server denies every tool until the operator
+delivers its policy again, and the gateway logs
+`l7_policy_unreadable_denying_all` at error. A database that cannot be read at
+start fails open: the gateway starts anyway, logs the failure at error, and
+serves its `config.yaml` servers without the stored policies until the operator
+delivers them again.
 
 **To keep the policy across restarts,** select a durable backend in the chart:
 
