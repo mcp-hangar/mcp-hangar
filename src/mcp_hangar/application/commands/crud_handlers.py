@@ -280,11 +280,27 @@ class SetL7PolicyHandler(CommandHandler):
     """
 
     def __init__(
-        self, repository: IMcpServerRepository, event_bus: Any, fleet_writer: IFleetWriter | None = None
+        self,
+        repository: IMcpServerRepository,
+        event_bus: Any,
+        fleet_writer: IFleetWriter | None = None,
+        restore_gap: str | None = None,
     ) -> None:
+        """Initialize the handler.
+
+        Args:
+            repository: McpServer repository the policy is attached in.
+            event_bus: Event bus for publishing domain events.
+            fleet_writer: Where the policy is recorded. None keeps it in memory
+                only, gone on restart.
+            restore_gap: Why the next start will not read the record back, or
+                None when it will. With *fleet_writer* it decides what the push
+                reports as ``persisted`` (#1306).
+        """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
+        self._not_persisted_reason = "no_durable_backend" if fleet_writer is None else restore_gap
 
     def handle(self, command: SetL7PolicyCommand) -> dict[str, Any]:
         """Set (or clear) the mcp_server's L7 policy.
@@ -335,7 +351,24 @@ class SetL7PolicyHandler(CommandHandler):
             source=command.source,
             policy_id=None if command.policy is None else command.policy.policy_id,
         )
-        return {"mcp_server_id": command.mcp_server_id, "l7_policy_set": command.policy is not None}
+        # Whether a restart of this gateway gives the policy back. The operator
+        # only re-delivers on its next reconcile, so a policy that is not kept
+        # leaves every restart ungoverned until then, and nothing else says so:
+        # the CR keeps reporting it (#1306).
+        persisted = self._not_persisted_reason is None
+        if not persisted and command.policy is not None:
+            logger.warning(
+                "l7_policy_not_persisted",
+                mcp_server_id=command.mcp_server_id,
+                reason=self._not_persisted_reason,
+                policy_id=command.policy.policy_id,
+                detail="a gateway restart drops this policy until the operator delivers it again",
+            )
+        return {
+            "mcp_server_id": command.mcp_server_id,
+            "l7_policy_set": command.policy is not None,
+            "persisted": persisted,
+        }
 
 
 class DeleteMcpServerHandler(CommandHandler):
@@ -703,6 +736,7 @@ def register_crud_handlers(
     fleet_writer: IFleetWriter | None = None,
     coordinated: Callable[[], bool] | None = None,
     log_buffers: ILogBuffers | None = None,
+    restore_gap: str | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -716,6 +750,8 @@ def register_crud_handlers(
             them. None leaves the fleet in memory only, as before.
         coordinated: Whether this gateway shares its state with peers.
         log_buffers: Where a deleted server's log buffer is released (#1506).
+        restore_gap: Why the next start will not read the fleet back, or None
+            when it will; reported by the L7 policy push (#1306).
     """
     # McpServer handlers
     command_bus.register(
@@ -730,7 +766,9 @@ def register_crud_handlers(
     )
     command_bus.register(
         SetL7PolicyCommand,
-        SetL7PolicyHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+        SetL7PolicyHandler(
+            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, restore_gap=restore_gap
+        ),
     )
     command_bus.register(
         DeleteMcpServerCommand,

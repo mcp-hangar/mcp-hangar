@@ -16,6 +16,7 @@ from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_
 from .components import register_auth_cqrs
 from .composition import close_at_shutdown
 from .logs import LogBuffers
+from .persistence import fleet_restore_gap
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -118,6 +119,7 @@ def init_cqrs(
         # So deleting a server releases the buffer its output was read from,
         # rather than leaving it registered under an id that is free (#1506).
         log_buffers=LogBuffers(),
+        restore_gap=fleet_restore_gap(runtime),
     )
 
     if discovery_registry is not None:

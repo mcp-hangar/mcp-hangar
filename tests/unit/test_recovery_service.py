@@ -3,7 +3,9 @@
 import pytest
 
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
+from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services.fleet_snapshot import server_from_snapshot
 from mcp_hangar.infrastructure.persistence import (
     Database,
     DatabaseConfig,
@@ -315,3 +317,103 @@ class TestRecoveryServiceInMemory:
 
         assert result is True
         assert await config_repo.exists("to-delete") is False
+
+
+class TestRecoveryCarriesStoredL7PolicyOntoDeclaredServers:
+    """A server config.yaml declares keeps the L7 policy the operator pushed (#1306).
+
+    Recovery skips the row of a server the file already built, so the file's
+    edit is not reverted by a stale row. The operator's L7 policy has no file
+    key and lives only on that row; skipping it wholesale lifted enforcement on
+    every restart while the CR still reported it.
+    """
+
+    POLICY = {"defaultAction": "Allow", "mode": "Enforce", "tools": {"deny": ["add"]}}
+
+    @pytest.fixture
+    async def repos(self, tmp_path):
+        database = Database(DatabaseConfig(path=str(tmp_path / "test.db")))
+        await database.initialize()
+        return database, SQLiteMcpServerConfigRepository(database), SQLiteAuditRepository(database)
+
+    @staticmethod
+    def _row(mcp_server_id: str, *, description: str, l7_policy: dict | None) -> McpServerConfigSnapshot:
+        return McpServerConfigSnapshot(
+            mcp_server_id=mcp_server_id,
+            mode="subprocess",
+            command=["python", "-m", "math_server"],
+            description=description,
+            l7_policy=l7_policy,
+        )
+
+    async def _recover(self, repos, provider_repo: InMemoryMcpServerRepository):
+        database, config_repo, audit_repo = repos
+        service = RecoveryService(
+            database=database,
+            mcp_server_repository=provider_repo,
+            config_repository=config_repo,
+            audit_repository=audit_repo,
+        )
+        await service.recover_mcp_servers()
+        return await service.get_recovery_status()
+
+    @pytest.mark.security
+    @pytest.mark.asyncio
+    async def test_a_declared_server_gets_its_stored_policy_back(self, repos):
+        _, config_repo, _ = repos
+        await config_repo.save(self._row("math", description="as stored", l7_policy=self.POLICY))
+        provider_repo = InMemoryMcpServerRepository()
+        declared = server_from_snapshot(self._row("math", description="from the file", l7_policy=None))
+        provider_repo.add("math", declared)
+
+        status = await self._recover(repos, provider_repo)
+
+        assert status["skipped_count"] == 1
+        assert status["failed_count"] == 0
+        # The file's server is kept, not replaced by the row's...
+        assert provider_repo.get("math") is declared
+        assert declared.description == "from the file"
+        # ...and it carries the policy the operator pushed before the restart.
+        assert declared.l7_policy == L7Policy.from_dict(self.POLICY)
+
+    @pytest.mark.asyncio
+    async def test_a_policy_already_on_the_declared_server_wins(self, repos):
+        _, config_repo, _ = repos
+        await config_repo.save(self._row("math", description="as stored", l7_policy=self.POLICY))
+        provider_repo = InMemoryMcpServerRepository()
+        declared = server_from_snapshot(self._row("math", description="from the file", l7_policy=None))
+        current = L7Policy.from_dict({"defaultAction": "Deny"})
+        declared.set_l7_policy(current)
+        provider_repo.add("math", declared)
+
+        await self._recover(repos, provider_repo)
+
+        assert declared.l7_policy is current
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_a_policy_leaves_the_declared_server_unchanged(self, repos):
+        _, config_repo, _ = repos
+        await config_repo.save(self._row("math", description="as stored", l7_policy=None))
+        provider_repo = InMemoryMcpServerRepository()
+        declared = server_from_snapshot(self._row("math", description="from the file", l7_policy=None))
+        provider_repo.add("math", declared)
+
+        status = await self._recover(repos, provider_repo)
+
+        assert status["skipped_count"] == 1
+        assert declared.l7_policy is None
+
+    @pytest.mark.security
+    @pytest.mark.asyncio
+    async def test_a_malformed_stored_policy_is_a_failed_recovery_not_a_quiet_skip(self, repos):
+        _, config_repo, _ = repos
+        await config_repo.save(self._row("math", description="as stored", l7_policy={"tools": {"deny": "add"}}))
+        provider_repo = InMemoryMcpServerRepository()
+        declared = server_from_snapshot(self._row("math", description="from the file", l7_policy=None))
+        provider_repo.add("math", declared)
+
+        status = await self._recover(repos, provider_repo)
+
+        assert status["failed_count"] == 1
+        assert status["skipped_count"] == 0
+        assert "math" in status["errors"]

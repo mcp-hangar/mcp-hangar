@@ -17,6 +17,7 @@ from ...domain.contracts.persistence import (
     McpServerConfigSnapshot,
 )
 from ...domain.model import McpServer
+from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot, snapshot_of
 from ...logging_config import get_logger
@@ -122,7 +123,10 @@ class RecoveryService:
                         # config.yaml is the operator's live intent; this
                         # snapshot is a record of what was true last time. An
                         # operator who edits the file and restarts must not have
-                        # their edit reverted by a row.
+                        # their edit reverted by a row. The file does not
+                        # declare everything the row holds, though, and what it
+                        # cannot declare is carried rather than skipped.
+                        self._carry_stored_l7_policy(config)
                         result.skipped_count += 1
                         logger.debug(f"Recovery: {config.mcp_server_id} already declared in configuration")
                         continue
@@ -168,6 +172,35 @@ class RecoveryService:
         )
 
         return result.recovered_ids
+
+    def _carry_stored_l7_policy(self, config: McpServerConfigSnapshot) -> None:
+        """Carry the stored L7 egress policy onto the server config.yaml already built.
+
+        The operator pushes its policy over REST onto servers the file declares
+        too, and the push writes it to this row. Skipping the row wholesale
+        dropped it: every restart lifted enforcement until the operator's next
+        reconcile, while the CR still reported it (#1306). No config key can
+        declare an L7 policy, so there is no file intent for the row to revert.
+
+        The same rule a reload applies (#1498): what the file says wins, so a
+        policy already on the built server is left alone.
+
+        A malformed stored payload raises from `L7Policy.from_dict`; the caller
+        counts it as a failed recovery and logs it at error, rather than leaving
+        the server silently unguarded.
+        """
+        if config.l7_policy is None:
+            return
+        mcp_server = self._mcp_server_repo.get(config.mcp_server_id)
+        if not isinstance(mcp_server, McpServer) or mcp_server.l7_policy is not None:
+            return
+        policy = L7Policy.from_dict(config.l7_policy)
+        mcp_server.set_l7_policy(policy)
+        logger.info(
+            "l7_policy_restored_to_declared_mcp_server",
+            mcp_server_id=config.mcp_server_id,
+            policy_id=policy.policy_id,
+        )
 
     def _restore_lifecycle_state(self, mcp_server: McpServer, mcp_server_id: str) -> None:
         """Replay this server's stream onto the aggregate built from config.
