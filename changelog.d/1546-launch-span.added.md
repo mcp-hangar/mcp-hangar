@@ -1,0 +1,1 @@
+**observability:** A cold start now shows how long the launch itself took: each launcher opens an `mcp_server.launch` span, carrying `mcp.server.id` and `mcp.server.mode`, around spawning the process, running the container or opening the HTTP transport. A launch that fails is marked ERROR with a bounded `error.type`.

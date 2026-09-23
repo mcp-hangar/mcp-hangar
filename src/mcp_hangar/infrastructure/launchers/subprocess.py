@@ -28,6 +28,8 @@ class SubprocessLauncher(McpServerLauncher):
     - Environment filtering
     """
 
+    mode = "subprocess"
+
     def __init__(
         self,
         allowed_commands: set[str] | None = None,
@@ -162,7 +164,7 @@ class SubprocessLauncher(McpServerLauncher):
 
         return result_env
 
-    def launch(
+    def _launch(
         self,
         command: list[str],
         env: dict[str, str] | None = None,

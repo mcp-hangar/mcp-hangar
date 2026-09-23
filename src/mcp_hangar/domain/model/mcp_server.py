@@ -1054,7 +1054,7 @@ class McpServer(AggregateRoot):
     def _get_launch_config(self) -> dict[str, Any]:
         """Get launch configuration for the current mode."""
         if self._mode == McpServerMode.SUBPROCESS:
-            return {"command": self._command, "env": self._env}
+            return {"command": self._command, "env": self._env, "mcp_server_id": self.mcp_server_id}
 
         if self._mode == McpServerMode.DOCKER:
             return {
@@ -1097,6 +1097,7 @@ class McpServer(AggregateRoot):
                 "provenance": self._provenance,
                 "runtime_addresses": self._runtime_addresses,
                 "enforce_ssrf": self._enforce_ssrf,
+                "mcp_server_id": self.mcp_server_id,
             }
 
         raise ValueError(f"unsupported_mode: {self._mode.value}")
