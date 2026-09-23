@@ -354,8 +354,9 @@ class SetL7PolicyHandler(CommandHandler):
         # Whether a restart of this gateway gives the policy back. The operator
         # only re-delivers on its next reconcile, so a policy that is not kept
         # leaves every restart ungoverned until then, and nothing else says so:
-        # the CR keeps reporting it (#1306).
-        persisted = self._not_persisted_reason is None
+        # the CR keeps reporting it (#1306). A clear always is: a gateway that
+        # keeps nothing starts with no policy, which is what was asked for.
+        persisted = command.policy is None or self._not_persisted_reason is None
         if not persisted and command.policy is not None:
             logger.warning(
                 "l7_policy_not_persisted",

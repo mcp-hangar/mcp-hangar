@@ -38,7 +38,7 @@ def test_clear_removes_policy() -> None:
 
     result = handler.handle(SetL7PolicyCommand(mcp_server_id="p", policy=None, source="operator"))
 
-    assert result == {"mcp_server_id": "p", "l7_policy_set": False, "persisted": False}
+    assert result == {"mcp_server_id": "p", "l7_policy_set": False, "persisted": True}
     assert server.l7_policy is None
 
 
