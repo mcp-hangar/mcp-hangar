@@ -338,6 +338,27 @@ def refuse_a_cluster_that_cannot_coordinate(config: dict[str, Any] | None = None
     raise ClusterNeedsSharedStorageError(type(backend).__name__)
 
 
+def fleet_restore_gap(runtime: Any) -> str | None:
+    """Why the next start will not read the fleet back, or None when it will.
+
+    The one answer both `restore_persisted_fleet` and the L7 policy push read, so
+    what the push tells the operator about a restart cannot drift from what the
+    restart does (#1306). It speaks for this process's configuration only: a
+    durable backend whose file lives on storage the pod does not keep -- SQLite
+    on an emptyDir -- is not visible from here.
+
+    Returns:
+        ``"no_durable_backend"`` when nothing is persisted, ``"auto_recover_off"``
+        when rows are written but not read at start, otherwise None.
+    """
+    persistence = getattr(runtime, "persistence_config", None)
+    if getattr(runtime, "recovery_service", None) is None or persistence is None or not persistence.enabled:
+        return "no_durable_backend"
+    if not persistence.auto_recover:
+        return "auto_recover_off"
+    return None
+
+
 def restore_persisted_fleet(runtime: Any) -> int:
     """Bring back the servers a previous run wrote down.
 
@@ -368,13 +389,12 @@ def restore_persisted_fleet(runtime: Any) -> int:
     """
     from ...infrastructure.async_bridge import BackgroundLoop
 
-    recovery = getattr(runtime, "recovery_service", None)
-    persistence = getattr(runtime, "persistence_config", None)
-    if recovery is None or persistence is None or not persistence.enabled:
-        return 0
-    if not persistence.auto_recover:
+    gap = fleet_restore_gap(runtime)
+    if gap == "auto_recover_off":
         logger.info("fleet_restore_disabled", detail="MCP_AUTO_RECOVER is off; persisted servers stay unloaded")
+    if gap is not None:
         return 0
+    recovery = runtime.recovery_service
 
     loop = BackgroundLoop()
     try:

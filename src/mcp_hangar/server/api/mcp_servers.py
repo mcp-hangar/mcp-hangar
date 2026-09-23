@@ -386,7 +386,9 @@ async def set_l7_policy(request: Request) -> HangarJSONResponse:
     ``arguments`` (secretPatterns, maxPayloadBytes), ``defaultAction``.
 
     Returns:
-        JSON with {"mcp_server_id": ..., "l7_policy_set": true}, status 200.
+        JSON with {"mcp_server_id": ..., "l7_policy_set": true, "persisted": ...},
+        status 200. ``persisted`` says whether a restart of this gateway gives
+        the policy back (#1306).
 
     Raises:
         McpServerNotFoundError: If mcp_server does not exist (-> 404).
@@ -438,7 +440,8 @@ async def clear_l7_policy(request: Request) -> HangarJSONResponse:
         mcp_server_id: McpServer identifier.
 
     Returns:
-        JSON with {"mcp_server_id": ..., "l7_policy_set": false}, status 200.
+        JSON with {"mcp_server_id": ..., "l7_policy_set": false, "persisted": true},
+        status 200.
 
     Raises:
         McpServerNotFoundError: If mcp_server does not exist (-> 404).

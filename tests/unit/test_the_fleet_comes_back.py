@@ -27,7 +27,7 @@ from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.infrastructure.persistence.fleet_writer import RepositoryFleetWriter
 from mcp_hangar.infrastructure.persistence.recovery_service import RecoveryService
 from mcp_hangar.infrastructure.persistence.registry import create_backend
-from mcp_hangar.server.bootstrap.persistence import restore_persisted_fleet
+from mcp_hangar.server.bootstrap.persistence import fleet_restore_gap, restore_persisted_fleet
 
 
 def _bootstrap_function():
@@ -132,6 +132,24 @@ class TestBootstrapReadsBackWhatItWrote:
             assert fleet.get("math") is None
         finally:
             backend.close()
+
+    @pytest.mark.parametrize(
+        ("recovery_service", "persistence_config", "gap"),
+        [
+            (None, None, "no_durable_backend"),
+            (object(), SimpleNamespace(enabled=False, auto_recover=True), "no_durable_backend"),
+            (object(), SimpleNamespace(enabled=True, auto_recover=False), "auto_recover_off"),
+            (object(), SimpleNamespace(enabled=True, auto_recover=True), None),
+        ],
+    )
+    def test_the_gap_the_l7_push_reports_is_the_one_this_restore_obeys(
+        self, recovery_service: object, persistence_config: object, gap: str | None
+    ) -> None:
+        # The L7 policy push reports `persisted` from this same answer (#1306);
+        # were it computed separately, the two could disagree about a restart.
+        runtime = SimpleNamespace(recovery_service=recovery_service, persistence_config=persistence_config)
+
+        assert fleet_restore_gap(runtime) == gap
 
     def test_an_unreadable_snapshot_does_not_stop_the_boot(self) -> None:
         # The servers declared in config.yaml are already loaded and working by
