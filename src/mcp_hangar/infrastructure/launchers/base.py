@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from ...observability.conventions import McpServer
-from ...observability.tracing import get_tracer, mark_span_error
+from ...observability.tracing import get_tracer
 
 
 class McpServerLauncher:
@@ -17,10 +17,12 @@ class McpServerLauncher:
     (#1546), between the leader's ``mcp_server.cold_start`` and the handshake's
     ``initialize``. The four launchers take four different argument lists, which
     is why the span lives here rather than in each body.
-    """
 
-    #: The mode this launcher runs, recorded as ``mcp.server.mode``.
-    mode: ClassVar[str] = "unknown"
+    The caller passes ``mcp_server_id`` and ``mcp_server_mode`` so the span
+    carries the server's own mode, the one the cold start metric uses: docker
+    and podman servers both run on ``ContainerLauncher``, so the class cannot
+    say which it is. A failed launch is recorded by the tracer itself.
+    """
 
     #: Whether ``_launch`` itself takes ``mcp_server_id``. The caller passes the
     #: id to every launcher so the span can carry it; a launcher that has no use
@@ -32,17 +34,13 @@ class McpServerLauncher:
         server_id = kwargs.get("mcp_server_id")
         if not self._launch_takes_server_id:
             kwargs.pop("mcp_server_id", None)
-        with get_tracer(__name__).start_as_current_span(
-            "mcp_server.launch", record_exception=False, set_status_on_exception=False
-        ) as span:
+        mode = kwargs.pop("mcp_server_mode", None)
+        with get_tracer(__name__).start_as_current_span("mcp_server.launch") as span:
             if server_id is not None:
                 span.set_attribute(McpServer.ID, str(server_id))
-            span.set_attribute(McpServer.MODE, self.mode)
-            try:
-                return self._launch(*args, **kwargs)
-            except Exception as exc:
-                mark_span_error(span, type(exc).__name__)
-                raise
+            if mode is not None:
+                span.set_attribute(McpServer.MODE, str(mode))
+            return self._launch(*args, **kwargs)
 
     def _launch(self, *args: Any, **kwargs: Any) -> Any:
         """Do the launch. Each launcher implements this with its own arguments."""

@@ -76,7 +76,6 @@ class ContainerLauncher(McpServerLauncher):
     - Security hardening (drop capabilities, no-new-privileges)
     """
 
-    mode = "container"
     _launch_takes_server_id = True
 
     # Paths that are never allowed to be mounted

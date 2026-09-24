@@ -1051,10 +1051,19 @@ class McpServer(AggregateRoot):
         t = threading.Thread(target=_reader, daemon=True, name=f"stderr-reader-{mcp_server_id}")
         t.start()
 
+    def _span_labels(self) -> dict[str, Any]:
+        """Who is being launched, for the launcher's ``mcp_server.launch`` span.
+
+        ``mcp_server_id`` is also a real argument to the docker and container
+        launchers; ``mcp_server_mode`` is only a label, and the base launcher
+        takes it off before the launch runs.
+        """
+        return {"mcp_server_id": self.mcp_server_id, "mcp_server_mode": self._mode.value}
+
     def _get_launch_config(self) -> dict[str, Any]:
         """Get launch configuration for the current mode."""
         if self._mode == McpServerMode.SUBPROCESS:
-            return {"command": self._command, "env": self._env, "mcp_server_id": self.mcp_server_id}
+            return {"command": self._command, "env": self._env, **self._span_labels()}
 
         if self._mode == McpServerMode.DOCKER:
             return {
@@ -1068,7 +1077,7 @@ class McpServer(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
-                "mcp_server_id": self.mcp_server_id,
+                **self._span_labels(),
             }
 
         if self._mode.value in ("container", "podman"):
@@ -1083,7 +1092,7 @@ class McpServer(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
-                "mcp_server_id": self.mcp_server_id,
+                **self._span_labels(),
             }
 
         if self._mode == McpServerMode.REMOTE:
@@ -1097,7 +1106,7 @@ class McpServer(AggregateRoot):
                 "provenance": self._provenance,
                 "runtime_addresses": self._runtime_addresses,
                 "enforce_ssrf": self._enforce_ssrf,
-                "mcp_server_id": self.mcp_server_id,
+                **self._span_labels(),
             }
 
         raise ValueError(f"unsupported_mode: {self._mode.value}")

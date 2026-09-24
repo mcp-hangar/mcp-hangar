@@ -6,8 +6,10 @@ HTTP transport had none. A four-second `mcp_server.cold_start` could not say
 whether the process was starting, the image pulling or the handshake waiting.
 
 `McpServerLauncher.launch` is now a template method around each launcher's
-`_launch`. These tests read the span from a real SDK exporter. The failure path
-and the wiring through `McpServer._get_launch_config` use the real
+`_launch`. These tests read the span from a real SDK exporter behind
+`_TextFreeTracer`, the wrapper `get_tracer()` returns in production, so the
+failure and refusal outcomes are the ones an operator sees. The failure path and
+the wiring through `McpServer._get_launch_config` use the real
 `SubprocessLauncher`; the other launchers are driven with their `_launch`
 replaced, because what is under test is the span around it, not Docker.
 """
@@ -39,10 +41,13 @@ def exporter(monkeypatch: pytest.MonkeyPatch) -> Any:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+    from mcp_hangar.observability.tracing import _TextFreeTracer
+
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    monkeypatch.setattr(base, "get_tracer", lambda name: provider.get_tracer("test-1546"))
+    tracer = _TextFreeTracer(provider.get_tracer("test-1546"))
+    monkeypatch.setattr(base, "get_tracer", lambda name: tracer)
     yield exporter
     exporter.clear()
 
@@ -51,12 +56,16 @@ def _launch_spans(exporter: Any) -> list[Any]:
     return [s for s in exporter.get_finished_spans() if s.name == "mcp_server.launch"]
 
 
-def _stubbed(cls: type[base.McpServerLauncher], seen: dict[str, Any]) -> base.McpServerLauncher:
+def _stubbed(
+    cls: type[base.McpServerLauncher], seen: dict[str, Any], raises: Exception | None = None
+) -> base.McpServerLauncher:
     """A launcher whose `_launch` records its arguments instead of starting anything."""
     launcher = object.__new__(cls)
 
     def fake_launch(*args: Any, **kwargs: Any) -> str:
         seen.update(kwargs)
+        if raises is not None:
+            raise raises
         return "client"
 
     launcher._launch = fake_launch  # type: ignore[method-assign]
@@ -69,7 +78,7 @@ def _stubbed(cls: type[base.McpServerLauncher], seen: dict[str, Any]) -> base.Mc
         (SubprocessLauncher, "subprocess", False),
         (HttpLauncher, "remote", False),
         (DockerLauncher, "docker", True),
-        (ContainerLauncher, "container", True),
+        (ContainerLauncher, "podman", True),
     ],
 )
 def test_every_launcher_opens_one_launch_span_with_the_server_and_mode(
@@ -77,7 +86,7 @@ def test_every_launcher_opens_one_launch_span_with_the_server_and_mode(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    result = _stubbed(cls, seen).launch(mcp_server_id=SERVER)
+    result = _stubbed(cls, seen).launch(mcp_server_id=SERVER, mcp_server_mode=mode)
 
     assert result == "client"
     [span] = _launch_spans(exporter)
@@ -85,8 +94,38 @@ def test_every_launcher_opens_one_launch_span_with_the_server_and_mode(
     assert span.attributes["mcp.server.mode"] == mode
     assert span.status.status_code is StatusCode.UNSET
     # Docker and container launchers use the id themselves; the other two never
-    # took it and must not start receiving it.
+    # took it and must not start receiving it. The mode is only a label.
     assert ("mcp_server_id" in seen) is receives_id
+    assert "mcp_server_mode" not in seen
+
+
+def test_a_docker_server_is_labelled_docker_although_a_container_launcher_runs_it(
+    exporter: Any,
+) -> None:
+    """`get_launcher("docker")` returns `ContainerLauncher`; the span must say docker,
+    as the cold start metric does."""
+    server = McpServer(mcp_server_id=SERVER, mode="docker", image="example/image:1")
+    seen: dict[str, Any] = {}
+
+    _stubbed(ContainerLauncher, seen).launch(**server._get_launch_config())
+
+    [span] = _launch_spans(exporter)
+    assert span.attributes["mcp.server.mode"] == "docker"
+    assert seen["mcp_server_id"] == SERVER
+
+
+def test_an_expected_refusal_is_not_marked_as_a_failed_launch(exporter: Any) -> None:
+    """ADR-029 s5: a refusal keeps its `error.type` and leaves the status UNSET."""
+    from mcp_hangar.domain.exceptions import RateLimitExceeded
+
+    refusal = RateLimitExceeded(mcp_server_id=SERVER, limit=1)
+    with pytest.raises(RateLimitExceeded):
+        _stubbed(SubprocessLauncher, {}, raises=refusal).launch(mcp_server_id=SERVER)
+
+    [span] = _launch_spans(exporter)
+    assert span.status.status_code is StatusCode.UNSET
+    assert span.attributes["error.type"] == "RateLimitExceeded"
+    assert not span.events
 
 
 def test_a_failed_launch_is_an_error_with_a_bounded_type(exporter: Any) -> None:
@@ -101,6 +140,10 @@ def test_a_failed_launch_is_an_error_with_a_bounded_type(exporter: Any) -> None:
     assert span.status.description is None
     assert span.attributes["error.type"] == "ValidationError"
     assert span.attributes["mcp.server.id"] == SERVER
+    # The exception event names the type and carries no message.
+    [event] = span.events
+    assert event.name == "exception"
+    assert "exception.message" not in event.attributes
 
 
 def test_a_subprocess_server_start_is_spanned_with_its_id(exporter: Any) -> None:

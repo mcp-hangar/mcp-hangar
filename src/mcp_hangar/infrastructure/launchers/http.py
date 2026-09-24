@@ -29,8 +29,6 @@ class HttpLauncher(McpServerLauncher):
     that connects to an already-running remote mcp_server.
     """
 
-    mode = "remote"
-
     def __init__(
         self,
         verify_ssl: bool = True,

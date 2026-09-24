@@ -27,7 +27,6 @@ class DockerLauncher(McpServerLauncher):
     - Network restrictions
     """
 
-    mode = "docker"
     _launch_takes_server_id = True
 
     # Docker images that are always blocked
