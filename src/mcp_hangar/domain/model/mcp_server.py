@@ -1338,11 +1338,22 @@ class McpServer(AggregateRoot):
                 method=method,
             )
             return
-        from ..services import subscription_relay
+        from ..services import subscription_relay, tool_catalogue_changes
 
         if method == "notifications/tools/list_changed":
             logger.info("upstream_tools_list_changed", mcp_server_id=self.mcp_server_id)
-            self._refresh_tools()
+            if self._refresh_tools():
+                # The front door serves the projection registry, not this
+                # catalogue (#1366). Rebuild it before the nudge below goes out,
+                # or the client it tells to re-list is served the old one.
+                try:
+                    tool_catalogue_changes.announce(self.mcp_server_id)
+                except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed projection must not swallow the nudge
+                    logger.warning(
+                        "tool_projection_refresh_failed",
+                        mcp_server_id=self.mcp_server_id,
+                        error_type=bounded_error_type(type(exc).__qualname__),
+                    )
             # The catalogue changed for this gateway AND for whoever is
             # listening through the front door (#1027): rediscovery is our
             # answer, the nudge is theirs.
@@ -2062,24 +2073,31 @@ class McpServer(AggregateRoot):
         # only ever there because the attribute was Any.
         return response
 
-    def _refresh_tools(self) -> None:
+    def _refresh_tools(self) -> bool:
         """Refresh tool catalog from mcp_server.
 
         Note: This performs I/O (tools/list RPC). Callers should prefer the
         two-lock-cycle pattern in invoke_tool() which performs the RPC outside
         the lock. This method is retained for internal use but should NOT be
         called while holding the mcp_server lock.
+
+        Returns:
+            Whether the catalogue was replaced from a fresh listing. ``False``
+            when there was no live client or the listing failed, and the
+            catalogue is the one it was.
         """
         if not self._client or not self._client.is_alive():
-            return
+            return False
 
         try:
             tools_resp = self._client.call("tools/list", {}, timeout=5.0)
             if "result" in tools_resp:
                 tool_list = tools_resp.get("result", {}).get("tools", [])
                 self._tools.update_from_list(tool_list)
+                return True
         except (OSError, TimeoutError) as e:
             logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
+        return False
 
     def health_check(self) -> bool:
         """

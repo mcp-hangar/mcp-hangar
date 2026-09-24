@@ -196,21 +196,19 @@ def _runtime(endpoint: str, also: tuple[str, ...] = ()) -> Any:
     """
     from mcp_hangar.application.commands import InvokeToolCommand, StartMcpServerCommand
     from mcp_hangar.application.commands.handlers import InvokeToolHandler, StartMcpServerHandler
-    from mcp_hangar.application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
     from mcp_hangar.bootstrap.runtime import create_runtime
-    from mcp_hangar.domain.contracts.event_bus import HandlerKind
-    from mcp_hangar.domain.events import McpServerStarted
     from mcp_hangar.domain.model import McpServer
     from mcp_hangar.infrastructure.command_bus import CommandBus
+    from mcp_hangar.server.bootstrap.event_handlers import subscribe_tool_projection
     from mcp_hangar.server.context import init_context
 
     bus = CommandBus()
     runtime = create_runtime(command_bus=bus)
     bus.register(StartMcpServerCommand, StartMcpServerHandler(runtime.repository, runtime.event_bus))
     bus.register(InvokeToolCommand, InvokeToolHandler(runtime.repository, runtime.event_bus))
-    # Subscribed the way bootstrap subscribes it (`server/bootstrap/event_handlers.py`).
-    projection = ToolProjectionPopulationHandler(repository=runtime.repository)
-    runtime.event_bus.subscribe(McpServerStarted, projection.handle, kind=HandlerKind.LOCAL_VIEW)
+    # Wired the way bootstrap wires it (`server/bootstrap/event_handlers.py`): on
+    # a start, and on an upstream's own `tools/list_changed` (#1366).
+    subscribe_tool_projection(runtime.event_bus, runtime.repository)
     runtime.repository.add(SERVER, McpServer(mcp_server_id=SERVER, mode="remote", endpoint=endpoint))
     for server_id in also:
         runtime.repository.add(server_id, McpServer(mcp_server_id=server_id, mode="remote", endpoint=endpoint))
@@ -244,6 +242,7 @@ def front_door(
     *,
     topology: str = "front_door",
     also: tuple[str, ...] = (),
+    upstream_class: type[Upstream] = Upstream,
 ) -> Iterator[FrontDoor]:
     """A served front door over one upstream exposing *tools*, each tenant with an API key.
 
@@ -252,9 +251,12 @@ def front_door(
     default ``egress`` instead, where the upstream is reached through
     ``hangar_call``, for a test that compares the two surfaces. Each id in
     *also* is one more server on the same upstream, registered cold.
+    *upstream_class* is the upstream's handler, for a test whose upstream does
+    more than answer POSTs.
     """
     from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
     from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
+    from mcp_hangar.domain.services import tool_catalogue_changes
     from mcp_hangar.server.api.middleware import create_auth_enforced_app
     from mcp_hangar.server.bootstrap import build_serving_mcp_server
     from mcp_hangar.server.context import reset_context
@@ -268,7 +270,7 @@ def front_door(
     for tenant, allowed in (policies or {}).items():
         resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
 
-    handler: type[Upstream] = type("_ThisUpstream", (Upstream,), {"tools": tools, "called": [], "holds": {}})
+    handler: type[Upstream] = type("_ThisUpstream", (upstream_class,), {"tools": tools, "called": [], "holds": {}})
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     runtime = None
@@ -293,6 +295,7 @@ def front_door(
         upstream.shutdown()
         upstream.server_close()
         reset_context()
+        tool_catalogue_changes.clear_listener()
         reset_tool_projection_registry()
         reset_tool_access_resolver()
         catalogue_warmup.reset()
