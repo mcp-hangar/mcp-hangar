@@ -38,3 +38,7 @@ class PrometheusMetricsPublisher(IMetricsPublisher):
     def set_connection_active(self, mcp_server_id: str, active: bool) -> None:
         """Record whether a backend connection is currently established."""
         self._ensure_metrics().set_connection_active(mcp_server_id, active)
+
+    def record_l7_policy_set(self, mcp_server_id: str) -> None:
+        """Record that an L7 egress policy was set or cleared, now."""
+        self._ensure_metrics().record_l7_policy_set(mcp_server_id)

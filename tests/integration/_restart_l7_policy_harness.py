@@ -4,7 +4,8 @@ Run as a script, in its own interpreter, by
 ``test_a_restart_keeps_an_l7_policy_set_over_the_api.py``:
 ``python _restart_l7_policy_harness.py <workdir> <phase> <out.json>``, once per
 phase -- ``before``, ``after``, ``clear``, ``after_clear`` -- over the same data
-directory, and once with ``memory``, which has no persistence backend at all. Not
+directory, and with ``memory`` then ``memory_after``, which have no persistence
+backend at all. Every phase also scrapes ``/metrics`` (#1562). Not
 collected by pytest. Each phase is its own process because a restart is one:
 ``bootstrap()`` fills process-global state, and nothing may survive from the
 first gateway to the second except what it stored.
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,9 +40,30 @@ SERVER = "math"
 def _config(data_dir: Path, phase: str) -> dict[str, Any]:
     config: dict[str, Any] = {"config_reload": {"enabled": False}, "mcp_servers": {SERVER: _server()}}
     # ``memory`` is the chart default: no persistence backend at all.
-    if phase != "memory":
+    if not phase.startswith("memory"):
         config["persistence"] = {"backend": "sqlite", "sqlite": {"data_dir": str(data_dir)}}
     return config
+
+
+def _scrape() -> dict[str, Any]:
+    """The L7 policy series of ``GET /metrics``, through the endpoint ``serve --http`` mounts."""
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from mcp_hangar.server.lifecycle import metrics_endpoint
+
+    with TestClient(Starlette(routes=[Route("/metrics", metrics_endpoint, methods=["GET"])])) as client:
+        text = client.get("/metrics").text
+    held = re.findall(r'^mcp_hangar_l7_policy_held\{mcp_server="([^"]+)",mode="([^"]+)"\} (\S+)$', text, re.M)
+    last_set = re.findall(
+        r'^mcp_hangar_l7_policy_last_set_timestamp_seconds\{mcp_server="([^"]+)"\} (\S+)$', text, re.M
+    )
+    return {
+        "held": {server: [mode, float(value)] for server, mode, value in held},
+        "last_set": {server: float(value) for server, value in last_set},
+        "family": "# TYPE mcp_hangar_l7_policy_held gauge" in text,
+    }
 
 
 def run(workdir: Path, phase: str) -> dict[str, Any]:
@@ -64,6 +87,8 @@ def run(workdir: Path, phase: str) -> dict[str, Any]:
             out["cleared"] = client.delete(f"/api/mcp_servers/{SERVER}/l7_policy").status_code
         out["policy"] = gateway.l7(SERVER)
         out["call"] = gateway.call(SERVER)
+
+    out["metrics"] = _scrape()
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()

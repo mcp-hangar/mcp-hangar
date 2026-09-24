@@ -481,6 +481,11 @@ def bootstrap(
 
     runtime = get_runtime(rate_limit=full_config.get("rate_limit"), persistence_backend=_backend)
     init_context(runtime)
+    # Read at scrape time, so it covers every way a server comes to hold a
+    # policy -- including recovery and the peer tail, which run below (#1562).
+    from ...metrics import read_l7_policies_from
+
+    read_l7_policies_from(runtime.repository)
 
     # Now the servers, with a runtime that knows where it persists.
     load_config(full_config.get("mcp_servers", {}))
