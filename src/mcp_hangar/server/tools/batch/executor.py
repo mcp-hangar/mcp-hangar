@@ -66,13 +66,15 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry
+from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry, Shaping
 from ....observability.tracing import (
     extract_trace_context,
     get_tracer,
     record_call_outcome,
     record_gate_decision,
     record_handled_failure,
+    record_mutation,
+    record_result_drop,
     record_retry_attempt,
     settle_failed_call,
 )
@@ -941,7 +943,15 @@ class BatchExecutor:
         # thread, under the identity hangar_call bound for the batch, and the
         # continuation tools read the caller the same way.
         owner = ContinuationOwner.of(get_identity_context())
-        cut = truncation_manager.process_batch(batch_id, [r for r in results if r.index not in whole], owner=owner)
+        budgeted = [r for r in results if r.index not in whole]
+        # Its own span: truncation can write the cut results to the continuation
+        # cache. Counts and a flag only, never a result or a continuation id (#1298).
+        with get_tracer(__name__).start_as_current_span("batch.truncate") as span:
+            cut = truncation_manager.process_batch(batch_id, budgeted, owner=owner)
+            was_truncated = {r.index for r in budgeted if r.truncated}
+            newly_cut = [r for r in cut if r.truncated and r.index not in was_truncated]
+            span.set_attribute(Shaping.TRUNCATED_COUNT, len(newly_cut))
+            span.set_attribute(Shaping.CONTINUATION, any(r.continuation_id for r in newly_cut))
         by_index = {r.index: r for r in cut}
         return [by_index.get(r.index, r) for r in results]
 
@@ -1278,7 +1288,12 @@ class BatchExecutor:
             payload=payload,
             correlation_id=correlation_id,
         )
+        started = time.perf_counter()
         result = self._mutator_pipeline.execute(ctx)
+        # Only a pipeline with mutators is observed: the default one does nothing,
+        # and an event on every call saying so would be noise (#1298).
+        if self._mutator_pipeline.has_mutators:
+            record_mutation(direction, result.changed, round((time.perf_counter() - started) * 1000, 3))
         return result.payload
 
     def execute(  # noqa: C901 -- baseline CC=17; split before extending
@@ -2604,6 +2619,7 @@ class BatchExecutor:
             original_size = result_size
             result = None
             BATCH_TRUNCATIONS_TOTAL.inc(reason="per_call")
+            record_result_drop(truncated_reason, result_size, MAX_RESPONSE_SIZE_BYTES)
             logger.warning(
                 "batch_call_truncated",
                 call_id=call.call_id,

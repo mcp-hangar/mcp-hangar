@@ -54,7 +54,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry
+from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry, Shaping
 
 logger = get_logger(__name__)
 
@@ -922,6 +922,42 @@ def record_retry_attempt(layer: str, index: int, reason: str, backoff_s: float) 
         )
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a retry
         logger.debug("retry_event_failed", layer=layer, index=index)
+
+
+def record_mutation(direction: str, changed: bool, duration_ms: float) -> None:
+    """Record one mutator pipeline run on the ambient `batch.call.<tool>` span (#1298).
+
+    Observes a mutation already applied and never raises. Nothing about the
+    payload is recorded, only whether it changed and how long it took.
+    """
+    try:
+        span = _ambient_span()
+        if span is None:
+            return
+        span.add_event(
+            Shaping.MUTATION_EVENT,
+            {Shaping.DIRECTION: direction, Shaping.CHANGED: changed, Shaping.DURATION_MS: duration_ms},
+        )
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
+        logger.debug("mutation_event_failed", direction=direction)
+
+
+def record_result_drop(reason: str, size_bytes: int, limit_bytes: int) -> None:
+    """Record a result the per-call size limit dropped, on the ambient call span (#1298). Never raises."""
+    try:
+        span = _ambient_span()
+        if span is None:
+            return
+        span.add_event(
+            Shaping.DROP_EVENT,
+            {
+                Shaping.REASON: bounded_error_type(reason),
+                Shaping.SIZE_BYTES: size_bytes,
+                Shaping.LIMIT_BYTES: limit_bytes,
+            },
+        )
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
+        logger.debug("drop_event_failed", reason=reason)
 
 
 def _ambient_span() -> Any:
