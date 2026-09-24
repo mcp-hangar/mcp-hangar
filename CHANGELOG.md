@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.22.1...v2.23.0) (2026-09-24)
+
+### Added
+
+- **core:** `/metrics` now says which L7 egress policies a gateway replica holds,
+  and when each last arrived. `mcp_hangar_l7_policy_held{mcp_server, mode}` is 1
+  for every server holding a policy (`mode` is `Enforce` or `Audit`) and absent
+  for one holding none; it is read from the servers at scrape time, so a policy
+  installed by the operator push, the peer event tail, startup recovery or a
+  reload shows up the same way. `mcp_hangar_l7_policy_last_set_timestamp_seconds{mcp_server}`
+  is the Unix time this replica last accepted a set or a clear for the server. A
+  replica that restarted without a durable backend and has not been re-delivered
+  its policy shows no `held` series, so comparing the MCPEgressPolicy CRs against
+  this family finds the gap #1306 left silent ([#1567](https://github.com/mcp-hangar/mcp-hangar/pull/1567))
+- **core:** a `front_door` gateway served over stdio now advertises
+  `tools.listChanged: true` on the handshake era (2025-11-25 and earlier) and
+  sends `notifications/tools/list_changed` when a tenant's projection changes:
+  the boot warm-up landing an upstream, a hot-loaded server, an upstream's own
+  `list_changed` (now also routed from stdio upstreams, which dropped it), a tool
+  found by a call's lazy refresh, and a withdrawal. A session is told only when
+  its own tenant's projection changed, and changes are coalesced over a 300 ms
+  window, flushed when the warm-up ends. `front_door` over HTTP and `egress`
+  still advertise `false`: HTTP has no back-channel until the sessionless GET
+  stream lands. The other three handshake-era flags and every 2026-07-28 flag are
+  unchanged, and the bounded first-listing wait (#1231) stays as a backstop. ([#1569](https://github.com/mcp-hangar/mcp-hangar/pull/1569))
+
+### Fixed
+
+- **core:** a group whose members had all left rotation and then gone `cold`
+  (reaped by the GC while the group could not call them) or DEAD (the recovery
+  saga gave up) refused every call on that replica until someone started it by
+  hand, even once the upstream was healthy again. A new per-replica worker,
+  `group_recovery`, runs every 30 s and starts those members of a group with
+  nothing to select, backing off per member from 30 s, doubling to a 600 s cap,
+  while the upstream stays down. A start goes through the usual
+  `McpServerStarted` path, so rotation and the group circuit follow the same rules
+  as any other success. It logs `group_recovery_probe_started`,
+  `group_recovery_probe_succeeded` and `group_recovery_probe_failed`. A member
+  that was never started, was stopped on purpose or was blocked for a capability
+  violation is left alone. `hangar_group_rebalance` no longer takes `cold`
+  members out of rotation, so on a stuck group it leaves a member a call can
+  select and start ([#1568](https://github.com/mcp-hangar/mcp-hangar/pull/1568))
+- A configuration reload that removes a group now drops that group's `mcp_hangar_group_circuit_open` series. It used to stay on `/metrics` for the life of the process, and a group removed with its circuit open read as open for good on that replica. ([#1570](https://github.com/mcp-hangar/mcp-hangar/pull/1570))
+- **core:** an upstream's own `notifications/tools/list_changed` now reaches the
+  front door's tool projection. The aggregate re-listed the upstream's catalogue,
+  but the front door lists from the projection registry, which only a start
+  filled, so a client told to re-list was served the catalogue from the last
+  start: a tool the upstream added was missing and one it removed was still
+  listed. The refreshed catalogue is now projected through the same handler a
+  start uses, before the relay tells clients to re-list, and other servers'
+  projections and every withdrawal and pin overlay are left alone ([#1563](https://github.com/mcp-hangar/mcp-hangar/pull/1563))
+
 ## [2.22.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.22.0...v2.22.1) (2026-09-23)
 
 ### Fixed
