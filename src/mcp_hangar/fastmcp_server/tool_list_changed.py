@@ -10,15 +10,16 @@ The flag
 ``tools.listChanged`` on the handshake era (<= 2025-11-25) is derived from two
 facts, both of which must hold:
 
-* a handshake-era push channel is served in this process (:func:`serve_push_channel`,
-  called by ``run_stdio``: a stdio connection is one duplex pipe, so the
-  session the client initialized on is the channel), and
+* a handshake-era push channel is served in this process (:func:`serve_push_channel`).
+  ``run_stdio`` serves one because a stdio connection is one duplex pipe, so the
+  session the client initialized on is the channel. ``mcp_app_for_serving``
+  serves one because it mounts the sessionless ``GET /mcp`` stream
+  (:mod:`tool_list_changed_stream`), which is the channel on HTTP; and
 * the projection-change publisher is registered (:func:`register_publisher`,
   front_door only, because only front_door serves the projection).
 
-So it is true on front_door stdio, false in egress, and false on front_door
-HTTP, which since #877 is served stateless and has no back-channel until the
-sessionless ``GET /mcp`` stream exists. Derived, not inverted (#888): the SDK
+So it is true on front_door stdio and front_door HTTP, and false in egress.
+Derived, not inverted (#888): the SDK
 derives the handshake-era flag from the ``NotificationOptions`` passed to
 ``create_initialization_options``, which nothing passed, so the wrapper below
 passes the one it derives. ``resources.subscribe``, ``resources.listChanged``
@@ -28,7 +29,10 @@ because the SDK ignores ``NotificationOptions`` there.
 
 Delivery
 --------
-A channel is recorded when it lists tools, with the projection it was served.
+On stdio a channel is recorded when it lists tools, with the projection it was
+served. On HTTP a channel is a ``GET /mcp`` stream, recorded when it opens
+(:func:`open_stream`) with the projection generated then; the stateless POST a
+listing arrives on is gone once it is answered, so it is never a channel.
 The registry calls :func:`_on_projection_changed` after any mutation, on
 whichever thread made it; that only hands off to the serving loop. On the loop,
 changes are coalesced over a trailing :data:`COALESCE_WINDOW_S` and then each
@@ -64,8 +68,17 @@ logger = logging.getLogger(__name__)
 #: what a client wants, and a third of a second is not a wait anyone sees.
 COALESCE_WINDOW_S = 0.3
 
-#: Channels held at most. stdio has one; the cap is for the transports to come.
+#: Channels held at most, across every caller. stdio has one; HTTP has one per open stream.
 MAX_CHANNELS = 1024
+
+#: Open ``GET /mcp`` streams one principal may hold. One API key is often shared
+#: by a team's clients, each of which opens one stream; past this the stream is
+#: refused and the client falls back to #1231's wait.
+MAX_STREAMS_PER_PRINCIPAL = 32
+
+#: Open ``GET /mcp`` streams one tenant may hold, so no tenant's principals can
+#: take every one of :data:`MAX_CHANNELS` and leave the other tenants none.
+MAX_STREAMS_PER_TENANT = 256
 
 _push_transport: str | None = None
 _publisher_registered = False
@@ -77,6 +90,10 @@ class _Channel:
     send: Callable[[], Awaitable[None]]
     #: The projection this channel was last served or told about.
     seen: Any
+    #: Who opened it, for the per-principal cap. None on stdio.
+    owner: str | None = None
+    #: Whether it is an HTTP stream, which the per-tenant cap counts.
+    stream: bool = False
 
 
 # Touched only on the serving loop, except the reads in `_on_projection_changed`,
@@ -135,6 +152,9 @@ def track_listing(mcp_ctx: Any, projection: Any) -> None:
     session = getattr(mcp_ctx, "session", None)
     if session is None or is_modern_protocol_version(getattr(mcp_ctx, "protocol_version", None)):
         return
+    if getattr(mcp_ctx, "request", None) is not None:
+        # A stateless HTTP POST: answered and gone. Its channel is the GET stream.
+        return
     # One session object per request; the connection is what persists (SDK seam).
     key = id(getattr(session, "_connection", session))
     channel = _channels.get(key)
@@ -150,6 +170,43 @@ def track_listing(mcp_ctx: Any, projection: Any) -> None:
     # either found no channel to schedule for, or was compared against the
     # previous listing and is now overwritten. One coalesced comparison closes both.
     _schedule()
+
+
+def open_stream(key: int, tenant_id: str | None, owner: str, send: Callable[[], Awaitable[None]]) -> str | None:
+    """Record a ``GET /mcp`` stream as a channel, or say why not. Serving loop.
+
+    The projection it is compared against is generated now, so a change that
+    lands after this is told. The stream sends one ``list_changed`` as it
+    opens, which covers anything that landed between the client's listing and
+    this call.
+
+    Returns:
+        None when recorded; otherwise why not: ``"channel_cap"``,
+        ``"tenant_cap"``, ``"principal_cap"`` or ``"generation_failed"``.
+    """
+    global _loop
+    from .flat_tool_projection import generate_projection
+
+    streams = [channel for channel in _channels.values() if channel.stream]
+    if len(_channels) >= MAX_CHANNELS:
+        return "channel_cap"
+    if sum(1 for channel in streams if channel.tenant_id == tenant_id) >= MAX_STREAMS_PER_TENANT:
+        return "tenant_cap"
+    if sum(1 for channel in streams if channel.owner == owner) >= MAX_STREAMS_PER_PRINCIPAL:
+        return "principal_cap"
+    try:
+        seen = generate_projection(tenant_id)
+    except Exception:  # noqa: BLE001 -- fault-barrier: a stream that cannot be compared is not opened
+        logger.warning("tool_list_changed_generation_failed", exc_info=True)
+        return "generation_failed"
+    _channels[key] = _Channel(tenant_id, send, seen, owner, stream=True)
+    _loop = asyncio.get_running_loop()
+    return None
+
+
+def close_stream(key: int) -> None:
+    """Forget a stream that ended. Serving loop."""
+    _channels.pop(key, None)
 
 
 def _on_projection_changed() -> None:

@@ -159,7 +159,7 @@ async def test_a_call_that_finds_a_new_tool_is_announced(gateway: FrontDoor) -> 
     assert a.notified == 1
 
 
-def test_front_door_http_does_not_advertise_what_it_cannot_push() -> None:
+def test_front_door_http_advertises_what_its_get_stream_pushes() -> None:
     tool_list_changed.reset()
     with front_door(("read_item",)) as door:
         try:
@@ -172,4 +172,4 @@ def test_front_door_http_does_not_advertise_what_it_cannot_push() -> None:
         finally:
             tool_list_changed.reset()
 
-    assert answer["result"]["capabilities"]["tools"].get("listChanged") is False
+    assert answer["result"]["capabilities"]["tools"].get("listChanged") is True
