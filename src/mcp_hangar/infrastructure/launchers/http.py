@@ -90,7 +90,7 @@ class HttpLauncher(McpServerLauncher):
                 value=endpoint,
             )
 
-    def launch(
+    def _launch(
         self,
         endpoint: str,
         auth_config: Mapping[str, object] | None = None,

@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from typing import cast
 
 from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
@@ -74,6 +75,8 @@ class ContainerLauncher(McpServerLauncher):
     - Network isolation
     - Security hardening (drop capabilities, no-new-privileges)
     """
+
+    _launch_takes_server_id = True
 
     # Paths that are never allowed to be mounted
     BLOCKED_MOUNT_PATHS: set[str] = {
@@ -400,7 +403,7 @@ class ContainerLauncher(McpServerLauncher):
 
         return cmd
 
-    def launch(
+    def _launch(
         self,
         image: str,
         command: list[str] | None = None,
@@ -520,7 +523,7 @@ class ContainerLauncher(McpServerLauncher):
         Returns:
             StdioClient connected to the container
         """
-        return self.launch(
+        client = self.launch(
             image=config.image,
             command=config.command,
             args=config.args,
@@ -532,3 +535,4 @@ class ContainerLauncher(McpServerLauncher):
             read_only=config.read_only,
             user=config.user,
         )
+        return cast(StdioClient, client)

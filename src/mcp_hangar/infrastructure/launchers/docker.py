@@ -27,6 +27,8 @@ class DockerLauncher(McpServerLauncher):
     - Network restrictions
     """
 
+    _launch_takes_server_id = True
+
     # Docker images that are always blocked
     BLOCKED_IMAGES: set[str] = {
         "ubuntu",
@@ -205,7 +207,7 @@ class DockerLauncher(McpServerLauncher):
 
         return cmd
 
-    def launch(
+    def _launch(
         self,
         image: str,
         env: dict[str, str] | None = None,

@@ -162,7 +162,7 @@ class SubprocessLauncher(McpServerLauncher):
 
         return result_env
 
-    def launch(
+    def _launch(
         self,
         command: list[str],
         env: dict[str, str] | None = None,
