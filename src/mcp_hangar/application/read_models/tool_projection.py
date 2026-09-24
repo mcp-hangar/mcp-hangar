@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -24,6 +24,34 @@ if TYPE_CHECKING:
     from ...domain.model.tool_catalog import ToolSchema
 
 logger = logging.getLogger(__name__)
+
+#: Called with no arguments after a mutation that can change what a tenant is
+#: projected (#1366). Module-level rather than per instance, so it survives a
+#: registry reset. Called outside the registry lock, on the mutating thread, so a
+#: listener must hand off rather than do work: the front door's publisher
+#: schedules a comparison on its serving loop and returns.
+_change_listeners: list[Callable[[], None]] = []
+
+
+def add_change_listener(listener: Callable[[], None]) -> None:
+    """Call *listener* after every projection-changing mutation. Idempotent."""
+    if listener not in _change_listeners:
+        _change_listeners.append(listener)
+
+
+def remove_change_listener(listener: Callable[[], None]) -> None:
+    """Stop calling *listener*. A listener that was never added is ignored."""
+    if listener in _change_listeners:
+        _change_listeners.remove(listener)
+
+
+def _projection_changed() -> None:
+    """Tell every listener; one that raises is logged and does not stop the rest."""
+    for listener in tuple(_change_listeners):
+        try:
+            listener()
+        except Exception:  # noqa: BLE001 -- fault-barrier: a listener must not fail the mutation that fired it
+            logger.warning("tool_projection_change_listener_failed", exc_info=True)
 
 
 class _AllTenants:
@@ -188,6 +216,7 @@ class ToolProjectionRegistry:
                     "tool_count": len(new_projections),
                 },
             )
+        _projection_changed()
 
     # ------------------------------------------------------------------
     # Config-withdrawal overlay (populated at config-load time)
@@ -238,6 +267,7 @@ class ToolProjectionRegistry:
         with self._lock:
             self._config_withdrawals.clear()
         logger.debug("config_withdrawals_cleared")
+        _projection_changed()
 
     def _is_config_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None, kind: str = "tool") -> bool:
         """Return True if (mcp_server, kind, tool) is config-withdrawn for tenant_id."""
@@ -325,6 +355,7 @@ class ToolProjectionRegistry:
             self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
         logger.debug("config_pins_cleared")
+        _projection_changed()
 
     def adopt_config_overlays(self, staged: ToolProjectionRegistry, *, replace: bool) -> None:
         """Take the withdrawals, pins and enforcement modes a configuration registered on *staged*.
@@ -354,18 +385,19 @@ class ToolProjectionRegistry:
                 self._config_pins = pins
                 self._config_pins_all_tenants = pins_all_tenants
                 self._digest_enforcement = enforcement
-                return
-            # Added through the setters, so a merge means what registering the
-            # same entries one by one has always meant.
-            for (mcp_server, kind, name), entry in withdrawals.items():
-                for tenant_id in sorted(entry) if isinstance(entry, set) else [None]:
-                    self.set_config_withdrawal(mcp_server, name, tenant_id, kind=kind)
-            for (mcp_server, tool), by_tenant in pins.items():
-                for tenant_id, digest in by_tenant.items():
-                    self.set_config_pin(mcp_server, tool, tenant_id, digest)
-            for (mcp_server, tool), digest in pins_all_tenants.items():
-                self.set_config_pin(mcp_server, tool, None, digest)
-            self._digest_enforcement.update(enforcement)
+            else:
+                # Added through the setters, so a merge means what registering
+                # the same entries one by one has always meant.
+                for (mcp_server, kind, name), entry in withdrawals.items():
+                    for tenant_id in sorted(entry) if isinstance(entry, set) else [None]:
+                        self.set_config_withdrawal(mcp_server, name, tenant_id, kind=kind)
+                for (mcp_server, tool), by_tenant in pins.items():
+                    for tenant_id, digest in by_tenant.items():
+                        self.set_config_pin(mcp_server, tool, tenant_id, digest)
+                for (mcp_server, tool), digest in pins_all_tenants.items():
+                    self.set_config_pin(mcp_server, tool, None, digest)
+                self._digest_enforcement.update(enforcement)
+        _projection_changed()
 
     # ------------------------------------------------------------------
     # Runtime-withdrawal overlay (survives config reloads)
@@ -402,6 +434,7 @@ class ToolProjectionRegistry:
             "runtime_withdrawal_set",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
         )
+        _projection_changed()
 
     def restore(
         self,
@@ -442,6 +475,7 @@ class ToolProjectionRegistry:
             "runtime_withdrawal_restored",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
         )
+        _projection_changed()
 
     def is_withdrawn_for_all_tenants(self, mcp_server: str, name: str, *, kind: str = "tool") -> bool:
         """Is there a runtime withdrawal of *name* that covers every tenant?

@@ -203,7 +203,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     """
     from ..application.commands import StartMcpServerCommand
     from ..domain.services.tool_access_resolver import is_front_door
-    from ..fastmcp_server import catalogue_warmup
+    from ..fastmcp_server import catalogue_warmup, tool_list_changed
 
     if not is_front_door():
         return
@@ -238,6 +238,8 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
         # In `finally`: a warm-up that dies must not leave every later listing
         # waiting out the full deadline for something that will never finish.
         catalogue_warmup.warmup_finished()
+        # Whatever landed, tell the clients now rather than at the window's end (#1366).
+        tool_list_changed.flush_now()
 
     logger.info("front_door_warmup_complete", warmed=warmed, failed=failed, skipped_dead=skipped)
 
@@ -471,6 +473,10 @@ class ServerLifecycle:
         MCP clients that communicate via stdin/stdout.
         """
         logger.info("starting_stdio_server")
+        # The pipe is the session, so a catalogue change can be pushed on it (#1366).
+        from ..fastmcp_server.tool_list_changed import serve_push_channel
+
+        serve_push_channel("stdio")
         try:
             self._context.mcp_server.run()
         except KeyboardInterrupt:

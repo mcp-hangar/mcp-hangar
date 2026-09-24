@@ -17,9 +17,10 @@ the catalogue from the last start. ``subscribe_tool_projection`` in
 ``server/bootstrap/event_handlers.py`` wires both triggers, so bootstrap and a
 test harness cannot wire only one.
 
-Known gap (follow-up): the lazy tool refresh in ``McpServer.invoke_tool``
-(a call for a tool the catalogue does not hold) announces nothing, so what it
-finds is not projected until the next start or ``list_changed``.
+The lazy tool refresh in ``McpServer.invoke_tool`` (a call for a tool the
+catalogue does not hold) announces through the same seam, so what it finds is
+projected at once, and the registry's change listeners tell the front door's
+clients (``fastmcp_server/tool_list_changed.py``).
 
 **Reads local state, not the event**, which is why the subscription is
 ``HandlerKind.LOCAL_VIEW`` -- see that member for what running it on a peer's

@@ -64,6 +64,7 @@ def _routing_server(refreshed: bool) -> MagicMock:
     server.mcp_server_id = "server_a"
     server._refresh_tools.return_value = refreshed
     server._route_upstream_message = McpServer._route_upstream_message.__get__(server)
+    server._announce_catalogue = McpServer._announce_catalogue.__get__(server)
     return server
 
 

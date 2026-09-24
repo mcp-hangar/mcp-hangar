@@ -1276,8 +1276,8 @@ class McpServer(AggregateRoot):
 
         # Open the standing server->client channel (#882). Without it every
         # upstream-initiated message -- progress, logs, tools/list_changed --
-        # is silently unreachable. HTTP-only: stdio has no such channel to
-        # open, its notifications arrive on the same pipe.
+        # is silently unreachable. Over HTTP it is a GET stream; over stdio the
+        # same pipe, handed to the router off the reader thread (#1366).
         start_stream = getattr(client, "start_notification_stream", None)
         if start_stream is not None:
             start_stream(self._route_upstream_message)
@@ -1354,7 +1354,7 @@ class McpServer(AggregateRoot):
                 method=method,
             )
             return
-        from ..services import subscription_relay, tool_catalogue_changes
+        from ..services import subscription_relay
 
         if method == "notifications/tools/list_changed":
             logger.info("upstream_tools_list_changed", mcp_server_id=self.mcp_server_id)
@@ -1362,14 +1362,7 @@ class McpServer(AggregateRoot):
                 # The front door serves the projection registry, not this
                 # catalogue (#1366). Rebuild it before the nudge below goes out,
                 # or the client it tells to re-list is served the old one.
-                try:
-                    tool_catalogue_changes.announce(self.mcp_server_id)
-                except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed projection must not swallow the nudge
-                    logger.warning(
-                        "tool_projection_refresh_failed",
-                        mcp_server_id=self.mcp_server_id,
-                        error_type=bounded_error_type(type(exc).__qualname__),
-                    )
+                self._announce_catalogue()
             # The catalogue changed for this gateway AND for whoever is
             # listening through the front door (#1027): rediscovery is our
             # answer, the nudge is theirs.
@@ -1848,33 +1841,41 @@ class McpServer(AggregateRoot):
                 refresh_error = e
                 logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
 
-            # Lock cycle 2: Apply refresh results, clear flag, re-check tool
-            with self._lock:
-                self._refresh_in_progress = False
+            # Lock cycle 2: Apply refresh results, clear flag, re-check tool.
+            # A refreshed catalogue is announced after the lock is released,
+            # found tool or not: the front door serves its projection (#1366).
+            refreshed = False
+            try:
+                with self._lock:
+                    self._refresh_in_progress = False
 
-                if refresh_error is None and refresh_result and "result" in refresh_result:
-                    tool_list = refresh_result.get("result", {}).get("tools", [])
-                    self._tools.update_from_list(tool_list)
+                    if refresh_error is None and refresh_result and "result" in refresh_result:
+                        tool_list = refresh_result.get("result", {}).get("tools", [])
+                        self._tools.update_from_list(tool_list)
+                        refreshed = True
 
-                # Again: the state may have moved during the refresh, and the
-                # refreshed catalogue has not been checked.
-                self._check_serving()
+                    # Again: the state may have moved during the refresh, and the
+                    # refreshed catalogue has not been checked.
+                    self._check_serving()
 
-                if not self._tools.has(tool_name):
-                    raise ToolNotFoundError(self.mcp_server_id, tool_name)
+                    if not self._tools.has(tool_name):
+                        raise ToolNotFoundError(self.mcp_server_id, tool_name)
 
-                tool_found = True
-                self._health._total_invocations += 1
-                client = self._client
-                self._record_event(
-                    ToolInvocationRequested(
-                        mcp_server_id=self.mcp_server_id,
-                        tool_name=tool_name,
-                        correlation_id=correlation_id,
-                        arguments=arguments,
-                        identity_context=identity_context_dict,
+                    tool_found = True
+                    self._health._total_invocations += 1
+                    client = self._client
+                    self._record_event(
+                        ToolInvocationRequested(
+                            mcp_server_id=self.mcp_server_id,
+                            tool_name=tool_name,
+                            correlation_id=correlation_id,
+                            arguments=arguments,
+                            identity_context=identity_context_dict,
+                        )
                     )
-                )
+            finally:
+                if refreshed:
+                    self._announce_catalogue()
         elif not tool_found:
             # Another thread is refreshing but tool still not found -- raise
             raise ToolNotFoundError(self.mcp_server_id, tool_name)
@@ -2088,6 +2089,23 @@ class McpServer(AggregateRoot):
         # No cast needed since the client is typed by TransportClient -- it was
         # only ever there because the attribute was Any.
         return response
+
+    def _announce_catalogue(self) -> None:
+        """Tell the application this server's catalogue was refreshed (#1366). Without the lock.
+
+        The listener projects it, and the projection's own listeners tell the
+        front door's clients. Fault-barriered: whoever refreshed goes on either way.
+        """
+        from ..services import tool_catalogue_changes
+
+        try:
+            tool_catalogue_changes.announce(self.mcp_server_id)
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: a failed projection must not fail the refresher
+            logger.warning(
+                "tool_projection_refresh_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
 
     def _refresh_tools(self) -> bool:
         """Refresh tool catalog from mcp_server.

@@ -95,6 +95,7 @@ from .flat_call_log import as_client_result, logging_each_call, note_failure
 from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
+from .tool_list_changed import register_publisher, track_listing
 
 logger = logging.getLogger(__name__)
 
@@ -816,6 +817,8 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
         observe_served_listing(projection, management, _member_to_group())
         # What this caller now holds, so a name that later leaves it can say so (#1368).
         remember_served(tool.name for tool in (*governed, *management))
+        # And the channel to tell when that changes (#1366).
+        track_listing(mcp_ctx, projection)
     else:
         _observe_param_header_skips(mcp_ctx, governed, management)
 
@@ -1302,6 +1305,8 @@ def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
         return False
 
     register_flat_tool_handlers(mcp)
+    # What makes the handshake-era `tools.listChanged` true where it is pushed (#1366).
+    register_publisher(mcp)
     expose_change_count()
     logger.info("flat_tool_handlers_registered (topology_mode=front_door)")
     return True

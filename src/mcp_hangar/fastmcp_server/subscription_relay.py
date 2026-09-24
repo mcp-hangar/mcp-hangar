@@ -36,11 +36,12 @@ a subscription to a URI that never changes does.
 
 Why it also publishes the ``*/list_changed`` events
 ---------------------------------------------------
-``get_capabilities`` derives all four modern flags -- ``resources.subscribe``
+At 2026-07-28 ``get_capabilities`` derives all four flags -- ``resources.subscribe``
 and the three ``listChanged`` -- from one fact: whether ``subscriptions/listen``
-is served. There is no way to advertise the subscription without advertising
-the nudges, so the honest choice is to publish the nudges, which cost one line
-each on the upstream router that already receives them. The same rule is why
+is served; the handshake era derives each separately (``tool_list_changed``).
+There is no way to advertise the subscription without advertising the nudges,
+so the honest choice is to publish the nudges, which cost one line each on the
+upstream router that already receives them. The same rule is why
 :func:`maybe_register_subscription_relay` *withdraws* the handler outside
 ``front_door`` mode, where nothing publishes at all (#888, derived not
 inverted).

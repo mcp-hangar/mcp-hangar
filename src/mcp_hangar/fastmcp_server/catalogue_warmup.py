@@ -5,12 +5,14 @@ because gating the serving path on a backend handshake deadlocks the deployment
 (#599, #878, #885). That is the right call and this module does not change it.
 
 What it costs is the *first* answer. A client that connects while the warm-up is
-in flight is served a catalogue with no upstream tools in it -- and over the
-legacy handshake Hangar advertises ``tools.listChanged: false`` and sends no
-notification afterwards, so a client that lists once at startup and caches (the
-normal thing, and the correct thing given what it was told) keeps that empty
-catalogue until it reconnects. The quickstart lands squarely in that window: it
-says "restart your MCP client", which is exactly when a client lists.
+in flight is served a catalogue with no upstream tools in it. Where the front
+door can push (stdio, #1366), it now advertises ``tools.listChanged`` and tells
+the client when the catalogue lands (``tool_list_changed``). This wait was the
+mitigation before that existed, and it stays, deliberately, as a backstop for
+the two cases a notification does not cover: a ``tools/call`` naming a tool not
+projected yet, which no re-list precedes, and a client that ignores
+``list_changed`` or has no channel to hear it on (front_door HTTP until the
+sessionless GET stream lands).
 
 So the fix is not to block the boot. It is to let the *listing* wait, briefly,
 for the warm-up that is already running -- and only in the one case where the
@@ -28,9 +30,7 @@ that may never arrive, never an unbounded one.
 
 Not a config knob on purpose. The wait is invisible when the warm-up is quick
 and irrelevant when it is not, and a deployment that needs to tune it is really
-asking for the notification path instead -- advertising ``listChanged`` and
-pushing ``notifications/tools/list_changed`` when a catalogue lands, which is
-the complete fix and a larger change than this one.
+asking for the notification path, which is the complete fix.
 """
 
 from __future__ import annotations

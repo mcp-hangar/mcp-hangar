@@ -41,7 +41,7 @@ from mcp_hangar.application.read_models.tool_projection import (
 )
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
-from mcp_hangar.fastmcp_server import catalogue_warmup
+from mcp_hangar.fastmcp_server import catalogue_warmup, tool_list_changed
 
 # The SDK's DNS-rebinding protection wants a loopback Host with a port.
 BASE_URL = "http://127.0.0.1:8000"
@@ -296,6 +296,7 @@ def front_door(
         upstream.server_close()
         reset_context()
         tool_catalogue_changes.clear_listener()
+        tool_list_changed.reset()
         reset_tool_projection_registry()
         reset_tool_access_resolver()
         catalogue_warmup.reset()
