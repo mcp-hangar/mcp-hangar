@@ -53,6 +53,16 @@ class IMetricsPublisher(ABC):
         """
         pass
 
+    @abstractmethod
+    def record_l7_policy_set(self, mcp_server_id: str) -> None:
+        """
+        Record that an L7 egress policy was set or cleared on a server, now.
+
+        Args:
+            mcp_server_id: McpServer identifier
+        """
+        pass
+
 
 class NullMetricsPublisher(IMetricsPublisher):
     """Null object pattern implementation that does nothing."""
@@ -70,6 +80,10 @@ class NullMetricsPublisher(IMetricsPublisher):
         pass
 
     def set_connection_active(self, mcp_server_id: str, active: bool) -> None:
+        """No-op implementation."""
+        pass
+
+    def record_l7_policy_set(self, mcp_server_id: str) -> None:
         """No-op implementation."""
         pass
 

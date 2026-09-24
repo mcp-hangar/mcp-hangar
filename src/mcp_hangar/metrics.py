@@ -10,6 +10,7 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -139,6 +140,36 @@ class Gauge:
                 MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False)))
                 for k, v in self._values.items()
             ]
+
+
+class ScrapedGauge(Gauge):
+    """A gauge read from current state at scrape time instead of written to.
+
+    For a value that several code paths change: a gauge each of them has to
+    remember to write drifts the first time a new one is added. The source
+    returns the label sets whose value is 1; anything it does not return is
+    absent from the scrape, not 0.
+    """
+
+    def __init__(self, name: str, description: str, labels: list[str] | None = None):
+        super().__init__(name, description, labels)
+        self._source: Callable[[], Iterable[dict[str, str]]] | None = None
+
+    def read_from(self, source: Callable[[], Iterable[dict[str, str]]] | None) -> None:
+        """Install the source the next scrape reads; None leaves the family empty."""
+        self._source = source
+
+    def collect(self) -> list[MetricSample]:
+        source = self._source
+        if source is None:
+            return []
+        try:
+            return [MetricSample(value=1.0, labels=dict(labels)) for labels in source()]
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one family must not fail the whole scrape
+            from .logging_config import get_logger
+
+            get_logger(__name__).error("scraped_gauge_source_failed", metric=self.name, error=str(e))
+            return []
 
 
 class Histogram:
@@ -1051,6 +1082,27 @@ EGRESS_POLICY_ENFORCED_TOTAL = Counter(
     labels=["mcp_server", "action", "rule_kind"],
 )
 
+# Which L7 egress policies this replica holds, and when each last arrived
+# (#1562). In #1306 a gateway served calls ungoverned for 2h16m after a restart
+# while the MCPEgressPolicy CR read Enforce throughout, and no metric said so.
+# `held` is read from the servers at scrape time, not kept by the paths that
+# install a policy -- the operator push, the peer tail, startup recovery, the
+# reload carry, a server rebuilt from its fleet row -- so a new path cannot make
+# it drift. A server without a policy is absent, not 0. The timestamp is written
+# by `McpServer` itself, which every one of those paths goes through. Both are
+# unlabelled by tenant, like the rest of the family.
+L7_POLICY_HELD = ScrapedGauge(
+    name="mcp_hangar_l7_policy_held",
+    description="1 for each mcp_server that currently holds an L7 egress policy, by mode; absent when it holds none",
+    labels=["mcp_server", "mode"],  # mode: Enforce | Audit
+)
+
+L7_POLICY_LAST_SET_SECONDS = Gauge(
+    name="mcp_hangar_l7_policy_last_set_timestamp_seconds",
+    description="Unix timestamp of the last L7 egress policy set or clear this replica accepted for an mcp_server",
+    labels=["mcp_server"],
+)
+
 # -----------------------------------------------------------------------------
 # Cost Attribution Metrics
 # -----------------------------------------------------------------------------
@@ -1449,6 +1501,8 @@ def _register_all_metrics():
             APPROVAL_DECISIONS_TOTAL,
             EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL,
             EGRESS_POLICY_ENFORCED_TOTAL,
+            L7_POLICY_HELD,
+            L7_POLICY_LAST_SET_SECONDS,
         ]
     )
 
@@ -1550,6 +1604,9 @@ def remove_mcp_server_series(mcp_server: str) -> None:
         PROVIDER_COLD_START_IN_PROGRESS,
         HEALTH_CHECK_CONSECUTIVE_FAILURES,
         CONNECTIONS_ACTIVE,
+        # `mcp_hangar_l7_policy_held` needs no removal: it is read from the
+        # servers that exist, and this one no longer does.
+        L7_POLICY_LAST_SET_SECONDS,
     ):
         gauge.remove(mcp_server=mcp_server)
 
@@ -1770,6 +1827,31 @@ def record_egress_policy_enforced(mcp_server: str, action: str, rule_kind: str) 
             ``arguments``.
     """
     EGRESS_POLICY_ENFORCED_TOTAL.inc(mcp_server=mcp_server, action=action, rule_kind=rule_kind)
+
+
+def record_l7_policy_set(mcp_server: str) -> None:
+    """Record that this replica accepted an L7 egress policy set or clear for ``mcp_server`` now."""
+    L7_POLICY_LAST_SET_SECONDS.set_to_current_time(mcp_server=mcp_server)
+
+
+def read_l7_policies_from(repository: Any) -> None:
+    """Point `mcp_hangar_l7_policy_held` at the servers in ``repository``. Called from bootstrap.
+
+    None detaches it, which leaves the family with no series.
+    """
+    if repository is None:
+        L7_POLICY_HELD.read_from(None)
+        return
+
+    def held() -> list[dict[str, str]]:
+        series = []
+        for mcp_server_id, server in repository.get_all().items():
+            policy = getattr(server, "l7_policy", None)  # a group holds none
+            if policy is not None:
+                series.append({"mcp_server": mcp_server_id, "mode": str(policy.mode)})
+        return series
+
+    L7_POLICY_HELD.read_from(held)
 
 
 def record_resource_links_evicted(reason: str, count: int) -> None:
