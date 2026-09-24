@@ -34,6 +34,9 @@ from ...domain.events import (
     ToolWithdrawn,
 )
 from ...domain.model.mcp_server_group import GroupCreated
+from ...domain.repository import IMcpServerRepository
+from ...domain.services import tool_catalogue_changes
+from ...infrastructure.event_bus import EventBus
 from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler, remove_series_of_deregistered
 from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...logging_config import get_logger
@@ -44,6 +47,27 @@ if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
 
 logger = get_logger(__name__)
+
+
+def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerRepository) -> ToolProjectionPopulationHandler:
+    """Wire the tool-projection handler to both of its triggers and return it.
+
+    A start (``McpServerStarted``) and an upstream's own ``tools/list_changed``
+    after start (#1366), announced on ``tool_catalogue_changes``. One function,
+    so bootstrap and a test harness cannot wire only one of them.
+
+    LOCAL_VIEW, not PROJECTION: the handler reads the local aggregate, not the
+    event, so a peer's tailed start had it rebuild from nothing and delete a
+    catalogue this replica was serving. See `HandlerKind.LOCAL_VIEW` and #922.
+    The reason it was a projection -- no replica may serve a third of the
+    catalogue -- is answered by every replica starting the fleet itself (#885).
+    An upstream's ``list_changed`` arrives only on the replica holding its GET
+    stream, so the announcement is local by construction.
+    """
+    tool_projection_handler = ToolProjectionPopulationHandler(repository=repository)
+    event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
+    tool_catalogue_changes.register_listener(tool_projection_handler.project)
+    return tool_projection_handler
 
 
 def init_event_handlers(runtime: "Runtime") -> None:
@@ -78,15 +102,9 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle, kind=HandlerKind.EFFECT)
 
-    # Populate the tool-projection registry from discovered tools on server start (#248)
-    #
-    # LOCAL_VIEW, not PROJECTION: the handler reads the local aggregate, not the
-    # event, so a peer's tailed start had it rebuild from nothing and delete a
-    # catalogue this replica was serving. See `HandlerKind.LOCAL_VIEW` and #922.
-    # The reason it was a projection -- no replica may serve a third of the
-    # catalogue -- is answered by every replica starting the fleet itself (#885).
-    tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
-    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
+    # Populate the tool-projection registry from discovered tools on server start
+    # (#248), and again on an upstream's own `tools/list_changed` (#1366).
+    subscribe_tool_projection(runtime.event_bus, runtime.repository)
 
     # The decision that built the audit log pipeline in `init_observability`: an
     # OTLP endpoint in the env or the file. The env var alone used to decide
