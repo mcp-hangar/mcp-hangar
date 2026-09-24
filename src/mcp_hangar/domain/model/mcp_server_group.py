@@ -19,7 +19,7 @@ from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, McpServer
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from .load_balancer import LoadBalancer
-from .mcp_server import DEAD_NOT_ROUTED_BY_GROUPS, McpServer
+from .mcp_server import DEAD_NOT_REVIVED_BY_CALLS, DEAD_NOT_ROUTED_BY_GROUPS, McpServer
 
 logger = get_logger(__name__)
 
@@ -149,6 +149,11 @@ class GroupMember:
     consecutive_failures: int = 0
     consecutive_successes: int = 0
     last_selected_at: float = 0.0
+    # Out of rotation because it failed -- checks, calls, a start, a give-up --
+    # and not because someone stopped the group. What the recovery probe may
+    # start again (#1565); a member never started, or stopped with its group,
+    # is left alone.
+    evicted: bool = False
 
     @property
     def id(self) -> str:
@@ -505,6 +510,7 @@ class McpServerGroup(AggregateRoot):
                 # Only update if member still exists (may have been removed)
                 if member_id in self._members:
                     self._members[member_id].in_rotation = False
+                    self._members[member_id].evicted = True
             return False
 
         # Read mcp_server state outside group lock to avoid lock order violation
@@ -520,6 +526,7 @@ class McpServerGroup(AggregateRoot):
             current_member = self._members[member_id]
             if mcp_server_state == McpServerState.READY:
                 current_member.in_rotation = True
+                current_member.evicted = False
                 current_member.consecutive_failures = 0
                 current_member.consecutive_successes = 1
                 self._update_state()
@@ -696,6 +703,7 @@ class McpServerGroup(AggregateRoot):
             return
 
         member.in_rotation = True
+        member.evicted = False
         self._record_event(
             GroupMemberHealthChanged(
                 group_id=self.id,
@@ -743,6 +751,7 @@ class McpServerGroup(AggregateRoot):
             reason = member.mcp_server.dead_reason_snapshot
             if member.in_rotation and reason in DEAD_NOT_ROUTED_BY_GROUPS:
                 member.in_rotation = False
+                member.evicted = True
                 member.consecutive_successes = 0
                 self._record_event(
                     GroupMemberHealthChanged(
@@ -755,6 +764,17 @@ class McpServerGroup(AggregateRoot):
                 logger.info(f"Member {member_id} removed from rotation: dead, {reason}")
             self._update_state()
 
+    def report_member_stopped_on_purpose(self, member_id: str) -> None:
+        """A member was stopped on purpose, not reaped for idling: not the recovery probe's to start (#1565).
+
+        An operator's stop or a detection block of a member that had failed out
+        of rotation would otherwise be undone by the probe on its next pass.
+        """
+        with self._lock:
+            member = self._members.get(member_id)
+            if member is not None:
+                member.evicted = False
+
     def _maybe_remove_from_rotation(self, member: GroupMember, member_id: str) -> None:
         """Remove member from rotation if unhealthy threshold reached."""
         if member.consecutive_failures < self._unhealthy_threshold:
@@ -763,6 +783,7 @@ class McpServerGroup(AggregateRoot):
             return
 
         member.in_rotation = False
+        member.evicted = True
         self._record_event(
             GroupMemberHealthChanged(
                 group_id=self.id,
@@ -824,17 +845,64 @@ class McpServerGroup(AggregateRoot):
                 f"(healthy={healthy}/{total}, not dead in rotation={in_rotation})"
             )
 
+    @staticmethod
+    def _routable(member: GroupMember) -> bool:
+        """What `rebalance()` keeps in rotation, or puts back: a member a call can use or start.
+
+        `ready`; or `cold`, or DEAD for a reason a group routes to, when it is
+        in rotation or left it on a failure. The call that selects one starts
+        it, as it starts a lazily started member. Until #1565 only `ready`
+        counted, so a rebalance of a group whose members had all been reaped
+        took every one of them out of rotation and left nothing to select. A
+        member never started, or stopped with its group, is not added. A
+        snapshot, as `_selectable` is.
+        """
+        state = member.mcp_server.state_snapshot
+        if state is McpServerState.READY:
+            return True
+        if not (member.in_rotation or member.evicted):
+            return False
+        if state is McpServerState.COLD:
+            return True
+        return state is McpServerState.DEAD and member.mcp_server.dead_reason_snapshot not in DEAD_NOT_ROUTED_BY_GROUPS
+
+    def recovery_candidates(self) -> list[McpServer]:
+        """Members the recovery probe should start: none while any member is selectable (#1565).
+
+        Only a group with nothing to select, and only its members that left
+        rotation on a failure and are now `cold`, or DEAD for any reason but a
+        capability block: nothing else starts those again. A call never selects
+        them, the health worker skips them, and a rebalance cannot start them.
+        Read under the group lock from snapshots of the members; the caller
+        starts them after it is released.
+        """
+        with self._lock:
+            members = list(self._members.values())
+            if any(self._selectable(m) for m in members):
+                return []
+            return [m.mcp_server for m in members if not m.in_rotation and m.evicted and self._probe_may_start(m)]
+
+    @staticmethod
+    def _probe_may_start(member: GroupMember) -> bool:
+        """`cold`, or DEAD for a reason a deliberate start may clear: every reason but a capability block."""
+        state = member.mcp_server.state_snapshot
+        if state is McpServerState.COLD:
+            return True
+        return state is McpServerState.DEAD and member.mcp_server.dead_reason_snapshot not in DEAD_NOT_REVIVED_BY_CALLS
+
     def rebalance(self) -> None:
         """
         Manually trigger rebalancing.
 
-        Re-evaluates health of all members and updates rotation.
+        Re-evaluates all members and updates rotation: a member a call can use
+        or start (`_routable`) joins it, any other member leaves it.
         """
         with self._lock:
             for member in self._members.values():
-                if member.mcp_server.state_snapshot == McpServerState.READY:
+                if self._routable(member):
                     if not member.in_rotation:
                         member.in_rotation = True
+                        member.evicted = False
                         member.consecutive_failures = 0
                         self._record_event(
                             GroupMemberHealthChanged(
@@ -847,6 +915,7 @@ class McpServerGroup(AggregateRoot):
                 else:
                     if member.in_rotation:
                         member.in_rotation = False
+                        member.evicted = True
                         self._record_event(
                             GroupMemberHealthChanged(
                                 group_id=self.id,
@@ -918,6 +987,8 @@ class McpServerGroup(AggregateRoot):
             for member_id, _ in members_snapshot:
                 if member_id in self._members:
                     self._members[member_id].in_rotation = False
+                    # Stopped on purpose: not the probe's to start again.
+                    self._members[member_id].evicted = False
             self._update_state()
 
     def shutdown(self) -> None:

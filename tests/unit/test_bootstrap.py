@@ -132,7 +132,7 @@ class TestCreateBackgroundWorkers:
     """Tests for _create_background_workers function."""
 
     def test_creates_two_workers(self):
-        """Should create GC, health check, and metrics snapshot workers."""
+        """Should create GC, health check, metrics snapshot and group recovery workers."""
         mock_worker_class = MagicMock()
         mock_snapshot_class = MagicMock()
 
@@ -145,7 +145,7 @@ class TestCreateBackgroundWorkers:
                     workers = _create_background_workers()
 
         assert mock_worker_class.call_count == 2
-        assert len(workers) == 3
+        assert len(workers) == 4
 
     def test_workers_not_started(self):
         """Workers should be created but not started."""

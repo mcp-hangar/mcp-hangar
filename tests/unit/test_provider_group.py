@@ -367,17 +367,38 @@ class TestRebalance:
 
         assert member.in_rotation is True
 
-    def test_rebalance_removes_non_ready_members(self):
-        """Rebalance should remove non-READY members from rotation."""
+    def test_rebalance_removes_degraded_members(self):
+        """Rebalance should remove a member no call can use from rotation."""
         group = McpServerGroup(group_id="test-group", auto_start=False)
-        provider = create_mock_provider("provider-1", ProviderState.COLD)
+        provider = create_mock_provider("provider-1", ProviderState.DEGRADED)
         group.add_member(provider)
         member = group.get_member("provider-1")
-        member.in_rotation = True  # Somehow in rotation but not ready
+        member.in_rotation = True
 
         group.rebalance()
 
         assert member.in_rotation is False
+
+    def test_rebalance_keeps_cold_members_in_rotation(self):
+        """A cold member in rotation stays: the call that selects it starts it (#1565)."""
+        group = McpServerGroup(group_id="test-group", auto_start=False)
+        provider = create_mock_provider("provider-1", ProviderState.COLD)
+        group.add_member(provider)
+        member = group.get_member("provider-1")
+        member.in_rotation = True
+
+        group.rebalance()
+
+        assert member.in_rotation is True
+
+    def test_rebalance_does_not_add_a_never_started_cold_member(self):
+        """Rebalance does not put a member nobody started into rotation (#1565)."""
+        group = McpServerGroup(group_id="test-group", auto_start=False)
+        group.add_member(create_mock_provider("provider-1", ProviderState.COLD))
+
+        group.rebalance()
+
+        assert group.get_member("provider-1").in_rotation is False
 
     def test_rebalance_resets_circuit_breaker(self):
         """Rebalance should reset circuit breaker."""
