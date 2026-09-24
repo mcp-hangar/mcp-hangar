@@ -26,6 +26,7 @@ from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
+from ..metrics import remove_group_series
 from .bootstrap.group_circuit_metric import observe_group_circuit
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .state import GROUPS, get_group_rebalance_saga, get_runtime
@@ -141,6 +142,7 @@ class _StagedConfig:
         # Each lock below is taken and released on its own, never while
         # another is held, and nothing here waits on a decision: see
         # `governance_overlays` for why no lock-order edge is added.
+        departed: list[str] = []
         with swapping():
             with resolver.locked():
                 resolver.adopt_config_policies(self.policies, replace=replace)
@@ -186,9 +188,17 @@ class _StagedConfig:
                 # group only in GROUPS, so while it was empty a member was checked
                 # as a standalone server and its group's deny list, access policies
                 # and withdrawals did not apply (#1424).
-                for group_id in [known for known in GROUPS if known not in self.groups]:
+                departed = [known for known in GROUPS if known not in self.groups]
+                for group_id in departed:
                     del GROUPS[group_id]
 
+        for group_id in departed:
+            # A reload removes a group without `GroupDeleted`, the event the
+            # group API's removal drops the series on (#1564). Left behind, a
+            # group removed with its circuit open read as open for good. After
+            # the swap, as below; a late transition of the removed group does
+            # not write the series back, since its writer checks GROUPS.
+            remove_group_series(group_id)
         for group in self.groups.values():
             # After the group is in GROUPS, which the gauge's writer checks
             # (#1357). After the swap: this takes the group's lock and writes

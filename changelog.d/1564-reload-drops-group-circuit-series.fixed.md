@@ -1,0 +1,1 @@
+A configuration reload that removes a group now drops that group's `mcp_hangar_group_circuit_open` series. It used to stay on `/metrics` for the life of the process, and a group removed with its circuit open read as open for good on that replica.
