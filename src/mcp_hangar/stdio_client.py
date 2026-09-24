@@ -7,8 +7,9 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any
 
 from . import metrics as prometheus_metrics
@@ -30,6 +31,8 @@ logger = get_logger(__name__)
 _STDERR_DRAIN_S = 1.0
 #: The most stderr collected from a process whose stdout reached EOF.
 _STDERR_DRAIN_MAX_BYTES = 64 * 1024
+#: Upstream notifications waiting for their router at most.
+_NOTIFICATION_BACKLOG = 256
 
 
 def _drain_pipe(pipe: Any, deadline_s: float, max_bytes: int) -> str:
@@ -105,6 +108,8 @@ class StdioClient:
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.closed = False
         self._last_stderr: str | None = None
+        #: Upstream notifications, handed from the reader to their router (#1366).
+        self._notifications: Queue[dict[str, Any] | None] | None = None
         self.reader_thread.start()
 
     @staticmethod
@@ -166,8 +171,7 @@ class StdioClient:
                     else:
                         logger.warning("stdio_client_unknown_request", request_id=msg_id)
                 else:
-                    # Unsolicited notification - log and ignore
-                    logger.debug("stdio_client_notification", message=msg)
+                    self._dispatch_notification(msg)
 
             except Exception as e:  # noqa: BLE001 -- fault-barrier: reader loop must not crash silently
                 logger.error("stdio_client_reader_error", error=str(e))
@@ -175,6 +179,42 @@ class StdioClient:
 
         # Clean up on exit
         self._cleanup_pending("reader_died")
+
+    def start_notification_stream(self, on_message: Callable[[dict[str, Any]], None]) -> None:
+        """Route the upstream's notifications to *on_message*, as the HTTP client's GET stream does (#1366).
+
+        On stdio they arrive on the same pipe as responses, and used to be
+        dropped, ``tools/list_changed`` included. They are handed to a thread of
+        their own: the router answers ``list_changed`` by re-listing, and a
+        ``tools/list`` issued on the reader thread would wait for a response only
+        that thread can read. The queue is bounded; a flood beyond it is dropped.
+        """
+        if self._notifications is not None or self.closed:
+            return
+        queue: Queue[dict[str, Any] | None] = Queue(maxsize=_NOTIFICATION_BACKLOG)
+
+        def _route() -> None:
+            while (msg := queue.get()) is not None:
+                try:
+                    on_message(msg)
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: a bad handler must not kill the channel
+                    logger.warning("stdio_client_notification_handler_failed", error_type=type(e).__name__)
+
+        self._notifications = queue
+        threading.Thread(target=_route, name=f"mcp-stdio-notify-{self.process.pid}", daemon=True).start()
+        if self.closed:  # closed while this was starting: `close` may have missed the queue
+            queue.put(None)
+
+    def _dispatch_notification(self, msg: dict[str, Any]) -> None:
+        """Queue one notification for its router, or drop it when there is none (reader thread)."""
+        queue = self._notifications
+        if queue is None:
+            logger.debug("stdio_client_notification", method=msg.get("method"))
+            return
+        try:
+            queue.put_nowait(msg)
+        except Full:
+            logger.warning("stdio_client_notification_dropped", method=msg.get("method"))
 
     def _capture_process_stderr(self) -> str | None:
         """Capture and log stderr from the process for debugging. Returns stderr text."""
@@ -382,6 +422,11 @@ class StdioClient:
 
         # Clean up any remaining pending requests
         self._cleanup_pending("client_closed")
+        if self._notifications is not None:
+            try:
+                self._notifications.put_nowait(None)
+            except Full:
+                pass  # a daemon thread; it goes with the process
 
     def __enter__(self):
         return self
