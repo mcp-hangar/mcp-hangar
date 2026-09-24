@@ -336,6 +336,8 @@ class McpServer(AggregateRoot):
         # L7 egress policy (MCPEgressPolicy). None means no L7 enforcement; when
         # set, invoke_tool evaluates every tool call against it.
         self._l7_policy = l7_policy
+        if l7_policy is not None:
+            self._record_l7_policy_set()
 
         # State
         self._state = McpServerState.COLD
@@ -521,6 +523,20 @@ class McpServer(AggregateRoot):
         MCPEgressPolicy). Clearing (None) disables L7 enforcement for this server.
         """
         self._l7_policy = policy
+        self._record_l7_policy_set()
+
+    def _record_l7_policy_set(self) -> None:
+        """Stamp `mcp_hangar_l7_policy_last_set_timestamp_seconds` (#1562).
+
+        Here, and at construction with a policy, rather than in the paths that
+        install one: every one of them -- the operator push, the peer tail,
+        startup recovery, the reload carry, a server rebuilt from its fleet row
+        -- ends in one of the two.
+        """
+        try:
+            self._metrics_publisher.record_l7_policy_set(self.mcp_server_id)
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not fail a policy install
+            pass
 
     @property
     def mode_str(self) -> str:

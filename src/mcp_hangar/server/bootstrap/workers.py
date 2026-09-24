@@ -5,8 +5,9 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
+from ...group_recovery import GroupRecoveryWorker
 from ...logging_config import get_logger
-from ..state import get_runtime
+from ..state import GROUPS, get_runtime
 from .coordination import may_manage
 
 logger = get_logger(__name__)
@@ -20,13 +21,16 @@ HEALTH_CHECK_INTERVAL_SECONDS = 60
 METRICS_SNAPSHOT_INTERVAL_SECONDS = 60
 """Interval for metrics history snapshot worker."""
 
+GROUP_RECOVERY_INTERVAL_SECONDS = 30
+"""Interval for the worker that starts the members of a group with none to select (#1565)."""
+
 WORKER_STOP_TIMEOUT_SECONDS = 10.0
 """How long `stop_background_workers` waits, in total, for the workers' threads to end."""
 
 
 def create_background_workers(
     config: dict[str, Any] | None = None,
-) -> list[BackgroundWorker | MetricsSnapshotWorker]:
+) -> list[BackgroundWorker | MetricsSnapshotWorker | GroupRecoveryWorker]:
     """Create (but don't start) background workers.
 
     Args:
@@ -58,8 +62,12 @@ def create_background_workers(
         may_manage=may_manage,
     )
 
-    workers: list[Any] = [gc_worker, health_worker, metrics_worker]
-    worker_names = ["gc", "health_check", "metrics_snapshot"]
+    # Per replica, as GC and health checks are: it starts this replica's own
+    # members. `GROUPS` is the live mapping a reload updates in place.
+    group_recovery_worker = GroupRecoveryWorker(GROUPS, interval_s=GROUP_RECOVERY_INTERVAL_SECONDS)
+
+    workers: list[Any] = [gc_worker, health_worker, metrics_worker, group_recovery_worker]
+    worker_names = [worker.task for worker in workers]
 
     logger.info("background_workers_created", workers=worker_names)
     return workers

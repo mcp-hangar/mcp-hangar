@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from ...application.ports.saga import EventTriggeredSaga
 from ...domain.events import (
     DEGRADED_BY_HEALTH_CHECKS,
+    DELIBERATE_STOP_REASONS,
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -161,6 +162,10 @@ class GroupRebalanceSaga(EventTriggeredSaga):
             # cold member out of rotation, where nothing selects, health-checks
             # or starts it again.
             logger.info(f"Member {mcp_server_id} stopped in group {group_id}: {event.reason}")
+            # A stop made on purpose stands: the recovery probe does not undo
+            # it (#1565). An idle reap is not such a stop for the group.
+            if group and event.reason in DELIBERATE_STOP_REASONS and event.reason != "idle":
+                group.report_member_stopped_on_purpose(mcp_server_id)
 
         elif isinstance(event, McpServerDegraded):
             if event.reason == DEGRADED_BY_HEALTH_CHECKS:

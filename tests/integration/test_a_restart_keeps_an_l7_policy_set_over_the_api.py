@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-# Five gateways, one after the other, with one real upstream each.
+# Six gateways, one after the other, with one real upstream each.
 pytestmark = pytest.mark.timeout(300)
 
 HARNESS = Path(__file__).with_name("_restart_l7_policy_harness.py")
@@ -47,7 +47,9 @@ def _phase(workdir: Path, phase: str) -> dict[str, Any]:
 def run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     workdir = tmp_path_factory.mktemp("restart-l7")
     phases = {phase: _phase(workdir, phase) for phase in ("before", "after", "clear", "after_clear")}
-    phases["memory"] = _phase(tmp_path_factory.mktemp("memory-l7"), "memory")
+    memory = tmp_path_factory.mktemp("memory-l7")
+    phases["memory"] = _phase(memory, "memory")
+    phases["memory_after"] = _phase(memory, "memory_after")
     return phases
 
 
@@ -88,3 +90,36 @@ def test_without_a_persistence_backend_the_push_says_a_restart_drops_it(run: dic
     assert memory["set"]["status"] == 200
     assert memory["set"]["body"]["persisted"] is False
     assert memory["call"] == DENIED
+
+
+class TestTheScrapeSaysWhichPolicyTheReplicaHolds:
+    """``mcp_hangar_l7_policy_held`` and its timestamp, read from ``GET /metrics`` (#1562)."""
+
+    def test_a_push_shows_as_held(self, run: dict[str, Any]) -> None:
+        scrape = run["before"]["metrics"]
+
+        assert scrape["held"] == {"math": ["Enforce", 1.0]}
+        assert "math" in scrape["last_set"]
+
+    def test_a_policy_restored_at_startup_shows_as_held_and_stamped(self, run: dict[str, Any]) -> None:
+        # Recovery installing the stored policy is a delivery from this
+        # replica's point of view, so it stamps the time too.
+        before, after = run["before"]["metrics"], run["after"]["metrics"]
+
+        assert after["held"] == {"math": ["Enforce", 1.0]}
+        assert after["last_set"]["math"] > before["last_set"]["math"]
+
+    def test_a_clear_drops_the_held_series(self, run: dict[str, Any]) -> None:
+        assert run["clear"]["metrics"]["held"] == {}
+        assert run["clear"]["metrics"]["last_set"]["math"] > run["after"]["metrics"]["last_set"]["math"]
+        assert run["after_clear"]["metrics"]["held"] == {}
+
+    @pytest.mark.security
+    def test_a_restart_without_a_durable_backend_shows_no_held_series(self, run: dict[str, Any]) -> None:
+        # The gap #1560 could not close: memory-only starts empty. The metric
+        # must make that observable -- the family is there, the series is not.
+        assert run["memory"]["metrics"]["held"] == {"math": ["Enforce", 1.0]}
+        after = run["memory_after"]
+        assert after["metrics"]["family"] is True
+        assert after["metrics"]["held"] == {}
+        assert after["policy"] == 404
