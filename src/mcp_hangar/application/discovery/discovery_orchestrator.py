@@ -25,6 +25,7 @@ from mcp_hangar.domain.events import (
     McpServerQuarantined,
 )
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.conventions import Discovery
 from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
 
 if TYPE_CHECKING:
@@ -368,11 +369,13 @@ class DiscoveryOrchestrator:
         most often has to establish from absence.
         """
         if self._may_manage():
+            skipped = self._idle.run_length
             if self._idle.recovered():
                 logger.info(
                     "discovery_resumed_on_this_instance",
                     detail="this instance now holds the management lease and is running discovery again",
                 )
+                self._trace_lease_transition(Discovery.HOLDER, skipped)
             return True
         if self._idle.failed():
             logger.info(
@@ -385,7 +388,20 @@ class DiscoveryOrchestrator:
                     "is not converging"
                 ),
             )
+        if self._idle.run_length == 1:
+            self._trace_lease_transition(Discovery.FOLLOWER, None)
         return False
+
+    def _trace_lease_transition(self, role: str, skipped_cycles: int | None) -> None:
+        """One short span when this instance changes lease role (#1296).
+
+        Only on the change, never per skipped cycle, and never a
+        `discovery.cycle`: a follower's skip is not a failed cycle.
+        """
+        with get_tracer(__name__).start_as_current_span("discovery.lease_transition") as span:
+            span.set_attribute(Discovery.LEASE_ROLE, role)
+            if skipped_cycles is not None:
+                span.set_attribute(Discovery.SKIPPED_CYCLES, skipped_cycles)
 
     async def run_discovery_cycle(self) -> DiscoveryCycleResult:
         """Run a single discovery cycle.

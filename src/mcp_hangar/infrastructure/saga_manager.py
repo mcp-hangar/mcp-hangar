@@ -23,6 +23,15 @@ from ..domain.events import DomainEvent
 from ..errors import bounded_error_type
 from ..lock_hierarchy import LockLevel, TrackedLock
 from ..logging_config import get_logger
+from ..observability.conventions import Saga as SagaAttr
+from ..observability.tracing import (
+    current_traceparent,
+    get_tracer,
+    new_trace_linked_to,
+    record_ambient_failure,
+    record_caught_failure,
+    record_saga_step,
+)
 from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
 
@@ -31,6 +40,13 @@ if TYPE_CHECKING:
     from .persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 
 logger = get_logger(__name__)
+
+#: The `hangar.saga.outcome` each final state records; RUNNING never reaches it.
+_RUN_OUTCOMES = {
+    SagaState.COMPLETED: SagaAttr.COMPLETED,
+    SagaState.COMPENSATED: SagaAttr.COMPENSATED,
+    SagaState.FAILED: SagaAttr.FAILED,
+}
 
 
 class SagaManager(ISagaManager):
@@ -127,27 +143,34 @@ class SagaManager(ISagaManager):
         """
         timer_id = str(uuid.uuid4())
         epoch = 0
+        # The timer thread starts with no trace context, and its cause is the
+        # scheduling span, not a parent: kept as data and linked when it fires.
+        origin = current_traceparent()
 
         def _fire() -> None:
             with self._lock:
                 self._pending_timers.pop(timer_id, None)
-            try:
-                self._command_bus.send(command)
-                logger.debug(
-                    "scheduled_command_dispatched",
-                    timer_id=timer_id,
-                    command=type(command).__name__,
-                )
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: scheduled command failure must not crash timer thread
-                logger.error(
-                    "scheduled_command_failed",
-                    timer_id=timer_id,
-                    command=type(command).__name__,
-                    # The type only: a failed start's text can carry what the upstream printed.
-                    error_type=bounded_error_type(type(e).__qualname__),
-                )
-                if on_failure is not None:
-                    self._follow_up(timer_id, command, on_failure, e, epoch)
+            tracer = get_tracer(__name__)
+            with tracer.start_as_current_span("saga.scheduled_command", **new_trace_linked_to(origin)) as span:
+                span.set_attribute(SagaAttr.COMMAND, type(command).__name__)
+                try:
+                    self._command_bus.send(command)
+                    logger.debug(
+                        "scheduled_command_dispatched",
+                        timer_id=timer_id,
+                        command=type(command).__name__,
+                    )
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: scheduled command failure must not crash timer thread
+                    record_caught_failure(span, e)
+                    logger.error(
+                        "scheduled_command_failed",
+                        timer_id=timer_id,
+                        command=type(command).__name__,
+                        # The type only: a failed start's text can carry what the upstream printed.
+                        error_type=bounded_error_type(type(e).__qualname__),
+                    )
+                    if on_failure is not None:
+                        self._follow_up(timer_id, command, on_failure, e, epoch)
 
         timer = threading.Timer(delay_s, _fire)
         timer.daemon = True
@@ -254,6 +277,18 @@ class SagaManager(ISagaManager):
         Returns:
             SagaContext for tracking the saga
         """
+        # One span per synchronous run, closed when the run returns (#1296). A
+        # step's command is dispatched inside it, so its spans are children.
+        with get_tracer(__name__).start_as_current_span("saga.run") as span:
+            span.set_attribute(SagaAttr.TYPE, saga.saga_type)
+            context = self._run_saga(saga, initial_data)
+            outcome = _RUN_OUTCOMES.get(context.state)
+            if outcome is not None:
+                span.set_attribute(SagaAttr.OUTCOME, outcome)
+        return context
+
+    def _run_saga(self, saga: Saga, initial_data: dict[str, Any] | None) -> SagaContext:
+        """Configure and execute one saga; the body of `start_saga`."""
         with self._lock:
             # Create context
             context = SagaContext(
@@ -296,11 +331,14 @@ class SagaManager(ISagaManager):
                     try:
                         result = self._command_bus.send(step.command)
                         step.completed = True
+                        record_saga_step(step.name, SagaAttr.COMPLETED)
                         saga.on_step_completed(step, result)
                         logger.debug(f"Saga {saga_id} step '{step.name}' completed")
                     except (  # fault-barrier: step failure triggers compensation, must not crash saga executor
                         Exception  # noqa: BLE001
                     ) as e:
+                        record_saga_step(step.name, SagaAttr.FAILED)
+                        record_ambient_failure(e)
                         step.error = str(e)
                         saga.on_step_failed(step, e)
                         logger.error(
@@ -318,6 +356,7 @@ class SagaManager(ISagaManager):
                 else:
                     # No command, just mark as completed
                     step.completed = True
+                    record_saga_step(step.name, SagaAttr.NO_ACTION)
 
                 context.current_step += 1
 
@@ -327,6 +366,7 @@ class SagaManager(ISagaManager):
             logger.info(f"Saga {saga_id} completed successfully")
 
         except Exception as e:  # noqa: BLE001 -- fault-barrier: unexpected saga failure must be recorded, not crash manager
+            record_ambient_failure(e)
             context.state = SagaState.FAILED
             context.error = str(e)
             logger.error(f"Saga {saga_id} failed unexpectedly: {e}")
@@ -350,8 +390,11 @@ class SagaManager(ISagaManager):
                 try:
                     self._command_bus.send(step.compensation_command)
                     step.compensated = True
+                    record_saga_step(step.name, SagaAttr.COMPENSATED)
                     logger.debug(f"Saga {saga_id} step '{step.name}' compensated")
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: compensation failure must not prevent other compensations
+                    record_saga_step(step.name, SagaAttr.COMPENSATION_FAILED)
+                    record_ambient_failure(e)
                     logger.error(
                         "saga_compensation_failed",
                         saga_id=saga_id,

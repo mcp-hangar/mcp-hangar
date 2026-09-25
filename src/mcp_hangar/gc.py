@@ -10,6 +10,8 @@ from .domain.contracts.mcp_server_runtime import McpServerMapping, McpServerRunt
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
 from .metrics import observe_health_check, record_error, record_gc_cycle
+from .observability.conventions import Health, HealthCheck, McpServer
+from .observability.tracing import get_tracer
 from .stream_ids import MCP_SERVER
 
 logger = get_logger(__name__)
@@ -123,6 +125,56 @@ class BackgroundWorker:
         except Exception:  # noqa: BLE001 -- fault-barrier: event publishing must not crash background worker
             logger.exception("event_publish_failed")
 
+    def _check_health(self, mcp_server_id: str, mcp_server: McpServerRuntime, now: float) -> None:
+        """Check one server that is due, in one `mcp_server.health_check` span (#1296).
+
+        The span covers the check and the publication of what it recorded, so
+        a recovery command the saga sends synchronously on that publication is
+        its child. Skipped servers and idle ticks never get here, so they emit
+        nothing. A check that raises ends the span ERROR and reaches the loop's
+        fault barrier as before.
+        """
+        with get_tracer(__name__).start_as_current_span("mcp_server.health_check") as span:
+            span.set_attribute(McpServer.ID, mcp_server_id)
+            try:
+                hc_start = time.perf_counter()
+                is_healthy = mcp_server.health_check()
+                hc_duration = time.perf_counter() - hc_start
+            except Exception:
+                span.set_attribute(HealthCheck.OUTCOME, HealthCheck.ERROR)
+                raise
+
+            consecutive = int(getattr(mcp_server.health, "consecutive_failures", 0))
+            span.set_attribute(HealthCheck.OUTCOME, HealthCheck.HEALTHY if is_healthy else HealthCheck.UNHEALTHY)
+            span.set_attribute(Health.CONSECUTIVE_FAILURES, consecutive)
+
+            observe_health_check(
+                mcp_server=mcp_server_id,
+                duration=hc_duration,
+                healthy=is_healthy,
+                is_cold=False,
+                consecutive_failures=consecutive,
+            )
+
+            if not is_healthy:
+                logger.warning("health_check_unhealthy", mcp_server_id=mcp_server_id)
+
+            # Calculate next check interval based on current state
+            # Re-read state after health check (it may have changed)
+            current_state = normalize_state_to_str(mcp_server.state)
+            health_tracker = getattr(mcp_server, "health", None)
+            if health_tracker and hasattr(health_tracker, "get_health_check_interval"):
+                interval = health_tracker.get_health_check_interval(
+                    current_state, normal_interval=float(self.interval_s)
+                )
+            else:
+                interval = float(self.interval_s)
+
+            if interval > 0:
+                self._next_check_at[mcp_server_id] = now + interval
+
+            self._publish_events(mcp_server)
+
     def _loop(self):
         """Main worker loop."""
         while self.running and not self._stopped.wait(self.interval_s):
@@ -159,37 +211,8 @@ class BackgroundWorker:
                         if now < next_check:
                             continue
 
-                        # Perform health check
-                        hc_start = time.perf_counter()
-                        is_healthy = mcp_server.health_check()
-                        hc_duration = time.perf_counter() - hc_start
-
-                        consecutive = int(getattr(mcp_server.health, "consecutive_failures", 0))
-
-                        observe_health_check(
-                            mcp_server=mcp_server_id,
-                            duration=hc_duration,
-                            healthy=is_healthy,
-                            is_cold=False,
-                            consecutive_failures=consecutive,
-                        )
-
-                        if not is_healthy:
-                            logger.warning("health_check_unhealthy", mcp_server_id=mcp_server_id)
-
-                        # Calculate next check interval based on current state
-                        # Re-read state after health check (it may have changed)
-                        current_state = normalize_state_to_str(mcp_server.state)
-                        health_tracker = getattr(mcp_server, "health", None)
-                        if health_tracker and hasattr(health_tracker, "get_health_check_interval"):
-                            interval = health_tracker.get_health_check_interval(
-                                current_state, normal_interval=float(self.interval_s)
-                            )
-                        else:
-                            interval = float(self.interval_s)
-
-                        if interval > 0:
-                            self._next_check_at[mcp_server_id] = now + interval
+                        self._check_health(mcp_server_id, mcp_server, now)
+                        continue
 
                     # Publish any collected events
                     self._publish_events(mcp_server)
