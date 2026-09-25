@@ -146,6 +146,11 @@ def _attributes_but_outcome(span: Any) -> dict[str, Any]:
     return {k: v for k, v in span.attributes.items() if k != "error.type"}
 
 
+def _pre_1280_attributes(span: Any) -> dict[str, Any]:
+    """The attributes this span had before #1280 added its `hangar.event*` keys."""
+    return {k: v for k, v in _attributes_but_outcome(span).items() if not k.startswith("hangar.event")}
+
+
 class TestRecordHandledFailure:
     def test_records_error_status_type_and_a_type_only_exception_event(self, sdk):
         from mcp_hangar.observability.tracing import record_handled_failure
@@ -259,7 +264,8 @@ class TestEventHandlerFailure:
         _publish_with_failing_then_succeeding_handler()
 
         span = _only(bus_tracer, "event.publish.McpServerStarted")
-        assert _attributes_but_outcome(span) == {"event.type": "McpServerStarted", "event.handlers_count": 2}
+        assert _pre_1280_attributes(span) == {"event.type": "McpServerStarted", "event.handlers_count": 2}
+        assert span.attributes["hangar.event.delivery_mode"] == "live"
 
     def test_a_failing_handler_then_a_succeeding_one_ends_error(self, bus_tracer):
         _publish_with_failing_then_succeeding_handler()
@@ -345,11 +351,12 @@ class TestEventStoreAppendFailure:
         _append_to_a_store_that_cannot_write()
 
         span = _only(bus_tracer, "event_store.append")
-        assert _attributes_but_outcome(span) == {
+        assert _pre_1280_attributes(span) == {
             "event_store.stream_id": "mcp_server:probe",
             "event_store.events_count": 2,
             "event_store.expected_version": -1,
         }
+        assert span.attributes["hangar.event_store.append.outcome"] == "failed"
 
     def test_the_append_span_ends_error_while_delivery_does_not(self, bus_tracer):
         _append_to_a_store_that_cannot_write()

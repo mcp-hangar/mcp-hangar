@@ -342,6 +342,53 @@ class Retry:
     LAYER_HTTP = "http"
 
 
+class EventDelivery:
+    """What happened to one domain event: its append and its handlers (#1280).
+
+    `event.publish.<Type>` stays one span per event, whatever the number of
+    handlers: `_deliver` also runs for every tailed and every recovered event,
+    so a span per handler would multiply the trace by the handler count. Each
+    handler's run is a span EVENT on it instead, which keeps one failing handler
+    among successful peers identifiable. Nothing from the event's payload is
+    recorded.
+    """
+
+    #: The event's `event_id`, on its `event.publish.<Type>` span.
+    EVENT_ID = "hangar.event.id"
+    #: The event's `produced_by`: the instance that produced it.
+    PRODUCER = "hangar.event.producer"
+    #: How the event reached this bus: `live`, `tailed` or `recovered`.
+    MODE = "hangar.event.delivery_mode"
+
+    #: Produced in this process and delivered as it was published.
+    LIVE = "live"
+    #: Read from the shared log, produced by a peer; projections only.
+    TAILED = "tailed"
+    #: Stored but never delivered by a previous run; delivered by the startup sweep.
+    RECOVERED = "recovered"
+
+    #: One handler's run, as an event on `event.publish.<Type>`.
+    HANDLED_EVENT = "hangar.event.handled"
+    #: The handler's `__qualname__`, bounded; never its arguments.
+    HANDLER_NAME = "hangar.event.handler.name"
+    #: The `HandlerKind` it subscribed with: `projection`, `effect` or `local_view`.
+    HANDLER_KIND = "hangar.event.handler.kind"
+    #: `success`, or `error` when the fault barrier caught it.
+    HANDLER_OUTCOME = "hangar.event.handler.outcome"
+
+    SUCCESS = "success"
+    ERROR = "error"
+
+    #: How `event_store.append` ended: `appended`; `conflict` when an explicit
+    #: expected version did not hold (raised to the caller); `failed` when the
+    #: store broke (the batch is delivered unpersisted after this span ends).
+    APPEND_OUTCOME = "hangar.event_store.append.outcome"
+
+    APPENDED = "appended"
+    CONFLICT = "conflict"
+    FAILED = "failed"
+
+
 class Caller:
     """Attributes identifying the caller (human or agent) behind a request.
 
