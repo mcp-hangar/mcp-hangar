@@ -394,6 +394,68 @@ class Health:
     DURATION_MS = "mcp.health.duration_ms"
 
 
+class HealthCheck:
+    """The outcome of one `mcp_server.health_check` span (#1296).
+
+    The span also carries `Health.CONSECUTIVE_FAILURES`. Kept apart from
+    `Health` because that class is the `mcp.*` namespace and this is `hangar.*`
+    (ADR-029 s9: new surface is additive, under `hangar.`).
+    """
+
+    #: `healthy`, `unhealthy`, or `error` when the check itself raised.
+    OUTCOME = "hangar.health.outcome"
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    ERROR = "error"
+
+
+class Saga:
+    """Attributes for saga runs and the commands a saga schedules (#1296, ADR-029).
+
+    One `saga.run` span covers one synchronous `start_saga`; each step and each
+    compensation is an event on it, because a saga has many steps and a scalar
+    would keep only the last. A timer-fired command opens `saga.scheduled_command`
+    in a new trace with one link to the span that scheduled it (ADR-029 s2).
+    """
+
+    #: The saga's `saga_type`, a class constant.
+    TYPE = "hangar.saga.type"
+    #: How the run ended: `completed`, `compensated` or `failed`.
+    OUTCOME = "hangar.saga.outcome"
+    COMPLETED = "completed"
+    COMPENSATED = "compensated"
+    FAILED = "failed"
+
+    #: One step's outcome, as an event on `saga.run`.
+    STEP_EVENT = "hangar.saga.step"
+    STEP_NAME = "hangar.saga.step.name"
+    #: `completed`, `no_action` (a step with no command), `failed`,
+    #: `compensated` or `compensation_failed`.
+    STEP_OUTCOME = "hangar.saga.step.outcome"
+    NO_ACTION = "no_action"
+    COMPENSATION_FAILED = "compensation_failed"
+
+    #: The command class a timer fired.
+    COMMAND = "hangar.saga.command"
+
+
+class Discovery:
+    """Attributes for discovery's lease gate (#1296).
+
+    A follower skips every cycle. The skip is recorded as a
+    `discovery.lease_transition` span on the transitions only -- into the
+    follower role and back out of it -- never once per skipped cycle, and never
+    as a `discovery.cycle`, so it cannot be read as a failed one.
+    """
+
+    #: The role this instance just moved into: `follower` or `holder`.
+    LEASE_ROLE = "hangar.discovery.lease_role"
+    FOLLOWER = "follower"
+    HOLDER = "holder"
+    #: On the move back to `holder`: how many cycles were skipped as follower.
+    SKIPPED_CYCLES = "hangar.discovery.skipped_cycles"
+
+
 # ---------------------------------------------------------------------------
 # Convenience helpers
 # ---------------------------------------------------------------------------
