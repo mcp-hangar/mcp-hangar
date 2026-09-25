@@ -20,7 +20,9 @@ I/O -- so the chokepoints cannot disagree about what "suspended" means:
   :func:`refuse_request_if_session_suspended`, as a JSON-RPC error.
 
 ``tools/list`` is not refused: it answers from Hangar's own catalogue and
-reaches no upstream.
+reaches no upstream. The handshake-era ``GET /mcp`` stream that tells a client
+to re-list is refused as it opens and ended at its next frame
+(``fastmcp_server.tool_list_changed_stream``): it is held open for the caller.
 
 What it can and cannot refuse
 -----------------------------
@@ -57,6 +59,7 @@ Chokepoint = Literal[
     "completion",
     "resource",
     "subscription",
+    "tool_list_changed",
 ]
 
 SESSION_SUSPENDED_MESSAGE = "Session suspended: this call was refused."

@@ -190,6 +190,26 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         assert principal.id == PrincipalId("svc-test")
         assert principal.type == PrincipalType.SERVICE_ACCOUNT
 
+    def test_expiring_key_exposes_its_verified_deadline(self, api_key_store):
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
+        raw_key = api_key_store.create_key(principal_id="svc-exp", name="exp-key", expires_at=expires_at)
+        principal = api_key_store.get_principal_for_key(ApiKeyAuthenticator._hash_key(raw_key))
+
+        assert principal.metadata["expires_at"] == expires_at.timestamp()
+
+    def test_rotated_key_exposes_the_earlier_grace_deadline(self, api_key_store):
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
+        raw_key = api_key_store.create_key(principal_id="svc-rot", name="rot-key", expires_at=expires_at)
+        key_id = api_key_store.list_keys("svc-rot")[0].key_id
+        api_key_store.rotate_key(key_id, grace_period_seconds=60)
+        principal = api_key_store.get_principal_for_key(ApiKeyAuthenticator._hash_key(raw_key))
+
+        assert datetime.now(UTC).timestamp() < principal.metadata["expires_at"] < expires_at.timestamp()
+
     def test_raises_revoked_credentials_for_revoked_key(self, api_key_store):
         """Lines 178-182: revoked key raises RevokedCredentialsError."""
         raw_key = api_key_store.create_key(principal_id="svc-revoke", name="rkey")

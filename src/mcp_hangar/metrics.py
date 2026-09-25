@@ -1239,6 +1239,30 @@ PROJECTION_CHANGES_TOTAL = Counter(
     description="Front-door tools/list responses whose projection differed from the one last served to the same caller",
 )
 
+# The handshake-era list_changed push (#1366). Unlabelled by tenant, like the
+# rest of the family. The stream gauge is what shows, on a replica behind a
+# proxy, that streams are reaching the gateway at all; the refusals and the
+# server-side closes show who hits a cap and whether revocation ends streams.
+TOOL_LIST_CHANGED_STREAMS = Gauge(
+    name="mcp_hangar_tool_list_changed_streams",
+    description="Open handshake-era GET /mcp list_changed streams on this replica",
+)
+TOOL_LIST_CHANGED_NOTIFICATIONS_TOTAL = Counter(
+    name="mcp_hangar_tool_list_changed_notifications",
+    description="notifications/tools/list_changed handed to a handshake-era channel, by transport",
+    labels=["transport"],  # stdio | http
+)
+TOOL_LIST_CHANGED_STREAMS_REFUSED_TOTAL = Counter(
+    name="mcp_hangar_tool_list_changed_streams_refused",
+    description="GET /mcp list_changed streams refused as they opened, by reason",
+    labels=["reason"],  # not_served | session_suspended | principal_cap | tenant_cap | channel_cap | generation_failed
+)
+TOOL_LIST_CHANGED_STREAMS_ENDED_TOTAL = Counter(
+    name="mcp_hangar_tool_list_changed_streams_ended",
+    description="GET /mcp list_changed streams the gateway ended, by reason; a client leaving is not counted",
+    labels=["reason"],  # lifetime | credential_expired | credential_revoked | session_suspended
+)
+
 # The SDK's Mcp-Param-* check is fail-open: a tools/list that cannot produce a
 # schema skips validation and the call still runs (#1053). Some of those
 # branches log; none of them were a metric. Reasons match the SDK skip arms
@@ -1487,6 +1511,11 @@ def _register_all_metrics():
             PARAM_HEADER_VALIDATION_SKIPPED_TOTAL,
             PROJECTION_WITHDRAWALS_TOTAL,
             RESOURCE_LINKS_EVICTED_TOTAL,
+            # The handshake-era list_changed push (#1366).
+            TOOL_LIST_CHANGED_STREAMS,
+            TOOL_LIST_CHANGED_NOTIFICATIONS_TOTAL,
+            TOOL_LIST_CHANGED_STREAMS_REFUSED_TOTAL,
+            TOOL_LIST_CHANGED_STREAMS_ENDED_TOTAL,
         ]
     )
 

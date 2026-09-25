@@ -8,6 +8,7 @@ import hashlib
 import secrets
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import structlog
@@ -214,6 +215,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
                 )
 
             # Check if this key has been rotated
+            grace_until = None
             if key_hash in self._rotated_keys:
                 _, grace_until = self._rotated_keys[key_hash]
                 now = time.time()
@@ -239,7 +241,14 @@ class InMemoryApiKeyStore(IApiKeyStore):
             )
             self._keys[key_hash] = (updated_metadata, principal)
 
-            return principal
+            principal_metadata = dict(principal.metadata or {})
+            principal_metadata.pop("expires_at", None)
+            deadlines = [metadata.expires_at.timestamp()] if metadata.expires_at else []
+            if grace_until is not None:
+                deadlines.append(grace_until)
+            if deadlines:
+                principal_metadata["expires_at"] = min(deadlines)
+            return replace(principal, metadata=principal_metadata)
 
     def create_key(
         self,

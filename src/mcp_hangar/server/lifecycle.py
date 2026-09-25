@@ -344,8 +344,9 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
     ``Session not found``.
 
     The session buys this gateway nothing to weigh against that. It issues no
-    server-to-client requests (no elicitation, no sampling, no roots) and no
-    notifications; ``event_store`` is unset here, so there was never any
+    server-to-client requests (no elicitation, no sampling, no roots), and its
+    one notification, ``tools/list_changed``, has a sessionless stream of its
+    own; ``event_store`` is unset here, so there was never any
     resumability to lose; authorization is per-request at the route chokepoint
     rather than bound to a session; and session *suspension* keys on
     ``CallerIdentity.session_id``, which comes from ``x-session-id`` or the JWT
@@ -362,6 +363,10 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
     there -- the SDK enforces header/body agreement itself -- but the legacy era
     does, and this path served neither before (#560).
 
+    ``GET /mcp`` on the handshake era is answered by the sessionless
+    ``list_changed`` stream rather than the SDK (#1366), and serving it is what
+    makes ``tools.listChanged`` true on front_door HTTP.
+
     Args:
         mcp_server: The server ``build_serving_mcp_server()`` produced.
 
@@ -370,11 +375,16 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
     """
     from ..fastmcp_server.asgi import mcp_transport_security
     from ..fastmcp_server.modern_surface import wrap_front_door_routing
+    from ..fastmcp_server.tool_list_changed import serve_push_channel
+    from ..fastmcp_server.tool_list_changed_stream import serve_tool_list_changed_stream
 
+    serve_push_channel("http")
     return wrap_front_door_routing(
-        mcp_server.streamable_http_app(
-            transport_security=mcp_transport_security(),
-            stateless_http=True,
+        serve_tool_list_changed_stream(
+            mcp_server.streamable_http_app(
+                transport_security=mcp_transport_security(),
+                stateless_http=True,
+            )
         )
     )
 
