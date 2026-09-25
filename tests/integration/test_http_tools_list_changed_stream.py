@@ -57,11 +57,19 @@ def _served(door: FrontDoor) -> Iterator[str]:
 
 
 class _Stream:
-    """One open ``GET /mcp``: its status, and its frames as they arrive."""
+    """One open ``GET /mcp``: its status, its events as they arrive, and a count of its pings.
+
+    The reading thread is the one that closes the connection. Closing it from
+    another thread while this one is blocked reading does not send a FIN on
+    Linux, so the gateway would never see the client leave. The thread checks
+    for a stop at every frame, and the gateway pings often (see ``gateway``).
+    """
 
     def __init__(self, base_url: str, headers: dict[str, str]) -> None:
         self.frames: queue.Queue[str] = queue.Queue()
         self.status: queue.Queue[int] = queue.Queue()
+        self.pings = 0
+        self._stop = threading.Event()
         self._client = httpx.Client(timeout=httpx.Timeout(10.0, read=None))
         self._thread = threading.Thread(target=self._read, args=(base_url, headers), daemon=True)
         self._thread.start()
@@ -73,8 +81,12 @@ class _Stream:
                 self.status.put(response.status_code)
                 for chunk in response.iter_text():
                     for frame in chunk.replace("\r\n", "\n").split("\n\n"):
-                        if frame.strip():
+                        if frame.startswith(":"):
+                            self.pings += 1
+                        elif frame.strip():
                             self.frames.put(frame)
+                    if self._stop.is_set():
+                        return
         except httpx.HTTPError:
             pass
         finally:
@@ -88,8 +100,9 @@ class _Stream:
             return None
 
     def close(self) -> None:
-        self._client.close()
+        self._stop.set()
         self._thread.join(timeout=5)
+        self._client.close()
 
 
 def _headers(door: FrontDoor, tenant: str, **extra: str) -> dict[str, str]:
@@ -97,7 +110,9 @@ def _headers(door: FrontDoor, tenant: str, **extra: str) -> dict[str, str]:
 
 
 @pytest.fixture
-def gateway() -> Iterator[tuple[FrontDoor, str]]:
+def gateway(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[FrontDoor, str]]:
+    # Often, so a client's reading thread wakes to close its own connection.
+    monkeypatch.setattr(tool_list_changed_stream, "KEEPALIVE_S", 0.2)
     with front_door(("read_item", "write_item")) as door, _served(door) as base_url:
         yield door, base_url
 
@@ -141,14 +156,16 @@ def test_the_channel_goes_when_the_client_leaves(gateway: tuple[FrontDoor, str])
     assert _wait_for_no_channels()
 
 
-def test_an_idle_stream_carries_keep_alive_comments(
-    gateway: tuple[FrontDoor, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(tool_list_changed_stream, "KEEPALIVE_S", 0.2)
+def test_an_idle_stream_carries_keep_alive_comments(gateway: tuple[FrontDoor, str]) -> None:
     stream = _open(gateway, TENANT_A)
     try:
         assert LIST_CHANGED in (stream.next() or "")
-        assert (stream.next() or "").startswith(":")  # an SSE comment: no event reaches the client
+        deadline = time.monotonic() + 5
+        while not stream.pings and time.monotonic() < deadline:
+            time.sleep(0.05)
+        # SSE comments: no event reaches the client between notifications.
+        assert stream.pings
+        assert stream.next(timeout=0.5) is None
     finally:
         stream.close()
 
@@ -172,7 +189,6 @@ def test_a_suspended_session_is_refused_and_its_open_stream_ended(
 ) -> None:
     from mcp_hangar.server.api.sessions import get_session_suspension_registry
 
-    monkeypatch.setattr(tool_list_changed_stream, "KEEPALIVE_S", 0.2)
     # The peer is loopback, which is a trusted proxy by default, so its x-session-id is honoured.
     stream = _open(gateway, TENANT_A, **{"x-session-id": "session-one"})
     registry = get_session_suspension_registry()
