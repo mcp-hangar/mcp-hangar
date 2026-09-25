@@ -61,6 +61,8 @@ from typing import Any
 
 from mcp_hangar._sdk_compat import is_modern_protocol_version, lowlevel_server
 
+from .. import metrics as prometheus_metrics
+
 logger = logging.getLogger(__name__)
 
 #: How long changes are gathered before channels are compared and notified. A
@@ -94,6 +96,9 @@ class _Channel:
     owner: str | None = None
     #: Whether it is an HTTP stream, which the per-tenant cap counts.
     stream: bool = False
+    #: The principal id a revocation names, and how to end the stream. HTTP only.
+    principal: str | None = None
+    end: Callable[[], None] | None = None
 
 
 # Touched only on the serving loop, except the reads in `_on_projection_changed`,
@@ -172,7 +177,15 @@ def track_listing(mcp_ctx: Any, projection: Any) -> None:
     _schedule()
 
 
-def open_stream(key: int, tenant_id: str | None, owner: str, send: Callable[[], Awaitable[None]]) -> str | None:
+def open_stream(
+    key: int,
+    tenant_id: str | None,
+    owner: str,
+    send: Callable[[], Awaitable[None]],
+    *,
+    principal: str | None = None,
+    end: Callable[[], None] | None = None,
+) -> str | None:
     """Record a ``GET /mcp`` stream as a channel, or say why not. Serving loop.
 
     The projection it is compared against is generated now, so a change that
@@ -199,14 +212,37 @@ def open_stream(key: int, tenant_id: str | None, owner: str, send: Callable[[], 
     except Exception:  # noqa: BLE001 -- fault-barrier: a stream that cannot be compared is not opened
         logger.warning("tool_list_changed_generation_failed", exc_info=True)
         return "generation_failed"
-    _channels[key] = _Channel(tenant_id, send, seen, owner, stream=True)
+    _channels[key] = _Channel(tenant_id, send, seen, owner, stream=True, principal=principal, end=end)
     _loop = asyncio.get_running_loop()
+    _count_streams()
     return None
 
 
 def close_stream(key: int) -> None:
     """Forget a stream that ended. Serving loop."""
     _channels.pop(key, None)
+    _count_streams()
+
+
+def _count_streams() -> None:
+    prometheus_metrics.TOOL_LIST_CHANGED_STREAMS.set(sum(1 for channel in _channels.values() if channel.stream))
+
+
+def end_streams(principal_id: str) -> None:
+    """End every stream *principal_id* holds, so its reconnect authenticates again. Any thread."""
+    loop = _loop
+    if loop is None or not _channels:
+        return
+
+    def _end() -> None:
+        for channel in list(_channels.values()):
+            if channel.principal == principal_id and channel.end is not None:
+                channel.end()
+
+    try:
+        loop.call_soon_threadsafe(_end)
+    except RuntimeError:  # the loop is closed: the process is going away
+        pass
 
 
 def _on_projection_changed() -> None:
@@ -269,6 +305,9 @@ async def _notify_changed() -> None:
         channel.seen = now
         try:
             await channel.send()
+            prometheus_metrics.TOOL_LIST_CHANGED_NOTIFICATIONS_TOTAL.inc(
+                transport="http" if channel.stream else "stdio"
+            )
         except Exception:  # noqa: BLE001 -- fault-barrier: a dead channel is dropped, the rest still hear
             logger.debug("tool_list_changed_send_failed", exc_info=True)
             _channels.pop(key, None)
@@ -287,3 +326,4 @@ def reset() -> None:
     _loop = None
     _pending = None
     _channels.clear()
+    _count_streams()

@@ -106,6 +106,12 @@ def init_event_handlers(runtime: "Runtime") -> None:
     # (#248), and again on an upstream's own `tools/list_changed` (#1366).
     subscribe_tool_projection(runtime.event_bus, runtime.repository)
 
+    # A revoked key or role ends that principal's list_changed streams, so the
+    # reconnect authenticates again (#1366).
+    from ...fastmcp_server.tool_list_changed_stream import subscribe_revocations
+
+    subscribe_revocations(runtime.event_bus)
+
     # The decision that built the audit log pipeline in `init_observability`: an
     # OTLP endpoint in the env or the file. The env var alone used to decide
     # here, so a file-only endpoint left audit export off (#1289).

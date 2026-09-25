@@ -31,10 +31,12 @@ What it checks, in order, before anything is held:
 Authentication is the auth layer's, which wraps ``/mcp`` for every method; the
 principal it leaves on the request is the one a POST is served as, and the
 tenant it names scopes what the stream is told. It runs once, as the stream
-opens, so a stream ends after :data:`MAX_LIFETIME_S`: a revoked key or an
-expired token then fails the reconnect instead of being told of changes for as
-long as the socket lasts. The TypeScript client reconnects a GET stream that
-the server closes, and is told once on open.
+opens, so the stream ends when that could have changed: when the principal's
+API key or a role is revoked (:func:`subscribe_revocations`, on every replica
+that tails the event), when a JWT's ``exp`` passes, and after
+:data:`MAX_LIFETIME_S` at the latest. The reconnect then authenticates again.
+The TypeScript client reconnects a GET stream that the server closes, and is
+told once on open.
 
 Tenant-less callers (``allow_anonymous``, or auth off on loopback) share one
 principal and so one per-principal cap between them.
@@ -47,8 +49,8 @@ told once on open, and re-lists.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
+import time
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -56,6 +58,7 @@ from typing import TYPE_CHECKING, Any
 from sse_starlette.sse import EventSourceResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .. import metrics as prometheus_metrics
 from ..logging_config import get_logger
 from . import tool_list_changed
 
@@ -75,6 +78,9 @@ SEND_TIMEOUT_S = 30.0
 
 #: Notifications waiting for the socket. They are all the same message, so a full queue loses nothing.
 _QUEUE_SIZE = 4
+
+_REFUSED = prometheus_metrics.TOOL_LIST_CHANGED_STREAMS_REFUSED_TOTAL
+_ENDED = prometheus_metrics.TOOL_LIST_CHANGED_STREAMS_ENDED_TOTAL
 
 _NOTIFICATION = json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 
@@ -128,6 +134,7 @@ async def _serve(scope: Scope, receive: Receive, send: Send) -> None:
     from .asgi import identity_for_request, mcp_transport_security
 
     if not tool_list_changed.advertises_tools_list_changed():
+        _REFUSED.inc(reason="not_served")
         await _respond(send, 405, headers=((b"allow", b"POST"),))
         return
 
@@ -143,37 +150,45 @@ async def _serve(scope: Scope, receive: Receive, send: Send) -> None:
     request_ctx = SimpleNamespace(request=request)
     refused = _suspended(request_ctx)
     if refused is not None:
+        _REFUSED.inc(reason="session_suspended")
         await _respond(send, 403, _refusal(refused.reason, str(refused)), ((b"content-type", b"application/json"),))
         return
 
     identity = identity_for_request(request_ctx)
     caller = identity.caller if identity is not None else None
     tenant_id = caller.tenant_id if caller is not None else None
+    principal_id = caller.user_id if caller is not None else None
     # repr: a tenant named "None" is not the tenant-less callers' bucket.
-    owner = f"{tenant_id!r}\x00{caller.user_id if caller is not None and caller.user_id else 'anonymous'}"
+    owner = f"{tenant_id!r}\x00{principal_id or 'anonymous'}"
 
-    queue: asyncio.Queue[None] = asyncio.Queue(_QUEUE_SIZE)
+    # True: tell the client. False: end the stream (a revocation named its principal).
+    queue: asyncio.Queue[bool] = asyncio.Queue()
 
     async def notify() -> None:
-        with contextlib.suppress(asyncio.QueueFull):
-            queue.put_nowait(None)
+        # All the same message, so a backlog past a few loses nothing.
+        if queue.qsize() < _QUEUE_SIZE:
+            queue.put_nowait(True)
 
     key = id(queue)
-    full = tool_list_changed.open_stream(key, tenant_id, owner, notify)
+    full = tool_list_changed.open_stream(
+        key, tenant_id, owner, notify, principal=principal_id, end=lambda: queue.put_nowait(False)
+    )
     if full is not None:
-        # Debug: a client retrying at its cap would otherwise fill the log.
+        # Debug: a client retrying at its cap would otherwise fill the log. The counter is the signal.
         logger.debug("tool_list_changed_stream_refused", reason=full)
+        _REFUSED.inc(reason=full)
         status = 429 if full in ("principal_cap", "tenant_cap") else 503
         await _respond(send, status, headers=((b"retry-after", b"60"),))
         return
 
     try:
         await notify()  # whatever landed between the client's listing and now
+        prometheus_metrics.TOOL_LIST_CHANGED_NOTIFICATIONS_TOTAL.inc(transport="http")
         # sse-starlette, as the SDK's own GET stream uses: it pings, it ends the
         # stream when the client leaves, and it ends it when the server is told
         # to stop, which a hand-rolled stream did not and so held shutdown open.
         response = EventSourceResponse(
-            _frames(queue, request_ctx),
+            _frames(queue, request_ctx, _credential_expires_at(request)),
             ping=KEEPALIVE_S,
             send_timeout=SEND_TIMEOUT_S,
             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
@@ -183,22 +198,62 @@ async def _serve(scope: Scope, receive: Receive, send: Send) -> None:
         tool_list_changed.close_stream(key)
 
 
-async def _frames(queue: asyncio.Queue[None], request_ctx: Any) -> AsyncIterator[dict[str, str]]:
-    """One ``list_changed`` per notification, until the caller's session is suspended.
+def _credential_expires_at(request: Any) -> float | None:
+    """When the credential this stream opened with stops being valid (epoch seconds), if it says.
 
-    The suspension is checked before each frame and at least every
-    :data:`KEEPALIVE_S`, so a suspension ends an idle stream too. The stream
-    ends after :data:`MAX_LIFETIME_S`.
+    A JWT's ``exp``, which the authenticator recorded on the principal after
+    verifying it. An API key carries no expiry here; its revocation ends the
+    stream instead (:func:`subscribe_revocations`).
+    """
+    principal = getattr(getattr(getattr(request, "state", None), "auth", None), "principal", None)
+    expires_at = (getattr(principal, "metadata", None) or {}).get("expires_at")
+    return float(expires_at) if isinstance(expires_at, int | float) and not isinstance(expires_at, bool) else None
+
+
+async def _frames(
+    queue: asyncio.Queue[bool], request_ctx: Any, expires_at: float | None
+) -> AsyncIterator[dict[str, str]]:
+    """One ``list_changed`` per notification, until the stream has to end.
+
+    It ends when the caller's session is suspended (checked before each frame
+    and at least every :data:`KEEPALIVE_S`, so an idle stream too), when its
+    principal's key or role is revoked, when its credential expires, and after
+    :data:`MAX_LIFETIME_S` at the latest.
     """
     loop = asyncio.get_running_loop()
-    ends = loop.time() + MAX_LIFETIME_S
+    ends, why = loop.time() + MAX_LIFETIME_S, "lifetime"
+    if expires_at is not None and (left := expires_at - time.time()) < MAX_LIFETIME_S:
+        ends, why = loop.time() + left, "credential_expired"
     while (left := ends - loop.time()) > 0:
         try:
-            await asyncio.wait_for(queue.get(), timeout=min(KEEPALIVE_S, left))
-            due = True
+            tell = await asyncio.wait_for(queue.get(), timeout=min(KEEPALIVE_S, left))
         except TimeoutError:
-            due = False
-        if _suspended(request_ctx) is not None:
+            tell = None
+        if tell is False:
+            _ENDED.inc(reason="credential_revoked")
             return
-        if due:
+        if _suspended(request_ctx) is not None:
+            _ENDED.inc(reason="session_suspended")
+            return
+        if tell:
             yield {"event": "message", "data": _NOTIFICATION}
+    _ENDED.inc(reason=why)
+
+
+def subscribe_revocations(event_bus: Any) -> None:
+    """End a principal's streams when its API key or a role is revoked.
+
+    ``PROJECTION``: it acts on the event's own payload (the principal id), on
+    every replica, because a stream on any replica may belong to that
+    principal; ending an ended stream again does nothing, and it publishes
+    nothing. A role matters because the management tools a caller is projected
+    follow its role (#904), so the reconnect's listing is the one to trust.
+    """
+    from ..domain.contracts.event_bus import HandlerKind
+    from ..domain.events import ApiKeyRevoked, RoleRevoked
+
+    def end(event: Any) -> None:
+        tool_list_changed.end_streams(str(event.principal_id))
+
+    event_bus.subscribe(ApiKeyRevoked, end, kind=HandlerKind.PROJECTION)
+    event_bus.subscribe(RoleRevoked, end, kind=HandlerKind.PROJECTION)

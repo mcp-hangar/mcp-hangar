@@ -291,3 +291,54 @@ def test_a_projection_that_cannot_be_generated_opens_no_stream(
         assert not tool_list_changed._channels
     finally:
         stream.close()
+
+
+def test_a_revocation_ends_only_that_principals_streams(gateway: tuple[FrontDoor, str]) -> None:
+    from mcp_hangar.domain.events import ApiKeyRevoked
+    from mcp_hangar.server.context import get_context
+
+    bus = get_context().runtime.event_bus
+    tool_list_changed_stream.subscribe_revocations(bus)  # as `init_event_handlers` wires it
+    a, b = _open(gateway, TENANT_A), _open(gateway, TENANT_B)
+    try:
+        assert (a.code, b.code) == (200, 200)
+        assert LIST_CHANGED in (a.next() or "")
+        assert LIST_CHANGED in (b.next() or "")
+
+        # The harness seeds tenant A's key for principal `agent-a`.
+        bus.publish(ApiKeyRevoked(key_id="key-a", principal_id="agent-a", revoked_by="operator"))
+
+        assert a.next() == "<closed>", "the revoked principal's stream stayed open"
+        assert b.next(timeout=SETTLE_S) is None, "another principal's stream was ended"
+    finally:
+        a.close()
+        b.close()
+
+
+def test_the_streams_and_their_notifications_are_counted(gateway: tuple[FrontDoor, str]) -> None:
+    from mcp_hangar import metrics as prometheus_metrics
+
+    def sent() -> float:
+        return sum(
+            sample.value
+            for sample in prometheus_metrics.TOOL_LIST_CHANGED_NOTIFICATIONS_TOTAL.collect()
+            if sample.labels.get("transport") == "http"
+        )
+
+    def open_streams() -> float:
+        return sum(sample.value for sample in prometheus_metrics.TOOL_LIST_CHANGED_STREAMS.collect())
+
+    stream = _open(gateway, TENANT_A)
+    try:
+        assert LIST_CHANGED in (stream.next() or "")
+        assert open_streams() == 1
+        before = sent()
+
+        get_tool_projection_registry().withdraw(SERVER, "write_item", TENANT_A)
+
+        assert LIST_CHANGED in (stream.next() or "")
+        assert sent() == before + 1
+    finally:
+        stream.close()
+    assert _wait_for_no_channels()
+    assert open_streams() == 0
