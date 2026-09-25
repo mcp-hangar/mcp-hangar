@@ -342,6 +342,45 @@ class Retry:
     LAYER_HTTP = "http"
 
 
+class Shaping:
+    """Attributes describing how a call's payload was shaped (#1298).
+
+    Request and response mutation and the per-call size limit are span EVENTS on
+    `batch.call.<tool>`, like `Retry`: one call can carry more than one of them.
+    Batch truncation can do cache I/O and gets its own short span. Only timing,
+    sizes and counts are recorded: never the arguments, the result, a cache entry
+    or a continuation id.
+    """
+
+    #: One `MutatorPipeline` run that had mutators registered, as a span event.
+    MUTATION_EVENT = "hangar.shaping.mutation"
+
+    #: Which payload was mutated: "request" (once, before any retry) or "response".
+    DIRECTION = "hangar.shaping.direction"
+
+    #: Whether a mutator changed the payload, from `MutationResult.changed`.
+    CHANGED = "hangar.shaping.changed"
+
+    #: Milliseconds the mutator pipeline took.
+    DURATION_MS = "hangar.shaping.duration_ms"
+
+    #: A result dropped by the per-call size limit, as a span event.
+    DROP_EVENT = "hangar.shaping.drop"
+
+    #: Why the result was dropped: "response_size_exceeded".
+    REASON = "hangar.shaping.reason"
+
+    #: Size of the dropped result in bytes, and the limit it exceeded.
+    SIZE_BYTES = "hangar.shaping.size_bytes"
+    LIMIT_BYTES = "hangar.shaping.limit_bytes"
+
+    #: How many results batch truncation cut, on the `batch.truncate` span.
+    TRUNCATED_COUNT = "hangar.shaping.truncated_count"
+
+    #: Whether batch truncation stored a continuation. A flag, never the id.
+    CONTINUATION = "hangar.shaping.continuation"
+
+
 class Caller:
     """Attributes identifying the caller (human or agent) behind a request.
 

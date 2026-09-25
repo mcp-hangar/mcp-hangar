@@ -48,6 +48,11 @@ class MutatorPipeline:
             index=idx,
         )
 
+    @property
+    def has_mutators(self) -> bool:
+        """Whether any mutator is registered; the default pipeline has none."""
+        return bool(self._mutators)
+
     def execute(self, context: MutationContext) -> MutationResult:
         """Run all applicable mutators sequentially.
 
