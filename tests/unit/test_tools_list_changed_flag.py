@@ -1,8 +1,8 @@
 """The capability flags across mode x protocol era x transport (#1366, part A).
 
 On the handshake era ``tools.listChanged`` is true exactly where the front door
-pushes the notification: front_door, over a transport it can push on (stdio).
-front_door HTTP has no back-channel yet (#877), and egress publishes nothing.
+pushes the notification: front_door, over a transport it can push on (stdio,
+and HTTP through the sessionless ``GET /mcp`` stream). egress publishes nothing.
 The other three handshake-era flags stay false, and the 2026-07-28 flags still
 follow ``subscriptions/listen`` alone, whatever the transport.
 """
@@ -43,18 +43,23 @@ def _served(mode: str, transport: str) -> Any:
     from mcp_hangar.server.bootstrap import build_serving_mcp_server
 
     get_tool_access_resolver().set_topology_mode(mode)
-    low = lowlevel_server(build_serving_mcp_server())
+    server = build_serving_mcp_server()
     if transport == "stdio":
         # What `ServerLifecycle.run_stdio` records before it serves.
         tool_list_changed.serve_push_channel("stdio")
-    return low
+    else:
+        # What `ServerLifecycle.run_http` mounts.
+        from mcp_hangar.server.lifecycle import mcp_app_for_serving
+
+        mcp_app_for_serving(server)
+    return lowlevel_server(server)
 
 
 @pytest.mark.parametrize(
     ("mode", "transport", "tools_list_changed"),
     [
         ("front_door", "stdio", True),
-        ("front_door", "http", False),  # until the sessionless GET stream lands
+        ("front_door", "http", True),
         ("egress", "stdio", False),
         ("egress", "http", False),
     ],

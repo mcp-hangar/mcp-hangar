@@ -252,12 +252,17 @@ class TestServerLifecycle:
             with (
                 patch("asyncio.run") as mock_asyncio_run,
                 patch("mcp_hangar.fastmcp_server.modern_surface.wrap_front_door_routing") as mock_wrap,
+                patch(
+                    "mcp_hangar.fastmcp_server.tool_list_changed_stream.serve_tool_list_changed_stream"
+                ) as mock_stream,
             ):
                 mock_asyncio_run.side_effect = _close_run_coro
 
                 ServerLifecycle(mock_context).run_http("127.0.0.1", 9000)
 
-            mock_wrap.assert_called_once_with(mock_context.mcp_server.streamable_http_app.return_value)
+            # The list_changed GET stream sits inside the routing wrap, over the SDK app (#1366).
+            mock_stream.assert_called_once_with(mock_context.mcp_server.streamable_http_app.return_value)
+            mock_wrap.assert_called_once_with(mock_stream.return_value)
         finally:
             del sys.modules["uvicorn"]
 

@@ -197,6 +197,16 @@ class TestInMemoryApiKeyStore:
             principal = store.get_principal_for_key(key_hash)
         assert principal is not None
         assert principal.id.value == "svc-1"
+        assert principal.metadata["expires_at"] == 4600.0
+
+    def test_expiring_key_exposes_its_verified_deadline(self):
+        store = self._make_store()
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
+        raw_key = store.create_key(principal_id="svc-1", name="exp-key", expires_at=expires_at)
+
+        principal = store.get_principal_for_key(ApiKeyAuthenticator._hash_key(raw_key))
+
+        assert principal.metadata["expires_at"] == expires_at.timestamp()
 
     def test_get_principal_for_key_rotated_grace_expired_raises(self):
         """Lines 219-224: rotated key after grace period raises ExpiredCredentialsError."""
