@@ -236,12 +236,18 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             if isinstance(groups, str):
                 groups = json.loads(groups)
 
+            principal_metadata = {**(metadata or {}), "key_id": key_id, "key_name": name}
+            principal_metadata.pop("expires_at", None)
+            deadline = min((date for date in (expires_at, grace_until) if date is not None), default=None)
+            if deadline is not None:
+                principal_metadata["expires_at"] = deadline.timestamp()
+
             return Principal(
                 id=PrincipalId(principal_id),
                 type=PrincipalType.SERVICE_ACCOUNT,
                 tenant_id=tenant_id,
                 groups=frozenset(groups or []),
-                metadata={"key_id": key_id, "key_name": name, **(metadata or {})},
+                metadata=principal_metadata,
             )
 
     def create_key(

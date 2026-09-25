@@ -154,6 +154,7 @@ class TestPostgresApiKeyStore:
         result = store.get_principal_for_key("abc123hash")
         assert result is not None
         assert str(result.id) == "svc-1"
+        assert result.metadata["expires_at"] == future_grace.timestamp()
 
     def test_get_principal_for_key_expired_raises(self):
         from mcp_hangar.domain.exceptions import ExpiredCredentialsError
@@ -198,6 +199,7 @@ class TestPostgresApiKeyStore:
         assert "grp2" in result.groups
         assert result.metadata["key_id"] == "kid1"
         assert result.metadata["foo"] == "bar"
+        assert result.metadata["expires_at"] == future_expiry.timestamp()
 
     def test_get_principal_for_key_groups_as_list(self):
         """Groups stored as a native Python list (not JSON string)."""

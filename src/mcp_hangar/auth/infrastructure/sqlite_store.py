@@ -191,6 +191,7 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             )
 
         # Check rotation and grace period
+        grace_until = None
         if row["rotated_to_key_id"] is not None:
             # Key has been rotated - check grace period
             if row["grace_until"]:
@@ -209,8 +210,8 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 )
 
         # Check expiration
-        if row["expires_at"]:
-            expires_at = datetime.fromisoformat(row["expires_at"])
+        expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+        if expires_at:
             if expires_at < datetime.now(UTC):
                 raise ExpiredCredentialsError(
                     message="API key has expired",
@@ -235,13 +236,18 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         # Parse groups from JSON
         groups = json.loads(row["groups"]) if row["groups"] else []
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+        principal_metadata = {**metadata, "key_id": row["key_id"], "key_name": row["name"]}
+        principal_metadata.pop("expires_at", None)
+        deadline = min((date for date in (expires_at, grace_until) if date is not None), default=None)
+        if deadline is not None:
+            principal_metadata["expires_at"] = deadline.timestamp()
 
         return Principal(
             id=PrincipalId(row["principal_id"]),
             type=PrincipalType.SERVICE_ACCOUNT,
             tenant_id=row["tenant_id"],
             groups=frozenset(groups),
-            metadata={"key_id": row["key_id"], "key_name": row["name"], **metadata},
+            metadata=principal_metadata,
         )
 
     def create_key(

@@ -201,9 +201,9 @@ async def _serve(scope: Scope, receive: Receive, send: Send) -> None:
 def _credential_expires_at(request: Any) -> float | None:
     """When the credential this stream opened with stops being valid (epoch seconds), if it says.
 
-    A JWT's ``exp``, which the authenticator recorded on the principal after
-    verifying it. An API key carries no expiry here; its revocation ends the
-    stream instead (:func:`subscribe_revocations`).
+    The verified expiry of a JWT or API key is carried on the principal. For a
+    rotated API key, this is the earlier of its expiry and rotation grace end.
+    Revocation also ends the stream (:func:`subscribe_revocations`).
     """
     principal = getattr(getattr(getattr(request, "state", None), "auth", None), "principal", None)
     expires_at = (getattr(principal, "metadata", None) or {}).get("expires_at")

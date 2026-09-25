@@ -7,6 +7,7 @@ credential it opened with stops being valid:
 
 * an API key revoked over ``DELETE /api/auth/keys/{id}`` ends its streams at
   once, and the reconnect is refused;
+* an API key with an expiry ends its stream when that expiry passes;
 * a JWT's stream ends when its ``exp`` passes, not an hour later.
 
 Each is read back from ``GET /metrics``: ``mcp_hangar_tool_list_changed_streams_ended_total``
@@ -23,6 +24,7 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -154,3 +156,24 @@ def test_a_jwt_stream_ends_when_the_token_expires(gateway: _Gateway) -> None:
 
     assert stream.ended_within(10), "the stream outlived its token"
     assert _ended(gateway.url, "credential_expired") == before + 1
+
+
+def test_an_api_key_stream_ends_when_the_key_expires(gateway: _Gateway) -> None:
+    before = _ended(gateway.url, "credential_expired")
+    expires_at = datetime.now(UTC) + timedelta(seconds=6)
+    created = httpx.post(
+        f"{gateway.url}/api/auth/keys",
+        headers={"X-API-Key": gateway.operator},
+        json={"principal_id": "svc:short-lived", "name": "short-lived", "expires_at": expires_at.isoformat()},
+        timeout=5.0,
+    )
+    assert created.status_code == 201, created.text[:300]
+    key = created.json()["raw_key"]
+
+    stream = _Stream(gateway.url, {"X-API-Key": key})
+    assert stream.status == "200"
+    assert "list_changed" in stream.events.get(timeout=5)
+
+    assert stream.ended_within(10), "the stream outlived its expired API key"
+    assert _ended(gateway.url, "credential_expired") == before + 1
+    assert _Stream(gateway.url, {"X-API-Key": key}).status == "401"
