@@ -54,7 +54,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry
+from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry, Saga
 
 logger = get_logger(__name__)
 
@@ -994,6 +994,77 @@ def _recorded_call_outcome(span: Any) -> str | None:
         return (getattr(span, "attributes", None) or {}).get(Gate.CALL_OUTCOME)
     except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
         return None
+
+
+def record_caught_failure(span: Any, error: BaseException) -> None:
+    """End a span a fault barrier caught ``error`` in: ERROR, unless it is an expected refusal.
+
+    A refusal keeps the `error.type` that names it and leaves the status UNSET
+    (ADR-029 s5), the rule `_TextFreeTracer` applies to an escaping exception.
+    """
+    if isinstance(error, ExpectedRefusal):
+        _set_error_type_if_absent(span, type(error).__qualname__)
+        return
+    record_handled_failure(span, error)
+
+
+def record_ambient_failure(error: BaseException) -> None:
+    """`record_caught_failure` on the ambient span, when there is a real one. Never raises."""
+    try:
+        span = _ambient_span()
+        if span is not None:
+            record_caught_failure(span, error)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break the caller
+        logger.debug("ambient_failure_record_failed")
+
+
+def record_saga_step(name: str, outcome: str) -> None:
+    """Record one saga step's outcome as an event on the ambient `saga.run` span (#1296). Never raises."""
+    try:
+        span = _ambient_span()
+        if span is not None:
+            span.add_event(Saga.STEP_EVENT, {Saga.STEP_NAME: bounded_error_type(name), Saga.STEP_OUTCOME: outcome})
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a saga
+        logger.debug("saga_step_event_failed", step=name)
+
+
+def current_traceparent() -> str | None:
+    """The ambient span as a W3C ``traceparent`` string, None when there is no real span.
+
+    The origin of scheduled work is kept as this string, as data and never as
+    an SDK object (ADR-029 s8). Never raises.
+    """
+    try:
+        if _ambient_span() is None:
+            return None
+        carrier: dict[str, Any] = {}
+        _get_propagator().inject(carrier)
+        origin = carrier.get("traceparent")
+        return origin if isinstance(origin, str) else None
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break scheduling
+        return None
+
+
+def new_trace_linked_to(origin: str | None) -> dict[str, Any]:
+    """Keyword arguments that start a span in a new trace, linked to ``origin`` (ADR-029 s2, s8).
+
+    Scheduled work is not a child of what scheduled it: the cause is a timer,
+    so it is a link. An absent or malformed origin gives no link -- an unknown
+    cause is never invented -- and the span is still a new root, not a child of
+    whatever context the firing thread happens to hold.
+    """
+    try:
+        from opentelemetry import trace as _trace
+        from opentelemetry.context import Context
+
+        kwargs: dict[str, Any] = {"context": Context()}
+        if origin:
+            carried = _trace.get_current_span(_get_propagator().extract({"traceparent": origin})).get_span_context()
+            if carried.is_valid:
+                kwargs["links"] = [_trace.Link(carried)]
+        return kwargs
+    except Exception:  # noqa: BLE001 -- fault barrier: a bad origin must not stop the command
+        return {}
 
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
