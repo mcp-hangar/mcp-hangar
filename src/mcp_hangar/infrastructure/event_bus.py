@@ -6,7 +6,7 @@ Supports optional event persistence via IEventStore.
 
 import threading
 from collections.abc import Callable
-from typing import Final
+from typing import Any, Final
 
 from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
 from mcp_hangar.domain.contracts.event_bus import HandlerKind, IEventBus
@@ -14,10 +14,12 @@ from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStor
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
+from mcp_hangar.errors import bounded_error_type
 from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_error
-from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
+from mcp_hangar.observability.conventions import EventDelivery
+from mcp_hangar.observability.tracing import get_tracer, record_event_handled, record_handled_failure
 from mcp_hangar.stream_ids import stream_id_for, stream_id_for_event
 
 logger = get_logger(__name__)
@@ -346,9 +348,9 @@ class EventBus(IEventBus):
         Args:
             event: An event read from the shared log, produced elsewhere.
         """
-        self._deliver(event, tailed=True)
+        self._deliver(event, mode=EventDelivery.TAILED)
 
-    def _deliver(self, event: DomainEvent, *, tailed: bool = False) -> None:
+    def _deliver(self, event: DomainEvent, *, mode: str = EventDelivery.LIVE) -> None:
         """Hand an event to its handlers. No persistence, no stream.
 
         Split out of `publish` so that `publish_to_stream` can deliver without
@@ -359,18 +361,24 @@ class EventBus(IEventBus):
 
         Args:
             event: The event to hand over.
-            tailed: Whether this event was read from the shared log rather than
-                produced here. Tailed events reach projections only.
+            mode: How the event reached this bus (`EventDelivery.LIVE`,
+                `TAILED` or `RECOVERED`). A tailed event was read from the
+                shared log rather than produced here and reaches projections only.
         """
         event_type_name = event.__class__.__name__
+        tailed = mode == EventDelivery.TAILED
         with self._lock:
             resolved = self._resolve_handlers(type(event))
-        handlers = [handler for handler, kind in resolved if not tailed or kind is HandlerKind.PROJECTION]
+        handlers = [(handler, kind) for handler, kind in resolved if not tailed or kind is HandlerKind.PROJECTION]
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span(f"event.publish.{event_type_name}") as evt_span:
             evt_span.set_attribute("event.type", event_type_name)
             evt_span.set_attribute("event.handlers_count", len(handlers))
+            # Bounded: an id and a minted instance name, never the payload.
+            evt_span.set_attribute(EventDelivery.EVENT_ID, bounded_error_type(event.event_id))
+            evt_span.set_attribute(EventDelivery.PRODUCER, bounded_error_type(event.produced_by))
+            evt_span.set_attribute(EventDelivery.MODE, mode)
 
             logger.debug(
                 "event_publishing",
@@ -379,7 +387,7 @@ class EventBus(IEventBus):
             )
 
             # Call handlers outside the lock
-            for handler in handlers:
+            for handler, kind in handlers:
                 try:
                     handler(event)
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: handler errors must not break other handlers
@@ -397,6 +405,9 @@ class EventBus(IEventBus):
                         error=str(e),
                     )
                     record_handled_failure(evt_span, e)
+                    record_event_handled(evt_span, handler, kind.value, e)
+                else:
+                    record_event_handled(evt_span, handler, kind.value)
 
             # Hook fan-out: deliver phase-wrapped event to hook subscribers.
             # Default phase is OBSERVE for events published via the flat API;
@@ -404,17 +415,12 @@ class EventBus(IEventBus):
             # code lands (issue #121).
             self._publish_hook(event, HookPhase.OBSERVE, evt_span)
 
-    def _deliver_unpersisted(
-        self,
-        stream_id: str,
-        events: list[DomainEvent],
-        span: object,
-        error: Exception,
-    ) -> None:
-        """Deliver a batch the store did not take, and say loudly that its record is missing.
+    def _append_failed(self, stream_id: str, events: list[DomainEvent], span: Any, error: Exception) -> None:
+        """Say loudly that a batch the store did not take has no record; `publish_to_stream` still delivers it.
 
-        Called from an `except` block when persistence failed for an
-        infrastructure reason: disk full, database locked, backend gone. For a
+        Called from an `except` block, inside the `event_store.append` span,
+        when persistence failed for an infrastructure reason: disk full,
+        database locked, backend gone. For a
         batch appended at the end, it is also called when a store that cannot do
         that atomically lost the race on every retry. Delivering nothing here
         would be the worse failure. Metrics, audit, security and enforcement
@@ -425,7 +431,9 @@ class EventBus(IEventBus):
 
         So: deliver, and say loudly that the record is missing. The events are
         gone from the log for good. There is no retry queue in front of a store
-        that just failed.
+        that just failed. The delivery itself runs after the append span ends,
+        so the append's duration is the store's alone and the delivery is its
+        sibling, as it is on success (#1280).
         """
         logger.error(
             "event_persistence_failed",
@@ -436,8 +444,7 @@ class EventBus(IEventBus):
             exc_info=True,
         )
         record_handled_failure(span, error)
-        for event in events:
-            self._deliver(event)
+        span.set_attribute(EventDelivery.APPEND_OUTCOME, EventDelivery.FAILED)
 
     def publish_to_stream(
         self,
@@ -477,6 +484,7 @@ class EventBus(IEventBus):
             store_span.set_attribute("event_store.events_count", len(events))
             store_span.set_attribute("event_store.expected_version", expected_version)
 
+            appended = False
             try:
                 if at_end:
                     # No optimistic-concurrency claim: the caller is appending to
@@ -499,25 +507,32 @@ class EventBus(IEventBus):
                 if not at_end:
                     # A genuine conflict is the caller's business, not something to
                     # paper over: someone else wrote where this caller expected to.
+                    store_span.set_attribute(EventDelivery.APPEND_OUTCOME, EventDelivery.CONFLICT)
                     raise
                 # Only a store that cannot append at the end atomically, and lost
                 # the race on every retry, gets here. The batch claimed nothing,
                 # so this is not a conflict to hand back. It is an outage, and it
                 # is delivered like one.
-                self._deliver_unpersisted(stream_id, events, store_span, e)
-                return expected_version
-            except Exception as e:  # noqa: BLE001 -- see `_deliver_unpersisted`; the store is not allowed to take delivery down with it
-                self._deliver_unpersisted(stream_id, events, store_span, e)
-                return expected_version
+                self._append_failed(stream_id, events, store_span, e)
+            except Exception as e:  # noqa: BLE001 -- see `_append_failed`; the store is not allowed to take delivery down with it
+                self._append_failed(stream_id, events, store_span, e)
+            else:
+                appended = True
+                store_span.set_attribute("event_store.new_version", new_version)
+                store_span.set_attribute(EventDelivery.APPEND_OUTCOME, EventDelivery.APPENDED)
 
-            store_span.set_attribute("event_store.new_version", new_version)
+                logger.debug(
+                    "events_persisted",
+                    stream_id=stream_id,
+                    events_count=len(events),
+                    new_version=new_version,
+                )
 
-            logger.debug(
-                "events_persisted",
-                stream_id=stream_id,
-                events_count=len(events),
-                new_version=new_version,
-            )
+        if not appended:
+            # Delivered unpersisted, outside the append span: see `_append_failed`.
+            for event in events:
+                self._deliver(event)
+            return expected_version
 
         # Then publish to handlers, on this thread, before returning -- the
         # delivery semantics are unchanged, and deliberately so: metrics, audit,
@@ -589,7 +604,7 @@ class EventBus(IEventBus):
             # the store. Publishing them would append them again, so every
             # restart would rewrite its own tail into the log and the history
             # would grow a duplicate copy of itself each time.
-            self._deliver(event)
+            self._deliver(event, mode=EventDelivery.RECOVERED)
             self._dispatch_checkpoint.advance(position)
             delivered += 1
 

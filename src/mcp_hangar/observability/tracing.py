@@ -54,7 +54,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, Gate, GenAI, Retry
+from mcp_hangar.observability.conventions import MCP, EventDelivery, Gate, GenAI, Retry
 
 logger = get_logger(__name__)
 
@@ -922,6 +922,31 @@ def record_retry_attempt(layer: str, index: int, reason: str, backoff_s: float) 
         )
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a retry
         logger.debug("retry_event_failed", layer=layer, index=index)
+
+
+def record_event_handled(span: Any, handler: Any, kind: str, error: BaseException | None = None) -> None:
+    """Record one event handler's run as an event on its `event.publish.<Type>` span (#1280).
+
+    An event, not a span: delivery runs for every live, tailed and recovered
+    event, and a span per handler would multiply the trace by the handler count.
+    The handler is named by its bounded `__qualname__`, never by its repr or
+    arguments; a failure adds its bounded class name as `error.type`. The span's
+    ERROR status stays `record_handled_failure`'s job. Never raises.
+    """
+    try:
+        if not span.is_recording():
+            return
+        name = getattr(handler, "__qualname__", None) or type(handler).__qualname__
+        attributes = {
+            EventDelivery.HANDLER_NAME: bounded_error_type(name),
+            EventDelivery.HANDLER_KIND: kind,
+            EventDelivery.HANDLER_OUTCOME: EventDelivery.SUCCESS if error is None else EventDelivery.ERROR,
+        }
+        if error is not None:
+            attributes[ERROR_TYPE] = bounded_error_type(type(error).__qualname__)
+        span.add_event(EventDelivery.HANDLED_EVENT, attributes)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break delivery
+        logger.debug("event_handled_record_failed", kind=kind)
 
 
 def _ambient_span() -> Any:
