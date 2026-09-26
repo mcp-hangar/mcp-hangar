@@ -33,6 +33,9 @@ class Received:
     status_code: int = 0  # proto Status.StatusCode; 2 is ERROR. 0 for a log record
     status_message: str = ""  # the span status description; "" for a log record
     events: tuple[tuple[str, dict[str, Any]], ...] = ()  # (name, attributes) per span event
+    span_id: str = ""  # hex; "" for a log record
+    parent_span_id: str = ""  # hex; "" for a root span or a log record
+    links: tuple[tuple[str, str], ...] = ()  # (trace_id, span_id) hex per span link
 
 
 def _value(any_value: Any) -> Any:
@@ -101,6 +104,9 @@ class OtlpReceiver:
                             status_code=span.status.code,
                             status_message=span.status.message,
                             events=tuple((e.name, _attributes(e.attributes)) for e in span.events),
+                            span_id=span.span_id.hex(),
+                            parent_span_id=span.parent_span_id.hex(),
+                            links=tuple((link.trace_id.hex(), link.span_id.hex()) for link in span.links),
                         )
                         self._spans.append((resource, record))
 
