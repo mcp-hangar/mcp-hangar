@@ -20,6 +20,7 @@ for every adjacent pair that can be co-triggered. Written before splitting the
 function, so the split has something to be wrong against.
 """
 
+from concurrent import futures as concurrent_futures
 from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
@@ -96,16 +97,42 @@ def ctx():
         yield context
 
 
+def _as_completed_once_every_call_has_run(fs, timeout=None):
+    """`as_completed`, entered only after every call's gates have run.
+
+    A spent budget (`global_timeout <= 0`) is refused twice over, by two threads
+    racing: the call's `global_timeout` gate on the worker, and the collecting
+    thread, whose `as_completed(timeout=<=0)` times out at once and sets the
+    batch's cancel event. When the collector wins, the worker's FIRST gate sees
+    the event and the call reads "Cancelled before execution" -- a real answer,
+    but not the gate these tests are about. Serially the worker nearly always
+    won; on a loaded runner (pytest-xdist, four workers) it lost often enough
+    to fail CI. Letting the worker finish first leaves the gates exactly as the
+    executor runs them; `as_completed` then yields the finished future before
+    it ever checks the timeout.
+    """
+    concurrent_futures.wait(fs)
+    return concurrent_futures.as_completed(fs, timeout=timeout)
+
+
 def _run(*, global_timeout: float = 30.0) -> object:
     token = identity_context_var.set(_identity(_TENANT))
     try:
-        batch = BatchExecutor().execute(
-            batch_id="b",
-            calls=[CallSpec(index=0, call_id="c-1", mcp_server=_SERVER, tool=_TOOL, arguments={})],
-            max_concurrency=1,
-            global_timeout=global_timeout,
-            fail_fast=False,
-        )
+        with ExitStack() as stack:
+            if global_timeout <= 0:
+                stack.enter_context(
+                    patch(
+                        "mcp_hangar.server.tools.batch.executor.as_completed",
+                        _as_completed_once_every_call_has_run,
+                    )
+                )
+            batch = BatchExecutor().execute(
+                batch_id="b",
+                calls=[CallSpec(index=0, call_id="c-1", mcp_server=_SERVER, tool=_TOOL, arguments={})],
+                max_concurrency=1,
+                global_timeout=global_timeout,
+                fail_fast=False,
+            )
     finally:
         identity_context_var.reset(token)
     return batch.results[0]
