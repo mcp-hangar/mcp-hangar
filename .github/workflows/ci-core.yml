@@ -341,7 +341,7 @@ jobs:
           coverage combine coverage-data
           coverage json -o coverage.json
           coverage xml -o coverage.xml
-          total=$(coverage report --format=total)
+          total=$(coverage report --format=total --precision=2)
           echo "Combined line+branch coverage, unit + integration: ${total}%" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce decision-path floors
