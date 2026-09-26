@@ -66,7 +66,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from mcp.shared.inbound import MCP_PARAM_HEADER_PREFIX, find_invalid_x_mcp_header
+from mcp.shared.inbound import (
+    MCP_PARAM_HEADER_PREFIX,
+    find_invalid_x_mcp_header,
+    validate_mcp_param_headers,
+    x_mcp_header_map,
+)
 
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
@@ -84,7 +89,7 @@ from mcp_hangar.domain.policies.header_exposure import get_header_exposure_polic
 
 from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
-from ..context import PARAM_VALIDATION_STATE_ATTR, get_identity_context
+from ..context import PARAM_VALIDATED_HEADERS_ATTR, PARAM_VALIDATION_STATE_ATTR, get_identity_context
 from ..domain.services import progress_relay
 from ..domain.services.governance_overlays import read_as_one_set
 from ..domain.services.tool_access_resolver import PolicyKind, get_tool_access_resolver
@@ -691,7 +696,10 @@ def _call_carries_param_check(mcp_ctx: Any) -> bool:
 
 
 def _observe_param_header_skips(mcp_ctx: Any, governed: list[MCPTool], management: list[MCPTool]) -> None:
-    """Count an SDK Mcp-Param skip that this pre-dispatch listing made visible (#1053)."""
+    """Count an SDK Mcp-Param skip that this pre-dispatch listing made visible (#1053).
+
+    Otherwise keep the schema the SDK is about to check the headers against (#1597).
+    """
     if not _call_carries_param_check(mcp_ctx):
         return
     params = _envelope(mcp_ctx).get("params")
@@ -702,6 +710,10 @@ def _observe_param_header_skips(mcp_ctx: Any, governed: list[MCPTool], managemen
         return
     if find_invalid_x_mcp_header(match.input_schema) is not None:
         prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="invalid_annotation")
+        return
+    state = getattr(_http_request(mcp_ctx), "state", None)
+    if state is not None:
+        setattr(state, _CHECKED_SCHEMA_ATTR, match.input_schema)
 
 
 def _observe_legacy_param_skip(mcp_ctx: Any) -> None:
@@ -754,6 +766,38 @@ def _mark_param_validation_skipped(mcp_ctx: Any) -> None:
     state = getattr(_http_request(mcp_ctx), "state", None)
     if state is not None:
         setattr(state, PARAM_VALIDATION_STATE_ATTR, True)
+
+
+#: The called tool's schema, left by the pre-dispatch listing when the SDK can check against it (#1597).
+_CHECKED_SCHEMA_ATTR = "hangar_param_checked_schema"
+
+
+def _record_validated_param_headers(mcp_ctx: Any, arguments: Any) -> None:
+    """Record on this POST the headers known to agree with its body; a failure records none."""
+    try:
+        setattr(
+            _http_request(mcp_ctx).state, PARAM_VALIDATED_HEADERS_ATTR, _validated_param_headers(mcp_ctx, arguments)
+        )
+    except Exception:  # noqa: BLE001 -- never break a call over a header nobody will then match
+        pass
+
+
+def _validated_param_headers(mcp_ctx: Any, arguments: Any) -> frozenset[str]:
+    """The ``Mcp-Param-*`` headers of this call known to agree with its body, lower-cased.
+
+    The SDK compares only the called tool's declared headers, and any other one
+    passes unread. The SDK's own check is re-run on the schema the listing left,
+    so the answer is a fact about this request and not an inference (ADR-025).
+    """
+    request = _http_request(mcp_ctx)
+    schema = getattr(getattr(request, "state", None), _CHECKED_SCHEMA_ATTR, None)
+    headers = getattr(request, "headers", None)
+    if schema is None or headers is None or _param_validation_skipped(mcp_ctx):
+        return frozenset()
+    body = arguments if isinstance(arguments, Mapping) else {}
+    if find_invalid_x_mcp_header(schema) is not None or validate_mcp_param_headers(schema, body, headers) is not None:
+        return frozenset()
+    return frozenset(f"{MCP_PARAM_HEADER_PREFIX}{token}".lower() for token in x_mcp_header_map(schema).values())
 
 
 def _param_validation_skipped(mcp_ctx: Any) -> bool:
@@ -1267,6 +1311,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
             # The L7 egress evaluator selects on Mcp-Param-* (#1058), and the
             # aggregate that runs it is several frames and one worker thread
             # away; this is the last place the HTTP request is in hand.
+            _record_validated_param_headers(ctx, params.arguments)
             headers_token = bind_routing_headers(ctx)
             try:
                 return await _call_v2_inner(params, ctx)

@@ -21,7 +21,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from mcp_hangar.context import get_routing_headers, routing_headers_var
+from mcp_hangar.context import PARAM_VALIDATED_HEADERS_ATTR, get_routing_headers, routing_headers_var
 from mcp_hangar.domain.policies.egress_l7 import (
     HeaderMatch,
     HeaderRules,
@@ -46,10 +46,14 @@ POLICY = L7Policy(
 
 
 def _request_ctx(region: str) -> SimpleNamespace:
-    """A FastMCP request context for a POST carrying one ``Mcp-Param-*`` header."""
+    """A FastMCP request context for a POST carrying one ``Mcp-Param-*`` header.
+
+    The front door has recorded the header as checked against the body, as it
+    does for a flat tool that declares it (#1597).
+    """
     request = SimpleNamespace(
         headers={"mcp-param-region": region, "mcp-protocol-version": MODERN},
-        state=SimpleNamespace(),
+        state=SimpleNamespace(**{PARAM_VALIDATED_HEADERS_ATTR: frozenset({"mcp-param-region"})}),
     )
     return SimpleNamespace(
         request_context=SimpleNamespace(meta={_META_PROTOCOL_VERSION_KEY: CLIENT_VERSION}, request=request)
