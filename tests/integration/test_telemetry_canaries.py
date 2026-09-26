@@ -249,7 +249,7 @@ CONTRACT["ws_events"] = dict(_RETAINED)
 
 #: Cells tracked outside this suite. Each is a strict xfail, so the change that
 #: resolves one has to delete its entry here.
-TRACKED_SEPARATELY = frozenset({("structured_logs", "approver_reason")})
+TRACKED_SEPARATELY: frozenset[tuple[str, str]] = frozenset()
 
 
 def _cells() -> Iterator[Any]:
