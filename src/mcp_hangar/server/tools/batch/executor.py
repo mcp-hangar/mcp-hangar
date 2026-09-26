@@ -49,6 +49,13 @@ from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....domain.value_objects.truncation import ContinuationOwner
 from ....errors import bounded_error_type
+from ....infrastructure.observability.l7_verdicts import (
+    L7Decision,
+    L7VerdictHolder,
+    bounded_l7_decision,
+    holding_l7_verdict,
+    record_l7_decision,
+)
 from ....infrastructure.observability.startup_spans import StartupSpanAdapter
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
@@ -136,6 +143,10 @@ _GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalR
 #: this set to the exceptions carrying that marker, so a new one cannot be
 #: recorded as a failure here while the tracer treats it as a refusal.
 _REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError", "RateLimitExceeded"})
+
+#: The dispatch refusals the aggregate's L7 policy raises (#1295). Their log line
+#: carries the verdict's bounded fields, not the policy's joined reasons.
+_L7_REFUSALS = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError"})
 
 
 def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
@@ -853,7 +864,7 @@ def _retry_policy_for(call: Any) -> RetryPolicy | None:
     return replace(configured, max_attempts=attempts)
 
 
-def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float) -> None:
+def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float, l7: L7Decision | None = None) -> None:
     """Log a failed call, loudly when the failure was a deliberate refusal.
 
     A policy refusal and an upstream blowing up are not the same class of event
@@ -866,11 +877,21 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float)
     is a warning and it says why. Everything else keeps the debug level: an
     upstream failure is already reported to the caller in the CallResult, and
     raising it here would make a batch of failing calls a log flood.
+
+    An L7 refusal logs the verdict's bounded fields from *l7*, the reading the
+    call's span got, and not `reason`: that was the policy's reasons joined into
+    free text (#1295, #1276 R7). One refused because its arguments could not be
+    inspected is `batch_call_failed`, as its span's outcome is `error`, still at
+    warning: the call was refused.
     """
     details = getattr(error, "details", None)
-    reason = details.get("reason") if isinstance(details, dict) else None
-    refused = error_type in _REFUSED_AT_DISPATCH
-    log = logger.warning if refused else logger.debug
+    if error_type in _L7_REFUSALS:
+        fields = l7.log_fields() if l7 is not None else {"l7_verdict": None}
+    else:
+        fields = {"reason": details.get("reason") if isinstance(details, dict) else None}
+    evaluator_failed = l7 is not None and l7.evaluator_failed
+    refused = error_type in _REFUSED_AT_DISPATCH and not evaluator_failed
+    log = logger.warning if refused or evaluator_failed else logger.debug
     log(
         "batch_call_refused" if refused else "batch_call_failed",
         call_id=call.call_id,
@@ -878,9 +899,9 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float)
         tool=call.tool,
         error=str(error),
         error_type=error_type,
-        reason=reason,
         policy_id=getattr(error, "policy_id", None),
         elapsed_ms=round(elapsed_ms, 2),
+        **fields,
     )
 
 
@@ -2537,6 +2558,9 @@ class BatchExecutor:
         # Which attempt is running, so each `command.send` span says which one it
         # is (#1287). A list, not an int, because `do_invoke` closes over it.
         attempt_index = [0]
+        # The L7 verdict of the latest attempt (#1295): a refusal is never
+        # retried, so the last attempt's verdict is the call's.
+        l7_holder = [L7VerdictHolder()]
 
         def do_invoke() -> dict[str, Any]:
             attempt_index[0] += 1
@@ -2557,7 +2581,9 @@ class BatchExecutor:
                     l7_approval_id=getattr(_approval_loop_local, "approval_id", None),
                     progress_token=call.progress_token,
                 )
-                result = ctx.command_bus.send(command)
+                l7_holder[0] = L7VerdictHolder()
+                with holding_l7_verdict(l7_holder[0]):
+                    result = ctx.command_bus.send(command)
                 cmd_span.set_attribute("command.result", "success")
                 return cast(dict[str, Any], result)
 
@@ -2585,6 +2611,7 @@ class BatchExecutor:
                 retry_span.set_attribute("retry.attempts", retry_result.attempt_count)
                 retry_span.set_attribute("retry.success", retry_result.success)
                 retry_span.set_attribute(Retry.OUTCOME, _retry_outcome(retry_result))
+            l7 = _l7_decision(l7_holder[0])
             if retry_result.success:
                 result = retry_result.result
             else:
@@ -2593,7 +2620,7 @@ class BatchExecutor:
                 error_type = type(retry_result.final_error).__name__ if retry_result.final_error else "UnknownError"
                 error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
-                _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms)
+                _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms, l7)
 
                 return CallResult(
                     index=call.index,
@@ -2603,6 +2630,7 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(retry_result.final_error),
+                    l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                     retry_metadata=RetryMetadata(
                         attempts=retry_result.attempt_count,
                         retries=[a.error_type for a in retry_result.attempts],
@@ -2616,8 +2644,9 @@ class BatchExecutor:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: tool invocation failure must return error result, not crash batch
                 elapsed_ms = (time.perf_counter() - call_start) * 1000
                 error_type = type(e).__name__
+                l7 = _l7_decision(l7_holder[0])
 
-                _log_call_failure(call, e, error_type, elapsed_ms)
+                _log_call_failure(call, e, error_type, elapsed_ms, l7)
 
                 return CallResult(
                     index=call.index,
@@ -2627,7 +2656,10 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(e),
+                    l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                 )
+            else:
+                _l7_decision(l7_holder[0])
 
         # Interceptor mutators (response): transform the returned result payload
         # after a successful invoke, before the size check and building the
@@ -2714,6 +2746,23 @@ def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, s
     return Gate.ALLOW, None, None
 
 
+def _l7_decision(holder: L7VerdictHolder) -> L7Decision | None:
+    """The L7 verdict of the call's last attempt, bounded and set on its span (#1295). Never raises.
+
+    One reading for both sinks, as `_gate_decision` is for a gate: the span's
+    `hangar.l7.*` and the refusal's log line come from this value, and nothing
+    classifies the call again or evaluates the policy a second time.
+    """
+    try:
+        decision = bounded_l7_decision(holder.verdict)
+        if decision is not None:
+            record_l7_decision(decision)
+        return decision
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
+        logger.debug("l7_observation_failed")
+        return None
+
+
 def _log_gate_outcome(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
     """Log the gate that stopped this call: one line, at the level it deserves.
 
@@ -2772,7 +2821,9 @@ def _observe_call(result: CallResult, *, refused_by_gate: bool) -> None:
         error_type = result.error_type or ""
         if result.success:
             outcome = Gate.ALLOW
-        elif error_type in _GATE_ERRORS:
+        elif error_type in _GATE_ERRORS or result.l7_evaluator_failed:
+            # An L7 refusal of arguments it could not inspect: the verdict is a
+            # denial, but the evaluator broke (#1295, ADR-029 s5).
             outcome = Gate.ERROR
         elif refused_by_gate or error_type in _REFUSED_AT_DISPATCH:
             outcome = Gate.DENY

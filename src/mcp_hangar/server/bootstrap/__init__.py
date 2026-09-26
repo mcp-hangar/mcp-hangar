@@ -58,7 +58,12 @@ from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
 from .hot_loading import init_hot_loading
 from .logs import init_log_buffers
-from .observability import init_metrics_publisher, init_observability, shutdown_observability
+from .observability import (
+    init_l7_verdict_observer,
+    init_metrics_publisher,
+    init_observability,
+    shutdown_observability,
+)
 from .reachability import (
     SubsystemRequirement,
     check_subsystem_reachability,
@@ -431,6 +436,7 @@ def bootstrap(
     # Before `load_config` below, which is where McpServer instances are
     # constructed and where they read the default publisher.
     init_metrics_publisher()
+    init_l7_verdict_observer()
 
     # Ensure data directory exists
     _ensure_data_dir()

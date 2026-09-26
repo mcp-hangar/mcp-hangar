@@ -70,6 +70,8 @@ SCENARIO = {
     "baggage": "argument",
     "header": "argument",
     "approver_reason": "approval",
+    "l7_argument": "argument",
+    "l7_header": "argument",
 }
 
 
@@ -80,8 +82,8 @@ def _unreachable_endpoint() -> str:
         return f"http://127.0.0.1:{probe.getsockname()[1]}"
 
 
-def _run(surface: str, tmp: Path) -> dict[str, Any]:
-    directory = tmp / surface
+def _run(surface: str, tmp: Path, l7_mode: str = "audit") -> dict[str, Any]:
+    directory = tmp / f"{surface}-{l7_mode}"
     directory.mkdir()
     out = directory / "run.json"
     # The limits are read from the environment; the suite checks the defaults.
@@ -93,7 +95,7 @@ def _run(surface: str, tmp: Path) -> dict[str, Any]:
     env.update({"MCP_COMPLIANCE_FORMAT": "cef", "MCP_COMPLIANCE_OUTPUT": str(directory / "cef.log")})
     # Under the 60s pytest-timeout the integration job applies.
     result = subprocess.run(
-        [sys.executable, str(HARNESS), surface, str(out), _unreachable_endpoint()],
+        [sys.executable, str(HARNESS), surface, str(out), _unreachable_endpoint(), l7_mode],
         capture_output=True,
         text=True,
         timeout=45,
@@ -230,7 +232,17 @@ class Redacted:
         assert {m[self.key] for m in ours} == {self.marker}, [m[self.key] for m in ours]
 
 
-Rule = Forbidden | Bounded | Kept | Redacted
+@dataclass(frozen=True)
+class ShapeRedacted:
+    """Kept as sent except its secret-shaped part, which the argument redactor replaced by shape."""
+
+    def check(self, records: list[Any], kind: str, transport: str) -> None:
+        strings = list(_strings(records))
+        assert any(head(kind, transport) in s for s in strings), "the sink is meant to keep this input"
+        assert not [s for s in strings if canary(kind, transport) in s], "the secret-shaped part was kept"
+
+
+Rule = Forbidden | Bounded | Kept | Redacted | ShapeRedacted
 
 #: What #1276 allows each sink to carry; every cell it leaves out is ``Forbidden``.
 #: The event store and ``/ws/events`` are the one different trust boundary: they
@@ -242,6 +254,9 @@ _RETAINED: dict[str, Rule] = {
     "is_error": Bounded(EVENT_TEXT_LENGTH_LIMIT),
     "rpc_error": Bounded(EVENT_TEXT_LENGTH_LIMIT),
     "approver_reason": Bounded(EVENT_TEXT_LENGTH_LIMIT),
+    # The L7 canaries are arguments too (#1295); `l7_header` mirrors one.
+    "l7_argument": ShapeRedacted(),
+    "l7_header": Kept(),
 }
 CONTRACT: dict[str, dict[str, Rule]] = {sink: {} for sink in SINKS}
 CONTRACT["event_store"] = dict(_RETAINED)
@@ -310,6 +325,10 @@ def _upstream_calls(run: dict[str, Any], transport: str) -> list[dict[str, Any]]
     return [r for r in run["upstream_seen"][transport] if r["method"] == "tools/call"]
 
 
+#: kind -> the argument key it is sent under.
+_ARGUMENT_KEYS = {"argument": "note", "secret_argument": "api_token", "l7_argument": "ref", "l7_header": "region"}
+
+
 @pytest.mark.parametrize("surface", SURFACES)
 @pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("kind", KINDS)
@@ -319,8 +338,8 @@ def test_the_canary_went_in(runs, surface, kind, transport):
     response = run["calls"][f"{transport}:{SCENARIO[kind]}"]
     assert "result" in response, response
 
-    if kind in ("argument", "secret_argument"):
-        key = "note" if kind == "argument" else "api_token"
+    if kind in _ARGUMENT_KEYS:
+        key = _ARGUMENT_KEYS[kind]
         sent = [(r.get("arguments") or {}).get(key) for r in _upstream_calls(run, transport)]
         assert canary(kind, transport) in sent, sent
     elif kind in ("result", "is_error", "rpc_error", "approver_reason"):
@@ -409,3 +428,49 @@ def test_no_free_text_event_field_exceeds_its_bound(runs, surface, sink):
     values = (e[k] for e in runs[surface][sink] for k in FREE_TEXT_FIELDS if isinstance(e.get(k), str))
 
     assert _long_strings(values, EVENT_TEXT_LENGTH_LIMIT) == []
+
+
+# --- the L7 canaries were matched, and an Enforce run refuses them (#1295) ----
+
+
+def _l7_spans(run: dict[str, Any]) -> list[dict[str, Any]]:
+    return [s["attributes"] for s in run["spans"] if "hangar.l7.verdict" in s["attributes"]]
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_the_audit_policy_observed_the_l7_canaries(runs, surface):
+    """Both canaries went through the policy: an absence of them elsewhere is then a result."""
+    verdicts = {(a["hangar.l7.verdict"], a.get("hangar.l7.rule_kind")) for a in _l7_spans(runs[surface])}
+
+    assert ("audit_observed", "argument") in verdicts, verdicts
+
+
+@pytest.fixture(scope="module")
+def enforced(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any]]:
+    tmp = tmp_path_factory.mktemp("canaries-enforced")
+    with ThreadPoolExecutor(max_workers=len(SURFACES)) as pool:
+        pending = {surface: pool.submit(_run, surface, tmp, "enforce") for surface in SURFACES}
+        return {surface: future.result() for surface, future in pending.items()}
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("sink", [sink for sink in SINKS if not CONTRACT[sink]])
+@pytest.mark.parametrize("kind", ["l7_argument", "l7_header"])
+def test_an_enforced_refusal_keeps_the_l7_canaries_off_telemetry(enforced, surface, sink, kind):
+    """The deny path writes its own lines and events; none of them may carry what the policy matched."""
+    for transport in TRANSPORTS:
+        Forbidden().check(SINKS[sink](enforced[surface]), kind, transport)
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_an_enforced_refusal_logs_the_verdict_not_the_policy_reasons(enforced, surface):
+    lines = [r for r in _logs(enforced[surface]) if isinstance(r, dict) and r.get("event") == "batch_call_refused"]
+    l7 = [r for r in lines if r.get("error_type") == "EgressPolicyDeniedError"]
+
+    assert len(l7) == len(TRANSPORTS), lines
+    for line in l7:
+        assert (line["l7_verdict"], line["l7_mode"], line["l7_rule_kind"]) == ("deny", "enforce", "argument")
+        assert "reason" not in line
+        assert not [s for s in _strings(line) if "secret matching" in s or "aws-keys" in s or "matched" in s], line
+    verdicts = {a["hangar.l7.verdict"] for a in _l7_spans(enforced[surface])}
+    assert "deny" in verdicts, verdicts

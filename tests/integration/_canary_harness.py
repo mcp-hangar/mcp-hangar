@@ -90,7 +90,35 @@ SCENARIOS = {
 def arguments(tool: str, transport: str) -> dict[str, Any]:
     if tool != "note":
         return {}
-    return {"note": canary("argument", transport), "api_token": canary("secret_argument", transport)}
+    return {
+        "note": canary("argument", transport),
+        "api_token": canary("secret_argument", transport),
+        "ref": canary("l7_argument", transport),
+        "region": canary("l7_header", transport),
+    }
+
+
+def _l7_policy(mode: str) -> Any:
+    """What ``l7_argument`` and ``l7_header`` are matched by (#1295): a header allow, then a secret pattern.
+
+    Audit by default, so the call still reaches both upstreams; the suite's
+    one Enforce run refuses it. The globs name no canary.
+    """
+    from mcp_hangar.domain.policies.egress_l7 import (
+        ArgumentRules,
+        HeaderMatch,
+        HeaderRules,
+        L7Policy,
+        PolicyMode,
+        ToolAction,
+    )
+
+    return L7Policy(
+        headers=HeaderRules(allow=(HeaderMatch(name="Mcp-Param-Region", values=("CANARY-L7HEADER-*",)),)),
+        arguments=ArgumentRules(secret_patterns=("aws-keys",)),
+        default_action=ToolAction.ALLOW,
+        mode=PolicyMode.ENFORCE if mode == "enforce" else PolicyMode.AUDIT,
+    )
 
 
 #: The event types ``/api/ws/events`` is asked for, and read back from the store.
@@ -226,7 +254,9 @@ def _keys(context: Any) -> tuple[str, str]:
     return caller, observer
 
 
-def _post(client: Any, key: str, transport: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+def _post(
+    client: Any, key: str, transport: str, method: str, params: dict[str, Any], region: str | None = None
+) -> dict[str, Any]:
     """One stateless request to ``/mcp`` carrying the transport's baggage and header canaries; its response."""
     params = {**params, "_meta": {**ENVELOPE, "baggage": f"canary.meta={canary('baggage', transport)}"}}
     headers = {
@@ -238,6 +268,8 @@ def _post(client: Any, key: str, transport: str, method: str, params: dict[str, 
     }
     if "name" in params:
         headers["Mcp-Name"] = params["name"]
+    if region is not None:
+        headers["Mcp-Param-Region"] = region
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
     response = client.post("/mcp", headers=headers, content=body)
     response.raise_for_status()
@@ -249,10 +281,12 @@ def _post(client: Any, key: str, transport: str, method: str, params: dict[str, 
 
 def _call(client: Any, key: str, surface: str, transport: str, tool: str) -> dict[str, Any]:
     name, args = prefix(transport) + tool, arguments(tool, transport)
+    region = args.get("region")
     if surface == "front_door":
-        return _post(client, key, transport, "tools/call", {"name": name, "arguments": args})
+        return _post(client, key, transport, "tools/call", {"name": name, "arguments": args}, region)
     calls = [{"mcp_server": SERVERS[transport], "tool": name, "arguments": args}]
-    return _post(client, key, transport, "tools/call", {"name": "hangar_call", "arguments": {"calls": calls}})
+    params = {"name": "hangar_call", "arguments": {"calls": calls}}
+    return _post(client, key, transport, "tools/call", params, region)
 
 
 def _span(span: Any) -> dict[str, Any]:
@@ -271,7 +305,7 @@ def _read_lines(file: Path) -> list[str]:
     return file.read_text(encoding="utf-8").splitlines() if file.exists() else []
 
 
-def main(surface: str, out: Path, endpoint: str) -> None:
+def main(surface: str, out: Path, endpoint: str, l7_mode: str = "audit") -> None:
     directory = out.parent
     os.chdir(directory)  # bootstrap keeps its data, the event store among it, under ./data
 
@@ -308,6 +342,8 @@ def main(surface: str, out: Path, endpoint: str) -> None:
     config_file.write_text(json.dumps(_config(surface, endpoint, http_upstream, stdio_record)))
     context = bootstrap(config_path=str(config_file))
     caller_key, observer_key = _keys(context)
+    for server_id in SERVERS.values():
+        context.runtime.repository.get(server_id).set_l7_policy(_l7_policy(l7_mode))
 
     logger_provider = get_logger_provider()
     audit = InMemoryLogs()
@@ -385,4 +421,4 @@ def main(surface: str, out: Path, endpoint: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], Path(sys.argv[2]), sys.argv[3])
+    main(sys.argv[1], Path(sys.argv[2]), sys.argv[3], *sys.argv[4:])

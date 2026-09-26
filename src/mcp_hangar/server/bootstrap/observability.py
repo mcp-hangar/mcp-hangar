@@ -58,8 +58,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...application.ports.observability import SCRUB_PAYLOADS_BY_DEFAULT, NullObservabilityAdapter, ObservabilityPort
+from ...domain.contracts.l7_verdict_observer import set_default_l7_verdict_observer
 from ...domain.contracts.metrics_publisher import set_default_metrics_publisher
 from ...infrastructure.metrics_publisher import PrometheusMetricsPublisher
+from ...infrastructure.observability.l7_verdicts import ContextL7VerdictObserver
 from ...infrastructure.observability.otlp_audit_exporter import init_audit_log_export, shutdown_audit_log_export
 from ...logging_config import get_logger
 from .components import create_observability_adapter
@@ -302,6 +304,16 @@ def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
     except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse init failure must not crash application
         logger.warning("langfuse_initialization_failed", error=str(e))
         return NullObservabilityAdapter()
+
+
+def init_l7_verdict_observer() -> None:
+    """Connect the aggregate's L7 verdict port to the adapter the batch executor reads (#1295).
+
+    Without it every verdict goes to the Null object and `batch.call.<tool>`
+    carries no `hangar.l7.*`, as the cold-start metric carried nothing while
+    its publisher was never constructed (#1567).
+    """
+    set_default_l7_verdict_observer(ContextL7VerdictObserver())
 
 
 def init_metrics_publisher() -> None:

@@ -44,6 +44,8 @@ KINDS = (
     "baggage",  # inbound W3C baggage, as an HTTP header and in ``_meta``
     "header",  # an inbound HTTP header Hangar has no reason to read
     "approver_reason",  # a human approver's reason for a denial
+    "l7_argument",  # a tool argument an L7 egress policy's secret pattern matches (#1295)
+    "l7_header",  # an ``Mcp-Param-*`` value an L7 egress policy's header rule matches (#1295)
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
@@ -65,6 +67,8 @@ def tail(kind: str, transport: str) -> str | None:
 def canary(kind: str, transport: str) -> str:
     """The value injected for ``kind`` on ``transport``."""
     start, end = head(kind, transport), tail(kind, transport)
+    if kind == "l7_argument":  # shaped like an access key, so the `aws-keys` group matches it
+        return start + "-AKIA" + "Q" * 16
     if end is None:
         return start
     return start + "-" + "x" * (_LONG - len(start) - len(end) - 2) + "-" + end
@@ -81,7 +85,10 @@ def prefix(transport: str) -> str:
 
 
 def tools_list(transport: str) -> list[dict[str, Any]]:
-    schema = {"type": "object", "properties": {"note": _STRING, "api_token": _STRING}}
+    # `region` is mirrored in `Mcp-Param-Region`, which the SDK validates against it.
+    region = {**_STRING, "x-mcp-header": "Region"}
+    properties = {"note": _STRING, "api_token": _STRING, "ref": _STRING, "region": region}
+    schema = {"type": "object", "properties": properties}
     return [{"name": prefix(transport) + t, "description": f"canary {t}", "inputSchema": schema} for t in TOOLS]
 
 

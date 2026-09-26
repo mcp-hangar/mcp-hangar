@@ -77,7 +77,10 @@ The spans of a call, such as `batch.call.<tool>` and `policy.check_access`,
 carry `mcp.server.id` and `gen_ai.tool.name`. `batch.call.<tool>` also carries
 one `hangar.gate.decision` event per gate and the call's `hangar.call.outcome`;
 a refused call adds `hangar.refusal.gate` and `hangar.refusal.reason` and has no
-`execute_tool <tool>` CLIENT span. See
+`execute_tool <tool>` CLIENT span. A server with an L7 egress policy adds the
+verdict it applied, `hangar.l7.verdict`, with `hangar.l7.mode`,
+`hangar.l7.rule_kind` and `hangar.l7.policy_id`; a verdict from the policy's
+default action reads `rule_kind=tool`. See
 `src/mcp_hangar/observability/conventions.py` for the attribute registry.
 
 ## Diagnose a trace
