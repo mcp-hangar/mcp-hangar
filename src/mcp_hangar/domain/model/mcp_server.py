@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from ..policies.egress_l7 import L7Policy
 
 from ...lock_hierarchy import LockLevel, TrackedLock
+from ..contracts.l7_verdict_observer import L7Verdict, L7VerdictKind, get_default_l7_verdict_observer
 from ..contracts.launcher import TransportClient
 from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
@@ -1671,6 +1672,7 @@ class McpServer(AggregateRoot):
             would_block = decision.action in (ToolAction.DENY, ToolAction.REQUIRE_APPROVAL)
             if would_block:
                 if self._l7_policy.mode is PolicyMode.AUDIT:
+                    self._observe_l7_verdict(decision, L7VerdictKind.AUDIT_OBSERVED)
                     self._record_event(
                         EgressPolicyViolationObserved(
                             mcp_server_id=self.mcp_server_id,
@@ -1692,9 +1694,11 @@ class McpServer(AggregateRoot):
                         would_be_action=decision.action.value,
                         reasons=list(decision.reasons),
                         policy_id=decision.policy_id,
+                        inspection_failed=decision.inspection_failed,
                     )
                     # Audit mode: fall through and proceed with the call.
                 elif decision.action is ToolAction.DENY:
+                    self._observe_l7_verdict(decision, L7VerdictKind.DENY)
                     self._record_egress_enforcement(decision, tool_name, correlation_id, identity_context_dict, "deny")
                     raise EgressPolicyDeniedError(
                         self.mcp_server_id, tool_name, "; ".join(decision.reasons), policy_id=decision.policy_id
@@ -1705,6 +1709,7 @@ class McpServer(AggregateRoot):
                     # authority here -- deny above still wins if the policy
                     # hardened during the hold; this branch only converts the
                     # require-approval verdict the approval was granted FOR.
+                    self._observe_l7_verdict(decision, L7VerdictKind.APPROVAL_HONORED)
                     logger.info(
                         "egress_policy_approval_honored",
                         mcp_server_id=self.mcp_server_id,
@@ -1712,10 +1717,13 @@ class McpServer(AggregateRoot):
                         approval_id=l7_approval_id,
                     )
                 else:  # ToolAction.REQUIRE_APPROVAL, nobody asked or nobody answered
+                    self._observe_l7_verdict(decision, L7VerdictKind.REQUIRE_APPROVAL)
                     self._record_egress_enforcement(
                         decision, tool_name, correlation_id, identity_context_dict, "require_approval"
                     )
                     raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name, policy_id=decision.policy_id)
+            else:
+                self._observe_l7_verdict(decision, L7VerdictKind.ALLOW)
 
     def _record_egress_enforcement(
         self,
@@ -1758,7 +1766,28 @@ class McpServer(AggregateRoot):
             reasons=list(decision.reasons),
             rule_kind=decision.rule_kind,
             policy_id=decision.policy_id,
+            inspection_failed=decision.inspection_failed,
         )
+
+    def _observe_l7_verdict(self, decision: Any, verdict: L7VerdictKind) -> None:
+        """Hand the verdict this call got to the observer port (#1295), once per call.
+
+        Built from the decision already made; nothing is evaluated again. A
+        telemetry failure must not change what the policy decided, so it is
+        swallowed here, before the branch that raises.
+        """
+        try:
+            get_default_l7_verdict_observer().observe(
+                L7Verdict(
+                    verdict=verdict,
+                    mode=self._l7_policy.mode.value if self._l7_policy is not None else "",
+                    rule_kind=decision.rule_kind,
+                    policy_id=decision.policy_id,
+                    inspection_failed=decision.inspection_failed,
+                )
+            )
+        except Exception:  # noqa: BLE001 -- fault-barrier: an observer must not change a policy verdict
+            pass
 
     def invoke_tool(  # noqa: C901 -- baseline CC=18 after the L7 split (#921); split further before extending
         self,

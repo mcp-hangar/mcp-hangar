@@ -63,6 +63,9 @@ class Upstream(BaseHTTPRequestHandler):
     """A minimal JSON-answering MCP upstream that records the tools it is asked to call."""
 
     tools: ClassVar[tuple[str, ...]] = ()
+    #: Each tool's input properties. A property may declare ``x-mcp-header``
+    #: so its value is mirrored in, and validated against, an ``Mcp-Param-*``.
+    properties: ClassVar[dict[str, Any]] = {"x": {"type": "string"}}
     called: ClassVar[list[str]] = []
     #: A tool named here is answered only once its event is set, so a test can
     #: keep a call in flight. The call is recorded in `called` when it arrives.
@@ -84,8 +87,7 @@ class Upstream(BaseHTTPRequestHandler):
             if hold is not None:
                 hold.wait(timeout=30)
         definitions = [
-            {"name": name, "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}}
-            for name in self.tools
+            {"name": name, "inputSchema": {"type": "object", "properties": self.properties}} for name in self.tools
         ]
         answer = {
             "initialize": {
@@ -132,9 +134,17 @@ class FrontDoor:
     upstream: type[Upstream]
 
     def post(
-        self, tenant: str, method: str, params: dict[str, Any], *, era: str = MODERN, request_id: int = 1
+        self,
+        tenant: str,
+        method: str,
+        params: dict[str, Any],
+        *,
+        era: str = MODERN,
+        request_id: int = 1,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         headers = {
+            **(extra_headers or {}),
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
             "MCP-Protocol-Version": era,
@@ -166,9 +176,10 @@ class FrontDoor:
         *,
         era: str = MODERN,
         request_id: int = 1,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         params = {"name": name, "arguments": arguments or {}}
-        return self.post(tenant, "tools/call", params, era=era, request_id=request_id)
+        return self.post(tenant, "tools/call", params, era=era, request_id=request_id, extra_headers=extra_headers)
 
     def error(self, tenant: str, name: str, *, era: str = MODERN) -> dict[str, Any]:
         payload = jsonrpc(self.call(tenant, name, era=era))

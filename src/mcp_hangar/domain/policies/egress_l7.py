@@ -367,6 +367,9 @@ class Decision:
     #: always wins, so this names the rule the verdict actually rests on rather
     #: than the first one consulted (#1128).
     rule_kind: str = "tool"
+    #: The arguments could not be inspected, so this is a fail-closed deny and
+    #: not the policy's own answer (#1295). Observational only.
+    inspection_failed: bool = False
 
 
 def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) -> tuple[ToolAction, str]:
@@ -469,6 +472,10 @@ def _serialize_arguments(arguments: Any) -> str | None:
         return None
 
 
+#: The violation `scan_arguments` reports for arguments it could not serialize.
+_UNSERIALIZABLE = "arguments could not be serialized for policy inspection"
+
+
 def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
     """Return a list of violation reasons for a tool call's arguments.
 
@@ -488,7 +495,7 @@ def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
 
     payload = _serialize_arguments(arguments)
     if payload is None:
-        return ["arguments could not be serialized for policy inspection"]
+        return [_UNSERIALIZABLE]
 
     violations: list[str] = []
 
@@ -545,9 +552,11 @@ def evaluate(
         if policy.headers and headers is not None and headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
             reasons.append(HEADER_RULES_NOT_CONSULTED)
 
+    inspection_failed = False
     if action is not ToolAction.DENY:
         try:
             violations = scan_arguments(arguments, policy.arguments)
+            inspection_failed = _UNSERIALIZABLE in violations
         except Exception as exc:  # noqa: BLE001 -- see below
             # This function is total by contract. A tool call that cannot be
             # inspected must end in a verdict the caller can act on, because
@@ -560,9 +569,16 @@ def evaluate(
             # reason, and lets Audit record and proceed.
             logger.exception("argument_inspection_failed error=%s", type(exc).__name__)
             violations = ["arguments could not be inspected for policy violations"]
+            inspection_failed = True
         if violations:
             action = ToolAction.DENY
             reasons.extend(violations)
             rule_kind = "arguments"
 
-    return Decision(action=action, reasons=tuple(reasons), policy_id=policy.policy_id, rule_kind=rule_kind)
+    return Decision(
+        action=action,
+        reasons=tuple(reasons),
+        policy_id=policy.policy_id,
+        rule_kind=rule_kind,
+        inspection_failed=inspection_failed,
+    )

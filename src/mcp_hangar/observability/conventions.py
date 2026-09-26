@@ -232,6 +232,34 @@ class Enforcement:
     VIOLATION_SEVERITY = "mcp.enforcement.violation_severity"
 
 
+class L7:
+    """The L7 egress policy verdict the aggregate applied to a call (#1295, ADR-029 s5).
+
+    Scalar attributes on `batch.call.<tool>`: the aggregate evaluates the policy
+    once per attempt and a refusal is never retried, so the last attempt's
+    verdict is the call's. An L7 verdict is not a gate: a `deny` or
+    `require_approval` sets `hangar.call.outcome=deny` and no
+    `hangar.refusal.*`, which name `_GATES` stages only. The policy's reasons,
+    argument values and header names or values are never exported.
+
+    A call refused because its arguments could not be inspected reads
+    `verdict=deny` with `hangar.call.outcome=error`, and in Enforce mode ends
+    `batch.call.<tool>` ERROR: the evaluator broke.
+    """
+
+    #: `allow`, `audit_observed`, `deny`, `require_approval` or `approval_honored`.
+    VERDICT = "hangar.l7.verdict"
+    #: The lowercased `PolicyMode`: `audit` or `enforce`.
+    MODE = "hangar.l7.mode"
+    #: The part of the policy the verdict rests on: `tool`, `argument` or
+    #: `header`. A verdict from the policy's default action reads `tool`: the
+    #: default is the tool ladder's last rung, and there is no fourth value.
+    RULE_KIND = "hangar.l7.rule_kind"
+    #: The policy's content hash, `sha256:` and hex digits (ADR-029 s6).
+    #: Omitted when it does not have that shape.
+    POLICY_ID = "hangar.l7.policy_id"
+
+
 class Audit:
     """Attributes for identity-aware audit trail entries."""
 

@@ -138,6 +138,9 @@ class CallResult:
     # What a failed invocation says about the group member that took it
     # (#1409). Set where the executor caught the error; None on every other path.
     member_outcome: MemberOutcome | None = None
+    # The aggregate refused the call because its L7 policy could not inspect the
+    # arguments (#1295): `hangar.call.outcome=error`, not `deny`.
+    l7_evaluator_failed: bool = False
 
 
 @dataclass
