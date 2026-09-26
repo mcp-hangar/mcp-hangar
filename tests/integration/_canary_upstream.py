@@ -47,6 +47,10 @@ KINDS = (
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
+#: The calling principal: an identifier, not an input. It is one per run rather
+#: than one per transport, so it sits beside ``KINDS`` instead of in it.
+PRINCIPAL = f"svc:CANARY-PRINCIPAL-{_TAG}"
+
 
 def head(kind: str, transport: str) -> str:
     """What any copy of the canary carries, cut or not."""

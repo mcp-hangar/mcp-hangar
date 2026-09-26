@@ -26,7 +26,9 @@ never sent or a sink never captured.
 Not covered here yet, and tracked on #1535: the live-gateway tier with a real
 OTLP receiver (#1293, ``tests/live``), exceptions raised on other paths (a
 transport failure, a validation error), the Langfuse route, metric labels and
-the identifier table.
+the rest of the identifier table. Of that table, the calling principal is a
+canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
+(#1580).
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ from mcp_hangar.domain.events.base import EVENT_TEXT_LENGTH_LIMIT, FREE_TEXT_FIE
 from mcp_hangar.logging_config import LOG_FIELD_LENGTH_LIMIT
 from mcp_hangar.observability.tracing import SPAN_ATTRIBUTE_LENGTH_LIMIT
 
-from ._canary_upstream import KINDS, TRANSPORTS, canary, head, tail
+from ._canary_upstream import KINDS, PRINCIPAL, TRANSPORTS, canary, head, tail
 
 pytestmark = [pytest.mark.otel_sdk, pytest.mark.security]
 
@@ -268,6 +270,37 @@ def test_a_canary_takes_only_the_form_the_contract_allows(runs, surface, sink, k
     rule = CONTRACT[sink].get(kind, Forbidden())
 
     rule.check(SINKS[sink](runs[surface]), kind, transport)
+
+
+#: The identifier table of #1276, for the calling principal (the harness's API
+#: key is issued to ``PRINCIPAL``): for each sink, whether it must carry the
+#: principal (True), must not (False), or may (None). Spans carry caller ids
+#: only on the operator's opt-in (#1580), which this suite leaves off.
+PRINCIPAL_CONTRACT: dict[str, bool | None] = dict.fromkeys(SINKS, False) | {
+    # Caller identity in audit, whatever the span setting (#1342). Also the
+    # proof the principal went in, so an absence from the spans is a result.
+    "otlp_audit_records": True,
+    # Allowed by the table, and not what this suite pins.
+    "compliance_cef": None,
+    "compliance_leef": None,
+    "compliance_jsonlines": None,
+    "compliance_syslog": None,
+    "structured_logs": None,
+    "ws_events": None,
+    "event_store": None,
+}
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("sink", SINKS)
+def test_the_principal_reaches_only_the_sinks_that_may_name_it(runs, surface, sink):
+    rule = PRINCIPAL_CONTRACT[sink]
+    carried = [s[:120] for s in _strings(SINKS[sink](runs[surface])) if PRINCIPAL in s]
+
+    if rule is True:
+        assert carried, "the sink is meant to name the caller, and holds no trace of the principal"
+    elif rule is False:
+        assert carried == [], f"{len(carried)} value(s) name the caller: {carried[:3]}"
 
 
 # --- that the matrix means something ----------------------------------------
