@@ -7,7 +7,8 @@ Visualize MCP governance telemetry in OpenLIT.
 - Tool invocation traces in OpenLIT's trace explorer
 - MCP Server lifecycle events (COLD -> READY -> DEGRADED) as audit log records
 - Violation and enforcement signals searchable by `mcp.enforcement.violation_type`
-- Filter all tool calls by user: `mcp.user.id = "alice"`
+- Filter all tool calls by user: `mcp.user.id = "alice"`, once caller ids on spans are
+  turned on with `MCP_TRACING_CALLER_IDS=true` (off by default)
 
 ## Run
 
@@ -25,8 +26,8 @@ Open OpenLIT at http://localhost:3000. Look in Traces for spans with `mcp.tool.n
 | `mcp.tool.name` | `add` | Tool that was invoked |
 | `mcp.tool.status` | `success` / `error` | Invocation outcome |
 | `mcp.tool.duration_ms` | `12.5` | Call duration |
-| `mcp.user.id` | `alice` | Calling user (if identity propagated) |
-| `mcp.session.id` | `sess-abc` | MCP session |
+| `mcp.user.id` | `alice` | Calling user; only with `MCP_TRACING_CALLER_IDS=true` |
+| `mcp.session.id` | `sess-abc` | MCP session; only with `MCP_TRACING_CALLER_IDS=true` |
 | `mcp.enforcement.action` | `block` | Enforcement action taken |
 | `mcp.enforcement.violation_type` | `egress_undeclared` | Capability violation type |
 

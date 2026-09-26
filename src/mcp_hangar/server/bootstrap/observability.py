@@ -7,6 +7,9 @@ This module handles initialization of:
 
 Configuration via environment variables:
     MCP_TRACING_ENABLED: Enable OpenTelemetry (default: true)
+    MCP_TRACING_CALLER_IDS: Put the caller's user, agent and session ids on
+        spans (default: false). Tenant, principal type and correlation id are
+        on spans either way; audit records carry identity either way
     OTEL_EXPORTER_OTLP_*: standard OTLP exporter settings; their precedence
         over otlp_endpoint is in mcp_hangar.observability.tracing
     OTEL_SERVICE_NAME: Service name (default: mcp-hangar)
@@ -36,6 +39,7 @@ Or via config.yaml:
         enabled: true
         otlp_endpoint: http://localhost:4317
         service_name: mcp-hangar
+        caller_ids: false  # MCP_TRACING_CALLER_IDS wins over this
       audit:
         enabled: true  # MCP_AUDIT_EXPORT_ENABLED wins over this
       langfuse:
@@ -75,6 +79,8 @@ class TracingConfig:
     jaeger_host: str | None = None
     jaeger_port: int = 6831
     console_export: bool = False
+    caller_ids: bool = False
+    """`observability.tracing.caller_ids`: user, agent and session ids on spans (#1580)."""
 
 
 @dataclass
@@ -124,6 +130,7 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         jaeger_host=os.getenv("JAEGER_HOST", tracing_dict.get("jaeger_host")),
         jaeger_port=int(os.getenv("JAEGER_PORT", str(tracing_dict.get("jaeger_port", 6831)))),
         console_export=_get_bool_env("MCP_TRACING_CONSOLE", tracing_dict.get("console_export", False)),
+        caller_ids=_get_bool_env("MCP_TRACING_CALLER_IDS", _file_bool(tracing_dict.get("caller_ids", False))),
     )
 
     # Langfuse config
@@ -147,10 +154,9 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
     # nobody chose that. Not gated on `tracing.enabled`: audit is its own signal,
     # with its own switch (#1327), the env's word beating the file's. A string is
     # read as the env var is: `${VAR:-false}` interpolates to a truthy "false".
-    audit_enabled = (obs_config.get("audit") or {}).get("enabled", True)
-    if isinstance(audit_enabled, str):
-        audit_enabled = audit_enabled.lower() in ("true", "1", "yes")
-    audit_enabled = _get_bool_env("MCP_AUDIT_EXPORT_ENABLED", bool(audit_enabled))
+    audit_enabled = _get_bool_env(
+        "MCP_AUDIT_EXPORT_ENABLED", _file_bool((obs_config.get("audit") or {}).get("enabled", True))
+    )
     explicit = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") is not None or "otlp_endpoint" in tracing_dict
     audit_otlp_endpoint = tracing.otlp_endpoint if audit_enabled and explicit and tracing.otlp_endpoint else None
 
@@ -160,6 +166,13 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         audit_otlp_endpoint=audit_otlp_endpoint,
         audit_export_enabled=audit_enabled,
     )
+
+
+def _file_bool(value: Any) -> bool:
+    """A config-file switch, a string read as the env var is: `${VAR:-false}` is not truthy."""
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
 
 
 def _get_bool_env(key: str, default: bool) -> bool:
@@ -332,6 +345,13 @@ def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, Obs
         Tuple of (ObservabilityConfig, ObservabilityPort adapter).
     """
     obs_config = _parse_observability_config(config)
+
+    # Read here once, not per call: the executor asks the tracing module (#1580).
+    from ...observability.tracing import set_caller_ids_on_spans
+
+    set_caller_ids_on_spans(obs_config.tracing.caller_ids)
+    if obs_config.tracing.caller_ids:
+        logger.info("tracing_caller_ids_enabled_by_config")
 
     # Initialize OpenTelemetry tracing
     tracing_enabled = init_tracing(obs_config.tracing)

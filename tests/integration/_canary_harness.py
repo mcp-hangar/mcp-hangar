@@ -70,7 +70,7 @@ HEADERS = {
 }
 
 #: Who makes the calls. The front door serves only a caller with a tenant.
-CALLER = "svc:canary-caller"
+CALLER = upstream.PRINCIPAL
 TENANT = "tenant-canary"
 
 #: transport -> the server that reaches its upstream over it.

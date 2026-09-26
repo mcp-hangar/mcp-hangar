@@ -18,7 +18,10 @@ Proven: a ``hangar_call`` and a flat-tool call each produce a
 ``batch.call.<tool>`` span carrying the caller's tenant, id, type and user id;
 no identity attribute is exported as an empty string; and an attribute the
 identity context does not hold -- ``mcp.session.id``, for an API-key caller on
-this transport -- is absent rather than empty. Not proven: anything about
+this transport -- is absent rather than empty. Both gateways opt in with
+``MCP_TRACING_CALLER_IDS=true``: caller ids are off spans by default (#1580),
+which ``tests/integration/test_caller_ids_on_the_served_app.py`` proves over the
+served app on both entry points. Not proven: anything about
 anonymous callers or other transports, or the attributes of spans other than
 the enrichment boundary. Run with::
 
@@ -101,6 +104,7 @@ def _env(receiver: OtlpReceiver, run_id: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "MCP_TRACING"))}
     env["OTEL_EXPORTER_OTLP_ENDPOINT"] = receiver.endpoint  # http:// -- plaintext gRPC
     env["OTEL_RESOURCE_ATTRIBUTES"] = f"service.instance.id={run_id}"
+    env["MCP_TRACING_CALLER_IDS"] = "true"  # the opt-in this tier exercises (#1580)
     return env
 
 
