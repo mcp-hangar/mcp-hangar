@@ -24,12 +24,27 @@ The origin travels as a W3C `traceparent` string, never as an SDK object, so
 `SingleFlight` stores data it does not have to understand (ADR-029 s8). A
 waiter that arrives before the leader publishes one gets `None` and is recorded
 with no link, because the alternative is inventing a cause.
+
+**Both mechanisms link to the same span (#1583).** Most followers of a burst
+miss single flight -- its window closes the moment the leader moves the server
+to `INITIALIZING` -- and wait on the aggregate's event instead. So `starting`
+publishes an origin too, per server, for `waiting_for_start` to link to: the
+`mcp_server.cold_start` span single flight handed its own waiters when the same
+caller led there, else the span the start runs in. The entry lives only while
+that start runs.
+
+No lock guards it. Each access is one dict operation, atomic on its own, and the
+observer is entered outside every aggregate lock, so a lock here would sit
+outside the hierarchy for no gain. The one race it leaves -- a start ending
+while the next one begins -- can only drop the next start's entry, which means
+a missing link, never a wrong one.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from ...logging_config import get_logger
@@ -47,12 +62,24 @@ MECHANISM = "hangar.startup.mechanism"
 _LEADER = "leader"
 _WAITER = "waiter"
 
+#: What `leading` published on this caller: (server id, traceparent). The same
+#: caller then reaches `starting` inside the single-flight work, which reads it.
+_LED: ContextVar[tuple[str, str] | None] = ContextVar("hangar_startup_led", default=None)
+
+
+def _trace_id(origin: str) -> str | None:
+    """The trace id field of a traceparent, or None when it has none."""
+    fields = origin.split("-")
+    return fields[1] if len(fields) == 4 else None
+
 
 class StartupSpanAdapter:
     """Maps startup role reports to spans, for both waiting mechanisms."""
 
     def __init__(self, tracer: Any | None = None) -> None:
         self._tracer = tracer or get_tracer(__name__)
+        # The origin of each start in progress, by server id (#1583).
+        self._starts: dict[str, str] = {}
 
     # -- SingleFlightObserver -------------------------------------------------
 
@@ -65,10 +92,9 @@ class StartupSpanAdapter:
         opening a second one: a start that appeared twice in a trace would be
         the double-counting this epic exists to remove.
         """
-        carrier: dict[str, Any] = {}
-        inject_trace_context(carrier)
-        origin = carrier.get("traceparent")
-        return origin if isinstance(origin, str) else None
+        origin = self._ambient_origin()
+        _LED.set((key, origin) if origin else None)
+        return origin
 
     @contextmanager
     def waiting(self, key: str, origin: str | None) -> Iterator[None]:
@@ -85,9 +111,20 @@ class StartupSpanAdapter:
         An attribute rather than a span: the work already has one, and the
         caller that performs a start is the interesting fact about the span it
         is already in.
+
+        It also publishes the start's origin for `waiting_for_start`, and
+        withdraws it when the start ends, so a later start's waiters never link
+        to this one.
         """
         self._mark(ROLE, _LEADER)
-        yield
+        origin = self._start_origin(mcp_server_id)
+        if origin:
+            self._starts[mcp_server_id] = origin
+        try:
+            yield
+        finally:
+            if origin and self._starts.get(mcp_server_id) is origin:
+                self._starts.pop(mcp_server_id, None)
 
     @contextmanager
     def waiting_for_start(self, mcp_server_id: str) -> Iterator[None]:
@@ -95,12 +132,37 @@ class StartupSpanAdapter:
 
         These are the callers that arrived after the leader moved the server to
         `INITIALIZING`, so single flight never saw them. Their wait had no span
-        at all before this.
+        at all before this. It links to the origin `starting` published, and to
+        nothing when no start of this server has published one.
         """
-        with self._wait_span(mcp_server_id, None, mechanism="ensure_ready"):
+        origin = self._starts.get(mcp_server_id)
+        with self._wait_span(mcp_server_id, origin, mechanism="ensure_ready"):
             yield
 
+    def _start_origin(self, server_id: str) -> str | None:
+        """The origin of the start this caller performs.
+
+        The single-flight origin when this caller led the single flight for
+        this server, in this trace: the executor's `mcp_server.cold_start`, the
+        span single flight's own waiters link to. The trace check drops what an
+        earlier call on a reused thread left behind. Otherwise the span the
+        start runs in.
+        """
+        led, ambient = _LED.get(), self._ambient_origin()
+        _LED.set(None)
+        if led and ambient and led[0] == server_id and _trace_id(led[1]) == _trace_id(ambient):
+            return led[1]
+        return ambient
+
     # -- shared ---------------------------------------------------------------
+
+    @staticmethod
+    def _ambient_origin() -> str | None:
+        """The current span as a traceparent, or None when there is none."""
+        carrier: dict[str, Any] = {}
+        inject_trace_context(carrier)
+        origin = carrier.get("traceparent")
+        return origin if isinstance(origin, str) else None
 
     @contextmanager
     def _wait_span(self, server_id: str, origin: str | None, *, mechanism: str) -> Iterator[None]:
