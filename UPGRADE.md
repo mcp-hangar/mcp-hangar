@@ -1,5 +1,85 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.24.0
+
+### `mcp.server.id` names the group on every span of a group call; the member is `hangar.route.backend`
+
+`mcp_server.cold_start` and `command.send.InvokeToolCommand` used to carry the
+selected group member in `mcp.server.id`, while every other span of the same
+call carried the group. They now carry the group too, and the member moves to
+`hangar.route.backend`.
+
+A trace query, dashboard or alert that selects those spans by member, such as
+`name = "command.send.InvokeToolCommand" AND mcp.server.id = "<member>"`, finds
+nothing after the upgrade for calls routed through a group. Change it to
+`hangar.route.backend = "<member>"`. A query by group keeps working and now
+matches those spans as well. Calls to a server outside any group carry the same
+value in both keys, so their queries need no change.
+
+The lifecycle spans `mcp_server.launch` and `mcp_server.startup_wait` are not
+opened by the call, and keep naming the member they start in `mcp.server.id`,
+so a query over every span of a group call's trace still sees the member there.
+
+### GET /mcp: a list_changed stream on a front door, 405 in egress
+
+On the handshake era (2025-11-25 and earlier), `GET /mcp` used to open an
+empty SSE stream that nothing wrote to. It stayed open until the client left.
+It now does one of two things:
+
+- On a `front_door` gateway, it is the stream that carries
+  `notifications/tools/list_changed`, and `initialize` answers
+  `tools.listChanged: true`. A client that re-lists on the notification now
+  sees upstreams that arrive after it connected, without reconnecting.
+- In `egress`, it answers `405 Method Not Allowed`. MCP clients treat a 405 on
+  this GET as "no stream offered".
+
+A proxy in front of the gateway should pass `text/event-stream` responses
+unbuffered and allow an idle interval longer than 15 s, the ping interval.
+On each replica, one principal may hold 32 open streams and one tenant 256. A
+client past either gets 429 on the GET, while its POSTs are unaffected.
+
+A stream ends when its principal's API key or a role is revoked, when a JWT's
+`exp` passes, and after an hour at the latest. The client then reconnects and
+authenticates again. A stream is told about the catalogue of the replica it is
+connected to (#877).
+
+To confirm that streams get through a proxy, watch
+`mcp_hangar_tool_list_changed_streams` (open streams per replica) and
+`mcp_hangar_tool_list_changed_notifications_total{transport="http"}`. A cap
+being hit shows in `mcp_hangar_tool_list_changed_streams_refused_total{reason}`.
+
+### caller user, agent and session ids are off spans unless `observability.tracing.caller_ids` is on
+
+Since 2.22.0 every `batch.call.<tool>` span carried `mcp.caller.id`,
+`mcp.user.id`, `mcp.agent.id` and `mcp.session.id` for an authenticated caller.
+They are now left off by default, as the telemetry data contract requires.
+`mcp.caller.type`, `mcp.caller.tenant_id` and `mcp.correlation_id` are still set.
+The attribute names are unchanged: only whether they are emitted changed.
+
+A dashboard, alert or trace query that selects spans by `mcp.caller.id` or
+`mcp.user.id` finds nothing after the upgrade. Either move it to OTLP audit
+records, which carry caller identity whatever this setting says, or turn the ids
+back on:
+
+```yaml
+observability:
+  tracing:
+    caller_ids: true
+```
+
+`MCP_TRACING_CALLER_IDS=true` does the same, and wins over the file.
+
+### `batch_call_refused` from a gate no longer carries `error`
+
+Since 2.22.0 a call refused by a batch gate logged `batch_call_refused` with an
+`error` field holding the message the caller was told, which could be an
+approver's own reason. That field is gone. A log query or alert that matches on
+the text of `error` in these lines finds nothing after the upgrade: match on
+`reason` (a bounded code such as `approval_denied` or `tool_withdrawn`), `gate`
+or `error_type` instead, which are unchanged. The refusal message still reaches
+the caller in the tool result, and approval decisions keep their reason in the
+event store.
+
 ## Upgrade to 2.23.0
 
 ### a stdio front door advertises tools.listChanged

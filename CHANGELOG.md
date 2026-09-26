@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.24.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.23.0...v2.24.0) (2026-09-26)
+
+### Added
+
+- **observability:** A cold start now shows how long the launch itself took: each launcher opens an `mcp_server.launch` span around spawning the process, running the container or opening the HTTP transport. It carries `mcp.server.id` and the server's own `mcp.server.mode`, the same value the cold start metric reports, so a docker server reads `docker` although `ContainerLauncher` runs it. A failed launch ends ERROR like every other Hangar span, and an expected refusal does not. ([#1571](https://github.com/mcp-hangar/mcp-hangar/pull/1571))
+- **core:** a `front_door` gateway served over HTTP now advertises
+  `tools.listChanged: true` on the handshake era (2025-11-25 and earlier). It
+  sends `notifications/tools/list_changed` on a sessionless `GET /mcp` stream,
+  which the TypeScript SDK client opens after `notifications/initialized`. The
+  stream sends one notification as it opens. After that, it sends one only when
+  that caller's tenant projection changes. It passes the same authentication,
+  DNS-rebinding guard and session-suspension check as a POST. A suspension also
+  ends a stream that is already open. Each principal may hold 32 streams and each
+  tenant 256 (429 past either). The stream pings every 15 s. It ends when its
+  principal's API key or a role is revoked, when a JWT's `exp` passes, and after
+  an hour at the latest, so the client's reconnect authenticates again. New
+  metrics: `mcp_hangar_tool_list_changed_streams`,
+  `mcp_hangar_tool_list_changed_notifications_total{transport}`,
+  `mcp_hangar_tool_list_changed_streams_refused_total{reason}` and
+  `mcp_hangar_tool_list_changed_streams_ended_total{reason}`. POSTs stay stateless (#877).
+  Python SDK 2.0.0 clients open the stream only when they hold a session id, so
+  they still rely on the bounded first-listing wait (#1231). Where no push is
+  served (`egress`), `GET /mcp` on the handshake era now answers 405 instead of
+  holding an empty stream open. ([#1573](https://github.com/mcp-hangar/mcp-hangar/pull/1573))
+- **core:** background recovery is now traced as bounded operations. Each server
+  the health worker actually checks gets one `mcp_server.health_check` span with
+  `hangar.health.outcome` (`healthy`, `unhealthy`, `error`) and
+  `mcp.health.consecutive_failures`; a recovery command the saga sends on that
+  check's events is its child. A command a saga schedules on a timer fires as
+  `saga.scheduled_command` in a new trace with one link to the span that
+  scheduled it, and no link when that cause is unknown. Each `start_saga` run is
+  one `saga.run` span with `hangar.saga.type`, `hangar.saga.outcome` and one
+  `hangar.saga.step` event per step (`completed`, `no_action`, `failed`,
+  `compensated`, `compensation_failed`). A discovery follower that skips cycles
+  because another instance holds the lease records a `discovery.lease_transition`
+  span when it becomes a follower and when it takes the lease back, never once
+  per skipped cycle and never as a `discovery.cycle`. Skipped servers and idle
+  ticks emit nothing, and saga, timer and lease behaviour is unchanged (#1296). ([#1575](https://github.com/mcp-hangar/mcp-hangar/pull/1575))
+- **core:** event delivery and persistence now say which handler and which append.
+  Each handler's run is a `hangar.event.handled` event on its
+  `event.publish.<Type>` span, naming the handler (`hangar.event.handler.name`,
+  its bounded `__qualname__`), its kind (`hangar.event.handler.kind`) and its
+  outcome (`hangar.event.handler.outcome`, with `error.type` on a failure), so one
+  failing handler among successful peers is identifiable. The publish span also
+  carries `hangar.event.id`, `hangar.event.producer` and
+  `hangar.event.delivery_mode` (`live`, `tailed`, `recovered`), and
+  `event_store.append` carries `hangar.event_store.append.outcome` (`appended`,
+  `conflict`, `failed`). When an append fails, its span now ends before the
+  unpersisted delivery instead of containing it, so the append's duration is the
+  store's alone and the delivery is its sibling, as on success. Still one span
+  per event, not one per handler; no payload is recorded, and existing attributes
+  are unchanged. ([#1576](https://github.com/mcp-hangar/mcp-hangar/pull/1576))
+
+### Changed
+
+- **core:** Spans no longer carry the caller's own identifiers by default. `batch.call.<tool>` used to set `mcp.caller.id`, `mcp.user.id`, `mcp.agent.id` and `mcp.session.id` for every authenticated call, although the telemetry data contract (#1276, ADR-029) makes them opt-in. They are now set only with `observability.tracing.caller_ids: true` or `MCP_TRACING_CALLER_IDS=true` (the environment wins over the file). `mcp.caller.type`, `mcp.caller.tenant_id` and `mcp.correlation_id` are unchanged, and OTLP audit records carry caller identity as before (#1580). ([#1584](https://github.com/mcp-hangar/mcp-hangar/pull/1584))
+- **core:** A call to a server group now says which member served it and why. `batch.call.<tool>` carries `hangar.route.backend` (the member) and `hangar.route.reason` (`standalone`, `load_balanced`, `pinned`, `canary`, `canary_fallback` or `no_available_member`), and `mcp_server.cold_start` and `command.send.InvokeToolCommand` carry `hangar.route.backend`. On those two spans `mcp.server.id` is now the target the caller named -- the group -- instead of the selected member, so it means the same thing on every span of a call. Calls to a server that is not in a group are unchanged (#1286). ([#1595](https://github.com/mcp-hangar/mcp-hangar/pull/1595))
+
+### Fixed
+
+- **core:** the approval gate's `approval_gate_error` and `approval_revalidation_failed` warnings no longer carry an internal exception's text. Each now logs the exception's bounded type as `error_type` with its existing identifiers, and the full text moves to an adjacent DEBUG line, as the data-handling contract requires for log lines at INFO and above (#1276). The message returned to the caller is unchanged. ([#1593](https://github.com/mcp-hangar/mcp-hangar/pull/1593))
+- **core:** a batch call that reaches its gates after the batch's global budget ran out is now refused as `batch_timeout` by the `global_timeout` gate every time. Before, when the collecting thread's timeout set the batch's cancel event first, the call read `cancelled` (`CancellationError`, `hangar.gate.name=cancelled_before_execution`), depending on thread timing. An explicit cancellation still reads `cancelled`. ([#1591](https://github.com/mcp-hangar/mcp-hangar/pull/1591))
+- **core:** a caller that waits for a cold server's start on the aggregate's
+  readiness event, rather than in single flight, now links its
+  `mcp_server.startup_wait` span to the start it waits on, as single flight's
+  waiters already did. That is most followers of a concurrent burst, and until
+  now their waits carried no link. The link targets the leader's
+  `mcp_server.cold_start` when the leader came through the batch executor, else
+  the span the start runs in; a wait on a start with no known trace context has
+  no link, and a later start never links to an earlier one. No attribute changes. ([#1592](https://github.com/mcp-hangar/mcp-hangar/pull/1592))
+- **core:** A refused call is logged with its bounded reason only. The `batch_call_refused` warning a gate refusal writes carried `error`, the refusal message the caller is told, which several gates fill with text they do not bound: the approver's own reason, a validator's reason, the server name the caller typed. The data-handling contract (#1276) allows a log line identifiers and bounded codes, so that field is gone; `gate`, `reason`, `error_type`, the identifiers and `elapsed_ms` are unchanged, and the caller still receives the message in the tool result. A gate that broke rather than refused still logs `batch_call_failed` at debug with its error (#1581). ([#1589](https://github.com/mcp-hangar/mcp-hangar/pull/1589))
+
 ## [2.23.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.22.1...v2.23.0) (2026-09-24)
 
 ### Added
