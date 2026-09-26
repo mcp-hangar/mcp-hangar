@@ -235,6 +235,26 @@ def _worker(context: Any, task: str) -> Any:
     return next(w for w in context.background_workers if getattr(w, "task", None) == task)
 
 
+#: How long a stopped health worker gets to finish the check it is in.
+WORKER_JOIN_S = 10.0
+
+
+def _stop_and_join(worker: Any) -> None:
+    """Stop the worker and wait for the check it is in to finish, events and all.
+
+    The wait loops above watch the aggregate (`member.in_rotation`), which the
+    worker's check changes BEFORE it publishes the events that change raised.
+    Snapshotting straight after `stop()` could land in that gap: the member is
+    back, and the subscriber has not heard it yet. Serially the gap is too
+    short to hit; on a loaded machine (the suite runs under pytest-xdist) it
+    was hit, and the events test read a recovery with no recovery events in it.
+    `stop()` does not block; `join()` waits for the thread, so everything the
+    last check raised has been published when this returns.
+    """
+    worker.stop()
+    assert worker.join(WORKER_JOIN_S), f"the health worker did not stop within {WORKER_JOIN_S}s"
+
+
 def _recover(
     context: Any, client: Any, metrics: Any, report: dict[str, Any], mode: str, passed: dict[str, int], flag: Path
 ) -> None:
@@ -273,7 +293,7 @@ def _recover(
     # say the passes arrive and are not acted on.
     while time.monotonic() < deadline and not member.in_rotation and passed.get(RECOVERING, 0) < 3:
         time.sleep(0.05)
-    worker.stop()
+    _stop_and_join(worker)
 
     report["status"]["after"] = _status(client)
     report["calls"]["after"] = _call(client, "add", {"a": 1, "b": 2})
@@ -417,7 +437,7 @@ def _events(
     deadline = time.monotonic() + DEADLINE_S
     while time.monotonic() < deadline and not member.in_rotation and passed.get(RECOVERING, 0) < 3:
         time.sleep(0.05)
-    worker.stop()
+    _stop_and_join(worker)
 
     report["events"]["recovered"] = list(seen)
     report["status"]["after"] = _status(client)

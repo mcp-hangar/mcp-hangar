@@ -196,6 +196,10 @@ class TestAuthenticationMiddleware:
     def test_rate_limit_exceeded_raises_error(self):
         rl = Mock()
         rl.check_rate_limit.return_value = Mock(allowed=False, reason="too many", retry_after=60.0)
+        # A real dict: a refusal writes `get_stats()["active_buckets"]` into the
+        # process-wide RATE_LIMIT_ACTIVE_BUCKETS gauge, where a Mock would break
+        # every later `/metrics` scrape in the same process.
+        rl.get_stats.return_value = {"active_buckets": 1}
         mw = self._make_middleware(authenticators=[], rate_limiter=rl)
 
         with pytest.raises(RateLimitExceededError):

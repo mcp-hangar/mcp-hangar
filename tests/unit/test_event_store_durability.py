@@ -18,6 +18,7 @@ import pytest
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 from mcp_hangar.observability.health import (
     get_event_store_durability_status,
+    set_event_store_durability_status,
 )
 from mcp_hangar.server.bootstrap.event_store import (
     EventStoreConfigurationError,
@@ -52,7 +53,16 @@ def runtime() -> SimpleNamespace:
 
 @pytest.fixture(autouse=True)
 def _clean_health():
+    """Clear the process-wide durability posture `init_event_store` records.
+
+    `build_readiness_report` reads it, so a degraded posture left here turns
+    every later readiness assertion in the same process into a 503. This
+    fixture used to be an empty `yield`; serially it did not matter only
+    because `test_readiness_report.py` happens to sort next and clears it.
+    """
+    set_event_store_durability_status(None)
     yield
+    set_event_store_durability_status(None)
 
 
 class TestFailFastBootstrap:

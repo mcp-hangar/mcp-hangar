@@ -17,13 +17,29 @@ from mcp_hangar.context import (
 from mcp_hangar.logging_config import _add_service_context, _sanitize_sensitive_data, get_logger, setup_logging
 
 
+@pytest.fixture(autouse=True)
+def isolated_logging():
+    """Put back the process-global logging state `setup_logging` rewrites.
+
+    Restore what was there, not structlog's defaults. `reset_defaults()` used
+    to run here, and the default factory is `PrintLoggerFactory()` -- stdout.
+    `logging_config` points it at stderr at import, and nothing re-applies that,
+    so every structlog line from a later test in the same process went to
+    stdout: a CLI test reading `CliRunner` output then found log lines in it.
+    Serial file order hid it; pytest-xdist reordering exposed it. Clearing the
+    root handlers likewise dropped pytest's own capture handlers.
+    """
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    config = structlog.get_config()
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
+    structlog.configure(**config)
+
+
 class TestSetupLogging:
     """Tests for setup_logging function."""
-
-    def teardown_method(self):
-        """Reset logging state after each test."""
-        structlog.reset_defaults()
-        logging.getLogger().handlers.clear()
 
     def test_setup_logging_development_mode(self):
         """Test development mode logging setup."""
@@ -209,10 +225,8 @@ class TestLoggerIntegration:
     """Integration tests for logging with context."""
 
     def teardown_method(self):
-        """Reset state after each test."""
+        """Reset state after each test; logging itself is put back by `isolated_logging`."""
         clear_request_context()
-        structlog.reset_defaults()
-        logging.getLogger().handlers.clear()
 
     def test_log_includes_request_context(self, capsys):
         """Test that logs include bound request context."""
