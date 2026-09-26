@@ -84,8 +84,9 @@ PARAM_VALIDATED_HEADERS_ATTR = "hangar_param_validated_headers"
 #: a client sending it by that name is filtered out below.
 PARAM_VALIDATION_KEY = "hangar-param-validation"
 
-#: Values of :data:`PARAM_VALIDATION_KEY`.
+#: Values of :data:`PARAM_VALIDATION_KEY`: none, some (#1599) or all carried ``Mcp-Param-*`` headers dropped.
 PARAM_VALIDATION_RAN = "ran"
+PARAM_VALIDATION_PARTIAL = "partial"
 PARAM_VALIDATION_SKIPPED = "skipped"
 
 
@@ -123,26 +124,44 @@ def bind_routing_headers(request_context: Any) -> Any:
     called tool's declared ones, and a selector must not match any other
     (ADR-025). Nothing recorded, or a recorded skip, binds none: fail-closed
     (#1597). :data:`PARAM_VALIDATION_KEY` reads ``skipped`` when headers were
-    carried and none survived.
+    carried and none survived, ``partial`` when only some did (#1599).
 
     Returns a token to reset, or ``None``. Fully fault-barriered.
     """
     try:
-        inner = getattr(request_context, "request_context", None) or request_context
-        request = getattr(inner, "request", None)
-        selected = dict(select_routing_headers(getattr(request, "headers", None)))
-        if not selected:
-            return None
-        state = getattr(request, "state", None)
-        skipped = bool(getattr(state, PARAM_VALIDATION_STATE_ATTR, False))
-        keep = set() if skipped else {name.lower() for name in getattr(state, PARAM_VALIDATED_HEADERS_ATTR, ())}
-        bound = {k: v for k, v in selected.items() if not k.startswith("mcp-param-") or k in keep}
-        dropped = len(bound) < len(selected)
-        unchecked = dropped and not any(k.startswith("mcp-param-") for k in bound)
-        bound[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_SKIPPED if unchecked else PARAM_VALIDATION_RAN
-        return routing_headers_var.set(bound)
+        bound = _selectable_headers(request_context)
+        return None if bound is None else routing_headers_var.set(bound)
     except Exception:  # noqa: BLE001 -- header bags vary; a missed bind must never break a call
         return None
+
+
+def param_headers_unchecked(request_context: Any) -> bool:
+    """Whether this request carried an ``Mcp-Param-*`` header no selector will see (#1599).
+
+    Fail-closed: a request whose headers cannot be read counts as unchecked.
+    """
+    try:
+        bound = _selectable_headers(request_context)
+    except Exception:  # noqa: BLE001 -- an unreadable request is not a checked one
+        return True
+    return bound is not None and bound[PARAM_VALIDATION_KEY] != PARAM_VALIDATION_RAN
+
+
+def _selectable_headers(request_context: Any) -> dict[str, str] | None:
+    """The mapping :func:`bind_routing_headers` binds, or ``None`` when there is none."""
+    inner = getattr(request_context, "request_context", None) or request_context
+    request = getattr(inner, "request", None)
+    selected = dict(select_routing_headers(getattr(request, "headers", None)))
+    if not selected:
+        return None
+    state = getattr(request, "state", None)
+    skipped = bool(getattr(state, PARAM_VALIDATION_STATE_ATTR, False))
+    keep = set() if skipped else {name.lower() for name in getattr(state, PARAM_VALIDATED_HEADERS_ATTR, ())}
+    bound = {k: v for k, v in selected.items() if not k.startswith("mcp-param-") or k in keep}
+    kept = any(k.startswith("mcp-param-") for k in bound)
+    status = PARAM_VALIDATION_PARTIAL if kept else PARAM_VALIDATION_SKIPPED
+    bound[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_RAN if len(bound) == len(selected) else status
+    return bound
 
 
 def release_routing_headers(token: Any) -> None:

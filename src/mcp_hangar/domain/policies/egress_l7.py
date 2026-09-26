@@ -34,7 +34,7 @@ from fnmatch import fnmatchcase
 from typing import Any
 
 from ..._sdk_compat import is_modern_protocol_version
-from ...context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_SKIPPED
+from ...context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_PARTIAL, PARAM_VALIDATION_RAN
 from ...redactor import OutputRedactor
 
 logger = logging.getLogger(__name__)
@@ -406,20 +406,19 @@ def evaluate_headers(
 
     Two facts disqualify a request, and they are not the same fact:
 
-    * :data:`PARAM_VALIDATION_KEY` says validation was skipped. The SDK's
-      pre-dispatch ladder is fail-open by design -- a ``tools/list`` that raises
-      means no schema, no check, and dispatch continues anyway -- so this is
-      reachable on a perfectly modern request.
+    * :data:`PARAM_VALIDATION_KEY` does not say validation ran: it says it was
+      skipped, or it is absent. The SDK's pre-dispatch ladder is fail-open by
+      design -- a ``tools/list`` that raises means no schema, no check, and
+      dispatch continues anyway -- so this is reachable on a perfectly modern
+      request. An absent key is not read as a pass (#1599).
     * the ``MCP-Protocol-Version`` predates mandatory header-body validation, so
-      the ladder was never entered at all. This is the same disqualification
-      arriving before there was anything to record, which is why it stays a
-      check of its own rather than being folded into the key above: a caller
-      that reaches the evaluator without an HTTP request in hand (the batch
-      surface, stdio) carries no skip status either way.
+      the ladder was never entered at all.
     """
     if not rules:
         return None
-    if headers is None or headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
+    # Fail-closed on the key (#1599): only a stated check admits the headers, and
+    # a ``partial`` mapping carries only the headers that were checked.
+    if headers is None or headers.get(PARAM_VALIDATION_KEY) not in (PARAM_VALIDATION_RAN, PARAM_VALIDATION_PARTIAL):
         return None
     if not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER)):
         return None
@@ -549,8 +548,9 @@ def evaluate(
         rule_kind = "tool"
         action, reason = evaluate_tool(tool_name, policy.tools, policy.default_action)
         reasons = [reason]
-        if policy.headers and headers is not None and headers.get(PARAM_VALIDATION_KEY) == PARAM_VALIDATION_SKIPPED:
-            reasons.append(HEADER_RULES_NOT_CONSULTED)
+    # Any header dropped as unchecked is a rule not consulted, even beside a checked one (#1599).
+    if policy.headers and headers is not None and headers.get(PARAM_VALIDATION_KEY) != PARAM_VALIDATION_RAN:
+        reasons.append(HEADER_RULES_NOT_CONSULTED)
 
     inspection_failed = False
     if action is not ToolAction.DENY:

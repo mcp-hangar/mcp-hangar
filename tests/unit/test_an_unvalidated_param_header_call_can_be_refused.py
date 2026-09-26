@@ -57,14 +57,14 @@ def _handlers() -> dict[str, Any]:
     return handlers
 
 
-def _call(ctx: SimpleNamespace) -> Any:
+def _call(ctx: SimpleNamespace, arguments: dict[str, Any] | None = None) -> Any:
     """Drive the front door's tools/call handler, returning whatever it raised."""
     handlers = _handlers()
     captured: list[BaseException] = []
 
     async def _run() -> None:
         try:
-            await handlers["tools/call"](ctx, SimpleNamespace(name="add", arguments={"a": 1}))
+            await handlers["tools/call"](ctx, SimpleNamespace(name="add", arguments=arguments or {"a": 1}))
         except BaseException as exc:  # noqa: BLE001 -- the verdict is the subject of the test
             captured.append(exc)
 
@@ -123,8 +123,12 @@ class TestTheRefusal:
         """Only the request whose validation was skipped is refused: an operator
         turning this on does not lose every call carrying header parameters."""
         flat_tool_projection.set_param_validation_required(True)
+        ctx = _ctx(skipped=False)
+        # The listing left a schema declaring the header, and the body agrees with it (#1599).
+        schema = {"type": "object", "properties": {"region": {"type": "string", "x-mcp-header": "Region"}}}
+        setattr(ctx.request.state, flat_tool_projection._CHECKED_SCHEMA_ATTR, schema)
 
-        error = _call(_ctx(skipped=False))
+        error = _call(ctx, {"region": "eu-west-1"})
 
         assert _code(error) != HEADER_MISMATCH
 
