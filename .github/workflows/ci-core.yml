@@ -119,21 +119,77 @@ jobs:
   # own process. A test that passes serially and fails here is leaning on state
   # an earlier file left behind; fix the leak where it starts, do not pin the
   # victim to a worker.
+  #
+  # COVERAGE comes from these runs, not from a run of its own. `test (3.11)`
+  # measures tests/unit and `integration` measures tests/integration, each with
+  # the marker expression the floors were measured on; `decision-coverage`
+  # below combines the two data files into one report. See the note there.
   test:
+    # Spelled out because the matrix carries more than the version: without an
+    # explicit name the extra `include` keys would join the reported context
+    # (`test (3.11, true)`), and `test (3.x)` are required checks by name.
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # FLOOR AND CEILING ON PULL REQUESTS, ALL FOUR ON MAIN. A version marked
+        # `main_only` reports its check on a pull request but runs nothing; on a
+        # push to main it runs in full. The list lives here and nowhere else --
+        # the conditions below read the flag, never a version number.
+        #
+        # Why the middle versions: version-specific breakage is a floor/ceiling
+        # surface (see the #1518 note under `Run tests`). A dependency floor or
+        # a removed API breaks the oldest interpreter; a reworded message or a
+        # new deprecation breaks the newest. A middle version repeats what one
+        # of the two ends already found, so on a pull request it buys minutes,
+        # not signal. It is not dropped: every push to main runs 3.12 and 3.13,
+        # so a middle-only break shows up on main within one merge, and
+        # release.yml runs the whole tree on all four before a tag.
+        #
+        # The skip is per STEP, not per job, because `test (3.12)` and
+        # `test (3.13)` are required checks and must report on every PR. A
+        # job-level `if:` cannot read `matrix` (it is evaluated before the matrix
+        # expands), and a matrix entry left out would leave its check pending
+        # forever. The entry therefore runs, skips its steps and reports green.
+        # A green `test (3.12)` on a PR is not a test run and must not pass for
+        # one, so the job says so in its summary and in an annotation.
+        include:
+          - python-version: "3.11"
+            coverage: true
+          - python-version: "3.12"
+            main_only: true
+          - python-version: "3.13"
+            main_only: true
+
+    env:
+      RUN_SUITE: ${{ github.event_name != 'pull_request' || !matrix.main_only }}
 
     steps:
+      - name: Say that this version runs on main only
+        if: env.RUN_SUITE != 'true'
+        env:
+          PY: ${{ matrix.python-version }}
+        run: |
+          msg="Python ${PY}: tests skipped on pull requests; runs on main. Pull requests test the floor (3.11) and the ceiling (${NEWEST_PYTHON})."
+          echo "::notice title=test (${PY}) did not run::${msg}"
+          {
+            echo "### test (${PY}): skipped on pull requests; runs on main"
+            echo ""
+            echo "${msg} This check is green without running a test."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: env.RUN_SUITE == 'true'
 
       - name: Set up Python ${{ matrix.python-version }}
+        if: env.RUN_SUITE == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        if: env.RUN_SUITE == 'true'
         # `.[dev]` carries only the OTel API (via `mcp`); the tracing contract
         # tests need the SDK from the `opentelemetry` extra. Under CI they fail
         # without it (tests/conftest.py) rather than skip, so dropping the extra
@@ -141,14 +197,16 @@ jobs:
         run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run tests
-        # `--ignore`, not a list of directories: a new test directory is picked
-        # up here by default rather than by remembering to add it.
+        if: env.RUN_SUITE == 'true'
+        # tests/unit with the coverage selection's marker expression. On 3.11
+        # this step also measures coverage (COV_ARGS); the other versions run
+        # the same selection without it. The rest of the tree runs in the next
+        # step, so nothing outside the selection leaks into the report.
         #
-        # Integration is excluded because it has its own jobs below. Run bare,
+        # Integration is excluded because it has its own jobs below. Run here,
         # this matrix would execute `tests/integration` four times over, on top
-        # of `decision-coverage` and the two integration jobs -- seven runs of
-        # the same in-process suite for one signal. The suite launches no
-        # containers, so the cost is runner minutes and nothing else.
+        # of the two integration jobs. The suite launches no containers, so the
+        # cost is runner minutes and nothing else.
         #
         # This note used to carry a second reason: that the suite "touches no
         # version-specific surface the unit tests do not". That was false, and
@@ -160,16 +218,49 @@ jobs:
         # the finding. So it is covered by one more job, `integration-newest`
         # below, and not by folding the suite back into this matrix.
         #
-        # No coverage here: the report is measured once, by `decision-coverage`,
-        # on the pinned selection the floors were measured against. Measuring it
-        # three more times produced three more numbers nobody could reconcile.
+        # `not live`: tests/unit holds no live-marked test today, and a live
+        # test is skipped here anyway (tests/live/conftest.py skips every live
+        # item unless MCP_HANGAR_LIVE_VERIFY=1). The expression is here so the
+        # measured selection is the pinned one by construction.
         #
-        # `-m "not benchmark"`: the benchmarks run in the next step, serially.
-        # Nothing else is filtered out; `live` tests skip without their
-        # prerequisites, as before.
-        run: pytest --ignore=tests/integration -n auto --dist loadfile -m "not benchmark"
+        # `not benchmark`: the benchmarks run serially, further down.
+        #
+        # $COV_ARGS is unquoted on purpose: two words on 3.11, none elsewhere.
+        env:
+          COV_ARGS: ${{ matrix.coverage && '--cov=mcp_hangar --cov-report=' || '' }}
+        run: pytest tests/unit -n auto --dist loadfile -m "not benchmark and not live" $COV_ARGS
+
+      - name: Keep the unit coverage data
+        if: env.RUN_SUITE == 'true' && matrix.coverage
+        # The raw data file, not a report: `decision-coverage` combines it with
+        # the integration half. The coverage version travels with it, because
+        # the report must be written by the same coverage that measured.
+        run: |
+          mkdir -p coverage-data
+          mv .coverage coverage-data/.coverage.unit
+          python -c "import coverage; print(coverage.__version__)" > coverage-data/coverage-version.unit
+
+      - name: Upload the unit coverage data
+        if: env.RUN_SUITE == 'true' && matrix.coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-data-unit
+          path: coverage-data/
+          # `.coverage.unit` is a dot-file; upload-artifact skips those unless told.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Run the tests outside the coverage selection
+        if: env.RUN_SUITE == 'true'
+        # Everything `test` ran before coverage moved here that is not
+        # tests/unit: tests/ci and tests/live (skipped without opt-in, see
+        # above), and any new directory by default -- `--ignore`, not a list.
+        # No coverage: these are not part of the selection the floors measure.
+        run: pytest --ignore=tests/integration --ignore=tests/unit -n auto --dist loadfile -m "not benchmark"
 
       - name: Run benchmarks
+        if: env.RUN_SUITE == 'true'
         # Serial, and on purpose. pytest-benchmark switches itself off under
         # xdist ("Benchmarks are automatically disabled because xdist plugin is
         # active") and calls each benchmarked function ONCE. The tests still
@@ -181,51 +272,83 @@ jobs:
         run: pytest --ignore=tests/integration -m benchmark -p no:xdist
 
   decision-coverage:
-    # A SEPARATE job, not a step folded into `test`, on purpose:
-    #  * `test` is a 3-version matrix; running the gate three times triples the
-    #    flake surface for one signal.
-    #  * `test` has its own selection (unit only, benchmarks in a separate
-    #    step), which is not the selection the floors in
-    #    [tool.decision_coverage.floors] were measured against. This job pins
-    #    its own so the number is reproducible.
-    #  * a dedicated job name can be made a required check without making the
-    #    whole matrix required.
+    # ONE REPORT, ONE SELECTION, MEASURED ONCE -- from the data the test jobs
+    # already produce. `test (3.11)` measures tests/unit and `integration`
+    # measures tests/integration, both on 3.11 and both with
+    # `-m "not benchmark and not live"`; this job combines the two data files
+    # and gates on the result. The union is exactly the selection the floors in
+    # [tool.decision_coverage.floors] were measured against
+    # (`tests/unit tests/integration -m "not benchmark and not live"`), which
+    # this job used to re-run in full for the sake of the number: ~6 minutes
+    # of runner time repeating two suites that had just passed next door.
+    #
+    # Still a SEPARATE job, and still measured once:
+    #  * the other matrix entries do not measure, so there is one number, not
+    #    four that nobody can reconcile; codecov gets one upload under `core`.
+    #  * a dedicated job name is the required check; the gate does not hide
+    #    inside `test (3.11)`, and a coverage failure is not a test failure.
+    #  * `!cancelled()`: a red `test (3.14)` does not stop the gate from
+    #    reporting on the 3.11 data. If a half is missing (its tests failed, so
+    #    it uploaded nothing), the combine step below fails -- a partial report
+    #    never passes for a whole one.
+    #
+    # Combining across runners works because [tool.coverage.run] sets
+    # `relative_files = true`: both halves record `src/mcp_hangar/...`, not an
+    # absolute runner path. Branch mode also comes from there, so both halves
+    # and the report agree -- and the gate refuses a statement-only report.
+    needs: [test, integration]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
+        # 3.11, the interpreter that measured. Branch arcs are computed from
+        # the source at report time and differ between CPython versions (see
+        # the floors' note in pyproject.toml).
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        # With the SDK, as in `test` -- see the note there.
-        run: pip install -e ".[dev,opentelemetry]"
+      - name: Download the coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-data-*
+          path: coverage-data
+          merge-multiple: true
 
-      - name: Measure branch coverage
-        # Selection pinned to match the one the floors were measured with.
-        # Branch mode comes from [tool.coverage.run], not a flag here -- the
-        # gate refuses a statement-only report outright, so the two cannot drift.
-        #
-        # Parallel, like the other test steps (see the note above `test`).
-        # pytest-cov measures in each worker and combines the data before it
-        # writes a report, so coverage.json and coverage.xml describe the whole
-        # run, as they did serially; the per-module numbers agree with a serial
-        # run within noise.
+      - name: Install coverage
+        # The version that measured, read from the data, not a second pin here.
+        # Both halves were installed from the same `.[dev]` in the same run, so
+        # they agree; if they ever do not, stop rather than report on a mix.
         run: |
-          pytest tests/unit tests/integration -q \
-            -n auto --dist loadfile \
-            -m "not benchmark and not live" \
-            --cov=mcp_hangar --cov-report=json:coverage.json --cov-report=xml
+          for half in unit integration; do
+            if [ ! -f "coverage-data/.coverage.${half}" ]; then
+              echo "::error::No ${half} coverage data: that half's tests failed or did not run, so there is nothing whole to report on."
+              exit 1
+            fi
+          done
+          unit_version=$(cat coverage-data/coverage-version.unit)
+          integration_version=$(cat coverage-data/coverage-version.integration)
+          if [ "$unit_version" != "$integration_version" ]; then
+            echo "::error::The halves were measured by different coverage versions (${unit_version} vs ${integration_version})."
+            exit 1
+          fi
+          pip install "coverage==${unit_version}"
+
+      - name: Combine branch coverage
+        run: |
+          coverage combine coverage-data
+          coverage json -o coverage.json
+          coverage xml -o coverage.xml
+          total=$(coverage report --format=total)
+          echo "Combined line+branch coverage, unit + integration: ${total}%" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce decision-path floors
         run: python scripts/check_decision_coverage.py coverage.json
 
       - name: Upload coverage
-        # The only coverage upload in the workflow, from the only run that
-        # measures it. The `test` matrix used to upload three reports of a
-        # different selection under the same flag.
+        # The only coverage upload in the workflow, from the only report.
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           files: coverage.xml
@@ -272,12 +395,35 @@ jobs:
         run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile
+        # The integration half of the coverage selection, so it measures (see
+        # `decision-coverage`). The marker expression selects nothing away from
+        # tests/integration today; it is here so the measured selection is the
+        # pinned one by construction. `integration-newest` runs the same
+        # command without `--cov`.
+        run: |
+          pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile \
+            -m "not benchmark and not live" --cov=mcp_hangar --cov-report=
+
+      - name: Keep the integration coverage data
+        run: |
+          mkdir -p coverage-data
+          mv .coverage coverage-data/.coverage.integration
+          python -c "import coverage; print(coverage.__version__)" > coverage-data/coverage-version.integration
+
+      - name: Upload the integration coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-data-integration
+          path: coverage-data/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
 
   integration-newest:
     # The same selection as `integration` above, on the newest supported
-    # interpreter instead of the floor. Keep the two commands identical: the
-    # point of this job is that the only variable is the Python version.
+    # interpreter instead of the floor. Keep the two commands identical except
+    # for `--cov` (the floor measures; this job does not): the point of this
+    # job is that the only variable is the Python version.
     #
     # A SEPARATE JOB, not a `strategy.matrix` on `integration`, and that is not
     # a style choice. `integration` is a required status check on `main`. Adding
@@ -304,7 +450,9 @@ jobs:
         run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile
+        run: |
+          pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile \
+            -m "not benchmark and not live"
 
   build:
     runs-on: ubuntu-latest
