@@ -47,6 +47,7 @@ from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....domain.value_objects.truncation import ContinuationOwner
+from ....errors import bounded_error_type
 from ....infrastructure.observability.startup_spans import StartupSpanAdapter
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
@@ -1100,7 +1101,17 @@ class BatchExecutor:
                 )
             )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
-            logger.warning("approval_gate_error", tool=call.tool, error=str(exc))
+            # The exception's text can carry anything its source put in it (a
+            # store's connection string, a policy engine's echo of the
+            # arguments), so WARNING gets its bounded type and DEBUG the text
+            # (#1276 R7, #1590). The caller is still told, in the CallResult.
+            logger.warning(
+                "approval_gate_error",
+                tool=call.tool,
+                call_id=call.call_id,
+                error_type=bounded_error_type(type(exc).__name__),
+            )
+            logger.debug("approval_gate_error_detail", tool=call.tool, call_id=call.call_id, error=str(exc))
             return CallResult(
                 index=call.index,
                 call_id=call.call_id,
@@ -1164,14 +1175,19 @@ class BatchExecutor:
         to one of them during the hold refuses the approved call.
         """
 
-        def _refuse(reason: str, code: str) -> CallResult:
+        def _refuse(reason: str, code: str, *, error_type: str | None = None) -> CallResult:
             logger.warning(
                 "approval_revalidation_failed",
                 approval_id=approval_id,
                 mcp_server=call.mcp_server,
                 tool=call.tool,
-                reason=reason,
+                # A revalidation that raised logs its bounded type here and its
+                # text at DEBUG below (#1590); every other reason is fixed text.
+                reason="revalidation error" if error_type is not None else reason,
+                error_type=error_type,
             )
+            if error_type is not None:
+                logger.debug("approval_revalidation_failed_detail", approval_id=approval_id, reason=reason)
             return CallResult(
                 index=call.index,
                 call_id=call.call_id,
@@ -1190,7 +1206,11 @@ class BatchExecutor:
             except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
                 # Fail closed: an approval we cannot re-verify is not an
                 # approval we can act on.
-                return _refuse(f"revalidation error: {exc}", "ApprovalRevalidationError")
+                return _refuse(
+                    f"revalidation error: {exc}",
+                    "ApprovalRevalidationError",
+                    error_type=bounded_error_type(type(exc).__name__),
+                )
             if reason is not None:
                 return _refuse(reason, "ApprovalNoLongerValid")
 
