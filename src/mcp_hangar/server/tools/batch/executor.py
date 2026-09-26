@@ -1413,6 +1413,8 @@ class BatchExecutor:
         # front door so a selector is never silently inert on this surface --
         # a policy that reports enforcing while a rule cannot fire is the
         # failure this module already refuses for secret-pattern groups.
+        # Only headers the front door recorded as checked are bound; nothing
+        # records any for `hangar_call`, which declares no x-mcp-header (#1597).
         routing_token = bind_routing_headers(request_ctx)
 
         # Both bindings are this call's, so both tokens are reset in the finally

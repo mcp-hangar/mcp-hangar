@@ -72,6 +72,11 @@ caller_polls_tasks_var: ContextVar[bool] = ContextVar("caller_polls_tasks", defa
 #: channel the projection memo already uses (#1049).
 PARAM_VALIDATION_STATE_ATTR = "hangar_param_validation_skipped"
 
+#: Where the front door records the ``Mcp-Param-*`` headers of this POST known
+#: to agree with its body, lower-cased. Per-POST like the skip above, so every
+#: bind of this request reads the same answer. Absent means none (#1597).
+PARAM_VALIDATED_HEADERS_ATTR = "hangar_param_validated_headers"
+
 #: The entry :func:`bind_routing_headers` adds to the mapping to carry the skip
 #: status to the evaluator. Not an HTTP header: an ``MCPEgressPolicy`` selector
 #: can only name an ``Mcp-Param-*`` header (``egress_l7._header_matches``
@@ -113,11 +118,12 @@ def bind_routing_headers(request_context: Any) -> Any:
     exposing one as ``.request_context`` -- so the front door and the batch
     surface share one definition instead of growing one each.
 
-    The mapping also carries whether this request's ``Mcp-Param-*`` headers were
-    validated against the body, read off ``request.state`` where the listing
-    path left it (ADR-025). Absent state means the ladder ran, which is what a
-    request that reaches a handler at all has done unless something recorded
-    otherwise.
+    Only the ``Mcp-Param-*`` headers recorded under
+    :data:`PARAM_VALIDATED_HEADERS_ATTR` are bound. The SDK checks only the
+    called tool's declared ones, and a selector must not match any other
+    (ADR-025). Nothing recorded, or a recorded skip, binds none: fail-closed
+    (#1597). :data:`PARAM_VALIDATION_KEY` reads ``skipped`` when headers were
+    carried and none survived.
 
     Returns a token to reset, or ``None``. Fully fault-barriered.
     """
@@ -127,9 +133,14 @@ def bind_routing_headers(request_context: Any) -> Any:
         selected = dict(select_routing_headers(getattr(request, "headers", None)))
         if not selected:
             return None
-        skipped = bool(getattr(getattr(request, "state", None), PARAM_VALIDATION_STATE_ATTR, False))
-        selected[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_SKIPPED if skipped else PARAM_VALIDATION_RAN
-        return routing_headers_var.set(selected)
+        state = getattr(request, "state", None)
+        skipped = bool(getattr(state, PARAM_VALIDATION_STATE_ATTR, False))
+        keep = set() if skipped else {name.lower() for name in getattr(state, PARAM_VALIDATED_HEADERS_ATTR, ())}
+        bound = {k: v for k, v in selected.items() if not k.startswith("mcp-param-") or k in keep}
+        dropped = len(bound) < len(selected)
+        unchecked = dropped and not any(k.startswith("mcp-param-") for k in bound)
+        bound[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_SKIPPED if unchecked else PARAM_VALIDATION_RAN
+        return routing_headers_var.set(bound)
     except Exception:  # noqa: BLE001 -- header bags vary; a missed bind must never break a call
         return None
 
