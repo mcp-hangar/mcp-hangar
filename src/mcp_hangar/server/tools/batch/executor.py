@@ -2702,11 +2702,20 @@ def _log_gate_outcome(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
     line the gate wrote for itself, under its own name and at its own level, so
     "which calls were refused yesterday" had no single answer (ADR-029 s5).
 
+    A refusal carries no free text (#1581). `refusal.error` is the message the
+    caller is told, and a gate fills it from text it does not bound: an
+    approver's own reason, a validator's reason, the server name the caller
+    typed. The data-handling contract allows a log line identifiers and bounded
+    codes (#1276), and `reason` and `error_type` already say why.
+
     A gate that broke rather than refused keeps `batch_call_failed` at debug, as
-    the invoke path does for a failure.
+    the invoke path does for a failure, and keeps `error` there: what broke is
+    in the exception text, and the contract forbids upstream text at INFO and
+    above only. The redaction and length processors still apply to it.
     """
     outcome, reason, _revision = _gate_decision(p, refusal)
     refused = outcome == Gate.DENY
+    fields: dict[str, Any] = {} if refused else {"error": refusal.error}
     log = logger.warning if refused else logger.debug
     log(
         "batch_call_refused" if refused else "batch_call_failed",
@@ -2716,9 +2725,9 @@ def _log_gate_outcome(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
         tenant_id=p.caller_tenant_id,
         gate=gate,
         reason=reason,
-        error=refusal.error,
         error_type=refusal.error_type,
         elapsed_ms=round(refusal.elapsed_ms, 2),
+        **fields,
     )
 
 
