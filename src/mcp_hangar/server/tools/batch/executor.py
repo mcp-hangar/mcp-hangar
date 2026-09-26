@@ -1881,7 +1881,10 @@ class BatchExecutor:
     # run in.
 
     def _gate_cancelled_before_execution(self, p: "_CallPipeline") -> CallResult | None:
-        if p.cancel_event.is_set():
+        # A spent budget sets the event too: the collector's `as_completed`
+        # timed out. That call is the `global_timeout` gate's to refuse, so it
+        # reads `batch_timeout` whichever thread got there first (#1587).
+        if p.cancel_event.is_set() and _remaining_budget(p) > 0:
             # elapsed_ms is 0.0 rather than measured: nothing ran.
             return CallResult(
                 index=p.call.index,
@@ -1895,7 +1898,7 @@ class BatchExecutor:
 
     def _gate_global_timeout(self, p: "_CallPipeline") -> CallResult | None:
         """Refuse if the batch's budget is already spent, and set what is left."""
-        remaining_global = p.global_timeout - (time.perf_counter() - p.batch_start_time)
+        remaining_global = _remaining_budget(p)
         if remaining_global <= 0:
             return CallResult(
                 index=p.call.index,
@@ -2673,6 +2676,11 @@ class BatchExecutor:
             original_size_bytes=original_size,
             retry_metadata=retry_meta,
         )
+
+
+def _remaining_budget(p: _CallPipeline) -> float:
+    """What is left of the batch's global budget, in seconds; zero or less when it is spent."""
+    return p.global_timeout - (time.perf_counter() - p.batch_start_time)
 
 
 def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, str | None, str | None]:

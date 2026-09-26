@@ -14,6 +14,7 @@ The caller is still told why, in the tool result. Only the log changes.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from threading import Event
@@ -200,7 +201,17 @@ class TestARefusalLine:
         def refuse(error: str, error_type: str) -> CallResult:
             return CallResult(index=0, call_id="c-1", success=False, error=error, error_type=error_type, elapsed_ms=0)
 
-        p = SimpleNamespace(call=call, cancel_event=cancelled, refuse=refuse, gate_note=None, caller_tenant_id=_TENANT)
+        # Budget left, so the cancellation is what refuses: with it spent, the global
+        # timeout refuses instead (#1587).
+        p = SimpleNamespace(
+            call=call,
+            cancel_event=cancelled,
+            refuse=refuse,
+            gate_note=None,
+            caller_tenant_id=_TENANT,
+            global_timeout=60.0,
+            batch_start_time=time.perf_counter(),
+        )
         refusal = getattr(BatchExecutor, f"_gate_{gate}")(BatchExecutor(), p)
         with structlog.testing.capture_logs() as captured:
             _log_gate_outcome(p, gate, refusal)  # type: ignore[arg-type]
