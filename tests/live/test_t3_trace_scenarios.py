@@ -10,8 +10,8 @@ reasons -- never a snapshot of the whole tree, so an added span does not break
 them and a wrong parent or outcome does.
 
 Proven: ten concurrent calls to a cold server launch it once, and every other
-caller waits in its own span in its own trace, never parented to the start (a
-link to it is the strict xfail below); a retry to success and to exhaustion
+caller waits in its own span in its own trace, never parented to the start but
+linked to it, on either wait path (#1583); a retry to success and to exhaustion
 record an attempt event per retried failure, its backoff and the outcome; an
 approval granted, denied and expired each report that as ``approval.result``;
 gates record allow, skip and deny with bounded reasons, and nothing downstream
@@ -270,11 +270,6 @@ def test_ten_concurrent_calls_to_a_cold_server_start_it_once(cold_burst: _ColdBu
     print(f"T3 cold start: mechanisms={sorted(_wait_of(t).attributes[MECHANISM] for t in burst.followers)}")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="defect to be filed: a caller that waits on the aggregate's readiness event, not in single flight, "
-    "records its wait with no link to the start (every follower in this run)",
-)
 def test_every_follower_wait_links_to_the_start(cold_burst: _ColdBurst) -> None:
     unlinked = [_wait_of(t).attributes[MECHANISM] for t in cold_burst.followers if not _wait_of(t).links]
     assert unlinked == [], f"{len(unlinked)} of 9 follower waits carry no link: {unlinked}"
