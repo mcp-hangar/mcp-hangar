@@ -562,7 +562,11 @@ class TestColdStartFailure:
         _cold_start(tracer, _start_error())
 
         span = _only(exporter, "mcp_server.cold_start")
-        assert _attributes_but_outcome(span) == {"mcp.server.id": "math", "cold_start.result": "error"}
+        assert _attributes_but_outcome(span) == {
+            "mcp.server.id": "math",
+            "hangar.route.backend": "math",
+            "cold_start.result": "error",
+        }
 
     def test_ends_error(self, sdk):
         exporter, tracer = sdk

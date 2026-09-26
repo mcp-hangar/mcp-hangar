@@ -31,6 +31,7 @@ import pytest
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import caller_polls_tasks_var, identity_context_var
 from mcp_hangar.domain.events import TaskCreated
+from mcp_hangar.domain.model.mcp_server_group import MemberSelection, RouteReason
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
@@ -196,7 +197,7 @@ def test_worker_relay_branch_does_not_touch_group_health(worker_ctx: Mock) -> No
         has_tools=False,
         health=Mock(should_degrade=Mock(return_value=False)),
     )
-    group_obj.select_member_for.return_value = member
+    group_obj.select_member_with_reason.return_value = MemberSelection(member, RouteReason.LOAD_BALANCED)
     worker_ctx.get_mcp_server.return_value = None  # force group resolution
     worker_ctx.command_bus.send.return_value = _TASK_RESULT
 
@@ -378,7 +379,7 @@ def test_day_one_parity_kill_switch_off_is_byte_identical_rejection() -> None:
         has_tools=False,
         health=Mock(should_degrade=Mock(return_value=False)),
     )
-    group_obj.select_member_for.return_value = member
+    group_obj.select_member_with_reason.return_value = MemberSelection(member, RouteReason.LOAD_BALANCED)
 
     with (
         patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=ctx),

@@ -42,6 +42,7 @@ from mcp_hangar.domain.exceptions import (
     ToolTimeoutError,
 )
 from mcp_hangar.domain.model import McpServer, McpServerState
+from mcp_hangar.domain.model.mcp_server_group import MemberSelection, RouteReason
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.fastmcp_server.flat_call_log import DENIAL_CODES
@@ -314,7 +315,7 @@ def group_call() -> Iterator[GroupCall]:
     def run(
         invoke: BaseException | None = None, start: BaseException | None = None, state: str = "ready", retries: int = 1
     ) -> tuple[Any, list[str]]:
-        group.select_member_for.return_value = _member(state)
+        group.select_member_with_reason.return_value = MemberSelection(_member(state), RouteReason.LOAD_BALANCED)
 
         def send(command: Any) -> Any:
             if isinstance(command, StartMcpServerCommand) and start is not None:

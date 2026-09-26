@@ -8,6 +8,7 @@ import hashlib
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from ...errors import bounded_error_type
@@ -22,6 +23,30 @@ from .load_balancer import LoadBalancer
 from .mcp_server import DEAD_NOT_REVIVED_BY_CALLS, DEAD_NOT_ROUTED_BY_GROUPS, McpServer
 
 logger = get_logger(__name__)
+
+
+class RouteReason(StrEnum):
+    """Why a call went to the backend it did (ADR-029 s5, #1286). A bounded vocabulary.
+
+    ``STANDALONE`` is a call to a server named directly, where no group selected
+    anything. A pinned tenant whose member is out of rotation reads
+    ``CANARY_FALLBACK``, as a canary does: pins live under the same policy.
+    """
+
+    STANDALONE = "standalone"
+    LOAD_BALANCED = "load_balanced"
+    PINNED = "pinned"
+    CANARY = "canary"
+    CANARY_FALLBACK = "canary_fallback"
+    NO_AVAILABLE_MEMBER = "no_available_member"
+
+
+@dataclass(frozen=True)
+class MemberSelection:
+    """The member one selection chose, or None, and why. Made by the selection itself, never reconstructed."""
+
+    member: McpServer | None
+    reason: RouteReason
 
 
 @dataclass(frozen=True)
@@ -40,13 +65,18 @@ class CanaryPolicy:
 
     def resolve(self, tenant_id: str) -> str | None:
         """Return the member id this tenant should route to, or None for the LB."""
+        resolved = self.resolve_with_reason(tenant_id)
+        return resolved[0] if resolved else None
+
+    def resolve_with_reason(self, tenant_id: str) -> tuple[str, RouteReason] | None:
+        """The member id this tenant routes to and whether a pin or the split chose it, or None for the LB."""
         pinned = self.pinned_tenants.get(tenant_id)
         if pinned:
-            return pinned
+            return pinned, RouteReason.PINNED
         if self.canary_member and self.split_pct > 0:
             bucket = int(hashlib.sha256(tenant_id.encode()).hexdigest(), 16) % 100
             if bucket < self.split_pct:
-                return self.canary_member
+                return self.canary_member, RouteReason.CANARY
         return None
 
 
@@ -557,6 +587,13 @@ class McpServerGroup(AggregateRoot):
     def select_member_for(self, tenant_id: str | None) -> McpServer | None:
         """Select a member, applying per-tenant canary routing when configured.
 
+        See :meth:`select_member_with_reason`, which this returns the member of.
+        """
+        return self.select_member_with_reason(tenant_id).member
+
+    def select_member_with_reason(self, tenant_id: str | None) -> MemberSelection:
+        """Select a member, applying per-tenant canary routing, and say why it was chosen.
+
         Resolution: an explicit per-tenant pin, then a sticky canary split
         (deterministic by ``tenant_id``), then the load-balancer strategy. A
         pinned/canary target that is not in rotation falls back to the LB pick,
@@ -575,7 +612,8 @@ class McpServerGroup(AggregateRoot):
         selected, as a COLD one is, and selecting it restarts it.
 
         Returns:
-            Selected mcp_server or None if no healthy members available.
+            The selected mcp_server, or None if no healthy members are
+            available, with the reason this selection made it.
         """
         with self._lock:
             self._check_circuit_recovery()
@@ -584,16 +622,19 @@ class McpServerGroup(AggregateRoot):
             if not available:
                 # No member remains in rotation: honor the group circuit
                 # breaker and reject rather than hammer a genuinely-down group.
-                return None
+                return MemberSelection(None, RouteReason.NO_AVAILABLE_MEMBER)
 
             # Per-tenant canary/version routing (explicit pin or sticky split).
+            fallback = False
             if tenant_id is not None and self._canary is not None:
-                target_id = self._canary.resolve(tenant_id)
-                if target_id is not None:
+                resolved = self._canary.resolve_with_reason(tenant_id)
+                if resolved is not None:
+                    target_id, reason = resolved
                     target = self._members.get(target_id)
                     if target is not None and self._selectable(target):
                         target.last_selected_at = time.time()
-                        return target.mcp_server
+                        return MemberSelection(target.mcp_server, reason)
+                    fallback = True
                     logger.warning(
                         "canary_target_unavailable_fallback_lb",
                         group_id=str(self.id),
@@ -604,9 +645,10 @@ class McpServerGroup(AggregateRoot):
             selected = self._load_balancer.select(available)
             if selected:
                 selected.last_selected_at = time.time()
-                return selected.mcp_server
+                reason = RouteReason.CANARY_FALLBACK if fallback else RouteReason.LOAD_BALANCED
+                return MemberSelection(selected.mcp_server, reason)
 
-            return None
+            return MemberSelection(None, RouteReason.NO_AVAILABLE_MEMBER)
 
     @staticmethod
     def _selectable(member: GroupMember) -> bool:

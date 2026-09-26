@@ -56,7 +56,7 @@ from typing import Any, TypeVar
 from mcp_hangar.errors import ExpectedRefusal, bounded_error_type
 from mcp_hangar.logging_config import env_length_limit, get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, EventDelivery, Gate, GenAI, Retry, Saga
+from mcp_hangar.observability.conventions import MCP, EventDelivery, Gate, GenAI, Retry, Route, Saga
 
 logger = get_logger(__name__)
 
@@ -1003,6 +1003,24 @@ def record_gate_decision(
                 span.set_attribute(Gate.REFUSAL_REASON, bounded_error_type(reason))
     except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a gate
         logger.debug("gate_event_failed", gate=name)
+
+
+def record_route(backend: str | None, reason: str) -> None:
+    """Set which backend the call went to, and why, on the ambient `batch.call.<tool>` span (#1286).
+
+    Observes a selection already made and never raises: a telemetry failure
+    must not change where the call goes. `backend` is omitted when None, as
+    when no member was available.
+    """
+    try:
+        span = _ambient_span()
+        if span is None:
+            return
+        span.set_attribute(Route.REASON, reason)
+        if backend is not None:
+            span.set_attribute(Route.BACKEND, backend)
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break routing
+        logger.debug("route_attributes_failed")
 
 
 def record_call_outcome(outcome: str) -> None:

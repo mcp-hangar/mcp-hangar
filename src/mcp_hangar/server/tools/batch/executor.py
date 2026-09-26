@@ -42,6 +42,7 @@ from ....domain.model.mcp_server import (
     START_REFUSED_IN_BACKOFF,
     START_REFUSED_NOT_REVIVED_BY_CALLS,
 )
+from ....domain.model.mcp_server_group import RouteReason
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
@@ -67,7 +68,7 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry
+from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry, Route
 from ....observability.tracing import (
     caller_ids_on_spans,
     extract_trace_context,
@@ -76,6 +77,7 @@ from ....observability.tracing import (
     record_gate_decision,
     record_handled_failure,
     record_retry_attempt,
+    record_route,
     settle_failed_call,
 )
 from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_sync
@@ -1843,7 +1845,7 @@ class BatchExecutor:
         cm = self.concurrency_manager
         with ExitStack() as permit:
             with pipeline.tracer.start_as_current_span("concurrency.acquire") as conc_span:
-                conc_span.set_attribute("mcp.server.id", call.mcp_server)
+                conc_span.set_attribute(McpServer.ID, call.mcp_server)
                 wait_s = permit.enter_context(cm.acquire(call.mcp_server))
                 conc_span.set_attribute("concurrency.wait_ms", round(wait_s * 1000, 2))
             if wait_s > 0.01:
@@ -1929,28 +1931,37 @@ class BatchExecutor:
         advances the group's strategy, so it is made once. The governance of a
         call naming a group, the group's scope and the selected member's,
         reads no membership.
+
+        The route -- which backend, and why -- is recorded from that one
+        selection, never reconstructed (#1286). A server named directly, a
+        group member included, is `standalone`: no group selected it.
         """
         p.mcp_server_obj = p.ctx.get_mcp_server(p.call.mcp_server)
         p.target_server_id = p.call.mcp_server
         if p.mcp_server_obj:
+            record_route(p.call.mcp_server, RouteReason.STANDALONE.value)
             return None
 
         p.group_obj = GROUPS.get(p.call.mcp_server)
         if p.group_obj:
             p.is_group = True
-            selected_member = p.group_obj.select_member_for(p.caller_tenant_id)
-            if selected_member is None:
+            selection = p.group_obj.select_member_with_reason(p.caller_tenant_id)
+            if selection.member is None:
+                record_route(None, selection.reason.value)
                 return p.refuse(f"No available member in group '{p.call.mcp_server}'", "NoAvailableMemberError")
-            p.mcp_server_obj = selected_member
-            p.target_server_id = selected_member.id.value
+            p.mcp_server_obj = selection.member
+            p.target_server_id = selection.member.id.value
+            record_route(p.target_server_id, selection.reason.value)
         elif not p.ctx.mcp_server_exists(p.call.mcp_server):
             return p.refuse(f"McpServer '{p.call.mcp_server}' not found", "McpServerNotFoundError")
+        else:
+            record_route(p.call.mcp_server, RouteReason.STANDALONE.value)
         return None
 
     def _gate_tool_access(self, p: "_CallPipeline") -> CallResult | None:
         """Tool access policy, checked BEFORE starting the server or executing."""
         with p.tracer.start_as_current_span("policy.check_access") as policy_span:
-            policy_span.set_attribute("mcp.server.id", p.call.mcp_server)
+            policy_span.set_attribute(McpServer.ID, p.call.mcp_server)
             policy_span.set_attribute("gen_ai.tool.name", p.call.tool)
             policy_span.set_attribute("policy.is_group", p.is_group)
             if p.is_group:
@@ -2263,7 +2274,7 @@ class BatchExecutor:
         (mcp_server-specific or _global fallback).
         """
         with p.tracer.start_as_current_span("approval_gate.check") as approval_span:
-            approval_span.set_attribute("mcp.server.id", p.call.mcp_server)
+            approval_span.set_attribute(McpServer.ID, p.call.mcp_server)
             approval_span.set_attribute("gen_ai.tool.name", p.call.tool)
             approval_result = self._check_approval_gate(
                 p.call,
@@ -2358,7 +2369,9 @@ class BatchExecutor:
             if refusal is not None:
                 return self._report_refusal(p, refusal)
         with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
-            cs_span.set_attribute("mcp.server.id", p.target_server_id)
+            # The target the caller named; the member a group selected is the backend (#1286).
+            cs_span.set_attribute(McpServer.ID, p.call.mcp_server)
+            cs_span.set_attribute(Route.BACKEND, p.target_server_id)
             try:
                 self._single_flight.do(
                     p.target_server_id,
@@ -2528,7 +2541,8 @@ class BatchExecutor:
         def do_invoke() -> dict[str, Any]:
             attempt_index[0] += 1
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
-                cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
+                cmd_span.set_attribute(McpServer.ID, call.mcp_server)
+                cmd_span.set_attribute(Route.BACKEND, dispatch_server_id)
                 cmd_span.set_attribute("gen_ai.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
                 cmd_span.set_attribute(Retry.INDEX, attempt_index[0])
@@ -2554,7 +2568,7 @@ class BatchExecutor:
             with tracer.start_as_current_span("invoke_with_retry") as retry_span:
                 retry_span.set_attribute("retry.max_attempts", policy.max_attempts)
                 retry_span.set_attribute("retry.backoff", str(policy.backoff))
-                retry_span.set_attribute("mcp.server.id", call.mcp_server)
+                retry_span.set_attribute(McpServer.ID, call.mcp_server)
                 retry_span.set_attribute("gen_ai.tool.name", call.tool)
                 retry_result = retry_sync(
                     operation=do_invoke,
