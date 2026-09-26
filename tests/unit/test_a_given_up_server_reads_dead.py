@@ -43,6 +43,7 @@ from mcp_hangar.domain.events import (
 from mcp_hangar.domain.exceptions import CannotStartMcpServerError, McpServerStartError
 from mcp_hangar.domain.model.health_tracker import HealthTracker
 from mcp_hangar.domain.model.mcp_server import VALID_TRANSITIONS, McpServer
+from mcp_hangar.domain.model.mcp_server_group import CanaryPolicy
 from mcp_hangar.domain.value_objects import McpServerState
 from mcp_hangar.gc import BackgroundWorker
 from mcp_hangar.infrastructure.command_bus import CommandBus
@@ -441,7 +442,7 @@ class TestAGroup:
         dead, cold = _Fleet(), _Fleet()
         dead.dead()
         group = self._group(dead.server, cold.server)
-        group.set_canary_policy(Mock(resolve=Mock(return_value=dead.sid)))
+        group.set_canary_policy(CanaryPolicy(pinned_tenants={"tenant-a": dead.sid}))
 
         assert group.select_member_for("tenant-a").mcp_server_id == cold.sid
 

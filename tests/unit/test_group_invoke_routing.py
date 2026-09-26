@@ -13,6 +13,7 @@ import pytest
 from mcp_hangar.application.commands import InvokeToolCommand
 from mcp_hangar.application.read_models.tool_projection import reset_tool_projection_registry
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.model.mcp_server_group import MemberSelection, RouteReason
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
@@ -88,14 +89,14 @@ class TestGroupInvokeRouting:
         group = Mock()
         # Drained after the call reports its outcome (#1410).
         group.collect_events.return_value = []
-        group.select_member_for.return_value = _member(_MEMBER)
+        group.select_member_with_reason.return_value = MemberSelection(_member(_MEMBER), RouteReason.LOAD_BALANCED)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
         result = _execute()
 
         assert result.results[0].success is True
-        group.select_member_for.assert_called()  # member selection happened on the invoke path
+        group.select_member_with_reason.assert_called()  # member selection happened on the invoke path
         commands = _sent_invoke_commands(ctx)
         assert len(commands) == 1
         # Dispatched to the MEMBER id, not the group id.
@@ -107,7 +108,8 @@ class TestGroupInvokeRouting:
         group = Mock()
         # Drained after the call reports its outcome (#1410).
         group.collect_events.return_value = []
-        group.select_member_for.return_value = None  # all members out of rotation / circuit open
+        # All members out of rotation / circuit open.
+        group.select_member_with_reason.return_value = MemberSelection(None, RouteReason.NO_AVAILABLE_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
@@ -126,21 +128,21 @@ class TestCanaryRoutingAndHealthFeedback:
         group = Mock()
         # Drained after the call reports its outcome (#1410).
         group.collect_events.return_value = []
-        group.select_member_for.return_value = _member(_MEMBER)
+        group.select_member_with_reason.return_value = MemberSelection(_member(_MEMBER), RouteReason.LOAD_BALANCED)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
         _execute(tenant_id="tenant:acme")
 
         # The caller tenant drives per-tenant canary/version routing.
-        group.select_member_for.assert_called_once_with("tenant:acme")
+        group.select_member_with_reason.assert_called_once_with("tenant:acme")
 
     def test_successful_call_reports_member_success(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
         # Drained after the call reports its outcome (#1410).
         group.collect_events.return_value = []
-        group.select_member_for.return_value = _member(_MEMBER)
+        group.select_member_with_reason.return_value = MemberSelection(_member(_MEMBER), RouteReason.LOAD_BALANCED)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
@@ -155,7 +157,7 @@ class TestCanaryRoutingAndHealthFeedback:
         group = Mock()
         # Drained after the call reports its outcome (#1410).
         group.collect_events.return_value = []
-        group.select_member_for.return_value = _member(_MEMBER)
+        group.select_member_with_reason.return_value = MemberSelection(_member(_MEMBER), RouteReason.LOAD_BALANCED)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
         ctx.command_bus.send.side_effect = RuntimeError("backend down")

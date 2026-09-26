@@ -16,6 +16,7 @@ from mcp_hangar.application.read_models.tool_projection import (
 )
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.events import DigestMismatchEvent
+from mcp_hangar.domain.model.mcp_server_group import MemberSelection, RouteReason
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects import DigestEnforcement, ToolDigest
@@ -261,7 +262,8 @@ class TestDigestPinAtColdStartThroughAGroup:
         )
         # `collect_events`: the executor drains the group after reporting the
         # call's outcome to it (#1410), and a real aggregate hands back a list.
-        group = Mock(select_member_for=Mock(return_value=member), collect_events=Mock(return_value=[]))
+        selection = MemberSelection(member, RouteReason.LOAD_BALANCED)
+        group = Mock(select_member_with_reason=Mock(return_value=selection), collect_events=Mock(return_value=[]))
 
         # The group id resolves to no server -- that is what makes it a group.
         mock_context.get_mcp_server.side_effect = lambda server_id: None if server_id == _GROUP else member

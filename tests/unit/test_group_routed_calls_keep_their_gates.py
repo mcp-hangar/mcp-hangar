@@ -32,6 +32,7 @@ from mcp_hangar.application.read_models.tool_projection import (
     reset_tool_projection_registry,
 )
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.model.mcp_server_group import MemberSelection, RouteReason
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
@@ -77,7 +78,7 @@ def ctx():
     member.id.value = _MEMBER
 
     group = Mock()
-    group.select_member_for.return_value = member
+    group.select_member_with_reason.return_value = MemberSelection(member, RouteReason.LOAD_BALANCED)
     group.select_member.return_value = member
     # Drained after the call reports its outcome (#1410).
     group.collect_events.return_value = []

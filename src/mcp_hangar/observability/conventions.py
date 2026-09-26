@@ -186,6 +186,25 @@ class Gate:
     REFUSAL_REASON = "hangar.refusal.reason"
 
 
+class Route:
+    """Which backend served a call, and why (#1286, ADR-029 s5).
+
+    One selection per call, so these are attributes, not events. `mcp.server.id`
+    stays the target the caller named -- for a group, the group -- on every span
+    the executor opens for the call; the member a group selected is `BACKEND`.
+    """
+
+    #: The server the call was dispatched to: the selected member, or on a
+    #: standalone call the server itself. On `batch.call.<tool>`,
+    #: `mcp_server.cold_start` and each `command.send.InvokeToolCommand`.
+    #: Absent when no backend was chosen.
+    BACKEND = "hangar.route.backend"
+    #: A `RouteReason` value, on `batch.call.<tool>`: `standalone`,
+    #: `load_balanced`, `pinned`, `canary`, `canary_fallback` or
+    #: `no_available_member`.
+    REASON = "hangar.route.reason"
+
+
 class Enforcement:
     """Attributes describing policy and enforcement decisions."""
 
