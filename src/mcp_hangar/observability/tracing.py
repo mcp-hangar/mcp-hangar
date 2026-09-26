@@ -13,6 +13,8 @@ Configuration via environment variables:
     MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT: Longest attribute value on Hangar's own
         provider, in characters (default: 256). The OTEL_*_LENGTH_LIMIT
         variables win when set: see _span_limits().
+    MCP_TRACING_CALLER_IDS: Put caller user, agent and session ids on spans
+        (default: false). Read once by the bootstrap: see set_caller_ids_on_spans().
 
 OTLP trace exporter precedence, first match wins (resolve_otlp_exporter_settings):
     protocol: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -283,6 +285,23 @@ def disable_tracing() -> None:
     """
     global _disabled
     _disabled = True
+
+
+# Set by the bootstrap from `observability.tracing.caller_ids` (#1580). Off: the
+# telemetry data contract (#1276) keeps caller user, agent and session ids off
+# spans unless the operator opts in. Audit records are another sink, unaffected.
+_caller_ids_on_spans = False
+
+
+def set_caller_ids_on_spans(enabled: bool) -> None:
+    """Let spans carry the caller's user, agent and session ids, or stop them."""
+    global _caller_ids_on_spans
+    _caller_ids_on_spans = enabled
+
+
+def caller_ids_on_spans() -> bool:
+    """Whether the operator opted in to caller user, agent and session ids on spans."""
+    return _caller_ids_on_spans
 
 
 def _build_sampler() -> Any:

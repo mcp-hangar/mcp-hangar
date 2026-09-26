@@ -138,6 +138,12 @@ records, which carry caller identities. To export traces without them, set
 `config.yaml`. The environment variable wins over the file, and the default is
 `true`.
 
+Spans carry the caller's tenant, principal type and correlation id, but not the
+caller's own identifiers. To put `mcp.caller.id`, `mcp.user.id`, `mcp.agent.id`
+and `mcp.session.id` on spans as well, set `MCP_TRACING_CALLER_IDS=true`, or
+`observability.tracing.caller_ids: true` in `config.yaml`. The environment
+variable wins over the file, and the default is `false`.
+
 ## Length limits
 
 Hangar bounds how long a value it records can be. Each limit is a number of

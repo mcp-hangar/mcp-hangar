@@ -68,6 +68,7 @@ from ....negotiation import (
 )
 from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry
 from ....observability.tracing import (
+    caller_ids_on_spans,
     extract_trace_context,
     get_tracer,
     record_call_outcome,
@@ -205,6 +206,12 @@ def _identity_span_attributes() -> dict[str, str]:
     which name the upstream call. ADR-029 keeps those on the one CLIENT span
     ``execute_tool <tool>``; repeating them here would invite a GenAI-aware
     backend to count one invocation twice.
+
+    The caller's own identifiers -- ``mcp.caller.id``, ``mcp.user.id``,
+    ``mcp.agent.id`` and ``mcp.session.id`` -- are set only when the operator
+    opted in with ``observability.tracing.caller_ids`` (#1580): the #1276
+    contract keeps them off spans by default, as ADR-029 s10 records. Type,
+    tenant and correlation id are not personal identifiers and always go.
     """
     identity = get_identity_context()
     if identity is None:
@@ -212,13 +219,16 @@ def _identity_span_attributes() -> dict[str, str]:
     caller = identity.caller
     candidates = {
         Caller.TYPE: caller.principal_type,
-        Caller.ID: caller.user_id or caller.agent_id,
         Caller.TENANT: caller.tenant_id,
-        MCP.USER_ID: caller.user_id,
-        MCP.AGENT_ID: caller.agent_id,
-        MCP.SESSION_ID: caller.session_id,
         MCP.CORRELATION_ID: identity.correlation_id,
     }
+    if caller_ids_on_spans():
+        candidates |= {
+            Caller.ID: caller.user_id or caller.agent_id,
+            MCP.USER_ID: caller.user_id,
+            MCP.AGENT_ID: caller.agent_id,
+            MCP.SESSION_ID: caller.session_id,
+        }
     return {key: value for key, value in candidates.items() if value}
 
 

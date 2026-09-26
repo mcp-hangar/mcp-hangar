@@ -211,9 +211,13 @@ mcp_servers:
 #   rps: 10      # tokens (requests) added per second
 #   burst: 20    # maximum burst capacity (bucket size)
 
-# Observability - Langfuse integration (optional)
+# Observability - OpenTelemetry tracing and Langfuse integration (optional)
 # Provides end-to-end tracing for MCP tool invocations
 # observability:
+#   tracing:
+#     caller_ids: false   # Put caller user, agent and session ids on spans.
+#                         # Off by default; MCP_TRACING_CALLER_IDS wins over this.
+#                         # Tenant, principal type and correlation id are always on.
 #   langfuse:
 #     enabled: true
 #     public_key: ${LANGFUSE_PUBLIC_KEY}   # From Langfuse dashboard
