@@ -71,7 +71,7 @@ For metrics, open Prometheus at `http://localhost:9090` and query
 | `gen_ai.tool.name` | Tool name |
 | `mcp.tool.status` | `success` or `error` |
 | `mcp.tool.duration_ms` | Invocation duration |
-| `mcp.caller.type`, `mcp.caller.id`, `mcp.caller.roles` | The caller, when the call carries an identity (not in this example, which runs without authentication) |
+| `mcp.caller.type`, `mcp.caller.id`, `mcp.caller.roles` | The caller, when the call carries an identity (not in this example, which runs without authentication). `mcp.caller.id` also needs `MCP_TRACING_CALLER_IDS=true`: caller ids are off spans by default |
 
 The spans of a call, such as `batch.call.<tool>` and `policy.check_access`,
 carry `mcp.server.id` and `gen_ai.tool.name`. `batch.call.<tool>` also carries
