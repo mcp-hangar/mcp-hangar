@@ -15,8 +15,8 @@ on:
   # skipped one, nothing -- and branch protection reads a check that never
   # reports as pending forever. So `test (3.x)` could not be a required check
   # while this filter stood: the first docs-only PR would have hung on it.
-  # The whole workflow is ~3.5 minutes wall clock; paying it on a README typo
-  # is cheaper than a required check that is only sometimes enforced.
+  # Paying a few minutes of wall clock on a README typo is cheaper than a
+  # required check that is only sometimes enforced.
   pull_request:
 
 concurrency:
@@ -105,6 +105,20 @@ jobs:
           assert t.get_current_trace_id() is None and t.get_current_span_id() is None
           EOF
 
+  # PARALLEL TEST RUNS. Every pytest step below that runs the suite passes
+  # `-n auto --dist loadfile` (pytest-xdist, a dev dependency): one worker per
+  # vCPU, a whole FILE per worker. `loadfile`, not the default `load`, because
+  # the suite's slowest cost is module-scoped: the real-clock subprocess
+  # harnesses at default settings (e.g. the readiness retry-window test, ~70 s)
+  # set up once per module, and `load` would split a module's tests across
+  # workers and pay that setup on each. Module fixtures and the process-global
+  # state a file sets up stay in one worker. Serial, `decision-coverage` alone
+  # was ~14 minutes and the critical path of the workflow.
+  #
+  # Order changes under xdist: a worker runs an arbitrary subset of files in its
+  # own process. A test that passes serially and fails here is leaning on state
+  # an earlier file left behind; fix the leak where it starts, do not pin the
+  # victim to a worker.
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -149,15 +163,31 @@ jobs:
         # No coverage here: the report is measured once, by `decision-coverage`,
         # on the pinned selection the floors were measured against. Measuring it
         # three more times produced three more numbers nobody could reconcile.
-        run: pytest --ignore=tests/integration
+        #
+        # `-m "not benchmark"`: the benchmarks run in the next step, serially.
+        # Nothing else is filtered out; `live` tests skip without their
+        # prerequisites, as before.
+        run: pytest --ignore=tests/integration -n auto --dist loadfile -m "not benchmark"
+
+      - name: Run benchmarks
+        # Serial, and on purpose. pytest-benchmark switches itself off under
+        # xdist ("Benchmarks are automatically disabled because xdist plugin is
+        # active") and calls each benchmarked function ONCE. The tests still
+        # pass, so the loss is silent -- and `test_full_path_p99_assertion`
+        # collects its own timings and checks p99 < 5 ms only with at least ten
+        # samples, so under xdist that assertion would never run. `-p no:xdist`
+        # takes the plugin out of this step entirely, so the benchmarks time
+        # thousands of rounds each, as they did before. ~15 s.
+        run: pytest --ignore=tests/integration -m benchmark -p no:xdist
 
   decision-coverage:
     # A SEPARATE job, not a step folded into `test`, on purpose:
     #  * `test` is a 3-version matrix; running the gate three times triples the
     #    flake surface for one signal.
-    #  * `test` passes no `-m` filter, so its selection is not the selection the
-    #    floors in [tool.decision_coverage.floors] were measured against. This
-    #    job pins its own so the number is reproducible.
+    #  * `test` has its own selection (unit only, benchmarks in a separate
+    #    step), which is not the selection the floors in
+    #    [tool.decision_coverage.floors] were measured against. This job pins
+    #    its own so the number is reproducible.
     #  * a dedicated job name can be made a required check without making the
     #    whole matrix required.
     runs-on: ubuntu-latest
@@ -177,8 +207,15 @@ jobs:
         # Selection pinned to match the one the floors were measured with.
         # Branch mode comes from [tool.coverage.run], not a flag here -- the
         # gate refuses a statement-only report outright, so the two cannot drift.
+        #
+        # Parallel, like the other test steps (see the note above `test`).
+        # pytest-cov measures in each worker and combines the data before it
+        # writes a report, so coverage.json and coverage.xml describe the whole
+        # run, as they did serially; the per-module numbers agree with a serial
+        # run within noise.
         run: |
           pytest tests/unit tests/integration -q \
+            -n auto --dist loadfile \
             -m "not benchmark and not live" \
             --cov=mcp_hangar --cov-report=json:coverage.json --cov-report=xml
 
@@ -211,13 +248,17 @@ jobs:
   # (3.14). Between them a version-specific integration failure is caught by a
   # PR instead of by a release.
   #
+  # Neither waits for `test`. The suite is in-process -- no container, nothing
+  # `test` builds or publishes -- so `needs: [test]` bought no signal, only
+  # serialisation: integration could not start until the slowest unit matrix
+  # entry had finished, which put the two back to back on the critical path.
+  #
   # Counterpart: release.yml's `test` job runs `python -m pytest tests/` -- the
   # whole tree, integration included -- across the same four versions. That is
   # deliberately broader than anything here, and the invariant is that nothing
   # it runs is unreachable from a PR. See the note there.
   integration:
     runs-on: ubuntu-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -231,7 +272,7 @@ jobs:
         run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --timeout=60
+        run: pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile
 
   integration-newest:
     # The same selection as `integration` above, on the newest supported
@@ -250,7 +291,6 @@ jobs:
     # NOTE: a new job does not gate merges until it is added to the required
     # checks on `main`. The exact context name to add is `integration-newest`.
     runs-on: ubuntu-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -264,7 +304,7 @@ jobs:
         run: pip install -e ".[dev,opentelemetry]"
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --timeout=60
+        run: pytest tests/integration/ -v --tb=short --timeout=60 -n auto --dist loadfile
 
   build:
     runs-on: ubuntu-latest

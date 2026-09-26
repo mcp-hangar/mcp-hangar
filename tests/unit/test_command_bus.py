@@ -399,6 +399,11 @@ class TestRateLimitMiddleware:
             reset_at=0.0,
             limit=limit,
         )
+        # A real dict, not the Mock a bare `Mock()` returns: the middleware
+        # writes `get_stats()["active_buckets"]` into the process-wide
+        # RATE_LIMIT_ACTIVE_BUCKETS gauge, and a Mock stored there is rendered
+        # as `<Mock ...>` on every later `/metrics` scrape in the same process.
+        limiter.get_stats.return_value = {"active_buckets": 1}
         return limiter
 
     def test_rate_limit_middleware_calls_consume_with_command_type_key(self):

@@ -76,6 +76,8 @@ dev = [
     "pytest-asyncio>=1.3.0",  # first release that admits pytest 9 (the pytest floor above)
     "pytest-timeout>=2.2.0",
     "pytest-benchmark>=5.1.0",
+    # Parallel runs: CI passes `-n auto --dist loadfile` (see ci-core.yml).
+    "pytest-xdist>=3.6.0",
     # Pinned, not a floor: this is the version CI lints with. A floor would let
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI

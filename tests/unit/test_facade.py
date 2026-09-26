@@ -841,6 +841,12 @@ class TestHangarStartsCoordinationAndTheWarmUp:
 
         assert order == ["keeper started", "tailer started", "tailer stopped", "keeper stopped"]
         assert hangar._context is None
+        # A start that raised leaves the facade's thread pool running, and only
+        # `stop()` releases it (see `Hangar.stop`). Without this the pool's
+        # worker outlived the test and was left to garbage collection; under
+        # pytest-xdist the unit thread guard ran before that and failed an
+        # unrelated test for it.
+        await hangar.stop()
 
     async def test_start_warms_the_front_door_and_stop_stops_the_retry(self):
         order: list[str] = []

@@ -21,6 +21,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs  # skip bulk reformats in
 
 # Test
 uv run pytest tests/ -x -q
+uv run pytest tests/ -x -q -n auto --dist loadfile -m "not benchmark"  # parallel, as CI runs it
 uv run pytest tests/unit/              # unit only
 uv run pytest tests/integration/       # integration (needs Docker)
 uv run pytest -m benchmark             # benchmarks
