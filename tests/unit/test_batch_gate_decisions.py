@@ -53,6 +53,7 @@ from tests.unit.test_batch_gate_precedence import (
     _arrange_stale_pin,
     _arrange_tool_access_denied,
     _arrange_withdrawn,
+    _gates_start_late,
     _refused_by_a_validator,
     _run,
 )
@@ -210,6 +211,19 @@ class TestTheFirstRefusingGate:
             ("global_timeout", Gate.DENY),
         ]
         assert _call_span(exporter).attributes[Gate.REFUSAL_REASON] == "batch_timeout"
+
+    def test_a_call_that_starts_after_the_budget_ran_out_is_refused_by_the_timeout_gate(self, ctx, exporter):
+        """The collector has already set the cancel event; the budget, not the event, names the refusal (#1587)."""
+        _arrange_catalogue()
+        with _gates_start_late():
+            assert _run(global_timeout=-1.0).error_type == "TimeoutError"
+
+        assert [(d[Gate.NAME], d[Gate.OUTCOME], d.get(Gate.REASON)) for d in _decisions(exporter)] == [
+            ("cancelled_before_execution", Gate.ALLOW, None),
+            ("global_timeout", Gate.DENY, "batch_timeout"),
+        ]
+        attributes = _call_span(exporter).attributes
+        assert (attributes[Gate.REFUSAL_GATE], attributes[Gate.REFUSAL_REASON]) == ("global_timeout", "batch_timeout")
 
     @pytest.mark.parametrize("reason", ["no_budget", "rate"])
     def test_a_tenant_budget_names_which_budget(self, ctx, exporter, reason):
