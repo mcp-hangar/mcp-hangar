@@ -55,8 +55,9 @@ class CallSpec:
     progress_token: str | None = None  # Minted upstream progress token (#883)
     #: The caller takes the whole result: no
     #: configured batch truncation cuts it, and no continuation is stored for
-    #: it. Set by the facade's ``invoke``, which returns results whole and has
-    #: no way to fetch a continuation (#1453).
+    #: it. Set by the facade's ``invoke`` (#1453) and the front door's flat
+    #: call (#1609): each returns its result whole, with no way to fetch a
+    #: continuation.
     whole_result: bool = False
 
 
@@ -102,6 +103,9 @@ class RelayCapture:
             back to the client verbatim once governed.
         logical_mcp_server: Logical mcp_server (or group) id the call targeted.
         tool: Tool name invoked on the call.
+        origin_traceparent: The ``batch.call.<tool>`` span's W3C ``traceparent``,
+            the origin the task's follow-ups link to (#1281); None when tracing
+            is off.
     """
 
     identity: IdentityContext | None
@@ -111,6 +115,7 @@ class RelayCapture:
     upstream: dict[str, Any]
     logical_mcp_server: str
     tool: str
+    origin_traceparent: str | None = None
 
 
 @dataclass

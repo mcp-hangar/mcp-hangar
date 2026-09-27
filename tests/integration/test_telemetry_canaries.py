@@ -50,7 +50,7 @@ from mcp_hangar.domain.events.base import EVENT_TEXT_LENGTH_LIMIT, FREE_TEXT_FIE
 from mcp_hangar.logging_config import LOG_FIELD_LENGTH_LIMIT
 from mcp_hangar.observability.tracing import SPAN_ATTRIBUTE_LENGTH_LIMIT
 
-from ._canary_upstream import KINDS, PRINCIPAL, TRANSPORTS, canary, encoded, head, tail
+from ._canary_upstream import BIG_RESULT_LENGTH, KINDS, PRINCIPAL, TRANSPORTS, canary, encoded, head, tail
 
 pytestmark = [pytest.mark.otel_sdk, pytest.mark.security]
 
@@ -371,11 +371,16 @@ def test_the_canary_went_in(runs, surface, kind, transport):
         assert canary(kind, transport) in sent, sent
     elif kind == "shaped_result":
         # The upstream has no other answer for `big_result`, so a call to it put
-        # the canary into Hangar. The batch budget then cut it before the caller
-        # saw it; on `hangar_call` the caller holds a continuation id instead.
+        # the canary into Hangar. On `hangar_call` the batch budget then cut it
+        # before the caller saw it, and the caller holds a continuation id
+        # instead. A front-door flat call takes its result whole (#1609).
         assert f"{transport}-big_result" in [r["tool"] for r in _upstream_calls(run, transport)]
         if surface == "hangar_call":
             assert _continuation_ids(response), json.dumps(response)[:500]
+        else:
+            whole = canary(kind, transport) + "-" + "y" * BIG_RESULT_LENGTH
+            assert response["result"]["content"] == [{"type": "text", "text": whole}], json.dumps(response)[:500]
+            assert not response["result"].get("isError"), json.dumps(response)[:500]
     elif kind in ("result", "is_error", "rpc_error", "approver_reason"):
         # The caller is owed the whole text; only telemetry is bounded.
         value = canary(kind, transport)
@@ -542,6 +547,14 @@ def test_batch_truncation_cut_the_big_result_and_recorded_counts_only(runs, tran
 
     assert len(cut) == len(TRANSPORTS), [s["attributes"] for s in truncates]
     assert all(a == {"hangar.shaping.truncated_count": 1, "hangar.shaping.continuation": True} for a in cut), cut
+
+
+def test_the_front_door_cut_nothing_and_stored_no_continuation(runs):
+    """Its flat calls take their result whole (#1609): no truncate span opens, and no id is minted."""
+    run = runs["front_door"]
+
+    assert [s for s in run["spans"] if s["name"] == "batch.truncate"] == []
+    assert not [i for transport in TRANSPORTS for i in _continuation_ids(run["calls"][f"{transport}:shaping"])]
 
 
 @pytest.mark.parametrize("sink", SINKS)

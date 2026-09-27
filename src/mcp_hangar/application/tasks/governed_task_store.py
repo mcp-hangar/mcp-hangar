@@ -100,6 +100,11 @@ class TaskEntry:
         mcp_server_id: The id the call that created the task named, a group or a
             server. Empty when the registration did not say.
         tool_name: The tool that call named. Empty when the registration did not say.
+        origin_traceparent: The W3C ``traceparent`` of the ``batch.call.<tool>``
+            span that created the task, as data and never as an SDK object
+            (ADR-029 s8). A follow-up links to it (#1281). Empty when tracing
+            was off or the registration did not say. In memory only, like the
+            rest of the entry: a restarted process or another replica has none.
     """
 
     snapshot: Task
@@ -110,6 +115,7 @@ class TaskEntry:
     relayed_at: str = ""
     mcp_server_id: str = ""
     tool_name: str = ""
+    origin_traceparent: str = ""
 
 
 class GovernedTaskStore:
@@ -257,6 +263,7 @@ class GovernedTaskStore:
         mcp_server_id: str | None = None,
         tool_name: str = "",
         original_result_type: str = "CallToolResult",
+        origin_traceparent: str | None = None,
     ) -> None:
         """Atomically bind governance to a relayed task and emit its provenance head.
 
@@ -280,6 +287,8 @@ class GovernedTaskStore:
             tool_name: Tool name for the ``TaskCreated`` head (optional).
             original_result_type: Marker recorded on the entry for future
                 ``tasks/result`` reconstruction.
+            origin_traceparent: The creating call's ``traceparent``, recorded on
+                the entry for its follow-ups to link to (#1281). Optional.
         """
         key: TaskKey = (target_server_id, task.task_id)
         with self._tasks_lock:
@@ -297,6 +306,7 @@ class GovernedTaskStore:
             entry = self._tasks[key]
             entry.correlation_id = correlation_id
             entry.original_result_type = original_result_type
+            entry.origin_traceparent = origin_traceparent if isinstance(origin_traceparent, str) else ""
             # 3. Publish the provenance head UNDER THE LOCK. On failure, roll the
             #    whole registration back so zero governed state survives, then re-raise.
             if self._event_publisher is not None:
@@ -380,6 +390,15 @@ class GovernedTaskStore:
         if entry is None or not entry.mcp_server_id or not entry.tool_name:
             return None
         return entry.mcp_server_id, entry.tool_name
+
+    def task_origin(self, key: TaskKey) -> str:
+        """The creating call's ``traceparent`` for ``key``, or ``""`` when unknown (#1281).
+
+        Callers authorize ``key`` first, as for every other read.
+        """
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+        return entry.origin_traceparent if entry is not None else ""
 
     def find_owned_key(self, task_id: str, caller: TaskOwner | None = None) -> TaskKey | None:
         """Resolve the composite :data:`TaskKey` for a ``task_id`` the caller owns.

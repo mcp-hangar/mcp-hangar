@@ -76,6 +76,7 @@ from ....negotiation import (
 from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry, Route, Shaping
 from ....observability.tracing import (
     caller_ids_on_spans,
+    current_traceparent,
     extract_trace_context,
     get_tracer,
     record_call_outcome,
@@ -2512,6 +2513,8 @@ class BatchExecutor:
                     upstream=result.result,
                     logical_mcp_server=p.call.mcp_server,
                     tool=p.call.tool,
+                    # Read inside `batch.call.<tool>`: the span this call's task links back to.
+                    origin_traceparent=current_traceparent(),
                 ),
             )
         logger.warning(
