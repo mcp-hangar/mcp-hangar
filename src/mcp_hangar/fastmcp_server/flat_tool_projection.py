@@ -77,7 +77,6 @@ from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
     FastMCP,
     ListToolsResult,
-    is_modern_protocol_version,
     lowlevel_server,
     make_mcp_error,
 )
@@ -94,6 +93,7 @@ from ..context import (
     PARAM_VALIDATION_STATE_ATTR,
     get_identity_context,
     param_headers_unchecked,
+    predates_param_validation,
 )
 from ..domain.services import progress_relay
 from ..domain.services.governance_overlays import read_as_one_set
@@ -726,7 +726,7 @@ def _observe_legacy_param_skip(mcp_ctx: Any) -> None:
     headers = getattr(_http_request(mcp_ctx), "headers", None)
     if headers is None or not hasattr(headers, "get") or not _carries_param_header(mcp_ctx):
         return
-    if is_modern_protocol_version(headers.get("mcp-protocol-version")):
+    if not predates_param_validation(headers):
         return
     prometheus_metrics.PARAM_HEADER_VALIDATION_SKIPPED_TOTAL.inc(reason="legacy_protocol")
 
@@ -1157,7 +1157,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # than a failure. Default off: this converts an upstream availability
         # problem into a client-visible refusal, which only an operator who
         # cannot serve an unvalidated header should choose. A carried
-        # Mcp-Param-* header the selector will not see is refused too (#1599).
+        # Mcp-Param-* header the selector will not see is refused too (#1599),
+        # unless the request is handshake-era: its headers are ignored (#1605).
         if _param_validation_required and (_param_validation_skipped(mcp_ctx) or param_headers_unchecked(mcp_ctx)):
             # HEADER_MISMATCH is a slight overstatement -- we do not know the
             # header disagrees with the body, only that nobody could check --
