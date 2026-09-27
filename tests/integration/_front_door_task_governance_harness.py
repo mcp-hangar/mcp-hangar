@@ -57,6 +57,17 @@ call reached an upstream, and what ``tasks/get`` answered for the task it was
 handed. It also holds the undeclared calls' outcomes, the spec upstream's
 undeclared call, the id of every task the governed task store recorded, and the
 id of every task an upstream was asked to cancel.
+
+Run as ``python _front_door_task_governance_harness.py <topology> <out.json>
+follow_ups`` it traces a task's follow-ups instead, for
+``test_task_follow_ups_link_to_origin_on_the_served_app.py`` (#1281). An
+in-memory exporter is registered on a provider before ``bootstrap()``, which
+then uses it rather than building its own. One caller creates a task with
+``job`` -- the flat call on the front door, ``hangar_call`` on egress -- then
+polls, updates and cancels it in separate requests. The other tenant polls it
+between, and the owner polls it once more after the cancel. A caller that did
+not declare the extension then calls ``job``, so the seam cancels a task
+nobody is handed. The report holds each answer and every span exported.
 """
 
 from __future__ import annotations
@@ -161,8 +172,9 @@ class _TaskUpstream(BaseHTTPRequestHandler):
                 answer = {"result": {"content": [{"type": "text", "text": "done"}]}}
             else:
                 answer = {"result": _flat(created, "task") if self.flat else {"task": created}}
-        elif method == "tasks/get" and params.get("taskId") in self.tasks:
-            polled = self.tasks[params["taskId"]]
+        elif method == "tasks/get" and followed in self.tasks:
+            # Hangar relays the id as `task_id`; a client sends `taskId`.
+            polled = self.tasks[followed]
             answer = {"result": _flat(polled, "complete") if self.flat else polled}
         elif method in ("tasks/update", "tasks/cancel") and followed in self.tasks:
             with _LOCK:
@@ -382,6 +394,24 @@ def _keys(context: Any) -> dict[str, str]:
     return keys
 
 
+def _serve(topology: str, out: Path, config: dict[str, Any]) -> tuple[Any, dict[str, str], Any]:
+    """Bootstrap from *config* as ``serve --http`` does: the context, a key per tenant, and the served app."""
+    from mcp_hangar.server.api.middleware import create_auth_enforced_app
+    from mcp_hangar.server.bootstrap import bootstrap
+    from mcp_hangar.server.lifecycle import mcp_app_for_serving, warm_the_front_door_catalogue
+
+    # A config file, as `serve --http` reads one. `tool_access.mode` is applied
+    # while the file is loaded, so a config dict would leave the default topology.
+    config_file = out.parent / "config.yaml"
+    config_file.write_text(json.dumps(config))  # JSON is YAML
+    context = bootstrap(config_path=str(config_file))
+    # What `run_http` starts at boot. It returns at once on egress.
+    warm_the_front_door_catalogue(context.runtime)
+    keys = _keys(context)
+    app = create_auth_enforced_app(mcp_app_for_serving(context.mcp_server), context.auth_components)
+    return context, keys, app
+
+
 def main(topology: str, out: Path) -> None:
     os.chdir(out.parent)  # bootstrap keeps its data under ./data
     group_endpoint, group_upstream = _upstream(GROUP_TOOLS)
@@ -395,22 +425,11 @@ def main(topology: str, out: Path) -> None:
     from starlette.testclient import TestClient
 
     import mcp_hangar
-    from mcp_hangar.server.api.middleware import create_auth_enforced_app
-    from mcp_hangar.server.bootstrap import bootstrap
     from mcp_hangar.server.context import get_context
-    from mcp_hangar.server.lifecycle import mcp_app_for_serving, warm_the_front_door_catalogue
     from mcp_hangar.tasks_wire import EXTENSION_ID
 
-    # A config file, as `serve --http` reads one. `tool_access.mode` is applied
-    # while the file is loaded, so a config dict would leave the default topology.
-    config_file = out.parent / "config.yaml"
     config = _config(topology, group_endpoint, solo_endpoint, flat_endpoint, spec_endpoint)
-    config_file.write_text(json.dumps(config))  # JSON is YAML
-    context = bootstrap(config_path=str(config_file))
-    # What `run_http` starts at boot. It returns at once on egress.
-    warm_the_front_door_catalogue(context.runtime)
-    keys = _keys(context)
-    app = create_auth_enforced_app(mcp_app_for_serving(context.mcp_server), context.auth_components)
+    context, keys, app = _serve(topology, out, config)
     tasks_capability = {"extensions": {EXTENSION_ID: {}}}
 
     upstreams = (group_upstream, solo_upstream, flat_upstream, spec_upstream)
@@ -482,5 +501,94 @@ def main(topology: str, out: Path) -> None:
     os._exit(0)
 
 
+def _span(span: Any) -> dict[str, Any]:
+    """An exported span as the parent test reads it: ids in hex, links as ``(trace, span)``."""
+    return {
+        "name": span.name,
+        "kind": span.kind.name,
+        "trace_id": f"{span.context.trace_id:032x}",
+        "span_id": f"{span.context.span_id:016x}",
+        "parent": f"{span.parent.span_id:016x}" if span.parent is not None else None,
+        "links": [[f"{link.context.trace_id:032x}", f"{link.context.span_id:016x}"] for link in span.links],
+        "status": span.status.status_code.name,
+        "status_description": span.status.description,
+        "attributes": dict(span.attributes or {}),
+        "events": [{"name": e.name, "attributes": dict(e.attributes or {})} for e in span.events],
+    }
+
+
+def follow_ups(topology: str, out: Path) -> None:
+    """Create a task, follow it up in separate requests, and export every span (#1281)."""
+    os.chdir(out.parent)
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    spans = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(spans))
+    trace.set_tracer_provider(provider)
+
+    group_endpoint, group_upstream = _upstream(GROUP_TOOLS)
+    solo_endpoint, _solo = _upstream(SOLO_TOOLS)
+
+    from starlette.testclient import TestClient
+
+    import mcp_hangar
+
+    context, keys, app = _serve(topology, out, _config(topology, group_endpoint, solo_endpoint))
+    owner, other = keys[TENANTS[0]], keys[TENANTS[1]]
+    capability = _tasks_capability()
+    answers: dict[str, Any] = {}
+    with TestClient(app, base_url=BASE_URL) as client:
+
+        def create(capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+            if topology == FRONT_DOOR:
+                return _flat_call(client, owner, "job", capabilities)
+            return _hangar_call(client, owner, GROUP, "job", capabilities)
+
+        def follow(key: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            return _post(client, key, method, params, name=task_id, capabilities=capability)
+
+        created = create()
+        task_id = str(created.get("task_id"))
+        answers["created"] = created
+        answers["get"] = follow(owner, "tasks/get", {"taskId": task_id})
+        answers["update"] = follow(owner, "tasks/update", {"taskId": task_id, "inputResponses": {"r1": {"ok": True}}})
+        answers["foreign_get"] = follow(other, "tasks/get", {"taskId": task_id})
+        answers["cancel"] = follow(owner, "tasks/cancel", {"taskId": task_id})
+        answers["get_after_cancel"] = follow(owner, "tasks/get", {"taskId": task_id})
+        answers["unhanded"] = create(capabilities={})
+
+    # The seam's cancel of the unhanded task is sent off the request path; wait for its span.
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if any(s.name == "task_relay.cancel_unhanded" for s in spans.get_finished_spans()):
+            break
+        time.sleep(0.05)
+
+    for server in context.runtime.repository.get_all().values():
+        server.shutdown()
+    out.write_text(
+        json.dumps(
+            {
+                "hangar": mcp_hangar.__file__,
+                "task_id": task_id,
+                "answers": answers,
+                "upstream_follow_ups": [list(item) for item in group_upstream.follow_ups],
+                "spans": [_span(s) for s in spans.get_finished_spans()],
+            },
+            default=str,
+        )
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], Path(sys.argv[2]))
+    if sys.argv[3:] == ["follow_ups"]:
+        follow_ups(sys.argv[1], Path(sys.argv[2]))
+    else:
+        main(sys.argv[1], Path(sys.argv[2]))

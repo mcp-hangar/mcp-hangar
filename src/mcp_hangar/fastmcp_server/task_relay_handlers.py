@@ -113,7 +113,14 @@ from mcp_hangar.context import caller_polls_tasks_var, get_identity_context, ide
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.fastmcp_server.asgi import identity_for_request
 from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
+from mcp_hangar.infrastructure.observability.task_relay_spans import (
+    follow_up_authorized,
+    record_follow_up,
+    relay_error_type,
+    traced_follow_up,
+)
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.conventions import TaskRelay
 from mcp_hangar.tasks_wire import (
     EXTENSION_ID,
     HEADER_MISMATCH,
@@ -440,13 +447,19 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         return None
 
     async def _resolve_owned_key(task_id: str) -> tuple[str, str]:
-        """Resolve the composite key for ``task_id`` the caller owns, else deny.
+        """Resolve the composite key for ``task_id`` the caller owns and ``authorize`` admits, else deny.
 
         Denial raises ``INVALID_PARAMS`` "Task not found" with no existence leak.
+        Only past both checks does the follow-up's span link to the call that
+        created the task and name its server and tool (#1281), so a foreign
+        task yields neither.
         """
         key = await asyncio.to_thread(store.find_owned_key, task_id)
-        if key is None:
+        if key is None or not await asyncio.to_thread(store.authorize, key):
+            record_follow_up(TaskRelay.NOT_FOUND, error_type=str(INVALID_PARAMS))
             raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
+        recorded = await asyncio.to_thread(store.task_tool, key)
+        follow_up_authorized(await asyncio.to_thread(store.task_origin, key), *(recorded or (None, None)))
         return key
 
     def _tool_access_refusal(key: tuple[str, str]) -> Exception | None:
@@ -513,6 +526,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
         """
         snapshot = await asyncio.to_thread(store.get_task, key)
         if snapshot is None:
+            record_follow_up(TaskRelay.NOT_FOUND, error_type=str(INVALID_PARAMS))
             raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
 
         projected = task_wire_fields(snapshot)
@@ -558,8 +572,6 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)
             target_server_id = key[0]
-            if not await asyncio.to_thread(store.authorize, key):
-                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
 
             resp = await asyncio.to_thread(
                 upstream_router, target_server_id, "tasks/get", {"task_id": task_id}, _RELAY_TIMEOUT
@@ -578,8 +590,11 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
                         # returned, so a drifted tool is never even asked for output.
                         await asyncio.to_thread(store._verify_pinned_digest, key)
                         result = await _with_upstream_payload(key, task_id, result)
-                    return await _flat_snapshot(key, task_id, upstream=result)
+                    served = await _flat_snapshot(key, task_id, upstream=result)
+                    record_follow_up(TaskRelay.SERVED)
+                    return served
 
+            record_follow_up(TaskRelay.UPSTREAM_ERROR, error_type=relay_error_type(resp) or "_OTHER", failed=True)
             return await _flat_snapshot(key, task_id)
         finally:
             if token is not None:
@@ -652,8 +667,6 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             task_id = params.task_id
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)
-            if not await asyncio.to_thread(store.authorize, key):
-                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
 
             resp = await asyncio.to_thread(
                 upstream_router, key[0], "tasks/cancel", {"task_id": task_id}, _RELAY_TIMEOUT
@@ -661,6 +674,10 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             if _cancel_confirmed(resp):
                 await asyncio.to_thread(store.mark_cancelled, key)
                 await asyncio.to_thread(store.delete_task, key)
+                record_follow_up(TaskRelay.CONFIRMED)
+            else:
+                failure = relay_error_type(resp)
+                record_follow_up(TaskRelay.UNCONFIRMED, error_type=failure, failed=failure is not None)
 
             return EmptyResult()
         finally:
@@ -698,8 +715,6 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             task_id = params.task_id
             _require_tasks_client(ctx, task_id)
             key = await _resolve_owned_key(task_id)
-            if not await asyncio.to_thread(store.authorize, key):
-                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
             # New input for the tool: refused as a new call of it would be (#1473),
             # before the gate opens or the upstream is asked anything.
             await _refuse_unless_tool_allowed(key)
@@ -717,6 +732,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             resp = await asyncio.to_thread(upstream_router, key[0], "tasks/update", payload, _RELAY_TIMEOUT)
             if isinstance(resp, dict) and "error" in resp:
                 consent_gate.discard(key)  # recoverable: retry re-drives the update
+                record_follow_up(TaskRelay.ERROR, error_type=relay_error_type(resp), failed=True)
                 raise make_mcp_error(INVALID_PARAMS, "task update relay failed; retry")
             consent_gate.answer(key, input_key)
             await asyncio.to_thread(store.record_consent_decision, key, input_key, True, principal_id)
@@ -724,6 +740,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             updated = resp.get("result") if isinstance(resp, dict) else None
             if isinstance(updated, dict):
                 await _sync_snapshot_from_result(key, updated)
+            record_follow_up(TaskRelay.RELAYED)
             return EmptyResult()
         finally:
             if token is not None:
@@ -739,9 +756,12 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
     # they watched `mcp_types` -- which carries the frozen SEP-1686 generation,
     # not this extension. `tasks/list` was therefore always served and
     # `tasks/update` never was, permanently and in both cases wrongly (ADR-015).
-    low.add_request_handler("tasks/get", _GetTaskParams, _get)
-    low.add_request_handler("tasks/cancel", _CancelTaskParams, _cancel)
-    low.add_request_handler("tasks/update", _UpdateTaskParams, _update)
+    #
+    # Each handler runs inside one `task_relay.<op>` span linked to the call that
+    # created its task (#1281).
+    low.add_request_handler("tasks/get", _GetTaskParams, traced_follow_up("get", _get))
+    low.add_request_handler("tasks/cancel", _CancelTaskParams, traced_follow_up("cancel", _cancel))
+    low.add_request_handler("tasks/update", _UpdateTaskParams, traced_follow_up("update", _update))
 
 
 #: Statuses whose answer is the tool's output or its request for input, not only a status.

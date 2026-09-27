@@ -598,6 +598,36 @@ class Saga:
     COMMAND = "hangar.saga.command"
 
 
+class TaskRelay:
+    """The outcome of one governed task follow-up span (#1281, ADR-029 s2, s8).
+
+    `tasks/get`, `tasks/cancel` and `tasks/update` each open one
+    `task_relay.<op>` span under the request's SDK SERVER span, with one link
+    to the `batch.call.<tool>` that created the task; Hangar's own cancel of a
+    task nobody was handed opens `task_relay.cancel_unhanded` in a new trace
+    linked the same way. The task id is never recorded: the link is the join.
+    """
+
+    #: How the follow-up ended; one of `OUTCOMES`, nothing else is exported.
+    OUTCOME = "hangar.task.outcome"
+    #: `tasks/get` answered with the upstream's current state.
+    SERVED = "served"
+    #: `tasks/get` answered with the stored snapshot, because the upstream answered an error.
+    UPSTREAM_ERROR = "upstream_error"
+    #: A cancel the upstream confirmed, or did not.
+    CONFIRMED = "confirmed"
+    UNCONFIRMED = "unconfirmed"
+    #: `tasks/update` reached the upstream and it accepted the input.
+    RELAYED = "relayed"
+    #: No task this caller owns has that id: unknown and foreign read the same, as on the wire.
+    NOT_FOUND = "not_found"
+    #: Refused on purpose: the capability ladder, tool access, withdrawal or digest drift.
+    REFUSED = "refused"
+    #: The follow-up itself failed.
+    ERROR = "error"
+    OUTCOMES = frozenset({SERVED, UPSTREAM_ERROR, CONFIRMED, UNCONFIRMED, RELAYED, NOT_FOUND, REFUSED, ERROR})
+
+
 class Discovery:
     """Attributes for discovery's lease gate (#1296).
 
