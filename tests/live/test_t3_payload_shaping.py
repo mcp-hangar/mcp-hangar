@@ -9,7 +9,9 @@ caller, which is what the owner binding of the continuation cache needs.
 Proven: a ``hangar_call`` the batch budget cuts exports a ``batch.truncate``
 span under its ``batch.execute``, carrying the count it cut and that it stored
 a continuation, and nothing else; the continuation id the caller holds
-appears in no exported span, attribute or event. Not proven: mutation and the
+appears in no exported span, attribute or event. On a ``front_door`` gateway
+with the same budget, a flat ``tools/call`` gets its result whole and opens no
+``batch.truncate`` span (#1609). Not proven: mutation and the
 per-call size limit. No mutator can be registered through configuration, and
 the limit is 10 MB; the unit tests cover both through ``BatchExecutor``.
 Run with::
@@ -71,6 +73,9 @@ mcp_servers:
 """
 
 
+_FRONT_DOOR_CONFIG = _CONFIG.replace("mcp_servers:", "tool_access:\n  mode: front_door\nmcp_servers:")
+
+
 @dataclass
 class _Harness:
     receiver: OtlpReceiver
@@ -79,15 +84,14 @@ class _Harness:
     run_id: str
 
 
-@pytest.fixture(scope="module")
-def harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Harness]:
+def _serve(tmp_path_factory: pytest.TempPathFactory, template: str) -> Iterator[_Harness]:
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 
     workdir = tmp_path_factory.mktemp("payload_shaping")
     auth_db = workdir / "auth.db"
     keys = gs.seed_tenant_keys(auth_db, [_TENANT])
-    config = _CONFIG.format(auth_db=str(auth_db), tenant=_TENANT, python=sys.executable, server=str(_MATH_SERVER))
+    config = template.format(auth_db=str(auth_db), tenant=_TENANT, python=sys.executable, server=str(_MATH_SERVER))
 
     receiver = OtlpReceiver()
     try:
@@ -101,8 +105,18 @@ def harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Harness]:
         receiver.stop()
 
 
-def _hangar_call(harness: _Harness) -> dict[str, Any]:
-    """One ``math.add`` through ``hangar_call`` over streamable-HTTP as the tenant's key; the batch it returns."""
+@pytest.fixture(scope="module")
+def harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Harness]:
+    yield from _serve(tmp_path_factory, _CONFIG)
+
+
+@pytest.fixture(scope="module")
+def front_door(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Harness]:
+    yield from _serve(tmp_path_factory, _FRONT_DOOR_CONFIG)
+
+
+def _call(harness: _Harness, tool: str, arguments: dict[str, Any]) -> Any:
+    """One ``tools/call`` over streamable-HTTP as the tenant's key; the result the client got."""
     from mcp import ClientSession
 
     from tests.live._mcp_client import open_mcp_streams
@@ -111,10 +125,15 @@ def _hangar_call(harness: _Harness) -> dict[str, Any]:
         async with open_mcp_streams(f"{harness.base_url}/mcp", {"X-API-Key": harness.api_key}) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                calls = [{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}]
-                return await session.call_tool("hangar_call", {"calls": calls})
+                return await session.call_tool(tool, arguments)
 
-    result = asyncio.run(_run())
+    return asyncio.run(_run())
+
+
+def _hangar_call(harness: _Harness) -> dict[str, Any]:
+    """One ``math.add`` through ``hangar_call``; the batch it returns."""
+    calls = [{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}]
+    result = _call(harness, "hangar_call", {"calls": calls})
     structured = getattr(result, "structuredContent", None) or getattr(result, "structured_content", None)
     if isinstance(structured, dict) and "results" in structured:
         return structured
@@ -150,3 +169,19 @@ def test_a_truncated_batch_exports_counts_and_no_continuation_id(harness: _Harne
     assert truncate.attributes == {Shaping.TRUNCATED_COUNT: 1, Shaping.CONTINUATION: True}
     assert parent.name == "batch.execute"
     assert [s.name for s in spans if any(continuation_id in v for v in _strings(s))] == []
+
+
+def test_a_front_door_flat_call_is_served_whole_under_the_same_budget(front_door: _Harness) -> None:
+    """The flat call's result is over the 40-byte budget; it is not cut, and nothing is truncated (#1609)."""
+    result = _call(front_door, "add", {"a": 1, "b": 2})
+
+    assert not getattr(result, "is_error", False), result
+    text = " ".join(getattr(block, "text", "") or "" for block in result.content)
+    assert json.loads(text) == {"result": 3.0}, text
+    assert len(result.model_dump_json(by_alias=True, exclude_none=True)) > 40, "the result fits the budget"
+    # Exported by the time the call's own spans are: wait for them, then look.
+    assert poll(
+        lambda: [s for s in front_door.receiver.spans(front_door.run_id) if s.name == "batch.execute"] or None,
+        _ARRIVAL_TIMEOUT_S,
+    )
+    assert [s for s in front_door.receiver.spans(front_door.run_id) if s.name == "batch.truncate"] == []

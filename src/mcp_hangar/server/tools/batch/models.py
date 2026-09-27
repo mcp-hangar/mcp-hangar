@@ -56,8 +56,9 @@ class CallSpec:
     progress_token: str | None = None  # Minted upstream progress token (#883)
     #: The caller takes the whole result: neither the per-call size cap nor the
     #: configured batch truncation cuts it, and no continuation is stored for
-    #: it. Set by the facade's ``invoke``, which returns results whole and has
-    #: no way to fetch a continuation (#1453).
+    #: it. Set by the facade's ``invoke`` (#1453) and the front door's flat
+    #: call (#1609): each returns its result whole, with no way to fetch a
+    #: continuation.
     whole_result: bool = False
 
 
