@@ -19,6 +19,7 @@ HTTP headers, for the HTTP one.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -46,6 +47,7 @@ KINDS = (
     "approver_reason",  # a human approver's reason for a denial
     "l7_argument",  # a tool argument an L7 egress policy's secret pattern matches (#1295)
     "l7_header",  # an ``Mcp-Param-*`` value an L7 egress policy's header rule matches (#1295)
+    "l7_header_encoded",  # the same, sent in the ``=?base64?...?=`` sentinel form the SDK decodes (#1600)
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
@@ -74,6 +76,11 @@ def canary(kind: str, transport: str) -> str:
     return start + "-" + "x" * (_LONG - len(start) - len(end) - 2) + "-" + end
 
 
+def encoded(kind: str, transport: str) -> str:
+    """The canary in the SEP-2243 sentinel form: what a client sends in the ``Mcp-Param-*`` header."""
+    return f"=?base64?{base64.b64encode(canary(kind, transport).encode()).decode('ascii')}?="
+
+
 #: The tools, each producing one canary. ``guarded`` is approval-listed by the harness.
 TOOLS = ("note", "result_text", "is_error", "rpc_error", "guarded")
 
@@ -85,9 +92,11 @@ def prefix(transport: str) -> str:
 
 
 def tools_list(transport: str) -> list[dict[str, Any]]:
-    # `region` is mirrored in `Mcp-Param-Region`, which the SDK validates against it.
+    # `region` is mirrored in `Mcp-Param-Region`, `zone` in `Mcp-Param-Zone` (sentinel form);
+    # the SDK validates both against the body.
     region = {**_STRING, "x-mcp-header": "Region"}
-    properties = {"note": _STRING, "api_token": _STRING, "ref": _STRING, "region": region}
+    zone = {**_STRING, "x-mcp-header": "Zone"}
+    properties = {"note": _STRING, "api_token": _STRING, "ref": _STRING, "region": region, "zone": zone}
     schema = {"type": "object", "properties": properties}
     return [{"name": prefix(transport) + t, "description": f"canary {t}", "inputSchema": schema} for t in TOOLS]
 

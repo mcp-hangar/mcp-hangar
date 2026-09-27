@@ -50,7 +50,7 @@ from mcp_hangar.domain.events.base import EVENT_TEXT_LENGTH_LIMIT, FREE_TEXT_FIE
 from mcp_hangar.logging_config import LOG_FIELD_LENGTH_LIMIT
 from mcp_hangar.observability.tracing import SPAN_ATTRIBUTE_LENGTH_LIMIT
 
-from ._canary_upstream import KINDS, PRINCIPAL, TRANSPORTS, canary, head, tail
+from ._canary_upstream import KINDS, PRINCIPAL, TRANSPORTS, canary, encoded, head, tail
 
 pytestmark = [pytest.mark.otel_sdk, pytest.mark.security]
 
@@ -72,6 +72,7 @@ SCENARIO = {
     "approver_reason": "approval",
     "l7_argument": "argument",
     "l7_header": "argument",
+    "l7_header_encoded": "argument",
 }
 
 
@@ -254,9 +255,12 @@ _RETAINED: dict[str, Rule] = {
     "is_error": Bounded(EVENT_TEXT_LENGTH_LIMIT),
     "rpc_error": Bounded(EVENT_TEXT_LENGTH_LIMIT),
     "approver_reason": Bounded(EVENT_TEXT_LENGTH_LIMIT),
-    # The L7 canaries are arguments too (#1295); `l7_header` mirrors one.
+    # The L7 canaries are arguments too (#1295); `l7_header` mirrors one, and
+    # `l7_header_encoded` mirrors one in sentinel form, decoded to the argument
+    # (#1600). Its sentinel form is kept nowhere (``ENCODED_KINDS``).
     "l7_argument": ShapeRedacted(),
     "l7_header": Kept(),
+    "l7_header_encoded": Kept(),
 }
 CONTRACT: dict[str, dict[str, Rule]] = {sink: {} for sink in SINKS}
 CONTRACT["event_store"] = dict(_RETAINED)
@@ -285,6 +289,22 @@ def test_a_canary_takes_only_the_form_the_contract_allows(runs, surface, sink, k
     rule = CONTRACT[sink].get(kind, Forbidden())
 
     rule.check(SINKS[sink](runs[surface]), kind, transport)
+
+
+#: Kinds sent on the wire in the sentinel form. The binding decodes it for the
+#: L7 selector (#1600); the wire form is kept by no sink, not even the ones
+#: that keep the argument it decodes to.
+ENCODED_KINDS = ("l7_header_encoded",)
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("sink", SINKS)
+@pytest.mark.parametrize("kind", ENCODED_KINDS)
+def test_a_sentinel_canary_is_kept_by_no_sink_in_its_wire_form(runs, surface, sink, kind):
+    for transport in TRANSPORTS:
+        payload = encoded(kind, transport).removeprefix("=?base64?").removesuffix("?=")
+        found = [s[:120] for s in _strings(SINKS[sink](runs[surface])) if payload in s]
+        assert found == [], f"{len(found)} value(s) carry the sentinel canary: {found[:3]}"
 
 
 #: The identifier table of #1276, for the calling principal (the harness's API
@@ -326,7 +346,13 @@ def _upstream_calls(run: dict[str, Any], transport: str) -> list[dict[str, Any]]
 
 
 #: kind -> the argument key it is sent under.
-_ARGUMENT_KEYS = {"argument": "note", "secret_argument": "api_token", "l7_argument": "ref", "l7_header": "region"}
+_ARGUMENT_KEYS = {
+    "argument": "note",
+    "secret_argument": "api_token",
+    "l7_argument": "ref",
+    "l7_header": "region",
+    "l7_header_encoded": "zone",
+}
 
 
 @pytest.mark.parametrize("surface", SURFACES)
@@ -455,11 +481,14 @@ def enforced(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, An
 
 @pytest.mark.parametrize("surface", SURFACES)
 @pytest.mark.parametrize("sink", [sink for sink in SINKS if not CONTRACT[sink]])
-@pytest.mark.parametrize("kind", ["l7_argument", "l7_header"])
+@pytest.mark.parametrize("kind", ["l7_argument", "l7_header", "l7_header_encoded"])
 def test_an_enforced_refusal_keeps_the_l7_canaries_off_telemetry(enforced, surface, sink, kind):
     """The deny path writes its own lines and events; none of them may carry what the policy matched."""
     for transport in TRANSPORTS:
         Forbidden().check(SINKS[sink](enforced[surface]), kind, transport)
+        if kind in ENCODED_KINDS:
+            payload = encoded(kind, transport).removeprefix("=?base64?").removesuffix("?=")
+            assert not [s for s in _strings(SINKS[sink](enforced[surface])) if payload in s]
 
 
 @pytest.mark.parametrize("surface", SURFACES)

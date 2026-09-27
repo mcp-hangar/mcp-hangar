@@ -95,6 +95,7 @@ def arguments(tool: str, transport: str) -> dict[str, Any]:
         "api_token": canary("secret_argument", transport),
         "ref": canary("l7_argument", transport),
         "region": canary("l7_header", transport),
+        "zone": canary("l7_header_encoded", transport),
     }
 
 
@@ -114,7 +115,12 @@ def _l7_policy(mode: str) -> Any:
     )
 
     return L7Policy(
-        headers=HeaderRules(allow=(HeaderMatch(name="Mcp-Param-Region", values=("CANARY-L7HEADER-*",)),)),
+        headers=HeaderRules(
+            allow=(
+                HeaderMatch(name="Mcp-Param-Region", values=("CANARY-L7HEADER-*",)),
+                HeaderMatch(name="Mcp-Param-Zone", values=("CANARY-L7HEADERENCODED-*",)),
+            )
+        ),
         arguments=ArgumentRules(secret_patterns=("aws-keys",)),
         default_action=ToolAction.ALLOW,
         mode=PolicyMode.ENFORCE if mode == "enforce" else PolicyMode.AUDIT,
@@ -255,7 +261,7 @@ def _keys(context: Any) -> tuple[str, str]:
 
 
 def _post(
-    client: Any, key: str, transport: str, method: str, params: dict[str, Any], region: str | None = None
+    client: Any, key: str, transport: str, method: str, params: dict[str, Any], mirrored: bool = False
 ) -> dict[str, Any]:
     """One stateless request to ``/mcp`` carrying the transport's baggage and header canaries; its response."""
     params = {**params, "_meta": {**ENVELOPE, "baggage": f"canary.meta={canary('baggage', transport)}"}}
@@ -268,8 +274,9 @@ def _post(
     }
     if "name" in params:
         headers["Mcp-Name"] = params["name"]
-    if region is not None:
-        headers["Mcp-Param-Region"] = region
+    if mirrored:
+        headers["Mcp-Param-Region"] = canary("l7_header", transport)
+        headers["Mcp-Param-Zone"] = upstream.encoded("l7_header_encoded", transport)
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
     response = client.post("/mcp", headers=headers, content=body)
     response.raise_for_status()
@@ -281,12 +288,12 @@ def _post(
 
 def _call(client: Any, key: str, surface: str, transport: str, tool: str) -> dict[str, Any]:
     name, args = prefix(transport) + tool, arguments(tool, transport)
-    region = args.get("region")
+    mirrored = "region" in args
     if surface == "front_door":
-        return _post(client, key, transport, "tools/call", {"name": name, "arguments": args}, region)
+        return _post(client, key, transport, "tools/call", {"name": name, "arguments": args}, mirrored)
     calls = [{"mcp_server": SERVERS[transport], "tool": name, "arguments": args}]
     params = {"name": "hangar_call", "arguments": {"calls": calls}}
-    return _post(client, key, transport, "tools/call", params, region)
+    return _post(client, key, transport, "tools/call", params, mirrored)
 
 
 def _span(span: Any) -> dict[str, Any]:
