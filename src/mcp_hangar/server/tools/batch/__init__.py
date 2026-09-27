@@ -23,14 +23,15 @@ Example:
 import uuid
 from typing import Any
 
-from mcp_hangar._sdk_compat import Context, FastMCP
+from mcp_hangar._sdk_compat import Context, FastMCP, make_mcp_error
 
 from ....application.services.interceptor_registry import build_validator_pipeline
-from ....context import get_identity_context, identity_context_var
+from ....context import get_identity_context, identity_context_var, param_headers_unchecked
 from ....domain.value_objects.identity import IdentityContext
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
 from ....observability.tracing import get_tracer
+from ....tasks_wire import HEADER_MISMATCH
 from ...context import get_context
 from ...session_guard import refuse_if_session_suspended
 from .concurrency import (
@@ -205,6 +206,20 @@ def _authorize_calls(
     return denied
 
 
+def _refuse_if_param_headers_unchecked(ctx: Context | None) -> None:
+    """Under ``headers.param_validation.required``, refuse ``Mcp-Param-*`` headers nothing checked (#1599).
+
+    ``hangar_call`` declares no ``x-mcp-header``, so no such header it carries is
+    ever checked against the body, and none reaches a selector.
+    """
+    from ....fastmcp_server.flat_tool_projection import param_validation_required
+
+    if param_validation_required() and param_headers_unchecked(ctx):
+        raise make_mcp_error(
+            HEADER_MISMATCH, "hangar_call: the request's Mcp-Param-* headers could not be validated against its body"
+        )
+
+
 def hangar_call(
     calls: list[dict[str, Any]],
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
@@ -317,6 +332,7 @@ def hangar_call(
     # (GHSA-fhwh-fmq2-7m5c). Raised rather than returned as a batch, so the
     # whole call is an error and no partial result can be read as served.
     refuse_if_session_suspended("hangar_call", ctx)
+    _refuse_if_param_headers_unchecked(ctx)
 
     # Bridge the authenticated caller identity into the tool-call path over
     # streamable-HTTP. FastMCP's streamable-HTTP transport runs tool calls in

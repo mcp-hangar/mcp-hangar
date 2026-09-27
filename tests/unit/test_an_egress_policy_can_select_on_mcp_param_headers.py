@@ -19,6 +19,8 @@ from unittest.mock import Mock
 import pytest
 
 from mcp_hangar.context import (
+    PARAM_VALIDATION_KEY,
+    PARAM_VALIDATION_RAN,
     bind_routing_headers,
     get_routing_headers,
     release_routing_headers,
@@ -45,7 +47,8 @@ US = HeaderMatch(name="Mcp-Param-Region", values=("us-*",))
 
 
 def _headers(region: str, version: str | None = MODERN) -> dict[str, str]:
-    out = {"mcp-param-region": region}
+    """A bound mapping whose header the front door recorded as checked (#1599: no key, no match)."""
+    out = {"mcp-param-region": region, PARAM_VALIDATION_KEY: PARAM_VALIDATION_RAN}
     if version is not None:
         out["mcp-protocol-version"] = version
     return out

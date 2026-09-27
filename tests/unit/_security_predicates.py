@@ -41,7 +41,7 @@ from mcp_hangar.domain.services.ui_resource_guard import UiResourceGuard
 from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_request_if_session_suspended
-from mcp_hangar.server.tools.batch import _authorize_calls
+from mcp_hangar.server.tools.batch import _authorize_calls, _refuse_if_param_headers_unchecked
 from mcp_hangar.server.tools.batch.executor import BatchExecutor, _CallPipeline, _withdrawn_in_scope
 from mcp_hangar.server.tools.tool_permissions import authorize_tool
 
@@ -216,6 +216,9 @@ PREDICATES: tuple[Predicate, ...] = (
     # selectors are decided by `evaluate_headers`.
     Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),
     Predicate(evaluate_headers, paths=_each(_INVOKE_PATHS)),
+    # `headers.param_validation.required` on `hangar_call` (#1599). The front
+    # door decides it inline in its flat call, before the executor.
+    Predicate(_refuse_if_param_headers_unchecked, paths={HANGAR_CALL: None}),
     # The check made wherever the server's client is handed out -- the invoke
     # path and the relay every task, prompt and resource request makes: the
     # server is READY, and no refusing capability mode refuses its catalogue.

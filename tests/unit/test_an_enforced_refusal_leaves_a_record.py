@@ -21,6 +21,7 @@ from unittest.mock import Mock
 import pytest
 
 from mcp_hangar import metrics as prometheus_metrics
+from mcp_hangar.context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_RAN
 from mcp_hangar.domain.events.enforcement import EgressPolicyEnforced, EgressPolicyViolationObserved
 from mcp_hangar.domain.exceptions import EgressPolicyApprovalRequiredError, EgressPolicyDeniedError
 from mcp_hangar.domain.model.mcp_server import McpServer
@@ -161,7 +162,11 @@ class TestTheRuleKindTheVerdictRestsOn:
             tools=ToolRules(allow=("*",)),
             headers=HeaderRules(deny=(HeaderMatch("Mcp-Param-Region", ("eu-*",)),)),
         )
-        headers = {"mcp-param-region": "eu-west-1", "mcp-protocol-version": "2026-07-28"}
+        headers = {
+            "mcp-param-region": "eu-west-1",
+            "mcp-protocol-version": "2026-07-28",
+            PARAM_VALIDATION_KEY: PARAM_VALIDATION_RAN,
+        }
 
         assert evaluate("charge", {}, policy, headers).rule_kind == "header"
 

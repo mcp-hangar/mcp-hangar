@@ -194,14 +194,36 @@ class TestTheGate:
         assert verdict is not None
         assert verdict[0] is ToolAction.DENY
 
-    def test_an_unstated_status_keeps_the_version_gate(self) -> None:
-        """The batch surface and stdio reach the evaluator with no request in hand."""
+    def test_an_unstated_status_is_not_a_match(self) -> None:
+        """Fail-closed (#1599): a mapping that does not say validation ran is not read as validated.
+
+        This used to pin the opposite: a mapping without the key kept only the
+        version gate, so a modern header matched on the strength of a status
+        nobody stated. No production writer omits the key today --
+        `bind_routing_headers` always sets it, and stdio and the embedded call
+        bind nothing -- but the evaluator must not depend on that. Only an
+        explicit ``ran`` (or ``partial``, which carries only checked headers)
+        admits a selector.
+        """
         without_status = {"mcp-param-region": "eu-west-1", "mcp-protocol-version": MODERN}
 
-        assert evaluate_headers(without_status, HeaderRules(deny=(EU,))) is not None
-        assert (
-            evaluate_headers({**without_status, "mcp-protocol-version": "2025-06-18"}, HeaderRules(deny=(EU,))) is None
-        )
+        assert evaluate_headers(without_status, HeaderRules(deny=(EU,))) is None
+        assert evaluate_headers(without_status, HeaderRules(allow=(EU,))) is None
+        assert evaluate_headers({**without_status, PARAM_VALIDATION_KEY: "unknown"}, HeaderRules(deny=(EU,))) is None
+
+    def test_an_unstated_status_says_the_rules_were_not_consulted(self) -> None:
+        policy = L7Policy(tools=ToolRules(allow=("*",)), headers=HeaderRules(deny=(EU,)))
+        without_status = {"mcp-param-region": "eu-west-1", "mcp-protocol-version": MODERN}
+
+        decision = evaluate("get_user", {}, policy, without_status)
+
+        assert decision.action is ToolAction.ALLOW
+        assert HEADER_RULES_NOT_CONSULTED in decision.reasons
+
+    def test_a_stated_run_still_keeps_the_version_gate(self) -> None:
+        legacy = {**_headers(), "mcp-protocol-version": "2025-06-18"}
+
+        assert evaluate_headers(legacy, HeaderRules(deny=(EU,))) is None
 
 
 class TestTheVerdict:

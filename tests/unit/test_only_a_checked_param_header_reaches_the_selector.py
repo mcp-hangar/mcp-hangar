@@ -25,6 +25,7 @@ from mcp_hangar._sdk_compat import Tool as MCPTool
 from mcp_hangar.context import (
     PARAM_VALIDATED_HEADERS_ATTR,
     PARAM_VALIDATION_KEY,
+    PARAM_VALIDATION_PARTIAL,
     PARAM_VALIDATION_RAN,
     PARAM_VALIDATION_SKIPPED,
     PARAM_VALIDATION_STATE_ATTR,
@@ -79,7 +80,8 @@ class TestTheBindingDefault:
 
         assert bound["mcp-param-region"] == "eu-west-1"
         assert "mcp-param-tier" not in bound
-        assert bound[PARAM_VALIDATION_KEY] == PARAM_VALIDATION_RAN
+        # The drop is stated: the verdict must say a header rule was not consulted (#1599).
+        assert bound[PARAM_VALIDATION_KEY] == PARAM_VALIDATION_PARTIAL
 
     def test_a_recorded_skip_voids_the_record(self) -> None:
         ctx = _ctx(**{PARAM_VALIDATED_HEADERS_ATTR: frozenset({"mcp-param-region"}), PARAM_VALIDATION_STATE_ATTR: True})

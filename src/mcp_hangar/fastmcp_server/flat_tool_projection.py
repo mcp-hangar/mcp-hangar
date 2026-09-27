@@ -89,7 +89,12 @@ from mcp_hangar.domain.policies.header_exposure import get_header_exposure_polic
 
 from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
-from ..context import PARAM_VALIDATED_HEADERS_ATTR, PARAM_VALIDATION_STATE_ATTR, get_identity_context
+from ..context import (
+    PARAM_VALIDATED_HEADERS_ATTR,
+    PARAM_VALIDATION_STATE_ATTR,
+    get_identity_context,
+    param_headers_unchecked,
+)
 from ..domain.services import progress_relay
 from ..domain.services.governance_overlays import read_as_one_set
 from ..domain.services.tool_access_resolver import PolicyKind, get_tool_access_resolver
@@ -1151,8 +1156,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # already a -32601 below, and a handshake-era request is an era rather
         # than a failure. Default off: this converts an upstream availability
         # problem into a client-visible refusal, which only an operator who
-        # cannot serve an unvalidated header should choose.
-        if _param_validation_required and _param_validation_skipped(mcp_ctx):
+        # cannot serve an unvalidated header should choose. A carried
+        # Mcp-Param-* header the selector will not see is refused too (#1599).
+        if _param_validation_required and (_param_validation_skipped(mcp_ctx) or param_headers_unchecked(mcp_ctx)):
             # HEADER_MISMATCH is a slight overstatement -- we do not know the
             # header disagrees with the body, only that nobody could check --
             # and it is still the right code: a third code for one class
