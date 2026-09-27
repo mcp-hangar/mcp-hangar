@@ -11,7 +11,9 @@ Every test drives `BatchExecutor.execute` with a real SDK exporter behind
 failure outcome asserted here is the one an operator sees. Truncation runs the
 real `TruncationManager` with a small budget. The last tests pin the bounds:
 a canary in either payload reaches no span, nor does a continuation id, and a
-drop reason or direction outside its closed list is not exported.
+direction outside its closed list is not exported. A response over the size
+limit is failed by the transport before it is held (#1613), so it is an
+error on the call span, not a shaping event.
 """
 
 from __future__ import annotations
@@ -25,9 +27,10 @@ from opentelemetry.trace import StatusCode
 
 from mcp_hangar.application.services.mutator_pipeline import MutatorPipeline
 from mcp_hangar.domain.contracts.mutator import MutationContext, MutationResult
+from mcp_hangar.domain.exceptions import ResponseTooLarge
 from mcp_hangar.observability.conventions import Shaping
 from mcp_hangar.server.bootstrap.truncation import init_truncation, reset_truncation
-from mcp_hangar.server.tools.batch import MAX_RESPONSE_SIZE_BYTES, BatchExecutor, CallSpec
+from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 
 _TOOL = "add"
 
@@ -106,7 +109,10 @@ def upstream() -> Iterator[Mock]:
 
 @pytest.fixture
 def oversized_upstream() -> Iterator[Mock]:
-    yield from _upstream({"data": "x" * (MAX_RESPONSE_SIZE_BYTES + 1000)})
+    """The transport stopped reading the response past the limit (#1613)."""
+    for ctx in _upstream({}):
+        ctx.command_bus.send.side_effect = ResponseTooLarge(1024)
+        yield ctx
 
 
 def _run(executor: BatchExecutor, calls: int = 1) -> Any:
@@ -173,18 +179,17 @@ def test_a_failing_mutator_ends_the_call_span_in_error(exporter: Any, upstream: 
     assert all("exception.message" not in e.attributes for e in span.events)
 
 
-def test_an_oversized_result_records_the_drop(exporter: Any, oversized_upstream: Mock) -> None:
+def test_an_oversized_response_fails_the_call_span_and_records_no_drop(exporter: Any, oversized_upstream: Mock) -> None:
+    """An operational failure, typed, and not a shaping event: nothing was dropped after it was held (#1613)."""
     result = _run(BatchExecutor())
 
     [call] = result.results
-    assert call.truncated_reason == "response_size_exceeded"
+    assert not call.success and call.error_type == "ResponseTooLarge"
+    assert not call.truncated and call.truncated_reason is None
     [span] = _call_spans(exporter)
-    [drop] = _events(span, Shaping.DROP_EVENT)
-    assert drop == {
-        Shaping.REASON: "response_size_exceeded",
-        Shaping.SIZE_BYTES: call.original_size_bytes,
-        Shaping.LIMIT_BYTES: MAX_RESPONSE_SIZE_BYTES,
-    }
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.attributes["error.type"] == "ResponseTooLarge"
+    assert [e.name for e in span.events if e.name.startswith("hangar.shaping.")] == []
 
 
 @pytest.fixture
@@ -286,19 +291,6 @@ def test_neither_the_result_nor_the_continuation_id_reaches_the_truncate_span(
     exported = _everything_exported(exporter)
     assert [s for s in exported if _CANARY in s] == []
     assert [s for s in exported if call.continuation_id in s] == []
-
-
-@pytest.mark.parametrize("reason", ["some_other_reason", "payload_from_secret_host", ""])
-def test_a_drop_reason_outside_the_code_list_is_omitted_not_exported(reason: str) -> None:
-    """A closed code list, not the error-type shape rule: `payload_from_secret_host` has the shape and is still cut."""
-    from mcp_hangar.observability.tracing import record_result_drop
-
-    memory, tracer = _memory_tracer()
-    with tracer.start_as_current_span("op"):
-        record_result_drop(reason, 11, 10)
-
-    [span] = memory.get_finished_spans()
-    assert _events(span, Shaping.DROP_EVENT) == [{Shaping.SIZE_BYTES: 11, Shaping.LIMIT_BYTES: 10}]
 
 
 def test_a_direction_outside_the_two_records_no_mutation_event() -> None:

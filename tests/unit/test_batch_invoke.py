@@ -26,7 +26,6 @@ from mcp_hangar.server.tools.batch import (
     DEFAULT_TIMEOUT,
     MAX_CALLS_PER_BATCH,
     MAX_CONCURRENCY_LIMIT,
-    MAX_RESPONSE_SIZE_BYTES,
     MAX_TIMEOUT,
     BatchExecutor,
     CallSpec,
@@ -603,8 +602,8 @@ class TestResponseTruncation:
         ctx = Mock()
         ctx.event_bus = Mock()
         ctx.command_bus = Mock()
-        # Return a response larger than MAX_RESPONSE_SIZE_BYTES
-        large_data = {"data": "x" * (MAX_RESPONSE_SIZE_BYTES + 1000)}
+        # Larger than the 10 MB per-call cap the executor applied until #1613
+        large_data = {"data": "x" * (10 * 1024 * 1024 + 1000)}
         ctx.command_bus.send.return_value = large_data
 
         mock_provider = Mock()
@@ -626,8 +625,8 @@ class TestResponseTruncation:
             exec_groups.get.return_value = None
             yield ctx
 
-    def test_truncates_large_response(self, mock_large_response):
-        """Large responses are truncated."""
+    def test_a_large_result_the_transport_read_is_not_dropped(self, mock_large_response):
+        """The executor drops nothing past a size: the transport bounds the read, before it is held (#1613)."""
         result = hangar_call(
             calls=[
                 {"mcp_server": "math", "tool": "add", "arguments": {}},
@@ -635,10 +634,9 @@ class TestResponseTruncation:
         )
 
         call_result = result["results"][0]
-        assert call_result["truncated"] is True
-        assert call_result["truncated_reason"] == "response_size_exceeded"
-        assert call_result["original_size_bytes"] is not None
-        assert call_result["result"] is None  # No partial data
+        assert call_result["success"] is True
+        assert "truncated" not in call_result
+        assert call_result["result"] == mock_large_response.command_bus.send.return_value
 
     def test_a_call_that_takes_its_whole_result_is_not_cut(self, mock_large_response):
         """The facade's `invoke` takes its result whole, as it always has (#1453)."""

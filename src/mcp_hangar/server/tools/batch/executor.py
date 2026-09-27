@@ -11,7 +11,6 @@ Provides parallel execution of batch invocations with:
 
 import asyncio
 import contextvars
-import json
 import threading
 import time
 from collections.abc import Coroutine
@@ -66,7 +65,6 @@ from ....metrics import (
     BATCH_CONCURRENCY_GAUGE,
     BATCH_DURATION_SECONDS,
     BATCH_SIZE_HISTOGRAM,
-    BATCH_TRUNCATIONS_TOTAL,
     TENANT_QUOTA_REFUSALS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
@@ -84,7 +82,6 @@ from ....observability.tracing import (
     record_gate_decision,
     record_handled_failure,
     record_mutation,
-    record_result_drop,
     record_retry_attempt,
     record_route,
     settle_failed_call,
@@ -94,7 +91,7 @@ from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .member_health import MemberOutcome, member_outcome
-from .models import MAX_RESPONSE_SIZE_BYTES, BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
+from .models import BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
 from .relay_seam import upstream_task
 from .tenant_admission import CONCURRENCY, NO_BUDGET, RATE, Grant, Refusal, Reservation, get_tenant_admission
 
@@ -2681,36 +2678,13 @@ class BatchExecutor:
                 _l7_decision(l7_holder[0])
 
         # Interceptor mutators (response): transform the returned result payload
-        # after a successful invoke, before the size check and building the
-        # success CallResult. Empty pipeline (default) returns it unchanged.
+        # after a successful invoke, before building the success CallResult.
+        # Empty pipeline (default) returns it unchanged. A result over the read
+        # limit never gets here: the transport failed the call with
+        # `ResponseTooLarge` before it was held (#1613).
         result = self._mutate("tools/call", "response", cast(dict[str, Any], result), call.call_id)
 
         elapsed_ms = (time.perf_counter() - call_start) * 1000
-
-        # Check response size and truncate if needed
-        truncated = False
-        truncated_reason = None
-        original_size = None
-
-        result_json = json.dumps(result)
-        result_size = len(result_json.encode("utf-8"))
-
-        # A call whose caller takes the whole result is not cut (#1453).
-        if result_size > MAX_RESPONSE_SIZE_BYTES and not call.whole_result:
-            truncated = True
-            truncated_reason = "response_size_exceeded"
-            original_size = result_size
-            result = None
-            BATCH_TRUNCATIONS_TOTAL.inc(reason="per_call")
-            record_result_drop(truncated_reason, result_size, MAX_RESPONSE_SIZE_BYTES)
-            logger.warning(
-                "batch_call_truncated",
-                call_id=call.call_id,
-                mcp_server=call.mcp_server,
-                tool=call.tool,
-                size_bytes=result_size,
-                limit_bytes=MAX_RESPONSE_SIZE_BYTES,
-            )
 
         logger.debug(
             "batch_call_completed",
@@ -2737,9 +2711,6 @@ class BatchExecutor:
             success=True,
             result=result,
             elapsed_ms=elapsed_ms,
-            truncated=truncated,
-            truncated_reason=truncated_reason,
-            original_size_bytes=original_size,
             retry_metadata=retry_meta,
         )
 

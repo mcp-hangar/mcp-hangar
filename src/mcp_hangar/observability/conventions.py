@@ -457,10 +457,11 @@ class Shaping:
       histogram was the other choice and was not taken: a metric cannot say
       which call a slow mutation belonged to, and ADR-029 s1 keeps metrics for
       aggregates and SLOs, which nobody has asked of mutation.
-    - A result the per-call size limit drops is an event: one fact, instant, at
-      most once per call. Its reason is a code from `DROP_REASONS`; any other
-      value is omitted rather than exported, as `hangar.gate.reason` omits a
-      refusal it has no code for.
+    - Nothing here records a result over the size limit: it is no longer
+      dropped after it is held. The transport stops reading it and fails the
+      call with `ResponseTooLarge`, which the call span carries as its
+      `error.type` (#1613). The `hangar.shaping.drop` event #1606 added for
+      the drop went with it, before any release shipped it.
     - Batch truncation is its own short `batch.truncate` span under
       `batch.execute`: it runs once per batch and may write to the
       continuation cache, which is I/O with a duration of its own.
@@ -480,19 +481,6 @@ class Shaping:
 
     #: Milliseconds the mutator pipeline took.
     DURATION_MS = "hangar.shaping.duration_ms"
-
-    #: A result dropped by the per-call size limit, as a span event.
-    DROP_EVENT = "hangar.shaping.drop"
-
-    #: Why the result was dropped, a code from `DROP_REASONS`. Omitted for any
-    #: other value; never free text.
-    REASON = "hangar.shaping.reason"
-    RESPONSE_SIZE_EXCEEDED = "response_size_exceeded"
-    DROP_REASONS = frozenset({RESPONSE_SIZE_EXCEEDED})
-
-    #: Size of the dropped result in bytes, and the limit it exceeded.
-    SIZE_BYTES = "hangar.shaping.size_bytes"
-    LIMIT_BYTES = "hangar.shaping.limit_bytes"
 
     #: How many results batch truncation cut, on the `batch.truncate` span.
     TRUNCATED_COUNT = "hangar.shaping.truncated_count"

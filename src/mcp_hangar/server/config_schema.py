@@ -80,6 +80,8 @@ SERVER_SPEC_KEYS = frozenset(
         "image",
         "max_concurrency",
         "max_consecutive_failures",
+        # The server's own read limit on one upstream response (#1613).
+        "max_response_bytes",
         "members",
         "min_healthy",
         "mode",
@@ -124,8 +126,11 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "discovery": frozenset({"auto_register", "enabled", "refresh_interval_s", "security", "sources"}),
     "event_store": frozenset({"allow_memory_fallback", "driver", "enabled", "path"}),
     # `tenant_limits` (#1445), read by `config._init_tenant_limits_from_config`,
-    # which checks the keys of each entry itself.
-    "execution": frozenset({"default_mcp_server_concurrency", "max_concurrency", "tenant_limits"}),
+    # which checks the keys of each entry itself. `max_response_bytes` (#1613),
+    # read by `response_limit.resolve_max_response_bytes`.
+    "execution": frozenset(
+        {"default_mcp_server_concurrency", "max_concurrency", "max_response_bytes", "tenant_limits"}
+    ),
     # `param_validation.required` (ADR-025). Global to the front door: the
     # condition is a property of the request, not of one upstream.
     "headers": frozenset({"param_validation"}),

@@ -53,7 +53,8 @@ class _InProcessUpstream:
     def flush(self) -> None:
         pass
 
-    def readline(self) -> str:
+    def readline(self, size: int = -1) -> str:
+        # Every line here is far under the read chunk the client asks for.
         return self._lines.get()
 
     def poll(self) -> None:

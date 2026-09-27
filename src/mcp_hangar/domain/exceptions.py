@@ -422,6 +422,24 @@ class ClientTimeoutError(ClientError):
         self.timeout = timeout
 
 
+class ResponseTooLarge(ClientError):
+    """An upstream response went past the read-time limit and was not read whole (#1613).
+
+    Raised by the transport that was reading it, so it fails the call the same
+    way over stdio and HTTP, on ``hangar_call`` and on a flat call. An
+    operational failure, not a refusal: the upstream was asked and answered.
+    The message names the limit and nothing the upstream sent.
+    """
+
+    def __init__(self, limit_bytes: int, mcp_server_id: str = ""):
+        super().__init__(
+            message=f"The upstream response exceeded the limit of {limit_bytes} bytes and was not read.",
+            mcp_server_id=mcp_server_id,
+            details={"limit_bytes": limit_bytes},
+        )
+        self.limit_bytes = limit_bytes
+
+
 # --- Validation Exceptions ---
 
 
