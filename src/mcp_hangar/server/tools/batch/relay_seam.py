@@ -30,7 +30,7 @@ from ....errors import bounded_error_type
 from ....infrastructure.observability.task_relay_spans import record_follow_up, relay_error_type, unhanded_cancel_span
 from ....logging_config import get_logger
 from ....observability.conventions import TaskRelay
-from ....tasks_wire import EXTENSION_ID
+from ....tasks_wire import EXTENSION_ID, CancelTaskRequestParams
 from ...context import get_context
 from .models import CallResult, RelayCapture
 
@@ -113,9 +113,10 @@ def _cancel_unhanded_task(capture: RelayCapture) -> None:
 
     def _relay_cancel() -> None:
         try:
-            # The param shape the served `tasks/cancel` relays upstream, so an
-            # upstream sees one kind of cancel whoever asked for it.
-            response = router(target_server_id, "tasks/cancel", {"task_id": task_id}, _CANCEL_TIMEOUT)
+            # The params the served `tasks/cancel` relays upstream, `{"taskId": ...}`,
+            # so an upstream sees one kind of cancel whoever asked for it.
+            params = CancelTaskRequestParams(task_id=task_id).model_dump(by_alias=True)
+            response = router(target_server_id, "tasks/cancel", params, _CANCEL_TIMEOUT)
         except Exception as exc:  # noqa: BLE001 -- fault barrier: a cancel must never surface anywhere
             record_follow_up(TaskRelay.ERROR, error_type=type(exc).__qualname__, failed=True)
             logger.info(

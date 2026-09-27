@@ -36,7 +36,7 @@ from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.domain.value_objects.security import PrincipalType
-from mcp_hangar.fastmcp_server.task_relay_handlers import register_task_relay_handlers
+from mcp_hangar.fastmcp_server.task_relay_handlers import _UpdateTaskParams, register_task_relay_handlers
 from mcp_hangar.server.tools.batch import executor
 from mcp_hangar.tasks_wire import EXTENSION_ID
 
@@ -114,6 +114,11 @@ def _register(store: GovernedTaskStore, *, recorded: bool = True) -> None:
             store.register_relayed_task(target_server_id="S1", task=task, expected_owner=TaskOwner("tenant-a", "alice"))
 
 
+def _answers() -> _UpdateTaskParams:
+    """A ``tasks/update`` for T1, parsed as the served handler receives it."""
+    return _UpdateTaskParams(task_id="T1", input_responses={"k": {}})
+
+
 def _handlers(store: GovernedTaskStore, router: _Router) -> dict[str, Any]:
     handlers: dict[str, Any] = {}
     low = SimpleNamespace(add_request_handler=lambda method, _params, handler: handlers.__setitem__(method, handler))
@@ -158,7 +163,7 @@ async def test_an_update_is_refused_as_a_new_call_is(asked: Any, refusal: tuple[
     router = _Router({"tasks/get": {"result": _task("input_required")}})
 
     with pytest.raises(McpError) as exc:
-        await _handlers(store, router)["tasks/update"](_ctx(), SimpleNamespace(task_id="T1", input_responses={"k": {}}))
+        await _handlers(store, router)["tasks/update"](_ctx(), _answers())
 
     _assert_refused_as_a_call(exc, refusal)
     # Refused before the probe, so before the consent gate opens and before any answer is relayed.
@@ -170,7 +175,7 @@ async def test_the_check_asks_about_the_call_that_created_the_task(asked: Any) -
     _register(store)
     router = _Router({"tasks/get": {"result": _task("input_required")}, "tasks/update": {"result": _task()}})
 
-    await _handlers(store, router)["tasks/update"](_ctx(), SimpleNamespace(task_id="T1", input_responses={"k": {}}))
+    await _handlers(store, router)["tasks/update"](_ctx(), _answers())
 
     # The group the call named, its tool, the caller's tenant and the member the task lives on.
     assert asked == [("grp", "job", "tenant-a", "S1")]
@@ -248,7 +253,7 @@ async def test_a_task_registered_without_its_tool_is_refused(asked: Any) -> None
     router = _Router({"tasks/get": {"result": _task("input_required")}})
 
     with pytest.raises(McpError) as exc:
-        await _handlers(store, router)["tasks/update"](_ctx(), SimpleNamespace(task_id="T1", input_responses={"k": {}}))
+        await _handlers(store, router)["tasks/update"](_ctx(), _answers())
 
     _assert_refused_as_a_call(exc, ("Tool not available for this task", "ToolAccessDeniedError"))
     assert router.calls == [] and asked == []

@@ -33,6 +33,7 @@ from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityCon
 from mcp_hangar.domain.value_objects.security import PrincipalType
 from mcp_hangar.fastmcp_server.task_relay_handlers import (
     _cancel_confirmed,
+    _UpdateTaskParams,
     register_task_relay_handlers,
 )
 from mcp_hangar.tasks_wire import (
@@ -271,6 +272,58 @@ def test_param_models_match_the_vendored_wire_definitions(store: GovernedTaskSto
 
 
 # ---------------------------------------------------------------------------
+# What each follow-up relays upstream (#1617)
+# ---------------------------------------------------------------------------
+
+
+async def test_every_follow_up_is_relayed_upstream_with_the_wire_names(
+    store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEP-2663 names the id ``taskId`` on every ``tasks/*`` request, and so does Hangar.
+
+    Hangar used to send ``{"task_id": ...}`` on get, cancel and the
+    ``tasks/result`` fetch, so an upstream reading only the wire name found no
+    task: polls came back as errors and cancels went unconfirmed. Each params
+    here is parsed off the wire the way the SDK runner parses it (by alias), and
+    each relayed params is pinned exactly.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    monkeypatch.setattr(store, "_verify_pinned_digest", lambda _key: None)
+    router = _FakeRouter(
+        {
+            "tasks/get": {"result": _upstream_task("T1", status="input_required")},
+            "tasks/update": {"result": _upstream_task("T1", status="working")},
+            "tasks/cancel": {"result": {}},
+            "tasks/result": {"result": {"content": []}},
+        }
+    )
+    handlers = _handlers(store, router)
+    ctx = _ctx("alice", "tenant-a")
+
+    def parsed(method: str, wire: dict[str, Any]) -> Any:
+        return handlers[method][0].model_validate(wire, by_name=False)
+
+    answers = {"k": {"ok": True}}
+    meta = {"progressToken": "p-1"}
+    await handlers["tasks/update"][1](
+        ctx, parsed("tasks/update", {"taskId": "T1", "inputResponses": answers, "_meta": meta})
+    )
+    # Completed with no inline result, as an older-design upstream answers, so
+    # the poll also fetches `tasks/result`.
+    router.responses["tasks/get"] = {"result": _upstream_task("T1", status="completed")}
+    await handlers["tasks/get"][1](ctx, parsed("tasks/get", {"taskId": "T1"}))
+    await handlers["tasks/cancel"][1](ctx, parsed("tasks/cancel", {"taskId": "T1"}))
+
+    assert [(method, params) for _server, method, params, _timeout in router.calls] == [
+        ("tasks/get", {"taskId": "T1"}),  # the update's consent probe
+        ("tasks/update", {"_meta": meta, "taskId": "T1", "inputResponses": answers}),
+        ("tasks/get", {"taskId": "T1"}),
+        ("tasks/result", {"taskId": "T1"}),
+        ("tasks/cancel", {"taskId": "T1"}),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # tasks/get
 # ---------------------------------------------------------------------------
 
@@ -284,8 +337,8 @@ async def test_get_relays_to_owning_server_updates_snapshot_returns_flat(
 
     result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
-    # Relayed to the RIGHT upstream server, verbatim task_id param.
-    assert router.calls == [("S1", "tasks/get", {"task_id": "T1"}, 30.0)]
+    # Relayed to the RIGHT upstream server, the id under its wire name.
+    assert router.calls == [("S1", "tasks/get", {"taskId": "T1"}, 30.0)]
     assert isinstance(result, GetTaskResult)
     wire = result.model_dump(by_alias=True)
     assert wire["taskId"] == "T1"
@@ -509,7 +562,7 @@ async def test_legacy_connection_is_told_the_method_does_not_exist(store: Govern
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter()
     handlers = _handlers(store, router)
-    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+    params = _UpdateTaskParams(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
         await handlers[method][1](_ctx("alice", "tenant-a", version="2025-11-25"), params)
@@ -541,7 +594,7 @@ async def test_modern_client_without_the_extension_is_told_what_to_declare(
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter()
     handlers = _handlers(store, router)
-    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+    params = _UpdateTaskParams(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
         await handlers[method][1](_ctx("alice", "tenant-a", declares=False), params)
@@ -564,7 +617,7 @@ async def test_a_missing_mcp_name_header_is_refused(store: GovernedTaskStore, me
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter()
     handlers = _handlers(store, router)
-    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+    params = _UpdateTaskParams(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
         await handlers[method][1](_ctx("alice", "tenant-a", task_id=None), params)
@@ -812,7 +865,7 @@ async def test_update_relays_the_clients_answers_and_acknowledges_empty(store: G
     handlers = _handlers(store, router)
 
     result = await handlers["tasks/update"][1](
-        _ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1", input_responses=answers)
+        _ctx("alice", "tenant-a"), _UpdateTaskParams(task_id="T1", input_responses=answers)
     )
 
     assert isinstance(result, EmptyResult)
@@ -837,7 +890,7 @@ async def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstrea
 
     with pytest.raises(McpError) as exc:
         await handlers["tasks/update"][1](
-            _ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1", input_responses={"k": {}})
+            _ctx("bob", "tenant-b"), _UpdateTaskParams(task_id="T1", input_responses={"k": {}})
         )
 
     assert "Task not found: T1" in str(exc.value)

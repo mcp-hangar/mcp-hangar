@@ -15,7 +15,6 @@ import argparse
 import sys
 
 import anyio
-
 from _session import Checks, JsonRpcError, open_session
 
 TASK_TOOLS = ("long_job", "long_job_consent")
@@ -48,24 +47,29 @@ async def run(url: str) -> int:
         if not task_id:
             return checks.summary()
 
-        # 2. tasks/get accepts snake_case (what the relay forwards) and reaches completed.
-        immediate = await session.request("tasks/get", {"task_id": task_id})
+        # 2. tasks/get reads the wire name taskId, refuses any other, and reaches completed.
+        immediate = await session.request("tasks/get", {"taskId": task_id})
         checks.check(
-            "tasks/get accepts snake_case task_id (relay spelling)",
+            "tasks/get accepts the wire name taskId",
             immediate.get("status") in ("working", "completed"),
             f"status={immediate.get('status')}",
         )
+        try:
+            await session.request("tasks/get", {"task_id": task_id})
+            checks.check("tasks/get refuses snake_case task_id", False, "unexpected success")
+        except JsonRpcError as error:
+            checks.check("tasks/get refuses snake_case task_id", error.code == -32602, error.message[:80])
 
         status = None
         for _ in range(20):
-            status = (await session.request("tasks/get", {"task_id": task_id})).get("status")
+            status = (await session.request("tasks/get", {"taskId": task_id})).get("status")
             if status in ("completed", "failed"):
                 break
             await anyio.sleep(0.5)
         checks.check("tasks/get reaches completed", status == "completed", f"status={status}")
 
         # 3. tasks/result carries the payload.
-        payload = await session.request("tasks/result", {"task_id": task_id})
+        payload = await session.request("tasks/result", {"taskId": task_id})
         text = (payload.get("content") or [{}])[0].get("text", "")
         checks.check("tasks/result returns the tool payload", text.startswith("Completed job"), text[:80])
 
@@ -76,7 +80,7 @@ async def run(url: str) -> int:
 
         # 5. Unknown task fails closed rather than inventing a task.
         try:
-            await session.request("tasks/get", {"task_id": "does-not-exist-000"})
+            await session.request("tasks/get", {"taskId": "does-not-exist-000"})
             checks.check("unknown task_id fails closed", False, "unexpected success")
         except JsonRpcError as error:
             checks.check("unknown task_id fails closed", "not found" in error.message.lower(), error.message[:80])
@@ -86,7 +90,7 @@ async def run(url: str) -> int:
         consent_id = (consent.get("task") or {}).get("taskId")
         consent_status = None
         for _ in range(20):
-            consent_status = (await session.request("tasks/get", {"task_id": consent_id})).get("status")
+            consent_status = (await session.request("tasks/get", {"taskId": consent_id})).get("status")
             if consent_status != "working":
                 break
             await anyio.sleep(0.5)
@@ -96,7 +100,7 @@ async def run(url: str) -> int:
             f"status={consent_status}",
         )
         if consent_status == "input_required":
-            updated = await session.request("tasks/update", {"task_id": consent_id, "input_key": "x"})
+            updated = await session.request("tasks/update", {"taskId": consent_id, "inputResponses": {"consent": {}}})
             checks.check(
                 "tasks/update resolves input_required to completed",
                 updated.get("status") == "completed",
@@ -105,7 +109,7 @@ async def run(url: str) -> int:
 
         # 7. Cancel a fresh working task.
         cancellable = await session.request("tools/call", {"name": "long_job", "arguments": {"prompt": "cancelme"}})
-        cancelled = await session.request("tasks/cancel", {"task_id": (cancellable["task"])["taskId"]})
+        cancelled = await session.request("tasks/cancel", {"taskId": (cancellable["task"])["taskId"]})
         checks.check(
             "tasks/cancel confirms cancelled",
             cancelled.get("status") == "cancelled",
