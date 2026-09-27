@@ -197,7 +197,8 @@ class Route:
     #: The server the call was dispatched to: the selected member, or on a
     #: standalone call the server itself. On `batch.call.<tool>`,
     #: `mcp_server.cold_start` and each `command.send.InvokeToolCommand`.
-    #: Absent when no backend was chosen.
+    #: Absent when no backend was chosen. Also on the `tool_invocation` audit
+    #: record, whose `mcp.server.id` is likewise the logical target (#1594).
     BACKEND = "hangar.route.backend"
     #: A `RouteReason` value, on `batch.call.<tool>`: `standalone`,
     #: `load_balanced`, `pinned`, `canary`, `canary_fallback` or

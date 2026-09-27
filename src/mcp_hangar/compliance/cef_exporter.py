@@ -16,7 +16,7 @@ from pathlib import Path
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
 from .cef_formatter import format_audit_record
-from .refusal import event_type_for_status, refusal_data
+from .refusal import ROUTE_BACKEND, event_type_for_status, refusal_data
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ class CEFExporter:
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
+        route_backend: str | None = None,
     ) -> None:
         """Export a tool invocation event as a CEF log line.
 
@@ -122,6 +123,8 @@ class CEFExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        if route_backend:
+            data[ROUTE_BACKEND] = route_backend
 
         record = AuditRecord(
             event_id="",

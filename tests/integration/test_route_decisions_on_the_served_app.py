@@ -13,6 +13,12 @@ through that member's group (`flat_tool_projection._member_to_group`). Both must
 say the same thing: ``mcp.server.id`` is the group on every span the executor
 opened, and the member is ``hangar.route.backend``.
 
+The call's audit record is keyed the same way (#1594): ``mcp.server.id`` is
+the group and ``hangar.route.backend`` the member, on both entry paths. A
+member named directly is standalone, with its own id in both, and a group call
+the group's access policy refuses after the selection (#1582) names the group
+and the member it was routed to.
+
 Naming: neutral placeholders only (pool, route-a, route-b, tenant-*).
 """
 
@@ -76,3 +82,23 @@ def test_mcp_server_id_is_the_group_on_every_executor_span_and_the_member_is_the
     for name, _, backend in spans:
         if name in ("mcp_server.cold_start", "command.send.InvokeToolCommand", "batch.call.whoami"):
             assert backend == member, (name, spans)
+
+
+@pytest.mark.parametrize(("tenant", "member"), [(PINNED_TENANT, MEMBER_B), (OTHER_TENANT, MEMBER_A)])
+def test_the_audit_record_names_the_group_and_the_member(run, tenant, member):
+    """Before #1594, `mcp.server.id` on this record was the member."""
+    assert run[tenant]["audit"] == [[GROUP, member, "success"]], run[tenant]
+
+
+def test_a_member_named_directly_is_audited_as_itself(run):
+    if "standalone" not in run:
+        pytest.skip("the front door names a group member's flat tool, which it routes through the group")
+
+    assert run["standalone"]["audit"] == [[MEMBER_A, MEMBER_A, "success"]], run["standalone"]
+
+
+def test_a_group_call_refused_after_the_selection_names_the_group_and_the_member(run):
+    if "refused" not in run:
+        pytest.skip("the front door does not project a tool the group's policy denies")
+
+    assert run["refused"]["audit"] == [[GROUP, MEMBER_A, "denied"]], run["refused"]

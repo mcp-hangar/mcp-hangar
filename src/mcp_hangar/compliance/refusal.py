@@ -29,6 +29,15 @@ REFUSAL_FIELDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+#: The ``AuditRecord.data`` key of the server a call was routed to (#1594): the
+#: selected member for a group call, whose record names the group as its
+#: server; the server itself on a standalone call. ADR-029's
+#: ``hangar.route.backend``. Each format writes it under its own convention:
+#: ``route_backend`` in JSON lines, ``routeBackend`` in LEEF and syslog, and
+#: the labelled ``flexString1`` in CEF, whose six ``cs`` slots are all taken.
+ROUTE_BACKEND = "route_backend"
+
+
 def event_type_for_status(status: str) -> str:
     """The audit event type a tool call's *status* is written as."""
     if status in ("success", "completed"):

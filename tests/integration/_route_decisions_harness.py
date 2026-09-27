@@ -23,14 +23,24 @@ Each tenant calls ``whoami`` once: on egress through ``hangar_call`` naming
 through the member's group. The report holds, per tenant, the call's route keys,
 ``mcp.server.id`` and ``hangar.route.backend`` on each span the executor
 opened, and which upstream answered.
+
+Audit export is on (#1594): the OTLP endpoint is a loopback port nothing
+listens on, and the production ``OTLPAuditExporter`` hands each record to a
+list here instead of the SDK. Each call reports its ``tool_invocation`` records'
+``mcp.server.id``, ``hangar.route.backend`` and status. On egress, ``tenant-b``
+also calls ``route-a`` by name (``standalone``) and calls ``blocked`` on
+``pool``, which the group's access policy denies after the member was selected
+(``refused``, #1582).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, ClassVar
@@ -42,6 +52,7 @@ FRONT_DOOR = "front_door"
 GROUP, MEMBER_A, MEMBER_B = "pool", "route-a", "route-b"
 TENANTS = ("tenant-a", "tenant-b")
 TOOL = "whoami"
+BLOCKED_TOOL = "blocked"  # in the group's deny_list
 EXECUTOR_SPANS = (
     f"batch.call.{TOOL}",
     "policy.check_access",
@@ -102,9 +113,19 @@ def _upstream() -> tuple[str, type[_Upstream]]:
     return f"http://127.0.0.1:{server.server_address[1]}/mcp", handler
 
 
+def _unreachable_endpoint() -> str:
+    """A loopback port nothing listens on: audit export is configured, and nothing leaves the host."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{probe.getsockname()[1]}"
+
+
 def _config(topology: str, endpoint_a: str, endpoint_b: str) -> dict[str, Any]:
     return {
         "tool_access": {"mode": topology},
+        # An endpoint turns OTLP audit export on; tracing stays off (the
+        # executor's tracer is the in-memory one patched in below).
+        "observability": {"tracing": {"otlp_endpoint": _unreachable_endpoint(), "enabled": False}},
         "rate_limit": {"rps": 1000, "burst": 1000},
         "auth": {
             "enabled": True,
@@ -121,6 +142,7 @@ def _config(topology: str, endpoint_a: str, endpoint_b: str) -> dict[str, Any]:
                 "min_healthy": 1,
                 "members": [{"id": MEMBER_A, "priority": 1}, {"id": MEMBER_B, "priority": 2}],
                 "canary": {"pinned_tenants": {TENANTS[0]: MEMBER_B}},
+                "tools": {"deny_list": [BLOCKED_TOOL]},
             },
         },
     }
@@ -155,14 +177,24 @@ def _post(client: Any, key: str, method: str, params: dict[str, Any]) -> dict[st
     return _jsonrpc(client.post("/mcp", headers=headers, content=json.dumps(body)).text)
 
 
-def _call(client: Any, key: str, topology: str) -> str:
-    """One call of ``whoami``: the payload's summary, for a failure message."""
+def _call(client: Any, key: str, topology: str, target: str = GROUP, tool: str = TOOL) -> str:
+    """One call of *tool* on *target*: the payload's summary, for a failure message."""
     if topology == FRONT_DOOR:
-        payload = _post(client, key, "tools/call", {"name": TOOL, "arguments": {}})
+        payload = _post(client, key, "tools/call", {"name": tool, "arguments": {}})
     else:
-        calls = {"calls": [{"mcp_server": GROUP, "tool": TOOL, "arguments": {}}]}
+        calls = {"calls": [{"mcp_server": target, "tool": tool, "arguments": {}}]}
         payload = _post(client, key, "tools/call", {"name": "hangar_call", "arguments": calls})
     return json.dumps(payload)[:300]
+
+
+def _audit_since(records: list[dict[str, Any]], start: int, want: int) -> list[list[Any]]:
+    """The ``tool_invocation`` records written from *start* on, once *want* of them arrived (or 5 s passed)."""
+    deadline = time.monotonic() + 5.0
+    while True:
+        found = [r for r in records[start:] if r.get("mcp.event.name") == "tool_invocation"]
+        if len(found) >= want or time.monotonic() > deadline:
+            return [[r.get("mcp.server.id"), r.get("hangar.route.backend"), r.get("mcp.tool.status")] for r in found]
+        time.sleep(0.02)
 
 
 def _keys(context: Any) -> dict[str, str]:
@@ -189,6 +221,7 @@ def main(topology: str, out: Path) -> None:
     from starlette.testclient import TestClient
 
     import mcp_hangar
+    from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
     from mcp_hangar.observability.conventions import McpServer, Route
     from mcp_hangar.server.api.middleware import create_auth_enforced_app
     from mcp_hangar.server.bootstrap import bootstrap
@@ -205,15 +238,22 @@ def main(topology: str, out: Path) -> None:
     keys = _keys(context)
     app = create_auth_enforced_app(mcp_app_for_serving(context.mcp_server), context.auth_components)
 
+    audit: list[dict[str, Any]] = []
+
+    def capture(_self: Any, attributes: dict[str, Any]) -> None:
+        audit.append(dict(attributes))
+
     report: dict[str, dict[str, Any]] = {}
     with (
         patch("mcp_hangar.server.tools.batch.executor.get_tracer", return_value=provider.get_tracer("harness")),
+        patch.object(OTLPAuditExporter, "_emit_log_record", capture),
         TestClient(app, base_url=BASE_URL) as client,
     ):
         for tenant in TENANTS:
             memory.clear()
             upstreams = ((MEMBER_A, upstream_a), (MEMBER_B, upstream_b))
             before = {member: len(upstream.reached) for member, upstream in upstreams}
+            audit_start = len(audit)
             answer = _call(client, keys[tenant], topology)
             spans = memory.get_finished_spans()
             calls = [s for s in spans if s.name == f"batch.call.{TOOL}"]
@@ -229,7 +269,13 @@ def main(topology: str, out: Path) -> None:
                     if s.name in EXECUTOR_SPANS
                 ],
                 "reached": [member for member, upstream in upstreams if len(upstream.reached) > before[member]],
+                "audit": _audit_since(audit, audit_start, 1),
             }
+        if topology != FRONT_DOOR:
+            for name, target, tool in (("standalone", MEMBER_A, TOOL), ("refused", GROUP, BLOCKED_TOOL)):
+                audit_start = len(audit)
+                answer = _call(client, keys[TENANTS[1]], topology, target, tool)
+                report[name] = {"answer": answer, "audit": _audit_since(audit, audit_start, 1)}
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()

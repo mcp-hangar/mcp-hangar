@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import TOOL_INVOCATION_DENIED, refusal_wire_fields
+from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusal_wire_fields
 
 # CEF header constants
 CEF_VERSION = "0"
@@ -177,8 +177,16 @@ def format_audit_record(record: AuditRecord) -> str:
         extensions.append(f"cs6={_escape_extension_value(record.tenant_id)}")
         extensions.append("cs6Label=TenantID")
 
-    # Tool name from data (common in tool invocation events)
     data = record.data or {}
+    # The server a call was routed to -> flexString1 (#1594). cs1 is the target
+    # the caller named, the group for a group call, and cs1-cs6 are all taken,
+    # so the member goes in the dictionary's labelled flex string.
+    route_backend = data.get(ROUTE_BACKEND)
+    if route_backend:
+        extensions.append(f"flexString1={_escape_extension_value(str(route_backend))}")
+        extensions.append("flexString1Label=RouteBackend")
+
+    # Tool name from data (common in tool invocation events)
     tool_name = data.get("tool_name")
     if tool_name:
         extensions.append(f"cs5={_escape_extension_value(str(tool_name))}")

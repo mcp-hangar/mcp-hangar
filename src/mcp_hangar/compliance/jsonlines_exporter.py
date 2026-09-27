@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import REFUSAL_FIELDS, event_type_for_status, refusal_data
+from .refusal import REFUSAL_FIELDS, ROUTE_BACKEND, event_type_for_status, refusal_data
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ def _record_to_json_line(record: AuditRecord) -> str:
         "timestamp": record.occurred_at.isoformat(),
         "event_type": record.event_type,
         "provider_id": record.provider_id,
+        ROUTE_BACKEND: data.get(ROUTE_BACKEND) or None,  # the member, for a group call (#1594)
         "tool_name": data.get("tool_name"),
         "status": data.get("status"),
         "duration_ms": data.get("duration_ms"),
@@ -78,6 +79,7 @@ class JSONLinesExporter:
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
+        route_backend: str | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -101,6 +103,8 @@ class JSONLinesExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        if route_backend:
+            data[ROUTE_BACKEND] = route_backend
 
         record = AuditRecord(
             event_id="",

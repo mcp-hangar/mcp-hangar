@@ -704,6 +704,11 @@ class _CallPipeline:
     is_group: bool = False
     group_obj: Any = None
     target_server_id: str = ""
+    #: The backend the route was recorded with, or None before one was chosen
+    #: (and when none could be): what a refusal's audit record names as
+    #: `hangar.route.backend` (#1594). `target_server_id` is preset to the
+    #: logical target, so it cannot tell a group with no member from a server.
+    route_backend: str | None = None
     #: Decided when a gate first asks: see `governance`.
     _governance: _Governance | None = None
     _projection: Any = _UNRESOLVED
@@ -907,14 +912,20 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float,
     )
 
 
-def _publish_l7_refusal(ctx: Any, call: CallSpec, error_type: str, elapsed_ms: float, l7: L7Decision | None) -> None:
+def _publish_l7_refusal(
+    ctx: Any, call: CallSpec, error_type: str, elapsed_ms: float, l7: L7Decision | None, route_backend: str
+) -> None:
     """Publish `ToolCallRefused` for an L7 refusal, the calls `_log_call_failure` logs as `batch_call_refused`.
 
     One refused because its arguments could not be inspected is not: its
     evaluator broke (ADR-029 s5), as a gate that errs is no refusal either.
+    The verdict is the dispatched server's, so the record names it as the
+    route's backend (#1594).
     """
     if error_type in _L7_REFUSALS and not (l7 is not None and l7.evaluator_failed):
-        publish_call_refused(ctx.event_bus, call, elapsed_ms, get_identity_context(), l7=l7)
+        publish_call_refused(
+            ctx.event_bus, call, elapsed_ms, get_identity_context(), l7=l7, route_backend=route_backend
+        )
 
 
 class BatchExecutor:
@@ -1991,6 +2002,7 @@ class BatchExecutor:
         p.mcp_server_obj = p.ctx.get_mcp_server(p.call.mcp_server)
         p.target_server_id = p.call.mcp_server
         if p.mcp_server_obj:
+            p.route_backend = p.call.mcp_server
             record_route(p.call.mcp_server, RouteReason.STANDALONE.value)
             return None
 
@@ -2003,10 +2015,12 @@ class BatchExecutor:
                 return p.refuse(f"No available member in group '{p.call.mcp_server}'", "NoAvailableMemberError")
             p.mcp_server_obj = selection.member
             p.target_server_id = selection.member.id.value
+            p.route_backend = p.target_server_id
             record_route(p.target_server_id, selection.reason.value)
         elif not p.ctx.mcp_server_exists(p.call.mcp_server):
             return p.refuse(f"McpServer '{p.call.mcp_server}' not found", "McpServerNotFoundError")
         else:
+            p.route_backend = p.call.mcp_server
             record_route(p.call.mcp_server, RouteReason.STANDALONE.value)
         return None
 
@@ -2613,6 +2627,9 @@ class BatchExecutor:
                     # when nothing was granted, and deny still wins inside.
                     l7_approval_id=getattr(_approval_loop_local, "approval_id", None),
                     progress_token=call.progress_token,
+                    # What the caller named, so the call's audit record is
+                    # keyed on the group and not the member (#1594).
+                    logical_target=call.mcp_server,
                 )
                 l7_holder[0] = L7VerdictHolder()
                 with holding_l7_verdict(l7_holder[0]):
@@ -2654,7 +2671,7 @@ class BatchExecutor:
                 error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
                 _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms, l7)
-                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7)
+                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7, dispatch_server_id)
 
                 return CallResult(
                     index=call.index,
@@ -2681,7 +2698,7 @@ class BatchExecutor:
                 l7 = _l7_decision(l7_holder[0])
 
                 _log_call_failure(call, e, error_type, elapsed_ms, l7)
-                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7)
+                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7, dispatch_server_id)
 
                 return CallResult(
                     index=call.index,
@@ -2821,6 +2838,7 @@ def publish_call_refused(
     gate: str | None = None,
     reason: str | None = None,
     l7: L7Decision | None = None,
+    route_backend: str | None = None,
 ) -> None:
     """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
 
@@ -2844,6 +2862,7 @@ def publish_call_refused(
                 l7_rule_kind=l7.rule_kind if l7 is not None else None,
                 l7_policy_id=l7.policy_id if l7 is not None else None,
                 elapsed_ms=round(elapsed_ms, 2),
+                route_backend=route_backend,
             )
         )
     except Exception as e:  # noqa: BLE001 -- fault barrier: the refusal stands whether or not its record is written
@@ -2855,7 +2874,13 @@ def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> N
     outcome, reason, _revision = _gate_decision(p, refusal)
     if outcome == Gate.DENY:
         publish_call_refused(
-            p.ctx.event_bus, p.call, refusal.elapsed_ms, get_identity_context(), gate=gate, reason=reason
+            p.ctx.event_bus,
+            p.call,
+            refusal.elapsed_ms,
+            get_identity_context(),
+            gate=gate,
+            reason=reason,
+            route_backend=p.route_backend,
         )
 
 

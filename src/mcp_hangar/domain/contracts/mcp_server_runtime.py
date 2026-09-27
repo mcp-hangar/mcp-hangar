@@ -106,11 +106,14 @@ class SupportsToolInvocation(Protocol):
         timeout: float = 30.0,
         l7_approval_id: str | None = None,
         progress_token: str | None = None,
+        logical_target: str = "",
     ) -> dict[str, Any]:
         """Invoke a tool on the mcp_server.
 
         ``l7_approval_id``: a granted approval converting an L7
         requireApproval verdict (#921); None means nothing was granted.
+        ``logical_target``: what the caller named, the group for a group call
+        (#1594), recorded on the invocation events; empty for the server itself.
         """
         ...
 

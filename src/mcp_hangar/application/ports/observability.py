@@ -273,11 +273,17 @@ class IAuditExporter(Protocol):
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
+        route_backend: str | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
         *status* ``denied`` is a call Hangar refused (#1582); *refusal* then
         holds its bounded ``hangar.gate.*`` or ``hangar.l7.*`` attributes.
+
+        *mcp_server_id* is the logical target the caller named -- the group,
+        for a group call -- and *route_backend* the server the call was routed
+        to, the member (#1594). A standalone call has the same value in both;
+        a refusal before a backend was chosen has no *route_backend*.
         """
         ...
 
