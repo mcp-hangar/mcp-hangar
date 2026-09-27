@@ -28,6 +28,7 @@ from ...domain.events import (
     McpServerStateChanged,
     SessionSuspended,
     SessionUnsuspended,
+    ToolCallRefused,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolRestored,
@@ -127,9 +128,13 @@ def init_event_handlers(runtime: "Runtime") -> None:
         audit_exporter=otlp_audit_exporter,
         cost_attributor=cost_attributor,
     )
-    # Exports spans and audit records outward. One invocation, one export.
+    # Exports spans and audit records outward. One invocation, one export; one
+    # refusal, one export (#1582). `ToolApprovalDenied`, `AuthorizationDenied`
+    # and `EgressPolicyEnforced` stay unsubscribed: each is a refusal
+    # `ToolCallRefused` already records, and would count it twice.
     runtime.event_bus.subscribe(ToolInvocationCompleted, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
     runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
+    runtime.event_bus.subscribe(ToolCallRefused, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
     runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
 
     compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").lower()
@@ -145,6 +150,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
             # it, three replicas send three CEF records for one tool call.
             runtime.event_bus.subscribe(ToolInvocationCompleted, compliance_handler.handle, kind=HandlerKind.EFFECT)
             runtime.event_bus.subscribe(ToolInvocationFailed, compliance_handler.handle, kind=HandlerKind.EFFECT)
+            runtime.event_bus.subscribe(ToolCallRefused, compliance_handler.handle, kind=HandlerKind.EFFECT)
             runtime.event_bus.subscribe(McpServerStateChanged, compliance_handler.handle, kind=HandlerKind.EFFECT)
             logger.info(
                 "compliance_exporter_registered",

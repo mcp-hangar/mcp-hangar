@@ -3,21 +3,15 @@
 import json
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
+from .refusal import REFUSAL_FIELDS, event_type_for_status, refusal_data
+
 logger = logging.getLogger(__name__)
-
-
-def _event_type_for_status(status: str) -> str:
-    if status in ("success", "completed"):
-        return "ToolInvocationCompleted"
-    if status in ("error", "failure", "failed"):
-        return "ToolInvocationFailed"
-    return "ToolInvocationRequested"
 
 
 def _record_to_json_line(record: AuditRecord) -> str:
@@ -36,6 +30,7 @@ def _record_to_json_line(record: AuditRecord) -> str:
         "from_state": data.get("from_state"),
         "to_state": data.get("to_state"),
     }
+    payload.update({data_key: data.get(data_key) for _key, data_key, _wire in REFUSAL_FIELDS})
     return json.dumps({key: value for key, value in payload.items() if value is not None})
 
 
@@ -82,6 +77,7 @@ class JSONLinesExporter:
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -104,10 +100,11 @@ class JSONLinesExporter:
             data["cost_input_tokens"] = cost_input_tokens
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
+        data.update(refusal_data(refusal))
 
         record = AuditRecord(
             event_id="",
-            event_type=_event_type_for_status(status),
+            event_type=event_type_for_status(status),
             occurred_at=datetime.now(UTC),
             mcp_server_id=mcp_server_id,
             data=data,

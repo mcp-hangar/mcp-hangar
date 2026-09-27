@@ -2,11 +2,13 @@
 
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+
+from .refusal import TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +21,9 @@ _EVENT_ID_MAP: dict[str, str] = {
     "ToolInvocationRequested": "100",
     "ToolInvocationCompleted": "101",
     "ToolInvocationFailed": "102",
+    TOOL_INVOCATION_DENIED: "103",
     "ProviderStateChanged": "202",
 }
-
-
-def _event_type_for_status(status: str) -> str:
-    if status in ("success", "completed"):
-        return "ToolInvocationCompleted"
-    if status in ("error", "failure", "failed"):
-        return "ToolInvocationFailed"
-    return "ToolInvocationRequested"
 
 
 def _escape_value(value: str) -> str:
@@ -69,6 +64,7 @@ def _format_record(record: AuditRecord) -> str:
     to_state = data.get("to_state")
     if to_state is not None:
         extensions.append(f"newState={_escape_value(str(to_state))}")
+    extensions.extend(f"{key}={_escape_value(value)}" for key, value in refusal_wire_fields(data))
     if record.provider_id:
         extensions.append(f"src={_escape_value(record.provider_id)}")
 
@@ -119,6 +115,7 @@ class LEEFExporter:
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -140,10 +137,11 @@ class LEEFExporter:
             data["cost_input_tokens"] = cost_input_tokens
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
+        data.update(refusal_data(refusal))
 
         record = AuditRecord(
             event_id="",
-            event_type=_event_type_for_status(status),
+            event_type=event_type_for_status(status),
             occurred_at=datetime.now(UTC),
             mcp_server_id=mcp_server_id,
             data=data,

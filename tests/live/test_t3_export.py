@@ -14,8 +14,9 @@ attribute). Arrival is asynchronous, so every check polls to a deadline.
 Proven: a warm call's spans arrive, including the upstream CLIENT span; a call
 the tool-access policy denies has a span and no CLIENT span; a
 ``tool_invocation`` audit record for the warm call arrives under scope
-``mcp_hangar.audit``; the spans of a call made right before SIGTERM arrive,
-delivered by the shutdown flush alone; and a failing tool's error text reaches
+``mcp_hangar.audit``, and one with ``mcp.tool.status=denied`` for the denied
+call; the spans of a call made right before SIGTERM arrive, delivered by the
+shutdown flush alone; and a failing tool's error text reaches
 the caller but no exported span -- not a status message, an event or an
 attribute (GHSA-qwq2-7g49-jxc6). Not proven: that the audit record is
 linked to the call's trace (its trace ID is reported as observed), or anything
@@ -241,6 +242,29 @@ def test_audit_record_for_the_warm_call_arrives(exported_run: _Run) -> None:
     same = bool(warm_trace) and warm_trace[0].trace_id == record.trace_id
     print(f"T3 audit: scope={record.scope} trace_id={record.trace_id or '<none>'} matches_warm_call_trace={same}")
     print(f"T3 audit attributes: {record.attributes}")
+
+
+def test_audit_record_for_the_denied_call_arrives_as_denied(exported_run: _Run) -> None:
+    """A refused call has its own `tool_invocation` record over the wire, with the gate that refused it (#1582)."""
+    run = exported_run
+
+    def _denials() -> list[Received]:
+        return [
+            log
+            for log in run.receiver.logs(run.run_id)
+            if log.attributes.get("mcp.event.name") == "tool_invocation"
+            and log.attributes.get("gen_ai.tool.name") == _DENIED_TOOL
+        ]
+
+    records = poll(_denials, _ARRIVAL_TIMEOUT_S)
+
+    assert records, f"no tool_invocation audit record for the denied call under {run.run_id}"
+    [record] = records
+    assert record.scope == "mcp_hangar.audit", record
+    assert record.attributes.get("mcp.tool.status") == "denied", record
+    assert record.attributes.get("hangar.gate.name") == "tool_access", record
+    assert record.attributes.get("hangar.gate.reason") == "tool_not_in_access_policy", record
+    print(f"T3 denied audit attributes: {record.attributes}")
 
 
 def test_spans_of_a_call_made_right_before_sigterm_arrive(receiver: OtlpReceiver, tmp_path: Path) -> None:

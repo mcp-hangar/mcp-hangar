@@ -9,6 +9,7 @@ MIT licensed -- part of core observability infrastructure.
 
 import threading
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from ...domain.events import current_instance_id
@@ -338,13 +339,14 @@ class OTLPAuditExporter:
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
         Args:
             mcp_server_id: McpServer that handled the tool call.
             tool_name: Tool that was invoked.
-            status: Outcome -- "success", "error", "timeout", "blocked".
+            status: Outcome -- "success", "error", or "denied" for a refused call.
             duration_ms: Call duration in milliseconds.
             user_id: Optional calling user identity.
             session_id: Optional MCP session identifier.
@@ -357,6 +359,8 @@ class OTLPAuditExporter:
             cost_input_tokens: Optional input tokens consumed.
             cost_output_tokens: Optional output tokens produced.
             tenant_id: Optional tenant of the caller.
+            refusal: A refused call's bounded ``hangar.gate.*`` or
+                ``hangar.l7.*`` attributes (#1582), set as given.
         """
         try:
             attributes: dict = {
@@ -388,6 +392,7 @@ class OTLPAuditExporter:
                 attributes[GenAI.USAGE_INPUT_TOKENS] = cost_input_tokens
             if cost_output_tokens is not None:
                 attributes[GenAI.USAGE_OUTPUT_TOKENS] = cost_output_tokens
+            attributes.update(refusal or {})
 
             self._emit_log_record(attributes)
 

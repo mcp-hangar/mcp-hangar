@@ -33,6 +33,7 @@ from ....domain.events import (
     BatchCallCompleted,
     BatchInvocationCompleted,
     BatchInvocationRequested,
+    ToolCallRefused,
     ToolWithdrawnRejected,
 )
 from ....domain.exceptions import CannotStartMcpServerError
@@ -46,6 +47,7 @@ from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
+from ....domain.value_objects.identity import IdentityContext
 from ....domain.value_objects.truncation import ContinuationOwner
 from ....errors import bounded_error_type
 from ....infrastructure.observability.l7_verdicts import (
@@ -903,6 +905,16 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float,
         elapsed_ms=round(elapsed_ms, 2),
         **fields,
     )
+
+
+def _publish_l7_refusal(ctx: Any, call: CallSpec, error_type: str, elapsed_ms: float, l7: L7Decision | None) -> None:
+    """Publish `ToolCallRefused` for an L7 refusal, the calls `_log_call_failure` logs as `batch_call_refused`.
+
+    One refused because its arguments could not be inspected is not: its
+    evaluator broke (ADR-029 s5), as a gate that errs is no refusal either.
+    """
+    if error_type in _L7_REFUSALS and not (l7 is not None and l7.evaluator_failed):
+        publish_call_refused(ctx.event_bus, call, elapsed_ms, get_identity_context(), l7=l7)
 
 
 class BatchExecutor:
@@ -1796,6 +1808,7 @@ class BatchExecutor:
         admitted = self._enforce_tenant_budget(pipeline)
         if isinstance(admitted, CallResult):
             _observe_gate("tenant_budget", pipeline, admitted)
+            _publish_gate_refusal(pipeline, "tenant_budget", admitted)
             _observe_call(admitted, refused_by_gate=True)
             return admitted
         try:
@@ -1825,6 +1838,7 @@ class BatchExecutor:
                 _observe_gate(name, p, refusal)
                 if refusal is not None:
                     _log_gate_outcome(p, name, refusal)
+                    _publish_gate_refusal(p, name, refusal)
                     return refusal
             passed = True
             return None
@@ -2640,6 +2654,7 @@ class BatchExecutor:
                 error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
                 _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms, l7)
+                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7)
 
                 return CallResult(
                     index=call.index,
@@ -2666,6 +2681,7 @@ class BatchExecutor:
                 l7 = _l7_decision(l7_holder[0])
 
                 _log_call_failure(call, e, error_type, elapsed_ms, l7)
+                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7)
 
                 return CallResult(
                     index=call.index,
@@ -2794,6 +2810,53 @@ def _log_gate_outcome(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
         elapsed_ms=round(refusal.elapsed_ms, 2),
         **fields,
     )
+
+
+def publish_call_refused(
+    event_bus: Any,
+    call: CallSpec,
+    elapsed_ms: float,
+    identity: IdentityContext | None,
+    *,
+    gate: str | None = None,
+    reason: str | None = None,
+    l7: L7Decision | None = None,
+) -> None:
+    """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
+
+    Called where the refusal is logged, from the same bounded decision: a gate's
+    name and reason from `_gate_decision`, or the L7 verdict from `_l7_decision`.
+    Nothing here reads the refusal's message, which carries text the gate was
+    handed (an approver's reason, a validator's), so no free text reaches the
+    record. A publish that fails is logged, and the call is still refused.
+    """
+    try:
+        event_bus.publish(
+            ToolCallRefused(
+                mcp_server_id=call.mcp_server,
+                tool_name=call.tool,
+                correlation_id=call.call_id,
+                identity_context=identity.to_dict() if identity is not None else None,
+                gate=gate,
+                gate_reason=reason,
+                l7_verdict=l7.verdict if l7 is not None else None,
+                l7_mode=l7.mode if l7 is not None else None,
+                l7_rule_kind=l7.rule_kind if l7 is not None else None,
+                l7_policy_id=l7.policy_id if l7 is not None else None,
+                elapsed_ms=round(elapsed_ms, 2),
+            )
+        )
+    except Exception as e:  # noqa: BLE001 -- fault barrier: the refusal stands whether or not its record is written
+        logger.warning("tool_call_refused_not_published", call_id=call.call_id, error_type=type(e).__name__)
+
+
+def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
+    """Publish `ToolCallRefused` for a gate that said `deny`; a gate that broke (`error`) is no refusal."""
+    outcome, reason, _revision = _gate_decision(p, refusal)
+    if outcome == Gate.DENY:
+        publish_call_refused(
+            p.ctx.event_bus, p.call, refusal.elapsed_ms, get_identity_context(), gate=gate, reason=reason
+        )
 
 
 def _observe_gate(name: str, p: _CallPipeline, refusal: CallResult | None) -> None:

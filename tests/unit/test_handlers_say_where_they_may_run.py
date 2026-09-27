@@ -223,7 +223,8 @@ class TestTheAuditOfWhatIsAlreadySubscribed:
         block = text[text.index("compliance_handler = ") : text.index("detection_enforcement_handler = ")]
 
         assert "HandlerKind.PROJECTION" not in block
-        assert block.count("HandlerKind.EFFECT") == 3
+        # Completed, failed, refused (#1582) and the state change.
+        assert block.count("HandlerKind.EFFECT") == 4
 
     def test_the_tool_catalogue_is_a_local_view(self) -> None:
         # It read as a projection for two releases, and the classification was
