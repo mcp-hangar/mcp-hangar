@@ -934,7 +934,7 @@ BATCH_CONCURRENCY_GAUGE = Gauge(
 BATCH_TRUNCATIONS_TOTAL = Counter(
     name="mcp_hangar_batch_truncations",
     description="Total number of response truncations in batches",
-    labels=["reason"],  # reason: per_call, total_size
+    labels=["reason"],  # reason: batch_budget
 )
 
 BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL = Counter(

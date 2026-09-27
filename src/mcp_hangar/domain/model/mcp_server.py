@@ -239,6 +239,9 @@ class McpServer(AggregateRoot):
         idle_ttl_s: int | IdleTTL = 300,  # Accept both int and value object
         health_check_interval_s: int | HealthCheckInterval = 60,  # Accept both int and value object
         max_consecutive_failures: int = 3,
+        # This server's own read limit on one upstream response (#1613); None
+        # reads with the process-wide `execution.max_response_bytes`.
+        max_response_bytes: int | None = None,
         # Container-specific options
         volumes: list[str] | None = None,
         build: dict[str, str] | None = None,
@@ -286,6 +289,7 @@ class McpServer(AggregateRoot):
         self._image = image
         self._endpoint = endpoint
         self._env = env or {}
+        self._max_response_bytes = max_response_bytes
 
         # Idle TTL - normalize to value object
         if isinstance(idle_ttl_s, IdleTTL):
@@ -954,6 +958,9 @@ class McpServer(AggregateRoot):
             # carry this server's ID (HTTP clients are labeled at construction).
             if getattr(client, "mcp_server_id", "unset") is None:
                 client.mcp_server_id = str(self.mcp_server_id)
+            # Both transports read it for each response, so it applies from the handshake on.
+            if self._max_response_bytes is not None:
+                client.max_response_bytes = self._max_response_bytes
 
             # Start live stderr-reader thread if a log buffer is configured and the
             # client has a process with a stderr pipe (subprocess/docker/container modes).

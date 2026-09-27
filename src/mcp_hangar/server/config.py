@@ -27,6 +27,7 @@ from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 from ..metrics import remove_group_series
+from ..response_limit import parse_max_response_bytes, resolve_max_response_bytes, set_default_max_response_bytes
 from .bootstrap.group_circuit_metric import observe_group_circuit
 from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .state import GROUPS, get_group_rebalance_saga, get_runtime
@@ -1110,6 +1111,15 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             hint="Add a 'capabilities' block to declare resource requirements",
         )
 
+    try:
+        max_response_bytes = parse_max_response_bytes(
+            spec_dict.get("max_response_bytes"), f"mcp_servers.{mcp_server_id}.max_response_bytes"
+        )
+    except ValueError as e:
+        from ..domain.exceptions import ConfigurationError  # a local of this function, bound below too
+
+        raise ConfigurationError(str(e)) from e
+
     # Everything the server is built from, and nothing else: a reload keeps the
     # running server when these are unchanged (#1426).
     built_with: dict[str, Any] = {
@@ -1121,6 +1131,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         "idle_ttl_s": spec_dict.get("idle_ttl_s", 300),
         "health_check_interval_s": spec_dict.get("health_check_interval_s", 60),
         "max_consecutive_failures": spec_dict.get("max_consecutive_failures", 3),
+        "max_response_bytes": max_response_bytes,
         "volumes": spec_dict.get("volumes", []),
         "build": spec_dict.get("build"),
         "resources": spec_dict.get("resources", {"memory": "512m", "cpu": "1.0"}),
@@ -1712,6 +1723,31 @@ def _validator_specs(full_config: dict[str, Any]) -> list[dict[str, Any]] | None
     return None
 
 
+def _init_response_limit_from_config(full_config: dict[str, Any]) -> None:
+    """Apply ``execution.max_response_bytes`` or ``MCP_MAX_RESPONSE_BYTES`` (#1613).
+
+    ::
+
+        execution:
+          max_response_bytes: 33554432
+
+    The most bytes of one upstream response either transport reads before it
+    fails the call with ``ResponseTooLarge``, for every server without its own
+    ``max_response_bytes``. The environment wins over the file, as it does for
+    ``observability.tracing.caller_ids``, and is read here, once, not per call.
+    Absent means 32 MiB. An invalid value is a hard error: a limit that quietly
+    fell back to the default would read as applied.
+    """
+    set_default_max_response_bytes(_max_response_bytes(full_config))
+
+
+def _max_response_bytes(full_config: dict[str, Any]) -> int:
+    try:
+        return resolve_max_response_bytes(full_config)
+    except ValueError as e:
+        raise ConfigurationError(str(e)) from e
+
+
 def http_graceful_shutdown_timeout(full_config: dict[str, Any]) -> int | None:
     """``http.graceful_shutdown_timeout_s``, checked (#1447). Absent means uvicorn's default.
 
@@ -1769,6 +1805,7 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_required_catalogue_from_config,
     _init_param_validation_from_config,
     _init_resource_links_from_config,
+    _init_response_limit_from_config,
     _init_interceptors_from_config,
     _init_ui_resources_from_config,
 )
@@ -1793,6 +1830,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     required_catalogue(full_config)
     _param_validation_required(full_config)
     _max_links_per_tenant(full_config)
+    _max_response_bytes(full_config)
     _ui_resource_policies(full_config)
     # Checked, not applied: `run_http` reads it when the server starts (#1447).
     http_graceful_shutdown_timeout(full_config)

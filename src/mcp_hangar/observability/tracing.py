@@ -991,27 +991,6 @@ def record_mutation(direction: str, changed: bool, duration_ms: float) -> None:
         logger.debug("mutation_event_failed")
 
 
-def record_result_drop(reason: str, size_bytes: int, limit_bytes: int) -> None:
-    """Record a result the per-call size limit dropped, on the ambient call span (#1298). Never raises.
-
-    `reason` is exported only when it is one of `Shaping.DROP_REASONS`, and
-    omitted otherwise: a closed code list, the way `hangar.gate.reason` takes
-    its codes from `executor._GATE_REASONS` and omits a refusal it has none
-    for. `bounded_error_type` is a shape rule for error types and would pass
-    any identifier-like text.
-    """
-    try:
-        span = _ambient_span()
-        if span is None:
-            return
-        attributes: dict[str, Any] = {Shaping.SIZE_BYTES: size_bytes, Shaping.LIMIT_BYTES: limit_bytes}
-        if reason in Shaping.DROP_REASONS:
-            attributes[Shaping.REASON] = reason
-        span.add_event(Shaping.DROP_EVENT, attributes)
-    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a call
-        logger.debug("drop_event_failed")
-
-
 def _ambient_span() -> Any:
     """The current span when it is a real one, else None: with tracing off there is nothing to write."""
     from opentelemetry import trace as _trace

@@ -27,7 +27,7 @@ def _http_client() -> HttpClient:
 def _stream_response(status_code: int, body: str = ""):
     response = MagicMock()
     response.status_code = status_code
-    response.iter_text.return_value = iter([body])
+    response.iter_bytes.return_value = iter([body.encode()])
 
     @contextmanager
     def ctx(*_args, **_kwargs):

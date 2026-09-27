@@ -1,5 +1,6 @@
 """Thread-safe stdio client with proper message correlation."""
 
+import io
 import json
 import os
 import select
@@ -13,10 +14,11 @@ from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any
 
 from . import metrics as prometheus_metrics
-from .domain.exceptions import ClientError
+from .domain.exceptions import ClientError, ResponseTooLarge
 from .logging_config import get_logger
 from .observability.tracing import inject_trace_context, record_upstream_outcome, upstream_call_span
 from .protocol import inject_protocol_meta
+from .response_limit import default_max_response_bytes
 
 if TYPE_CHECKING:
     from .lock_hierarchy import TrackedLock
@@ -33,6 +35,57 @@ _STDERR_DRAIN_S = 1.0
 _STDERR_DRAIN_MAX_BYTES = 64 * 1024
 #: Upstream notifications waiting for their router at most.
 _NOTIFICATION_BACKLOG = 256
+#: The most of one line read at a time, so a line past the limit is noticed within one chunk of it.
+_READ_CHUNK = 64 * 1024
+#: How much of each end of a line past the limit is kept, to find the request it answers.
+_ID_WINDOW = 4096
+
+
+@dataclass(frozen=True)
+class _OversizedLine:
+    """A line the reader stopped holding once it passed the limit, and discarded to its newline."""
+
+    size: int
+    limit: int
+    #: Its first and last `_ID_WINDOW` characters: a JSON-RPC response puts its id near one end.
+    ends: str
+
+
+def _text(data: bytes | str) -> str:
+    return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
+
+
+def _read_line(stream: Any, read_limit: Callable[[], int]) -> str | _OversizedLine:
+    """One newline-framed message within the read limit, or `_OversizedLine`; "" at EOF (#1613).
+
+    Never holds more than the limit plus one chunk of a line. Past the limit
+    the rest is read and dropped a chunk at a time up to the newline, which is
+    the next frame boundary: a JSON message cannot contain a raw newline, so the
+    framing is back in step and the next response parses. Only the two ends are
+    kept, to find the request it answers. The limit is read once the line has
+    begun to arrive, so a limit set while the reader waited applies to it.
+    *stream* is binary, or text, in which case the limit counts characters.
+    """
+    newline = b"\n" if isinstance(stream, io.BufferedIOBase) else "\n"
+    chunk = stream.readline(_READ_CHUNK)
+    limit = read_limit()
+    chunks: list[Any] = []
+    size = 0
+    while chunk:
+        chunks.append(chunk)
+        size += len(chunk)
+        if chunk.endswith(newline) and size - 1 <= limit:
+            break
+        if size > limit:
+            head, tail = chunks[0][:_ID_WINDOW], chunk[-_ID_WINDOW:]
+            chunks.clear()
+            while chunk and not chunk.endswith(newline):
+                chunk = stream.readline(_READ_CHUNK)
+                size += len(chunk)
+                tail = (tail + chunk)[-_ID_WINDOW:]
+            return _OversizedLine(size=size, limit=limit, ends=f"{_text(head)} {_text(tail)}")
+        chunk = stream.readline(min(_READ_CHUNK, limit + 1 - size))
+    return _text(newline[:0].join(chunks))
 
 
 def _drain_pipe(pipe: Any, deadline_s: float, max_bytes: int) -> str:
@@ -66,7 +119,8 @@ class PendingRequest:
     """Tracks a pending RPC request waiting for a response."""
 
     request_id: str
-    result_queue: "Queue[dict[str, Any]]"
+    #: The response, or the exception the reader failed the request with.
+    result_queue: "Queue[dict[str, Any] | Exception]"
     started_at: float
 
 
@@ -107,6 +161,8 @@ class StdioClient:
         self.pending_lock = self._create_lock(popen.pid)
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.closed = False
+        #: This server's own read limit, set by `McpServer`; None reads with the process default.
+        self.max_response_bytes: int | None = None
         self._last_stderr: str | None = None
         #: Upstream notifications, handed from the reader to their router (#1366).
         self._notifications: Queue[dict[str, Any] | None] | None = None
@@ -129,9 +185,16 @@ class StdioClient:
         """
         logger.info("stdio_client_reader_started", pid=self.process.pid)
         assert self.process.stdout is not None
+        # Read the bytes under the text wrapper, so the limit counts bytes. Only
+        # this thread reads stdout, so nothing is buffered in the wrapper.
+        stdout = self.process.stdout
+        stream = stdout.buffer if isinstance(stdout, io.TextIOWrapper) else stdout
         while not self.closed:
             try:
-                line = self.process.stdout.readline()
+                line = _read_line(stream, self._read_limit)
+                if isinstance(line, _OversizedLine):
+                    self._fail_oversized(line)
+                    continue
                 if not line:
                     # EOF: process exited. Expected when we closed it (idle
                     # shutdown), otherwise the process died on its own.
@@ -179,6 +242,30 @@ class StdioClient:
 
         # Clean up on exit
         self._cleanup_pending("reader_died")
+
+    def _read_limit(self) -> int:
+        """The most bytes of one response this client reads (#1613)."""
+        return self.max_response_bytes or default_max_response_bytes()
+
+    def _fail_oversized(self, line: _OversizedLine) -> None:
+        """Fail the request a line past the limit answered, found by its id at either end of the line.
+
+        The ids are ones this client minted, so one appearing in the kept ends
+        is that request's. A response with its id in the middle of the line is
+        not found, and its call times out as it would have.
+        """
+        with self.pending_lock:
+            request_id = next((rid for rid in self.pending if f'"{rid}"' in line.ends), None)
+            pending = self.pending.pop(request_id, None) if request_id is not None else None
+        logger.warning(
+            "stdio_client_response_too_large",
+            mcp_server=self.mcp_server_id or "unknown",
+            size_bytes=line.size,
+            limit_bytes=line.limit,
+            request_found=pending is not None,
+        )
+        if pending is not None:
+            pending.result_queue.put(ResponseTooLarge(line.limit, self.mcp_server_id or ""))
 
     def start_notification_stream(self, on_message: Callable[[dict[str, Any]], None]) -> None:
         """Route the upstream's notifications to *on_message*, as the HTTP client's GET stream does (#1366).
@@ -287,7 +374,7 @@ class StdioClient:
             raise ClientError("client_closed")
 
         request_id = str(uuid.uuid4())
-        result_queue: Queue[dict[str, Any]] = Queue(maxsize=1)
+        result_queue: Queue[dict[str, Any] | Exception] = Queue(maxsize=1)
 
         pending = PendingRequest(request_id=request_id, result_queue=result_queue, started_at=time.time())
 
@@ -341,12 +428,14 @@ class StdioClient:
 
             try:
                 response = result_queue.get(timeout=timeout)
-                record_upstream_outcome(span, response)
-                return response
             except Empty:
                 with self.pending_lock:
                     self.pending.pop(request_id, None)
                 raise TimeoutError(f"timeout: {method} after {timeout}s") from None
+            if isinstance(response, Exception):
+                raise response  # ends the CLIENT span in ERROR, typed
+            record_upstream_outcome(span, response)
+            return response
 
     def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         """Send a JSON-RPC notification: no id, no response, nothing to wait for.

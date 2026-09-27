@@ -29,7 +29,6 @@ DEFAULT_PROVIDER_CONCURRENCY = 10
 DEFAULT_TIMEOUT = 60.0
 MAX_TIMEOUT = 300.0
 MAX_CALLS_PER_BATCH = 100
-MAX_RESPONSE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB per call
 MAX_TOTAL_RESPONSE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB total
 
 DEFAULT_MAX_RETRIES = 3
@@ -54,7 +53,7 @@ class CallSpec:
     max_retries: int = 1  # Default: no retries (single attempt)
     metadata: dict[str, str] | None = None  # W3C TraceContext headers (traceparent, tracestate)
     progress_token: str | None = None  # Minted upstream progress token (#883)
-    #: The caller takes the whole result: neither the per-call size cap nor the
+    #: The caller takes the whole result: no
     #: configured batch truncation cuts it, and no continuation is stored for
     #: it. Set by the facade's ``invoke`` (#1453) and the front door's flat
     #: call (#1609): each returns its result whole, with no way to fetch a

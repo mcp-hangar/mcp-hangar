@@ -16,6 +16,12 @@
 execution:
   max_concurrency: 50                # Global limit across all providers (default: 50)
   default_provider_concurrency: 10   # Default per-provider limit (default: 10)
+  # The most bytes of one upstream response Hangar reads, over stdio or HTTP
+  # (default: 33554432, 32 MiB). Enforced while the response is read: past it
+  # the read stops and the call fails with ResponseTooLarge. The
+  # MCP_MAX_RESPONSE_BYTES env var wins over this key, and a server's own
+  # `max_response_bytes` (see `math` below) wins over both.
+  # max_response_bytes: 33554432
 
 # ---------------------------------------------------------------------------
 # Interceptors — opt-in built-in request validators (OFF by default)
@@ -49,6 +55,8 @@ mcp_servers:
     command: [python, -m, examples.provider_math.server]
     idle_ttl_s: 180
     # max_concurrency: 10   # Per-provider limit (inherits default_provider_concurrency)
+    # max_response_bytes: 8388608   # This server's own response read limit
+    #                               # (inherits execution.max_response_bytes)
     #
     # `tools:` is OVERLOADED — it accepts two distinct forms:
     #

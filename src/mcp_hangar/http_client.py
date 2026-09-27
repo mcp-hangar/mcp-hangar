@@ -16,6 +16,7 @@ import ssl
 import threading
 import time
 import uuid
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -25,7 +26,7 @@ from typing import Any, cast
 import httpx
 
 from . import metrics as prometheus_metrics
-from .domain.exceptions import ClientError
+from .domain.exceptions import ClientError, ResponseTooLarge
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
@@ -37,6 +38,7 @@ from .observability.tracing import (
     upstream_call_span,
 )
 from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject_protocol_meta
+from .response_limit import default_max_response_bytes
 
 logger = get_logger(__name__)
 
@@ -209,14 +211,27 @@ class _SsrfGuardedTransport(httpx.HTTPTransport):
         enforce_ssrf: bool,
         provenance: Provenance,
         runtime_addresses: frozenset[str] | None,
+        max_response_bytes: Callable[[], int] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._enforce_ssrf = enforce_ssrf
         self._provenance = provenance
         self._runtime_addresses = runtime_addresses
+        self._max_response_bytes = max_response_bytes
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        response = self._connect_checked(request)
+        # A POST is answered by one response, JSON or SSE framed, bounded as a
+        # whole while httpx reads it (#1613): each SSE event of it is part of
+        # it. The standing GET stream has no end, and is bounded per event by
+        # its reader instead.
+        if request.method == "POST" and self._max_response_bytes is not None:
+            encoding = response.headers.get("Content-Encoding", "").strip().lower()
+            response.stream = _BoundedStream(response.stream, self._max_response_bytes(), encoding)
+        return response
+
+    def _connect_checked(self, request: httpx.Request) -> httpx.Response:
         # Only endpoints the registration check guarded are re-checked here;
         # a config-file or directly-built client keeps httpx's plain behaviour,
         # so an intentionally private endpoint is not newly refused at connect.
@@ -257,6 +272,62 @@ class _SsrfGuardedTransport(httpx.HTTPTransport):
         return super().handle_request(request)
 
 
+class _BoundedStream(httpx.SyncByteStream):
+    """A response body that raises `ResponseTooLarge` once more than *limit* bytes of it are read (#1613).
+
+    httpx reads a body into memory chunk by chunk; this stops it one chunk past
+    the limit, before httpx decodes or keeps that chunk. It counts what would be
+    held: a gzip or deflate body (the encodings httpx decodes without optional
+    packages) by its inflated size, measured at most *limit* bytes at a time, so
+    a small compressed body that inflates past the limit is refused unexpanded.
+    Any other encoding is counted as sent. A body zlib cannot read is counted as
+    sent from there, and httpx fails it itself.
+    """
+
+    def __init__(self, stream: Any, limit: int, encoding: str) -> None:
+        self._stream = stream
+        self._limit = limit
+        self._inflate: Any = None
+        #: Until deflate has decoded something, it may still be raw deflate, which httpx accepts too.
+        self._maybe_raw = encoding == "deflate"
+        if encoding == "gzip":
+            self._inflate = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        elif encoding == "deflate":
+            self._inflate = zlib.decompressobj()
+
+    def __iter__(self) -> Any:
+        size = 0
+        for chunk in self._stream:
+            size += self._decoded_size(chunk, self._limit - size)
+            if size > self._limit:
+                raise ResponseTooLarge(self._limit)
+            yield chunk
+
+    def _decoded_size(self, chunk: bytes, room: int) -> int:
+        """How many bytes *chunk* decodes to, counted no further than one past *room*."""
+        if self._inflate is None:
+            return len(chunk)
+        size, data = 0, chunk
+        try:
+            while data and size <= room:
+                try:
+                    size += len(self._inflate.decompress(data, max(room - size, 0) + 1))
+                except zlib.error:
+                    if not self._maybe_raw:
+                        raise
+                    self._maybe_raw, self._inflate = False, zlib.decompressobj(-zlib.MAX_WBITS)
+                    continue
+                self._maybe_raw = False
+                data = self._inflate.unconsumed_tail
+        except zlib.error:
+            self._inflate = None
+            return len(chunk)
+        return size
+
+    def close(self) -> None:
+        self._stream.close()
+
+
 class HttpClient:
     """
     Thread-safe HTTP client for MCP-over-HTTP mcp_servers.
@@ -285,6 +356,8 @@ class HttpClient:
         self._auth_config = auth_config or AuthConfig()
         self._http_config = http_config or HttpClientConfig()
         self._mcp_server_id = mcp_server_id
+        #: This server's own read limit, set by `McpServer`; None reads with the process default.
+        self.max_response_bytes: int | None = None
         #: Whether this connection accepts the 2026-07-28 `_meta` envelope.
         #: Starts False: the era key on the `initialize` call itself is what
         #: makes a spec-current upstream apply its full era gate (missing
@@ -411,6 +484,7 @@ class HttpClient:
             enforce_ssrf=config.enforce_ssrf,
             provenance=config.provenance,
             runtime_addresses=config.runtime_addresses,
+            max_response_bytes=self._read_limit,
         )
 
         return httpx.Client(
@@ -419,6 +493,10 @@ class HttpClient:
             transport=transport,
             follow_redirects=False,  # SSRF prevention: redirects must be validated explicitly
         )
+
+    def _read_limit(self) -> int:
+        """The most bytes of one response this client reads (#1613)."""
+        return self.max_response_bytes or default_max_response_bytes()
 
     def _build_headers(self) -> dict[str, str]:
         """Build request headers including auth and custom headers."""
@@ -712,6 +790,16 @@ class HttpClient:
             )
             raise TimeoutError(f"timeout: {method} after {timeout}s") from e
 
+        except ResponseTooLarge as e:
+            logger.warning(
+                "http_client_response_too_large",
+                request_id=request_id,
+                mcp_server=mcp_server_label,
+                limit_bytes=e.limit_bytes,
+            )
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="response_too_large")
+            raise
+
         except httpx.ConnectError as e:
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
@@ -791,68 +879,6 @@ class HttpClient:
                 "message": "SSE response did not contain valid JSON-RPC response",
             }
         }
-
-    def _handle_sse_response(
-        self,
-        response: httpx.Response,
-        request_id: str,
-        timeout: float,
-    ) -> dict[str, Any]:
-        """
-        Handle SSE (Server-Sent Events) streaming response.
-
-        Reads events from the SSE stream until we get the response
-        for our request ID.
-
-        Args:
-            response: HTTP response with SSE stream
-            request_id: Our request ID to wait for
-            timeout: Remaining timeout
-
-        Returns:
-            JSON-RPC response dictionary
-        """
-        start_time = time.time()
-        buffer = ""
-
-        logger.debug("http_client_sse_stream_started", request_id=request_id)
-
-        try:
-            # Read SSE events
-            for chunk in response.iter_text():
-                if time.time() - start_time > timeout:
-                    raise TimeoutError(f"SSE timeout after {timeout}s")
-
-                if not chunk:
-                    continue
-
-                buffer += chunk
-
-                # Process complete events
-                while "\n\n" in buffer:
-                    event_data, buffer = buffer.split("\n\n", 1)
-                    result = self._parse_sse_event(event_data, request_id)
-                    if result is not None:
-                        return result
-
-            # Stream ended without response
-            return {
-                "error": {
-                    "code": -32000,
-                    "message": "SSE stream ended without response",
-                }
-            }
-
-        except TimeoutError:
-            raise
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: SSE errors wrapped as JSON-RPC error response
-            logger.error("http_client_sse_error", request_id=request_id, error=str(e))
-            return {
-                "error": {
-                    "code": -32000,
-                    "message": f"SSE error: {e}",
-                }
-            }
 
     def _parse_sse_event(self, event_data: str, request_id: str) -> dict[str, Any] | None:
         """
@@ -1005,14 +1031,7 @@ class HttpClient:
                         raise ClientError(f"get_stream_rejected: HTTP {response.status_code}")
                     logger.info("http_client_get_stream_open", mcp_server=mcp_server_label)
                     backoff = 1.0
-                    buffer = ""
-                    for chunk in response.iter_text():
-                        if not self._sse_running or self._closed:
-                            return
-                        buffer += chunk
-                        while "\n\n" in buffer:
-                            event_data, buffer = buffer.split("\n\n", 1)
-                            self._dispatch_stream_event(event_data, on_message, mcp_server_label)
+                    self._read_stream_events(response, on_message, mcp_server_label)
             except Exception as e:  # noqa: BLE001 -- the channel outlives any single transport failure
                 if not self._sse_running or self._closed:
                     return
@@ -1024,6 +1043,38 @@ class HttpClient:
                 )
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
+
+    def _read_stream_events(
+        self, response: httpx.Response, on_message: Callable[[dict[str, Any]], None], mcp_server_label: str
+    ) -> None:
+        """Dispatch each event of the standing GET stream, none of them held past the read limit (#1613).
+
+        The stream has no end, so the limit bounds each event, not the stream.
+        An event past it is dropped as it is read, up to the blank line that
+        ends it, where the framing is back in step; it answered no request.
+        """
+        buffer = b""
+        dropping = False
+        for chunk in response.iter_bytes():
+            if not self._sse_running or self._closed:
+                return
+            buffer += chunk
+            if dropping:
+                end = buffer.find(b"\n\n")
+                if end < 0:
+                    buffer = buffer[-1:]  # the first newline of a boundary split across chunks
+                    continue
+                buffer, dropping = buffer[end + 2 :], False
+            limit = self._read_limit()
+            while b"\n\n" in buffer:
+                event_data, buffer = buffer.split(b"\n\n", 1)
+                if len(event_data) > limit:
+                    logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
+                    continue
+                self._dispatch_stream_event(event_data.decode("utf-8", errors="replace"), on_message, mcp_server_label)
+            if len(buffer) > limit:
+                logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
+                buffer, dropping = buffer[-1:], True
 
     def _dispatch_stream_event(
         self,

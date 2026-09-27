@@ -11,9 +11,10 @@ span under its ``batch.execute``, carrying the count it cut and that it stored
 a continuation, and nothing else; the continuation id the caller holds
 appears in no exported span, attribute or event. On a ``front_door`` gateway
 with the same budget, a flat ``tools/call`` gets its result whole and opens no
-``batch.truncate`` span (#1609). Not proven: mutation and the
-per-call size limit. No mutator can be registered through configuration, and
-the limit is 10 MB; the unit tests cover both through ``BatchExecutor``.
+``batch.truncate`` span (#1609). Not proven here: mutation, since no mutator
+can be registered through configuration; the unit tests cover it through
+``BatchExecutor``. The response size limit is proven live in
+``test_t0_response_limit.py`` (#1613).
 Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live/test_t3_payload_shaping.py -m "live and t3" -o addopts=""

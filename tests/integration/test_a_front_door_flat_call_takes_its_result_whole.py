@@ -4,15 +4,15 @@ A flat ``tools/call`` is one call whose caller expects the upstream's result as
 it was sent, and that surface has no continuation tool to fetch a cut part
 with. With batch truncation on, the flat call was cut like a ``hangar_call``
 batch member, and the cut result was no valid tool result: the caller got
-``INVALID_RESULT_TEXT`` instead of its answer. Over the per-call size cap, the
-executor dropped the result and the caller got an empty success.
+``INVALID_RESULT_TEXT`` instead of its answer.
 
 The flat call now takes its result whole, as the facade's ``invoke`` does
-(#1453). ``hangar_call`` is cut exactly as before, under both rules.
+(#1453). ``hangar_call`` is cut exactly as before. The per-call response limit
+is enforced where the upstream response is read (#1613), the same on both
+surfaces, and is tested there.
 
 Everything goes over the real streamable-HTTP transport (``_front_door_harness``).
-Nothing on the call path is patched except, in the size-cap tests, the cap
-itself, lowered so a test result can cross it.
+Nothing on the call path is patched.
 
 Naming: neutral placeholders only (store, big_item, tenant:a).
 """
@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -38,8 +37,6 @@ OUTPUT_SCHEMA = {
 }
 #: A batch budget the result is twice over.
 TRUNCATION = {"enabled": True, "max_batch_size_bytes": 20_000, "min_per_response_bytes": 1_000}
-#: A per-call size cap the result is over.
-LOW_CAP = 30_000
 
 
 class BigUpstream(Upstream):
@@ -128,22 +125,3 @@ def test_a_hangar_call_over_the_budget_is_still_cut(truncation):
         assert entry["truncated"] is True, entry
         assert entry["continuation_id"], entry
         assert TEXT not in json.dumps(entry)
-
-
-def test_a_flat_call_over_the_per_call_size_cap_is_returned_whole():
-    """The cap is not a bound for a flat call: the result is in memory before it applies.
-
-    Under the cap the caller got ``{}`` -- an empty success -- and no word of
-    what it lost. See `_flat_call_tool`.
-    """
-    with patch("mcp_hangar.server.tools.batch.executor.MAX_RESPONSE_SIZE_BYTES", LOW_CAP), _serve("front_door") as door:
-        _assert_whole(door.result(TENANT_A, TOOL))
-
-
-def test_a_hangar_call_over_the_per_call_size_cap_is_still_dropped():
-    with patch("mcp_hangar.server.tools.batch.executor.MAX_RESPONSE_SIZE_BYTES", LOW_CAP), _serve("egress") as door:
-        entry = _batch_entry(door)
-
-        assert entry["truncated"] is True, entry
-        assert entry["truncated_reason"] == "response_size_exceeded", entry
-        assert entry.get("result") is None, entry
