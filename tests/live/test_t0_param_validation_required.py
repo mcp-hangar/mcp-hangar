@@ -10,6 +10,10 @@ call is refused with ``HEADER_MISMATCH`` (-32020); the same call without the
 header is served. Before #1599 ``required`` read only the front door's
 listing-failure mark, and the call with the header was served.
 
+A handshake-era ``hangar_call`` carrying the same header is served: a legacy
+revision is an era rather than a failure, so its headers are ignored rather
+than refused (ADR-025 Decision 2, #1605).
+
 Run with::
 
     MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live/test_t0_param_validation_required.py \
@@ -36,6 +40,7 @@ pytestmark = [pytest.mark.live, pytest.mark.t0]
 _SERVER = "region"
 _REGION_SERVER = Path(__file__).with_name("_region_server.py")
 _MODERN = "2026-07-28"
+_LEGACY = "2025-06-18"
 _ENVELOPE = {
     "io.modelcontextprotocol/protocolVersion": _MODERN,
     "io.modelcontextprotocol/clientInfo": {"name": "required-live-probe", "version": "0"},
@@ -64,20 +69,21 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         yield hangar.base_url
 
 
-def _hangar_call(base_url: str, headers: dict[str, str]) -> Any:
+def _hangar_call(base_url: str, headers: dict[str, str], version: str = _MODERN) -> Any:
     request_headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
-        "MCP-Protocol-Version": _MODERN,
-        "Mcp-Method": "tools/call",
-        "Mcp-Name": "hangar_call",
+        "MCP-Protocol-Version": version,
         **headers,
     }
-    params = {
+    params: dict[str, Any] = {
         "name": "hangar_call",
         "arguments": {"calls": [{"mcp_server": _SERVER, "tool": "ping", "arguments": {}}]},
-        "_meta": _ENVELOPE,
     }
+    if version == _MODERN:
+        # Self-describing and SEP-2243 routed: the modern era has no handshake.
+        request_headers |= {"Mcp-Method": "tools/call", "Mcp-Name": "hangar_call"}
+        params["_meta"] = _ENVELOPE
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params}
     response = httpx.post(f"{base_url}/mcp", headers=request_headers, content=json.dumps(body), timeout=60)
     text = response.text.lstrip()
@@ -95,6 +101,13 @@ def test_a_hangar_call_with_a_param_header_is_refused(base_url: str) -> None:
 
 def test_a_hangar_call_without_one_is_served(base_url: str) -> None:
     answer = _hangar_call(base_url, {})
+
+    assert "result" in answer, answer
+    assert not answer["result"].get("isError"), answer
+
+
+def test_a_legacy_hangar_call_with_a_param_header_is_served(base_url: str) -> None:
+    answer = _hangar_call(base_url, {"Mcp-Param-Tier": "gold"}, version=_LEGACY)
 
     assert "result" in answer, answer
     assert not answer["result"].get("isError"), answer
