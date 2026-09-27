@@ -55,6 +55,7 @@ _ADMIN = "policy-admin"
 _SERVER = "region"
 _REGION_SERVER = Path(__file__).with_name("_region_server.py")
 _ARRIVAL_TIMEOUT_S = 30.0
+_CATALOGUE_TIMEOUT_S = 30.0
 _MODERN = "2026-07-28"
 _ENVELOPE = {
     "io.modelcontextprotocol/protocolVersion": _MODERN,
@@ -161,9 +162,21 @@ def _post(harness: _Harness, method: str, params: dict[str, Any], headers: dict[
 
 
 def _flat_name(harness: _Harness, tool: str) -> str:
-    listed = _post(harness, "tools/list", {})["result"]["tools"]
-    names = [t["name"] for t in listed if t["name"] == tool or t["name"].endswith(f"_{tool}")]
-    assert len(names) == 1, [t["name"] for t in listed]
+    """The projected name of ``tool``, once the front door lists it.
+
+    The catalogue is projected by the gateway's boot warm-up, and a listing waits
+    for that only up to a few seconds, so a test that runs first can list the
+    ``hangar_*`` meta-API alone. Wait, on a deadline, until the tool is listed.
+    """
+    listed: list[str] = []
+
+    def _probe() -> list[str] | None:
+        listed[:] = [t["name"] for t in _post(harness, "tools/list", {})["result"]["tools"]]
+        return [n for n in listed if n == tool or n.endswith(f"_{tool}")] or None
+
+    names = poll(_probe, _CATALOGUE_TIMEOUT_S, interval=0.5)
+    assert names, f"tools/list did not list {tool!r} within {_CATALOGUE_TIMEOUT_S:.0f}s; it listed {listed}"
+    assert len(names) == 1, f"tools/list lists {tool!r} more than once: {names}"
     return names[0]
 
 
