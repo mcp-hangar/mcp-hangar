@@ -15,7 +15,10 @@ Proven, at the receiver, on ``batch.call.<tool>``:
   ``hangar.refusal.*`` and UNSET status;
 - an allowed call reads ``allow``/``tool``;
 - a validated ``Mcp-Param-Region`` matching a header deny rule reads
-  ``deny``/``header``, and the header's value is on no exported span.
+  ``deny``/``header``, and the header's value is on no exported span;
+- the same header sent in the ``=?base64?...?=`` sentinel form, which the SDK
+  decodes before comparing it with the body, is denied by the same glob, and
+  neither form is on an exported span (#1600).
 
 The policy is set in this test and asserted in force before any call. When it
 is not, this FAILS rather than skips: a verdict that never arrives is the defect
@@ -26,6 +29,7 @@ this tier exists to catch. Run with::
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -219,3 +223,27 @@ def test_a_validated_header_deny_is_exported_as_a_header_verdict(harness: _Harne
     assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
     carried = [str(v) for s in harness.receiver.spans(harness.run_id) for v in s.attributes.values()]
     assert not [v for v in carried if "eu-west-1" in v], "the header's value reached a span"
+
+
+def test_a_sentinel_encoded_header_is_denied_by_the_same_glob(harness: _Harness) -> None:
+    """A non-ASCII region can only travel as a sentinel; the glob sees what the SDK validated (#1600)."""
+    region = "eu-z\u00fcrich"
+    sentinel = f"=?base64?{base64.b64encode(region.encode('utf-8')).decode('ascii')}?="
+
+    def _denied() -> set[str]:
+        spans = harness.receiver.spans(harness.run_id)
+        return {s.span_id for s in spans if s.name == "batch.call.lookup" and s.attributes.get(L7.VERDICT) == "deny"}
+
+    before = _denied()
+    answer = _call(harness, "lookup", {"region": region}, {"Mcp-Param-Region": sentinel})
+    assert region not in json.dumps(answer, ensure_ascii=False), f"the denied call was served: {answer}"
+
+    arrived = poll(
+        lambda: [s for s in harness.receiver.spans(harness.run_id) if s.span_id in _denied() - before],
+        _ARRIVAL_TIMEOUT_S,
+    )
+    assert arrived, "no deny verdict for the sentinel-encoded header reached the receiver"
+    (span,) = arrived
+    assert (span.attributes[L7.RULE_KIND], span.attributes[Gate.CALL_OUTCOME]) == ("header", Gate.DENY)
+    carried = [str(v) for s in harness.receiver.spans(harness.run_id) for v in s.attributes.values()]
+    assert not [v for v in carried if region in v or sentinel in v], "the header reached a span"

@@ -31,6 +31,7 @@ from contextvars import ContextVar
 from typing import Any
 
 import structlog
+from mcp.shared.inbound import decode_header_value
 
 from mcp_hangar.domain.value_objects.identity import IdentityContext
 
@@ -123,7 +124,8 @@ def bind_routing_headers(request_context: Any) -> Any:
     :data:`PARAM_VALIDATED_HEADERS_ATTR` are bound. The SDK checks only the
     called tool's declared ones, and a selector must not match any other
     (ADR-025). Nothing recorded, or a recorded skip, binds none: fail-closed
-    (#1597). :data:`PARAM_VALIDATION_KEY` reads ``skipped`` when headers were
+    (#1597). A bound value is the one the SDK validated, sentinel-decoded
+    (#1600). :data:`PARAM_VALIDATION_KEY` reads ``skipped`` when headers were
     carried and none survived, ``partial`` when only some did (#1599).
 
     Returns a token to reset, or ``None``. Fully fault-barriered.
@@ -157,7 +159,12 @@ def _selectable_headers(request_context: Any) -> dict[str, str] | None:
     state = getattr(request, "state", None)
     skipped = bool(getattr(state, PARAM_VALIDATION_STATE_ATTR, False))
     keep = set() if skipped else {name.lower() for name in getattr(state, PARAM_VALIDATED_HEADERS_ATTR, ())}
-    bound = {k: v for k, v in selected.items() if not k.startswith("mcp-param-") or k in keep}
+    bound = {k: v for k, v in selected.items() if not k.startswith("mcp-param-")}
+    # Bound as the SDK compared it with the body: sentinel-decoded by its own helper (#1600).
+    # A sentinel that does not decode never matched the body, so it is dropped as unchecked.
+    for name in keep & {k for k in selected if k.startswith("mcp-param-")}:
+        if (value := decode_header_value(selected[name])) is not None:
+            bound[name] = value
     kept = any(k.startswith("mcp-param-") for k in bound)
     status = PARAM_VALIDATION_PARTIAL if kept else PARAM_VALIDATION_SKIPPED
     bound[PARAM_VALIDATION_KEY] = PARAM_VALIDATION_RAN if len(bound) == len(selected) else status
