@@ -26,6 +26,7 @@ from typing import Any
 from ....application.tasks.tool_pin_context import reset_current_tool_pin, set_current_tool_pin
 from ....context import caller_polls_tasks_var, identity_context_var
 from ....domain.services.task_ownership import TaskOwner
+from ....errors import bounded_error_type
 from ....logging_config import get_logger
 from ....tasks_wire import EXTENSION_ID
 from ...context import get_context
@@ -251,13 +252,16 @@ def govern_relayed_tasks(executed: list[CallResult]) -> None:
             except ValueError as exc:
                 # Fail-closed extraction: a malformed/idless upstream task handle.
                 # TODO(P3.4): increment a relay-registration-failure metric counter.
+                # A ValidationError's text echoes the upstream's handle, so WARNING
+                # gets the bounded type and DEBUG the text (#1276 R7, #1607).
                 logger.warning(
                     "task_relay_mint_failed",
                     call_id=r.call_id,
                     mcp_server=capture.logical_mcp_server,
                     tool=capture.tool,
-                    error=str(exc),
+                    error_type=bounded_error_type(type(exc).__name__),
                 )
+                logger.debug("task_relay_mint_failed_detail", call_id=r.call_id, error=str(exc))
                 executed[i] = CallResult(
                     index=r.index,
                     call_id=r.call_id,
