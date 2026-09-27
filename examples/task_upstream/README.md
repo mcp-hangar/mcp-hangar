@@ -126,11 +126,11 @@ Expect this file to shrink as the SDK lands its server-side Tasks surface.
 
 ### Two gotchas worth knowing
 
-**Params are validated by alias only.** The SDK's `GetTaskRequestParams` aliases
-`task_id` → `taskId`, so it accepts **only** camelCase. A native v2 client sends
-camelCase; Hangar's relay forwards snake_case. The server therefore validates
-against local models whose `AliasChoices` accept both — otherwise one of the two
-callers gets `-32602` and it looks like a relay bug.
+**Params are validated by alias only.** `RequestParams` aliases `task_id` →
+`taskId`, and the server turns off validation by field name, so it accepts the
+id **only** under its SEP-2663 wire name, `taskId`. That is deliberate: a native v2 client and Hangar's relay both send
+`taskId`, and a caller that sends `task_id` gets `-32602` rather than being
+quietly accommodated.
 
 **The pin is exact for a reason.** SEP-2663 reshapes Tasks *within* the v2 line:
 `tasks/list` is removed and `tasks/update` added. `drive_relay.py` already treats

@@ -50,7 +50,7 @@ import mcp_types as t
 from mcp.server import MCPServer
 from mcp.server.context import ServerRequestContext
 from mcp.shared.exceptions import MCPError
-from pydantic import AliasChoices, Field
+from pydantic import Field
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -273,20 +273,19 @@ async def task_emitting_middleware(ctx: ServerRequestContext[Any, Any], call_nex
 # Native tasks/* request handlers (custom methods -> returned raw by the runner)
 # --------------------------------------------------------------------------- #
 
-# The low-level runner validates a custom method's params by ALIAS only
-# (``model_validate(..., by_name=False)``). The SDK's own ``GetTaskRequestParams``
-# et al. alias ``task_id`` -> ``taskId``, so they accept ONLY camelCase. A native
-# v2 SDK client sends camelCase, while mcp-hangar's relay forwards snake_case
-# (``{"task_id": ...}``), so validate against local models whose ``AliasChoices``
-# accept BOTH spellings -- robust to either caller. ``extra="ignore"`` lets the
-# relay's extra keys (e.g. ``input_key`` on tasks/update) pass through harmlessly.
+# ``RequestParams`` aliases ``task_id`` -> ``taskId`` but also validates by field
+# name, so it would take ``task_id`` too. Turning name validation off makes this
+# accept the id under its SEP-2663 wire name and nothing else: a caller that
+# sends ``task_id`` gets ``-32602``, which is how a relay naming it wrongly is
+# caught rather than accommodated (#1617).
+# ``extra="ignore"`` lets other keys (``inputResponses`` on tasks/update) pass.
 
 
 class _TaskIdParams(t.RequestParams):
-    """``task_id`` accepting snake_case (Hangar relay) or camelCase (SDK client)."""
+    """``taskId``, the id's wire name, and only that."""
 
-    model_config = {"extra": "ignore", "populate_by_name": True}
-    task_id: str = Field(validation_alias=AliasChoices("task_id", "taskId"))
+    model_config = {"extra": "ignore", "validate_by_name": False}
+    task_id: str
 
 
 class _ListParams(t.RequestParams):

@@ -126,7 +126,9 @@ from mcp_hangar.tasks_wire import (
     HEADER_MISMATCH,
     MCP_NAME_HEADER,
     MISSING_REQUIRED_CLIENT_CAPABILITY,
+    CancelTaskRequestParams,
     EmptyResult,
+    GetTaskRequestParams,
     GetTaskResult,
     missing_capability_error_data,
 )
@@ -139,6 +141,21 @@ _RELAY_TIMEOUT = 30.0
 # Injected upstream transport: (target_server_id, method, params, timeout) -> raw
 # JSON-RPC response dict (the ``{"result": ...}`` / ``{"error": ...}`` shape).
 UpstreamRouter = Any
+
+
+def _get_params(task_id: str) -> dict[str, Any]:
+    """Params for a ``tasks/get`` (or legacy ``tasks/result``) relayed upstream: ``{"taskId": ...}``.
+
+    Built from the wire model dumped by alias, never a hand-written dict: the id
+    is ``taskId`` on the wire (SEP-2663), and an upstream that reads only that
+    name found no task when Hangar sent ``task_id`` (#1617).
+    """
+    return GetTaskRequestParams(task_id=task_id).model_dump(by_alias=True)
+
+
+def _cancel_params(task_id: str) -> dict[str, Any]:
+    """Params for a ``tasks/cancel`` relayed upstream, whoever asked for it. See :func:`_get_params`."""
+    return CancelTaskRequestParams(task_id=task_id).model_dump(by_alias=True)
 
 
 class _GetTaskParams(RequestParams):
@@ -574,7 +591,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             target_server_id = key[0]
 
             resp = await asyncio.to_thread(
-                upstream_router, target_server_id, "tasks/get", {"task_id": task_id}, _RELAY_TIMEOUT
+                upstream_router, target_server_id, "tasks/get", _get_params(task_id), _RELAY_TIMEOUT
             )
             if not (isinstance(resp, dict) and "error" in resp):
                 result = resp.get("result") if isinstance(resp, dict) else None
@@ -626,7 +643,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
 
         try:
             payload = await asyncio.to_thread(
-                upstream_router, key[0], "tasks/result", {"task_id": task_id}, _RELAY_TIMEOUT
+                upstream_router, key[0], "tasks/result", _get_params(task_id), _RELAY_TIMEOUT
             )
         except Exception:  # noqa: BLE001 -- a missing payload must not fail the poll
             logger.debug("task_payload_fetch_failed", target_server_id=key[0], task_id=task_id)
@@ -669,7 +686,7 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             key = await _resolve_owned_key(task_id)
 
             resp = await asyncio.to_thread(
-                upstream_router, key[0], "tasks/cancel", {"task_id": task_id}, _RELAY_TIMEOUT
+                upstream_router, key[0], "tasks/cancel", _cancel_params(task_id), _RELAY_TIMEOUT
             )
             if _cancel_confirmed(resp):
                 await asyncio.to_thread(store.mark_cancelled, key)
@@ -721,14 +738,14 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
             principal_id = _current_principal_id()
 
             # Key the decision off the current upstream input_required state.
-            probe = await asyncio.to_thread(upstream_router, key[0], "tasks/get", {"task_id": task_id}, _RELAY_TIMEOUT)
+            probe = await asyncio.to_thread(upstream_router, key[0], "tasks/get", _get_params(task_id), _RELAY_TIMEOUT)
             probed = probe.get("result") if isinstance(probe, dict) else None
             input_key = _derive_input_key(probed if isinstance(probed, dict) else {})
 
             # Consent BEFORE the answer reaches upstream (finding #1). Relay the
             # client's payload verbatim; consume only on a confirmed relay.
             consent_gate.open(key, input_key)
-            payload = params.model_dump(by_alias=True) if hasattr(params, "model_dump") else {"task_id": task_id}
+            payload = params.model_dump(by_alias=True)
             resp = await asyncio.to_thread(upstream_router, key[0], "tasks/update", payload, _RELAY_TIMEOUT)
             if isinstance(resp, dict) and "error" in resp:
                 consent_gate.discard(key)  # recoverable: retry re-drives the update
