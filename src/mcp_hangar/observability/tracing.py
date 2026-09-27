@@ -184,6 +184,9 @@ class NoOpSpan:
     def add_event(self, name: str, attributes: dict | None = None) -> None:
         pass
 
+    def add_link(self, context: Any, attributes: dict | None = None) -> None:
+        pass
+
     def __enter__(self) -> "NoOpSpan":
         return self
 
@@ -1107,6 +1110,16 @@ def current_traceparent() -> str | None:
         return None
 
 
+def _origin_span_context(origin: str | None) -> Any:
+    """The span context a stored ``traceparent`` names, or None when it is absent or malformed."""
+    if not origin:
+        return None
+    from opentelemetry import trace as _trace
+
+    carried = _trace.get_current_span(_get_propagator().extract({"traceparent": origin})).get_span_context()
+    return carried if carried.is_valid else None
+
+
 def new_trace_linked_to(origin: str | None) -> dict[str, Any]:
     """Keyword arguments that start a span in a new trace, linked to ``origin`` (ADR-029 s2, s8).
 
@@ -1120,13 +1133,31 @@ def new_trace_linked_to(origin: str | None) -> dict[str, Any]:
         from opentelemetry.context import Context
 
         kwargs: dict[str, Any] = {"context": Context()}
-        if origin:
-            carried = _trace.get_current_span(_get_propagator().extract({"traceparent": origin})).get_span_context()
-            if carried.is_valid:
-                kwargs["links"] = [_trace.Link(carried)]
+        carried = _origin_span_context(origin)
+        if carried is not None:
+            kwargs["links"] = [_trace.Link(carried)]
         return kwargs
     except Exception:  # noqa: BLE001 -- fault barrier: a bad origin must not stop the command
         return {}
+
+
+def link_span_to_origin(span: Any, origin: str | None) -> bool:
+    """Add one link from an open ``span`` to ``origin``; True when a link was added (#1281).
+
+    For a span that has to be open before it is known whether the origin may
+    be named: a task follow-up links only once the caller is shown to own the
+    task. An absent or malformed origin adds nothing. A link added after start
+    is not seen by a link-aware head sampler; the parent-based default needs
+    none. Never raises.
+    """
+    try:
+        carried = _origin_span_context(origin)
+        if carried is None:
+            return False
+        span.add_link(carried)
+        return True
+    except Exception:  # noqa: BLE001 -- fault barrier: telemetry must not break a follow-up
+        return False
 
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
