@@ -33,6 +33,7 @@ from typing import Any
 import structlog
 from mcp.shared.inbound import decode_header_value
 
+from mcp_hangar._sdk_compat import is_modern_protocol_version
 from mcp_hangar.domain.value_objects.identity import IdentityContext
 
 # Context variables for request-scoped data
@@ -90,6 +91,19 @@ PARAM_VALIDATION_RAN = "ran"
 PARAM_VALIDATION_PARTIAL = "partial"
 PARAM_VALIDATION_SKIPPED = "skipped"
 
+#: The header a request states its revision in, read rather than negotiated: ``_meta``
+#: defaults to the modern version when absent, which would make a handshake-era request look modern.
+PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
+
+
+def predates_param_validation(headers: Mapping[str, str]) -> bool:
+    """Whether a request's revision predates mandatory ``Mcp-Param-*`` validation (ADR-025 Decision 2).
+
+    The one reading shared by the L7 evaluator and ``headers.param_validation.required``,
+    so the two cannot disagree. An absent version is handshake-era.
+    """
+    return not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER))
+
 
 def select_routing_headers(headers: Mapping[str, str] | None) -> Mapping[str, str]:
     """Narrow a request's headers to the ones an egress policy may select on."""
@@ -140,13 +154,19 @@ def bind_routing_headers(request_context: Any) -> Any:
 def param_headers_unchecked(request_context: Any) -> bool:
     """Whether this request carried an ``Mcp-Param-*`` header no selector will see (#1599).
 
+    A handshake-era request never had its headers checked, by design: that is an
+    era rather than a failure, so its headers are ignored rather than refused (#1605).
     Fail-closed: a request whose headers cannot be read counts as unchecked.
     """
     try:
         bound = _selectable_headers(request_context)
     except Exception:  # noqa: BLE001 -- an unreadable request is not a checked one
         return True
-    return bound is not None and bound[PARAM_VALIDATION_KEY] != PARAM_VALIDATION_RAN
+    return (
+        bound is not None
+        and bound[PARAM_VALIDATION_KEY] != PARAM_VALIDATION_RAN
+        and not predates_param_validation(bound)
+    )
 
 
 def _selectable_headers(request_context: Any) -> dict[str, str] | None:

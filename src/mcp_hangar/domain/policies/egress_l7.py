@@ -33,8 +33,7 @@ from enum import StrEnum
 from fnmatch import fnmatchcase
 from typing import Any
 
-from ..._sdk_compat import is_modern_protocol_version
-from ...context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_PARTIAL, PARAM_VALIDATION_RAN
+from ...context import PARAM_VALIDATION_KEY, PARAM_VALIDATION_PARTIAL, PARAM_VALIDATION_RAN, predates_param_validation
 from ...redactor import OutputRedactor
 
 logger = logging.getLogger(__name__)
@@ -120,11 +119,6 @@ class ToolRules:
 #: case-insensitively: HTTP header names are not case-sensitive, and the
 #: operator writes them in the CRD in whatever case reads best.
 MCP_PARAM_PREFIX = "mcp-param-"
-
-#: The header a request states its revision in. Read here rather than trusted
-#: from negotiation: `_meta` defaults to the supported (modern) version when
-#: absent, which would make a handshake-era request look modern to the gate.
-PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
 
 #: The verdict reason recorded when a policy carries header selectors and none
 #: of them could be consulted, because this request's ``Mcp-Param-*`` headers
@@ -420,7 +414,7 @@ def evaluate_headers(
     # a ``partial`` mapping carries only the headers that were checked.
     if headers is None or headers.get(PARAM_VALIDATION_KEY) not in (PARAM_VALIDATION_RAN, PARAM_VALIDATION_PARTIAL):
         return None
-    if not is_modern_protocol_version(headers.get(PROTOCOL_VERSION_HEADER)):
+    if predates_param_validation(headers):
         return None
 
     for matches, action, label in (
