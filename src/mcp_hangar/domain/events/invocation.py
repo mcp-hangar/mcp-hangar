@@ -81,3 +81,46 @@ class ToolInvocationFailed(DomainEvent):
     error_message: str = ""
     error_type: str = ""
     identity_context: dict[str, Any] | None = None
+
+
+@dataclass
+class ToolCallRefused(DomainEvent):
+    """Published when Hangar refuses a tool call before it reaches the upstream (#1582).
+
+    A refusal returns before the aggregate invokes anything, so neither
+    ``ToolInvocationCompleted`` nor ``ToolInvocationFailed`` exists for it, and
+    audit -- which exported only those two -- never saw the decisions an
+    auditor most needs. This is the one record of a refused call: a gate of the
+    batch executor that said ``deny``, the ``tool:invoke`` check before the
+    gates (``gate="authorization"``), or an L7 verdict raised at dispatch.
+
+    Every field is an identifier, a number or a bounded code, never text a gate
+    was handed: an approver's or a validator's reason stays out (#1276). A gate
+    refusal carries ``gate`` and ``gate_reason`` (ADR-029's ``hangar.gate.*``);
+    an L7 refusal carries the ``l7_*`` verdict fields instead (``hangar.l7.*``).
+
+    Attributes:
+        mcp_server_id: The logical target the caller named (ADR-029 s5).
+        tool_name: The tool the caller named.
+        correlation_id: The refused call's id.
+        identity_context: The caller's ``IdentityContext.to_dict()``, if any.
+        gate: The refusing gate, without its ``_gate_`` prefix, or ``authorization``.
+        gate_reason: The gate's bounded reason code, when it has one.
+        l7_verdict: ``deny`` or ``require_approval``, for an L7 refusal.
+        l7_mode: The policy's lowercased mode.
+        l7_rule_kind: Which part of the policy decided.
+        l7_policy_id: The content hash of the policy.
+        elapsed_ms: Time from the call's start to its refusal.
+    """
+
+    mcp_server_id: str
+    tool_name: str = ""
+    correlation_id: str = ""
+    identity_context: dict[str, Any] | None = None
+    gate: str | None = None
+    gate_reason: str | None = None
+    l7_verdict: str | None = None
+    l7_mode: str | None = None
+    l7_rule_kind: str | None = None
+    l7_policy_id: str | None = None
+    elapsed_ms: float = 0.0

@@ -52,7 +52,8 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
     # `auth` is `yaml` with API-key auth on (#1342): the app is wrapped in the
     # auth enforcement `serve --http` applies, and each call presents a key
     # minted in the bootstrapped store.
-    "auth": [("sampled", "01"), ("failed", "01")],
+    # `refused` names a tool the server's access policy denies (#1582).
+    "auth": [("sampled", "01"), ("failed", "01"), ("refused", "01")],
     # `bound` is `yaml` with an identity the served HTTP path has no source for
     # -- a session, an agent and no user -- declared through the process-wide
     # fallback identity, the seam a stdio session's declared caller uses (ADR-026).
@@ -66,7 +67,13 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
 }
 
 #: call name -> (tool, arguments); every other call is add(1, 2).
-TOOLS: dict[str, tuple[str, dict[str, int]]] = {"failed": ("divide", {"a": 1, "b": 0})}
+TOOLS: dict[str, tuple[str, dict[str, int]]] = {
+    "failed": ("divide", {"a": 1, "b": 0}),
+    "refused": ("multiply", {"a": 1, "b": 2}),
+}
+
+#: The tool the ``auth`` mode's access policy denies.
+DENIED_TOOL = "multiply"
 
 #: The principal the ``auth`` mode's key authenticates as, and its tenant.
 AUTH_PRINCIPAL = "user:audit-harness"
@@ -202,6 +209,7 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     if mode in ("auth", "bound"):
         config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": True}}
     if mode == "auth":
+        config["mcp_servers"]["math"]["tools"] = {"deny_list": [DENIED_TOOL]}
         config["auth"] = {
             "enabled": True,
             "allow_anonymous": False,

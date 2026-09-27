@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
+from .refusal import TOOL_INVOCATION_DENIED, refusal_wire_fields
+
 # CEF header constants
 CEF_VERSION = "0"
 DEVICE_VENDOR = "MCP Hangar"
@@ -31,6 +33,7 @@ _SIGNATURE_MAP: dict[str, tuple[str, str]] = {
     "ToolInvocationRequested": ("100", "Tool Invocation Requested"),
     "ToolInvocationCompleted": ("101", "Tool Invocation Completed"),
     "ToolInvocationFailed": ("102", "Tool Invocation Failed"),
+    TOOL_INVOCATION_DENIED: ("103", "Tool Invocation Denied"),
     "ProviderStarted": ("200", "Provider Started"),
     "ProviderStopped": ("201", "Provider Stopped"),
     "ProviderStateChanged": ("202", "Provider State Changed"),
@@ -49,6 +52,8 @@ _SEVERITY_MAP: dict[str, int] = {
     "ToolInvocationRequested": 1,
     "ToolInvocationCompleted": 1,
     "ToolInvocationFailed": 7,
+    # Medium: a policy refusing a call is the gateway working, and still worth a look.
+    TOOL_INVOCATION_DENIED: 5,
     "ProviderStarted": 1,
     "ProviderStopped": 3,
     "ProviderStateChanged": 3,
@@ -189,6 +194,9 @@ def format_audit_record(record: AuditRecord) -> str:
     error_type = data.get("error_type")
     if error_type:
         extensions.append(f"reason={_escape_extension_value(str(error_type))}")
+
+    # A refused call's bounded gate or L7 fields (#1582).
+    extensions.extend(f"{key}={_escape_extension_value(value)}" for key, value in refusal_wire_fields(data))
 
     return header + "|" + " ".join(extensions)
 

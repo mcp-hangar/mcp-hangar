@@ -9,13 +9,14 @@ This module is part of the compliance layer.
 
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
 from .cef_formatter import format_audit_record
+from .refusal import event_type_for_status, refusal_data
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class CEFExporter:
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
         """Export a tool invocation event as a CEF log line.
 
@@ -94,14 +96,10 @@ class CEFExporter:
         The event_type is derived from the status:
           - "success" -> ToolInvocationCompleted
           - "error"/"failure" -> ToolInvocationFailed
+          - "denied" -> ToolInvocationDenied, with the refusal's bounded fields
           - other -> ToolInvocationRequested
         """
-        if status in ("success", "completed"):
-            event_type = "ToolInvocationCompleted"
-        elif status in ("error", "failure", "failed"):
-            event_type = "ToolInvocationFailed"
-        else:
-            event_type = "ToolInvocationRequested"
+        event_type = event_type_for_status(status)
 
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -123,6 +121,7 @@ class CEFExporter:
             data["cost_input_tokens"] = cost_input_tokens
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
+        data.update(refusal_data(refusal))
 
         record = AuditRecord(
             event_id="",

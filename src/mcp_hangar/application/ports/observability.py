@@ -15,6 +15,7 @@ Example usage:
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -271,8 +272,13 @@ class IAuditExporter(Protocol):
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
-        """Export a tool invocation event as an audit log record."""
+        """Export a tool invocation event as an audit log record.
+
+        *status* ``denied`` is a call Hangar refused (#1582); *refusal* then
+        holds its bounded ``hangar.gate.*`` or ``hangar.l7.*`` attributes.
+        """
         ...
 
     def export_mcp_server_state_change(

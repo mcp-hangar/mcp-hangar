@@ -120,6 +120,7 @@ from .interceptors import (
     InterceptorInvoked,
 )
 from .invocation import (
+    ToolCallRefused,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
@@ -310,6 +311,7 @@ __all__ = [
     "ToolApprovalExpired",
     "ToolApprovalGranted",
     "ToolApprovalRequested",
+    "ToolCallRefused",
     "ToolInvocationCompleted",
     "ToolInvocationFailed",
     "ToolInvocationRequested",

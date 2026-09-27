@@ -144,6 +144,7 @@ WS_EVENT_TYPES = (
     "ToolApprovalGranted",
     "ToolApprovalDenied",
     "ToolApprovalExpired",
+    "ToolCallRefused",
 )
 
 
@@ -225,7 +226,12 @@ def _subscribe_other_compliance_formats(runtime: Any, directory: Path) -> None:
     from mcp_hangar.application.event_handlers.audit_event_handler import OTLPAuditEventHandler
     from mcp_hangar.domain.contracts.cost import NullCostAttributor
     from mcp_hangar.domain.contracts.event_bus import HandlerKind
-    from mcp_hangar.domain.events import McpServerStateChanged, ToolInvocationCompleted, ToolInvocationFailed
+    from mcp_hangar.domain.events import (
+        McpServerStateChanged,
+        ToolCallRefused,
+        ToolInvocationCompleted,
+        ToolInvocationFailed,
+    )
     from mcp_hangar.server.bootstrap.event_handlers import _create_compliance_exporter
 
     for name in ("leef", "jsonlines", "syslog"):
@@ -235,7 +241,7 @@ def _subscribe_other_compliance_formats(runtime: Any, directory: Path) -> None:
         handler = OTLPAuditEventHandler(
             audit_exporter=exporter, cost_attributor=getattr(runtime, "cost_attributor", None) or NullCostAttributor()
         )
-        for event_type in (ToolInvocationCompleted, ToolInvocationFailed, McpServerStateChanged):
+        for event_type in (ToolInvocationCompleted, ToolInvocationFailed, ToolCallRefused, McpServerStateChanged):
             runtime.event_bus.subscribe(event_type, handler.handle, kind=HandlerKind.EFFECT)
 
 

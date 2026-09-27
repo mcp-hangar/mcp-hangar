@@ -204,6 +204,31 @@ def test_a_failed_call_records_its_duration(runs):
     assert all(a["mcp.caller.id"] == AUTH_PRINCIPAL for a in failures), failures
 
 
+def test_a_refused_call_records_one_denial_with_its_gate(runs):
+    """A gate refusal reaches audit once, as `denied`, with bounded fields and the caller (#1582)."""
+    run = runs["auth"]
+    assert run["calls"]["refused"]["batch"]["success"] is False, run["calls"]
+
+    attributes = _record_for(run, "refused")["attributes"]
+
+    assert (attributes["mcp.tool.status"], attributes["gen_ai.tool.name"]) == ("denied", "multiply")
+    assert (attributes["hangar.gate.name"], attributes["hangar.gate.reason"]) == (
+        "tool_access",
+        "tool_not_in_access_policy",
+    )
+    assert attributes["mcp.caller.id"] == AUTH_PRINCIPAL
+    assert attributes["mcp.caller.tenant_id"] == AUTH_TENANT
+    assert "mcp.error.type" not in attributes
+
+
+def test_an_allowed_call_beside_a_refused_one_still_has_one_record(runs):
+    """`_record_for` asserts exactly one; the refusal adds none to the calls that ran."""
+    run = runs["auth"]
+
+    assert _record_for(run, "sampled")["attributes"]["mcp.tool.status"] == "success"
+    assert [r["attributes"]["mcp.tool.status"] for r in _tool_records(run)].count("denied") == 1
+
+
 @pytest.mark.parametrize("mode", ["auth", "bound"], ids=["resource-env", "defaults"])
 def test_the_audit_resource_joins_the_trace_resource(runs, mode):
     audit, trace = runs[mode]["resources"]["audit"], runs[mode]["resources"]["trace"]

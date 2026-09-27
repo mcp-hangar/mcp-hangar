@@ -1,6 +1,6 @@
 """OTLP audit event handler -- bridges domain events to IAuditExporter.
 
-Subscribes to tool invocation and mcp_server state events. Forwards them
+Subscribes to tool invocation, tool refusal and mcp_server state events. Forwards them
 to IAuditExporter (OTLPAuditExporter in production, NullAuditExporter
 when OTLP not configured).
 
@@ -12,10 +12,12 @@ from typing import Any
 from ...domain.contracts.cost import ICostAttributor, InvocationContext, NullCostAttributor
 from ...domain.events import (
     McpServerStateChanged,
+    ToolCallRefused,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
 from ...logging_config import get_logger
+from ...observability.conventions import L7, Gate
 from ..ports.observability import IAuditExporter, NullAuditExporter
 
 logger = get_logger(__name__)
@@ -37,6 +39,19 @@ def _caller_fields(identity: dict[str, Any] | None) -> dict[str, Any]:
         "caller_type": identity.get("principal_type"),
         "caller_id": identity.get("user_id") or identity.get("agent_id"),
     }
+
+
+def _refusal_fields(event: ToolCallRefused) -> dict[str, str]:
+    """The bounded refusal attributes of *event*, keyed by the ADR-029 vocabulary; unset ones left out."""
+    candidates = {
+        Gate.NAME: event.gate,
+        Gate.REASON: event.gate_reason,
+        L7.VERDICT: event.l7_verdict,
+        L7.MODE: event.l7_mode,
+        L7.RULE_KIND: event.l7_rule_kind,
+        L7.POLICY_ID: event.l7_policy_id,
+    }
+    return {key: value for key, value in candidates.items() if value}
 
 
 class OTLPAuditEventHandler:
@@ -83,6 +98,18 @@ class OTLPAuditEventHandler:
                 status="error",
                 duration_ms=event.duration_ms,
                 error_type=event.error_type,
+                **_caller_fields(event.identity_context),
+            )
+        elif isinstance(event, ToolCallRefused):
+            # One record per refusal (#1582). The refusal events that already
+            # exist -- ToolApprovalDenied, AuthorizationDenied,
+            # EgressPolicyEnforced -- are not subscribed, so none counts twice.
+            self._exporter.export_tool_invocation(
+                mcp_server_id=event.mcp_server_id,
+                tool_name=event.tool_name,
+                status="denied",
+                duration_ms=event.elapsed_ms,
+                refusal=_refusal_fields(event),
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, McpServerStateChanged):

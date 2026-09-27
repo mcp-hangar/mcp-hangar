@@ -92,6 +92,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "ToolInvocationRequested": 2,
     "ToolInvocationCompleted": 1,
     "ToolInvocationFailed": 1,
+    # A refused call, bounded fields only (#1582)
+    "ToolCallRefused": 1,
     # Health Check
     "HealthCheckPassed": 1,
     "HealthCheckFailed": 1,

@@ -4,11 +4,13 @@ import logging
 import os
 import socket
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+
+from .refusal import TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ _MSG_ID_MAP: dict[str, str] = {
     "ToolInvocationRequested": "100",
     "ToolInvocationCompleted": "101",
     "ToolInvocationFailed": "102",
+    TOOL_INVOCATION_DENIED: "103",
     "ProviderStateChanged": "202",
 }
 
@@ -27,16 +30,10 @@ _SEVERITY_MAP: dict[str, int] = {
     "ToolInvocationRequested": 6,
     "ToolInvocationCompleted": 6,
     "ToolInvocationFailed": 3,
+    # Warning, the level `batch_call_refused` logs a refusal at: a decision, not a failure.
+    TOOL_INVOCATION_DENIED: 4,
     "ProviderStateChanged": 4,
 }
-
-
-def _event_type_for_status(status: str) -> str:
-    if status in ("success", "completed"):
-        return "ToolInvocationCompleted"
-    if status in ("error", "failure", "failed"):
-        return "ToolInvocationFailed"
-    return "ToolInvocationRequested"
 
 
 def _escape_sd_value(value: str) -> str:
@@ -56,6 +53,7 @@ def _format_structured_data(record: AuditRecord) -> str:
         "error": data.get("error_type"),
         "fromState": data.get("from_state"),
         "toState": data.get("to_state"),
+        **dict(refusal_wire_fields(data)),
     }
     params = " ".join(f'{key}="{_escape_sd_value(str(value))}"' for key, value in fields.items() if value is not None)
     return f"[{SD_ID}{(' ' + params) if params else ''}]"
@@ -125,6 +123,7 @@ class SyslogExporter:
         cost_input_tokens: int | None = None,
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
+        refusal: Mapping[str, str] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -147,10 +146,11 @@ class SyslogExporter:
             data["cost_input_tokens"] = cost_input_tokens
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
+        data.update(refusal_data(refusal))
 
         record = AuditRecord(
             event_id="",
-            event_type=_event_type_for_status(status),
+            event_type=event_type_for_status(status),
             occurred_at=datetime.now(UTC),
             mcp_server_id=mcp_server_id,
             data=data,

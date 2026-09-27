@@ -27,6 +27,7 @@ from mcp_hangar._sdk_compat import Context, FastMCP, make_mcp_error
 
 from ....application.services.interceptor_registry import build_validator_pipeline
 from ....context import get_identity_context, identity_context_var, param_headers_unchecked
+from ....domain.exceptions import AccessDeniedError
 from ....domain.value_objects.identity import IdentityContext
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
@@ -42,7 +43,7 @@ from .concurrency import (
     init_concurrency_manager,
     reset_concurrency_manager,
 )
-from .executor import BatchExecutor, format_result_dict
+from .executor import BatchExecutor, format_result_dict, publish_call_refused
 from .models import (
     DEFAULT_MAX_CONCURRENCY,
     DEFAULT_MAX_RETRIES,
@@ -116,6 +117,7 @@ def _authorize_calls(
     call_ids: list[str],
     principal: Any,
     batch_id: str,
+    identity: IdentityContext | None = None,
 ) -> dict[int, CallResult]:
     """Enforce ``tool:invoke`` authorization for each call, fail-closed.
 
@@ -139,11 +141,18 @@ def _authorize_calls(
 
     Fully fault-barriered: a missing app context (stdio) leaves behavior
     unchanged (allow), because no authz middleware is resolvable.
+
+    Each denial publishes one ``ToolCallRefused`` for audit (#1582), as a gate
+    named ``authorization``, carrying *identity* as the caller. An authorizer
+    that raised something other than a denial is no refusal, as a gate that
+    errs is none, and publishes nothing.
     """
     # Resolve the authz middleware. A missing app context (stdio/local) or an
     # unconfigured middleware means auth is off -> allow (backward compatible).
+    app_context: Any = None
     try:
-        auth_components = getattr(get_context(), "auth_components", None)
+        app_context = get_context()
+        auth_components = getattr(app_context, "auth_components", None)
     except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> auth off, allow
         auth_components = None
     authz = getattr(auth_components, "authz_middleware", None)
@@ -165,7 +174,8 @@ def _authorize_calls(
             reason="missing_credentials",
             call_count=len(calls),
         )
-        for i, _call in enumerate(calls):
+        for i, call in enumerate(calls):
+            _publish_authorization_refusal(app_context, call, call_ids[i], identity, "unauthenticated")
             denied[i] = CallResult(
                 index=i,
                 call_id=call_ids[i],
@@ -194,6 +204,8 @@ def _authorize_calls(
                 tool=tool,
                 reason=type(exc).__name__,
             )
+            if isinstance(exc, AccessDeniedError):
+                _publish_authorization_refusal(app_context, call, call_ids[i], identity, "tool_invoke_denied")
             denied[i] = CallResult(
                 index=i,
                 call_id=call_ids[i],
@@ -203,6 +215,17 @@ def _authorize_calls(
                 elapsed_ms=0.0,
             )
     return denied
+
+
+def _publish_authorization_refusal(
+    app_context: Any, call: dict[str, Any], call_id: str, identity: IdentityContext | None, reason: str
+) -> None:
+    """The ``ToolCallRefused`` of a call ``tool:invoke`` denied (#1582); its reason is a fixed code."""
+    spec = CallSpec(
+        index=0, call_id=call_id, mcp_server=call.get("mcp_server", ""), tool=call.get("tool", ""), arguments={}
+    )
+    event_bus = getattr(app_context, "event_bus", None)
+    publish_call_refused(event_bus, spec, 0.0, identity, gate="authorization", reason=reason)
 
 
 def _refuse_if_param_headers_unchecked(ctx: Context | None) -> None:
@@ -529,7 +552,9 @@ def _run_calls(
         # execution, mirroring the REST guard. Denied calls never reach the
         # executor; authorized calls proceed. No-auth/stdio -> allow all.
         with tracer.start_as_current_span("hangar_call.authorize") as authz_span:
-            denied_by_index = _authorize_calls(calls, call_ids, principal, batch_id)
+            denied_by_index = _authorize_calls(
+                calls, call_ids, principal, batch_id, identity=identity or get_identity_context()
+            )
             authz_span.set_attribute("authz.denied_count", len(denied_by_index))
 
         # Build call specs for the AUTHORIZED calls only. Give the executor a

@@ -519,6 +519,51 @@ def test_an_enforced_refusal_logs_the_verdict_not_the_policy_reasons(enforced, s
     assert "deny" in verdicts, verdicts
 
 
+# --- a refused call is audited once, in bounded form (#1582) -----------------
+
+
+def _denied(run: dict[str, Any]) -> list[dict[str, Any]]:
+    return [r["attributes"] for r in run["audit"] if r["attributes"].get("mcp.tool.status") == "denied"]
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_an_approver_refusal_is_one_denied_audit_record_per_call(runs, surface):
+    """The approver's canary reason is kept off it by the matrix above; this proves the record exists."""
+    records = _denied(runs[surface])
+
+    assert sorted(r["gen_ai.tool.name"] for r in records) == sorted(f"{t}-guarded" for t in TRANSPORTS), records
+    for record in records:
+        assert (record["hangar.gate.name"], record["hangar.gate.reason"]) == ("approval", "approval_denied")
+        assert record["mcp.caller.tenant_id"] == "tenant-canary"
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize(
+    ("sink", "marker"),
+    [
+        ("compliance_cef", "|Tool Invocation Denied|"),
+        ("compliance_leef", "|103|"),
+        ("compliance_jsonlines", '"event_type": "ToolInvocationDenied"'),
+        ("compliance_syslog", " 103 [mcp@49152"),
+    ],
+)
+def test_every_compliance_format_receives_the_refusal(runs, surface, sink, marker):
+    lines = [line for line in SINKS[sink](runs[surface]) if marker in line]
+
+    assert len(lines) == len(TRANSPORTS), SINKS[sink](runs[surface])
+    assert all("approval_denied" in line for line in lines), lines
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_an_enforced_l7_refusal_is_one_denied_audit_record_per_call(enforced, surface):
+    records = [r for r in _denied(enforced[surface]) if "hangar.l7.verdict" in r]
+
+    assert sorted(r["gen_ai.tool.name"] for r in records) == sorted(f"{t}-note" for t in TRANSPORTS), records
+    for record in records:
+        assert (record["hangar.l7.verdict"], record["hangar.l7.rule_kind"]) == ("deny", "argument")
+        assert "hangar.gate.name" not in record
+
+
 # --- payload shaping: truncation cut a result, and said so without it (#1298) --
 
 
