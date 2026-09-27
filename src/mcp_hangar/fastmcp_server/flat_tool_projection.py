@@ -1235,10 +1235,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                         # One call whose caller expects the upstream's result
                         # as sent, with no continuation tool to fetch a cut
                         # part: batch truncation left it an invalid tool
-                        # result (#1609). Also past the per-call size cap,
-                        # which bounds no memory (the result is held whole
-                        # before it applies); it only emptied the result into
-                        # a silent `{}` success. As the facade does (#1453).
+                        # result (#1609). As the facade does (#1453). The
+                        # response size is bounded where it is read (#1613).
                         whole_result=True,
                     )
                 ],
