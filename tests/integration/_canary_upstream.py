@@ -48,6 +48,7 @@ KINDS = (
     "l7_argument",  # a tool argument an L7 egress policy's secret pattern matches (#1295)
     "l7_header",  # an ``Mcp-Param-*`` value an L7 egress policy's header rule matches (#1295)
     "l7_header_encoded",  # the same, sent in the ``=?base64?...?=`` sentinel form the SDK decodes (#1600)
+    "shaped_result",  # the text of a result big enough for batch truncation to cut (#1298)
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
@@ -82,7 +83,11 @@ def encoded(kind: str, transport: str) -> str:
 
 
 #: The tools, each producing one canary. ``guarded`` is approval-listed by the harness.
-TOOLS = ("note", "result_text", "is_error", "rpc_error", "guarded")
+TOOLS = ("note", "result_text", "is_error", "rpc_error", "guarded", "big_result")
+
+#: How long ``big_result``'s text is: past the harness's batch budget, so a
+#: ``hangar_call`` of it is cut and its rest stored under a continuation id.
+BIG_RESULT_LENGTH = 40_000
 
 _STRING = {"type": "string"}
 
@@ -107,6 +112,9 @@ def call_result(tool: str, transport: str) -> dict[str, Any]:
         return {"result": {"content": [{"type": "text", "text": canary("result", transport)}]}}
     if tool == "is_error":
         return {"result": {"isError": True, "content": [{"type": "text", "text": canary("is_error", transport)}]}}
+    if tool == "big_result":
+        text = canary("shaped_result", transport)
+        return {"result": {"content": [{"type": "text", "text": text + "-" + "y" * BIG_RESULT_LENGTH}]}}
     if tool == "rpc_error":
         return {"error": {"code": -32000, "message": canary("rpc_error", transport)}}
     return {"result": {"content": [{"type": "text", "text": "noted"}]}}
