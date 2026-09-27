@@ -104,6 +104,9 @@ class RelayCapture:
             back to the client verbatim once governed.
         logical_mcp_server: Logical mcp_server (or group) id the call targeted.
         tool: Tool name invoked on the call.
+        origin_traceparent: The ``batch.call.<tool>`` span's W3C ``traceparent``,
+            the origin the task's follow-ups link to (#1281); None when tracing
+            is off.
     """
 
     identity: IdentityContext | None
@@ -113,6 +116,7 @@ class RelayCapture:
     upstream: dict[str, Any]
     logical_mcp_server: str
     tool: str
+    origin_traceparent: str | None = None
 
 
 @dataclass
