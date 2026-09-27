@@ -140,7 +140,8 @@ class _TaskUpstream(BaseHTTPRequestHandler):
             return
         method = request.get("method")
         params = request.get("params") or {}
-        followed = params.get("taskId") or params.get("task_id")
+        # The wire name only: an id relayed under any other name finds no task (#1617).
+        followed = params.get("taskId")
         answer: dict[str, Any]
         if method == "initialize":
             answer = {
@@ -173,7 +174,6 @@ class _TaskUpstream(BaseHTTPRequestHandler):
             else:
                 answer = {"result": _flat(created, "task") if self.flat else {"task": created}}
         elif method == "tasks/get" and followed in self.tasks:
-            # Hangar relays the id as `task_id`; a client sends `taskId`.
             polled = self.tasks[followed]
             answer = {"result": _flat(polled, "complete") if self.flat else polled}
         elif method in ("tasks/update", "tasks/cancel") and followed in self.tasks:

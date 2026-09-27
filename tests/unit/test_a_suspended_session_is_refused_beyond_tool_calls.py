@@ -42,7 +42,7 @@ from mcp_hangar.fastmcp_server import asgi
 from mcp_hangar.fastmcp_server import prompt_proxy as pp
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
 from mcp_hangar.fastmcp_server import subscription_relay as sr
-from mcp_hangar.fastmcp_server.task_relay_handlers import register_task_relay_handlers
+from mcp_hangar.fastmcp_server.task_relay_handlers import _UpdateTaskParams, register_task_relay_handlers
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence.in_memory_event_store import InMemoryEventStore
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
@@ -286,7 +286,7 @@ async def _served_then_refused_then_served(registry, handler, params, upstream: 
 _TASK_CALLS = [
     ("tasks/get", SimpleNamespace(task_id="T1")),
     ("tasks/cancel", SimpleNamespace(task_id="T1")),
-    ("tasks/update", SimpleNamespace(task_id="T1", input_responses={})),
+    ("tasks/update", _UpdateTaskParams(task_id="T1", input_responses={})),
 ]
 
 

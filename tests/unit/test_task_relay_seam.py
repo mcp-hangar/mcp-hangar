@@ -601,9 +601,9 @@ class TestATaskNoCallerIsHandedIsCancelledUpstream:
         executed, store = self._refuse(router)
 
         assert done.wait(5), "the seam sent no cancel"
-        # The task id the store would have been keyed on, in the param shape the
-        # served `tasks/cancel` relays.
-        assert sent == [(_SERVER, "tasks/cancel", {"task_id": "t1"}, _CANCEL_TIMEOUT)]
+        # The task id the store would have been keyed on, under its wire name,
+        # as the served `tasks/cancel` relays it (#1617).
+        assert sent == [(_SERVER, "tasks/cancel", {"taskId": "t1"}, _CANCEL_TIMEOUT)]
         # And the refusal is what it was: still refused, still nothing recorded.
         assert executed[0].error_type == "TasksNotNegotiated"
         assert store._tasks == {}

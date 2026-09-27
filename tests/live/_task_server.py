@@ -5,10 +5,8 @@ plain ``tools/call`` with a task handle. Every ``job`` call mints a new task and
 answers ``{"task": {...}}``, the nested shape Hangar relays to its caller. It
 then answers the follow-ups Hangar relays for that task:
 
-- ``tasks/get`` and ``tasks/cancel`` read the id from ``task_id``, the name
-  Hangar relays it under (a client sends ``taskId`` to Hangar, not to here);
-- ``tasks/update`` reads it from ``taskId``, because Hangar relays the caller's
-  params there as they arrived, camelCase.
+``tasks/get``, ``tasks/update`` and ``tasks/cancel`` each read the id from
+``taskId``, its wire name in SEP-2663, and from nothing else (#1617).
 
 A follow-up for an id it did not mint, or under another name, is an error, so a
 change in what Hangar relays fails the test instead of passing unnoticed.
@@ -27,8 +25,8 @@ import sys
 import uuid
 from typing import Any
 
-#: Where each follow-up carries the task id, as Hangar relays it.
-_ID_PARAM = {"tasks/get": "task_id", "tasks/cancel": "task_id", "tasks/update": "taskId"}
+#: The follow-ups it answers. Each carries the task id as ``taskId``, its wire name.
+_FOLLOW_UPS = frozenset({"tasks/get", "tasks/cancel", "tasks/update"})
 _TOOL = "job"
 
 
@@ -53,8 +51,8 @@ def _answer(method: str, params: dict[str, Any], tasks: dict[str, str]) -> tuple
         task_id = f"task-{uuid.uuid4().hex}"
         tasks[task_id] = "working"
         return {"result": {"task": _task(task_id, "working")}}, task_id
-    if method in _ID_PARAM:
-        task_id = params.get(_ID_PARAM[method])
+    if method in _FOLLOW_UPS:
+        task_id = params.get("taskId")
         if not isinstance(task_id, str) or task_id not in tasks:
             return {"error": {"code": -32602, "message": "unknown task"}}, None
         if method == "tasks/cancel":
