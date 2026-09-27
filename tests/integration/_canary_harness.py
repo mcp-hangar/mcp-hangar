@@ -24,7 +24,9 @@ What runs is production:
   ``_canary_upstream.py``: one over stdio, one over HTTP;
 - the approval gate ``bootstrap()`` wires, answered by a thread that denies each
   hold with the approver canary as its reason, through the service call the
-  REST resolve route makes.
+  REST resolve route makes;
+- batch truncation, on with a budget only ``big_result`` exceeds, and the
+  continuation cache the bootstrap builds for it (#1298).
 
 Surfaces: ``hangar_call`` is the default topology, each call a ``hangar_call``;
 ``front_door`` is ``tool_access.mode: front_door``, warmed as ``run_http`` warms
@@ -84,7 +86,13 @@ SCENARIOS = {
     "is_error": "is_error",
     "rpc_error": "rpc_error",
     "approval": "guarded",
+    "shaping": "big_result",
 }
+
+#: Batch truncation (#1298): a budget the other scenarios' results fit in and
+#: ``big_result`` does not. The front door's flat calls take their result
+#: whole (#1453), so only ``hangar_call`` is cut.
+TRUNCATION = {"enabled": True, "max_batch_size_bytes": 20_000, "min_per_response_bytes": 1_000}
 
 
 def arguments(tool: str, transport: str) -> dict[str, Any]:
@@ -180,6 +188,7 @@ def _config(surface: str, endpoint: str, http_upstream: str, stdio_record: Path)
             SERVERS["http"]: {"mode": "remote", "endpoint": http_upstream, "tools": guarded("http")},
         },
         "observability": {"tracing": {"otlp_endpoint": endpoint, "enabled": True}},
+        "truncation": TRUNCATION,
         "auth": {
             "enabled": True,
             "allow_anonymous": False,

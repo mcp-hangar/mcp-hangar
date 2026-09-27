@@ -436,6 +436,71 @@ class EventDelivery:
     FAILED = "failed"
 
 
+class Shaping:
+    """How a call's payload was shaped on its way through (#1298).
+
+    ``hangar.shaping.*`` is stable surface, like every ``hangar.*`` namespace
+    (ADR-029 s9): its keys and values are added to, never renamed. Only timing,
+    sizes, counts and flags are recorded -- never the arguments, the result, a
+    cache entry or a continuation id (#1276, R1).
+
+    Signal choice, per ADR-029 s1:
+
+    - Request and response mutation are span EVENTS on `batch.call.<tool>`,
+      each carrying its duration. The rule reserves events for rare, instant
+      facts, and a mutation is neither quite: it fires on every call once
+      mutators are registered. It stays an event because there are at most two
+      per call -- request mutation runs once, before any retry, and response
+      mutation once, after the invoke that succeeded -- because a child span
+      would add two spans to every call for an in-process transform with no
+      I/O, and because the default empty pipeline records nothing at all. A
+      histogram was the other choice and was not taken: a metric cannot say
+      which call a slow mutation belonged to, and ADR-029 s1 keeps metrics for
+      aggregates and SLOs, which nobody has asked of mutation.
+    - A result the per-call size limit drops is an event: one fact, instant, at
+      most once per call. Its reason is a code from `DROP_REASONS`; any other
+      value is omitted rather than exported, as `hangar.gate.reason` omits a
+      refusal it has no code for.
+    - Batch truncation is its own short `batch.truncate` span under
+      `batch.execute`: it runs once per batch and may write to the
+      continuation cache, which is I/O with a duration of its own.
+    """
+
+    #: One `MutatorPipeline` run that had mutators registered, as a span event.
+    MUTATION_EVENT = "hangar.shaping.mutation"
+
+    #: Which payload was mutated: "request" (once, before any retry) or "response".
+    DIRECTION = "hangar.shaping.direction"
+    REQUEST = "request"
+    RESPONSE = "response"
+    DIRECTIONS = frozenset({REQUEST, RESPONSE})
+
+    #: Whether a mutator changed the payload, from `MutationResult.changed`.
+    CHANGED = "hangar.shaping.changed"
+
+    #: Milliseconds the mutator pipeline took.
+    DURATION_MS = "hangar.shaping.duration_ms"
+
+    #: A result dropped by the per-call size limit, as a span event.
+    DROP_EVENT = "hangar.shaping.drop"
+
+    #: Why the result was dropped, a code from `DROP_REASONS`. Omitted for any
+    #: other value; never free text.
+    REASON = "hangar.shaping.reason"
+    RESPONSE_SIZE_EXCEEDED = "response_size_exceeded"
+    DROP_REASONS = frozenset({RESPONSE_SIZE_EXCEEDED})
+
+    #: Size of the dropped result in bytes, and the limit it exceeded.
+    SIZE_BYTES = "hangar.shaping.size_bytes"
+    LIMIT_BYTES = "hangar.shaping.limit_bytes"
+
+    #: How many results batch truncation cut, on the `batch.truncate` span.
+    TRUNCATED_COUNT = "hangar.shaping.truncated_count"
+
+    #: Whether batch truncation stored a continuation. A flag, never the id.
+    CONTINUATION = "hangar.shaping.continuation"
+
+
 class Caller:
     """Attributes identifying the caller (human or agent) behind a request.
 
