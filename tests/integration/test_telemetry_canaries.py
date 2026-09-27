@@ -73,6 +73,7 @@ SCENARIO = {
     "l7_argument": "argument",
     "l7_header": "argument",
     "l7_header_encoded": "argument",
+    "shaped_result": "shaping",
 }
 
 
@@ -368,6 +369,13 @@ def test_the_canary_went_in(runs, surface, kind, transport):
         key = _ARGUMENT_KEYS[kind]
         sent = [(r.get("arguments") or {}).get(key) for r in _upstream_calls(run, transport)]
         assert canary(kind, transport) in sent, sent
+    elif kind == "shaped_result":
+        # The upstream has no other answer for `big_result`, so a call to it put
+        # the canary into Hangar. The batch budget then cut it before the caller
+        # saw it; on `hangar_call` the caller holds a continuation id instead.
+        assert f"{transport}-big_result" in [r["tool"] for r in _upstream_calls(run, transport)]
+        if surface == "hangar_call":
+            assert _continuation_ids(response), json.dumps(response)[:500]
     elif kind in ("result", "is_error", "rpc_error", "approver_reason"):
         # The caller is owed the whole text; only telemetry is bounded.
         value = canary(kind, transport)
@@ -395,7 +403,8 @@ def test_both_upstreams_were_called_with_every_tool(runs, surface):
     for transport in TRANSPORTS:
         tools = sorted(r["tool"] for r in _upstream_calls(runs[surface], transport))
         # `guarded` never reaches its upstream: the approver denies it.
-        assert tools == sorted(f"{transport}-{t}" for t in ("note", "result_text", "is_error", "rpc_error")), tools
+        expected = ("note", "result_text", "is_error", "rpc_error", "big_result")
+        assert tools == sorted(f"{transport}-{t}" for t in expected), tools
 
 
 # --- the bounds, whatever carries them ----------------------------------------
@@ -503,3 +512,44 @@ def test_an_enforced_refusal_logs_the_verdict_not_the_policy_reasons(enforced, s
         assert not [s for s in _strings(line) if "secret matching" in s or "aws-keys" in s or "matched" in s], line
     verdicts = {a["hangar.l7.verdict"] for a in _l7_spans(enforced[surface])}
     assert "deny" in verdicts, verdicts
+
+
+# --- payload shaping: truncation cut a result, and said so without it (#1298) --
+
+
+def _continuation_ids(value: Any) -> list[str]:
+    """Every ``continuation_id`` in a response, including inside JSON carried as text."""
+    found: list[str] = []
+    for mapping in _mappings(value):
+        if isinstance(mapping.get("continuation_id"), str):
+            found.append(mapping["continuation_id"])
+    for text in _strings(value):
+        if text.lstrip().startswith("{"):
+            try:
+                found += _continuation_ids(json.loads(text))
+            except ValueError:
+                pass
+    return found
+
+
+@pytest.mark.parametrize("transport", TRANSPORTS)
+def test_batch_truncation_cut_the_big_result_and_recorded_counts_only(runs, transport):
+    """The proof the path ran: without a `batch.truncate` span, an absence of the id below proves nothing."""
+    run = runs["hangar_call"]
+    assert _continuation_ids(run["calls"][f"{transport}:shaping"]), "the big result was not cut"
+    truncates = [s for s in run["spans"] if s["name"] == "batch.truncate"]
+    cut = [s["attributes"] for s in truncates if s["attributes"].get("hangar.shaping.truncated_count")]
+
+    assert len(cut) == len(TRANSPORTS), [s["attributes"] for s in truncates]
+    assert all(a == {"hangar.shaping.truncated_count": 1, "hangar.shaping.continuation": True} for a in cut), cut
+
+
+@pytest.mark.parametrize("sink", SINKS)
+def test_a_continuation_id_reaches_no_sink(runs, sink):
+    """Only the caller holds it: its random suffix is all that keeps a continuation unguessable."""
+    run = runs["hangar_call"]
+    ids = {i for transport in TRANSPORTS for i in _continuation_ids(run["calls"][f"{transport}:shaping"])}
+
+    assert len(ids) == len(TRANSPORTS), ids
+    found = [s[:120] for s in _strings(SINKS[sink](run)) if any(i in s for i in ids)]
+    assert found == [], f"{len(found)} value(s) carry a continuation id: {found[:3]}"
