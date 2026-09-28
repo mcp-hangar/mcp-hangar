@@ -25,13 +25,14 @@ import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig, StaticSecretTokenValidator
 from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
-from mcp_hangar.auth.stdio_principal import clear_stdio_principal, set_stdio_principal
+from mcp_hangar.auth.stdio_principal import clear_stdio_principal
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.contracts.authentication import AuthRequest
 from mcp_hangar.domain.events import ToolCallRefused
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.server.api.sessions import get_session_suspension_registry
+from mcp_hangar.server.bootstrap import _declare_stdio_principal
 from mcp_hangar.server.tools.batch import hangar_call
 from mcp_hangar.server.tools.batch.models import BatchResult, CallResult, CallSpec
 
@@ -64,6 +65,11 @@ def _jwt_principal() -> Principal:
     return authenticator.authenticate(
         AuthRequest(headers={"authorization": f"Bearer {token}"}, source_ip="127.0.0.1", method="POST", path="/mcp")
     )
+
+
+def _stdio_config(role: str) -> dict[str, Any]:
+    """An ``auth.stdio.principal`` block declaring *role*, as bootstrap reads it."""
+    return {"auth": {"stdio": {"principal": {"id": "local-user", "tenant_id": "local", "roles": [role]}}}}
 
 
 def _request(principal: Principal | None) -> SimpleNamespace:
@@ -163,25 +169,49 @@ class TestEveryModeDecidesAsHangarCall:
         assert gateway.call(path, None) is None
         assert gateway.refusals() == [] and len(gateway.executed) == 2
 
-    @pytest.mark.parametrize("auth", [False, True], ids=["auth-off", "auth-on"])
-    def test_stdio_has_no_principal_on_a_request(self, monkeypatch, path, auth) -> None:
-        """ADR-026: the declared principal names the caller; ``tool:invoke`` never reads it.
-
-        With auth off every call is served. With auth on the call is refused as
-        unauthenticated whatever the declared roles, as ``hangar_call`` refuses it.
-        """
+    @pytest.mark.parametrize(
+        ("auth", "declared", "refusal", "reason", "roles"),
+        [
+            (False, "viewer", None, None, ()),
+            (True, "developer", None, None, ("developer",)),
+            (True, "viewer", _NEED_INVOKE, "tool_invoke_denied", ()),
+            (True, None, _NEED_AUTH, "unauthenticated", ()),
+        ],
+        ids=["auth-off", "developer", "viewer", "none-declared"],
+    )
+    def test_stdio_decides_on_the_declared_principal(
+        self, monkeypatch, path, auth, declared, refusal, reason, roles
+    ) -> None:
+        """ADR-026: with no request, the caller is the declared principal, decided on its roles."""
         gateway = _Gateway(monkeypatch, auth=auth)
-        declared = Principal(id=PrincipalId("local-user"), type=PrincipalType.USER, tenant_id="local")
-        set_stdio_principal(declared)
-        gateway.roles.assign_role("local-user", "developer")
+        if declared is not None:
+            _declare_stdio_principal(_stdio_config(declared), stdio=True)
 
-        refusal = gateway.call(path, None, request=False)
+        assert gateway.call(path, None, request=False) == refusal
+        assert [(e.gate, e.gate_reason) for e in gateway.refusals()] == ([("authorization", reason)] if reason else [])
+        if refusal is None:
+            [spec] = gateway.executed
+            assert spec.caller_roles == roles
+        else:
+            assert gateway.executed == []
+            [event] = gateway.refusals()
+            assert event.identity_context is None or event.identity_context["user_id"] == "local-user"
 
-        assert refusal == (_NEED_AUTH if auth else None)
-        assert len(gateway.executed) == (0 if auth else 1)
-        assert [(e.gate, e.gate_reason) for e in gateway.refusals()] == (
-            [("authorization", "unauthenticated")] if auth else []
-        )
+    @pytest.mark.parametrize(
+        "principal",
+        [None, Principal.anonymous(), _api_key_principal()],
+        ids=["no-principal", "anonymous", "viewer"],
+    )
+    def test_a_request_never_borrows_the_declared_principal(self, monkeypatch, path, principal) -> None:
+        """A process with a declared ``developer`` still decides an HTTP request on the request's caller."""
+        gateway = _Gateway(monkeypatch, auth=True)
+        gateway.roles.assign_role(_API_KEY_CALLER, "viewer")
+        _declare_stdio_principal(_stdio_config("developer"), stdio=True)
+
+        refusal = gateway.call(path, principal)
+
+        assert refusal == (_NEED_INVOKE if principal is not None and not principal.is_anonymous() else _NEED_AUTH)
+        assert gateway.executed == []
 
     @pytest.mark.parametrize("anonymous", [False, True], ids=["missing", "anonymous"])
     def test_no_principal_is_refused_as_unauthenticated(self, monkeypatch, path, anonymous) -> None:

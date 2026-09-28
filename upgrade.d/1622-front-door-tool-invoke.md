@@ -22,9 +22,24 @@ auth:
 Listing is unchanged: such a caller still sees the tools its tool-access
 policy allows, and is refused when it calls one.
 
-With auth off (the default, and `--unsafe-no-auth`) nothing changes. A stdio
-front door with `auth.enabled: true` is refused as unauthenticated whatever
-`auth.stdio.principal` declares, as `hangar_call` over stdio already was:
-no request carries a principal on stdio. A stdio deployment that relied on
-flat calls with auth on should run with auth off, which is how ADR-026
-expects stdio to be configured.
+With auth off (the default, and `--unsafe-no-auth`) nothing changes.
+
+Over stdio with `auth.enabled: true`, both invoke paths now decide
+`tool:invoke` for the principal `auth.stdio.principal` declares, on the roles
+it declares. The default declaration is `roles: [viewer]`, which does not hold
+`tool:invoke`, so its flat calls are now refused where they used to be served.
+Declare `developer` or `service-account` where a stdio session must call tools:
+
+```yaml
+auth:
+  stdio:
+    principal:
+      id: local-user
+      tenant_id: local
+      roles: [developer]
+```
+
+The same declaration also makes `hangar_call` over stdio with auth on serve a
+caller it used to refuse as unauthenticated. The declared roles are the
+principal's only role source: the configured role store and any OPA policy are
+not consulted for it.

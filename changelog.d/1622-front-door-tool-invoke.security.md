@@ -7,4 +7,9 @@ flat call is a tool error (`isError`) reading
 `Not authorized to invoke tool '<tool>': tool:invoke permission required`, the
 tool is not executed, and one `ToolCallRefused` is audited with
 `gate=authorization`. An allowed call's audit record carries the role that
-admitted it in `mcp.caller.roles`. Auth off is unchanged (#1622).
+admitted it in `mcp.caller.roles`. Over stdio with auth on, both
+`hangar_call` and the flat call now decide `tool:invoke` for the principal
+`auth.stdio.principal` declares, on its declared roles: a declared principal
+holding `tool:invoke` is served, where `hangar_call` refused every stdio caller
+as unauthenticated. An HTTP request never takes the declared principal. Auth
+off is unchanged (#1622).
