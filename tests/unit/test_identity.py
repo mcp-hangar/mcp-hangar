@@ -120,8 +120,23 @@ class TestIdentityContext:
             "session_id": "s1",
             "principal_type": "user",
             "tenant_id": None,
+            "roles": [],
             "correlation_id": "corr-42",
         }
+
+    def test_with_roles_is_a_copy_and_serializes_them(self):
+        """What authorized a call rides on a copy; the context it came from is unchanged (#1347)."""
+        ctx = IdentityContext(
+            caller=CallerIdentity(user_id="u1", agent_id=None, session_id="s1", principal_type="user"),
+            correlation_id="corr-1",
+        )
+
+        with_role = ctx.with_roles(("developer",))
+
+        assert with_role.caller.roles == ("developer",)
+        assert with_role.to_dict()["roles"] == ["developer"]
+        assert with_role.caller.user_id == "u1" and with_role.correlation_id == "corr-1"
+        assert ctx.caller.roles == () and ctx.to_dict()["roles"] == []
 
     def test_to_dict_minimal(self):
         ctx = IdentityContext(

@@ -59,6 +59,11 @@ class CallSpec:
     #: call (#1609): each returns its result whole, with no way to fetch a
     #: continuation.
     whole_result: bool = False
+    #: What authorized this call (#1347), as ``_authorize_calls`` derived it
+    #: from the decision that admitted it: the matched role, or ``opa_policy``.
+    #: The worker sets it on a copy of the caller's identity, so the call's
+    #: audit record names it. Empty when auth is off or nothing decided.
+    caller_roles: tuple[str, ...] = ()
 
 
 @dataclass

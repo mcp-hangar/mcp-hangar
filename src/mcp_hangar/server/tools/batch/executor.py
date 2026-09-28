@@ -26,7 +26,7 @@ from ....application.read_models.tool_projection import get_tool_projection_regi
 from ....application.services.mutator_pipeline import MutatorPipeline
 from ....application.services.validator_pipeline import ValidatorPipeline
 from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
-from ....context import bind_routing_headers, get_identity_context, release_routing_headers
+from ....context import bind_routing_headers, get_identity_context, identity_context_var, release_routing_headers
 from ....domain.contracts.mutator import MutationContext
 from ....domain.contracts.validator import ValidationContext
 from ....domain.events import (
@@ -246,6 +246,20 @@ def _identity_span_attributes() -> dict[str, str]:
             MCP.SESSION_ID: caller.session_id,
         }
     return {key: value for key, value in candidates.items() if value}
+
+
+def _bind_caller_roles(call: CallSpec) -> contextvars.Token[IdentityContext | None] | None:
+    """Bind a copy of the caller's identity naming what authorized *call* (#1347), or nothing.
+
+    The copy is this call's: the batch's identity is not changed, so one call's
+    role never reaches another's record. Everything the call publishes -- its
+    invocation events, a gate's ``ToolCallRefused`` -- reads it from here.
+    Nothing reads it onto a span (#1276, #1580).
+    """
+    identity = get_identity_context()
+    if not call.caller_roles or identity is None:
+        return None
+    return identity_context_var.set(identity.with_roles(call.caller_roles))
 
 
 def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
@@ -1722,6 +1736,22 @@ class BatchExecutor:
         Returns:
             CallResult for this call.
         """
+        roles_token = _bind_caller_roles(call)
+        try:
+            return self._execute_call_traced(call, cancel_event, global_timeout, batch_start_time, request_ctx)
+        finally:
+            if roles_token is not None:
+                identity_context_var.reset(roles_token)
+
+    def _execute_call_traced(
+        self,
+        call: CallSpec,
+        cancel_event: threading.Event,
+        global_timeout: float,
+        batch_start_time: float,
+        request_ctx: Any | None,
+    ) -> CallResult:
+        """`_execute_call` under the call's own span, with the caller's roles bound."""
         ctx = get_context()
         call_start = time.perf_counter()
 

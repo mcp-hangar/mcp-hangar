@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusal_wire_fields
+from .refusal import CALLER_ROLES, ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusal_wire_fields
 
 # CEF header constants
 CEF_VERSION = "0"
@@ -178,6 +178,11 @@ def format_audit_record(record: AuditRecord) -> str:
         extensions.append("cs6Label=TenantID")
 
     data = record.data or {}
+    # What authorized the call (#1347) -> spriv, the dictionary's field for the
+    # privileges of the source user `suser` names.
+    caller_roles = data.get(CALLER_ROLES)
+    if caller_roles:
+        extensions.append(f"spriv={_escape_extension_value(str(caller_roles))}")
     # The server a call was routed to -> flexString1 (#1594). cs1 is the target
     # the caller named, the group for a group call, and cs1-cs6 are all taken,
     # so the member goes in the dictionary's labelled flex string.

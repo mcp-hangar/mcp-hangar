@@ -27,6 +27,7 @@ from mcp_hangar._sdk_compat import Context, FastMCP, make_mcp_error
 
 from ....application.services.interceptor_registry import build_validator_pipeline
 from ....context import get_identity_context, identity_context_var, param_headers_unchecked
+from ....domain.contracts.authorization import AuthorizationResult
 from ....domain.exceptions import AccessDeniedError
 from ....domain.value_objects.identity import IdentityContext
 from ....logging_config import get_logger
@@ -112,12 +113,38 @@ def _request_principal(ctx: Context | None) -> Any:
         return None
 
 
+#: What a call's audit record names when an OPA policy admitted it and no role did (#1347).
+OPA_POLICY_ROLE = "opa_policy"
+
+#: The reasons an allow decision gives when an OPA policy admitted the call
+#: without a role: ``OPAAuthorizer`` on its own, and ``CombinedAuthorizer``
+#: when OPA overrode an RBAC denial.
+_OPA_ALLOW_REASONS = frozenset({"opa_policy", "opa_override"})
+
+
+def _role_that_authorized(decision: object) -> tuple[str, ...]:
+    """What admitted a call, read from the allow decision itself (#1347).
+
+    The role the decision matched, else ``opa_policy`` when an OPA policy
+    admitted it, else nothing. The role store is not asked again and no value
+    is made up: a decision that names neither leaves the record without roles.
+    """
+    if not isinstance(decision, AuthorizationResult) or not decision.allowed:
+        return ()
+    if decision.matched_role:
+        return (decision.matched_role,)
+    if decision.reason in _OPA_ALLOW_REASONS:
+        return (OPA_POLICY_ROLE,)
+    return ()
+
+
 def _authorize_calls(
     calls: list[dict[str, Any]],
     call_ids: list[str],
     principal: Any,
     batch_id: str,
     identity: IdentityContext | None = None,
+    authorizing_roles: dict[int, tuple[str, ...]] | None = None,
 ) -> dict[int, CallResult]:
     """Enforce ``tool:invoke`` authorization for each call, fail-closed.
 
@@ -146,6 +173,10 @@ def _authorize_calls(
     named ``authorization``, carrying *identity* as the caller. An authorizer
     that raised something other than a denial is no refusal, as a gate that
     errs is none, and publishes nothing.
+
+    *authorizing_roles*, when given, receives what admitted each allowed call,
+    by index, from its own decision (``_role_that_authorized``). A call with
+    nothing to record gets no entry, and with auth off none does.
     """
     # Resolve the authz middleware. A missing app context (stdio/local) or an
     # unconfigured middleware means auth is off -> allow (backward compatible).
@@ -191,7 +222,7 @@ def _authorize_calls(
     for i, call in enumerate(calls):
         tool = call.get("tool", "")
         try:
-            authz.authorize(
+            decision = authz.authorize(
                 principal=principal,
                 action="invoke",
                 resource_type="tool",
@@ -214,6 +245,10 @@ def _authorize_calls(
                 error_type="AuthorizationDenied",
                 elapsed_ms=0.0,
             )
+            continue
+        roles = _role_that_authorized(decision)
+        if roles and authorizing_roles is not None:
+            authorizing_roles[i] = roles
     return denied
 
 
@@ -551,9 +586,16 @@ def _run_calls(
         # Authorization gate (fail-closed): enforce tool:invoke per call BEFORE
         # execution, mirroring the REST guard. Denied calls never reach the
         # executor; authorized calls proceed. No-auth/stdio -> allow all.
+        # What admitted each allowed call, for its audit record (#1347).
+        roles_by_index: dict[int, tuple[str, ...]] = {}
         with tracer.start_as_current_span("hangar_call.authorize") as authz_span:
             denied_by_index = _authorize_calls(
-                calls, call_ids, principal, batch_id, identity=identity or get_identity_context()
+                calls,
+                call_ids,
+                principal,
+                batch_id,
+                identity=identity or get_identity_context(),
+                authorizing_roles=roles_by_index,
             )
             authz_span.set_attribute("authz.denied_count", len(denied_by_index))
 
@@ -575,6 +617,7 @@ def _run_calls(
                     timeout=call.get("timeout"),
                     max_retries=max_attempts,  # Internal field uses max_retries
                     whole_result=whole_result,
+                    caller_roles=roles_by_index.get(i, ()),
                 )
             )
             exec_to_orig.append(i)

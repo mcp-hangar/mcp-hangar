@@ -8,7 +8,14 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
+from .refusal import (
+    CALLER_ROLES,
+    ROUTE_BACKEND,
+    TOOL_INVOCATION_DENIED,
+    event_type_for_status,
+    refusal_data,
+    refusal_wire_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,10 @@ def _format_record(record: AuditRecord) -> str:
 
     if record.caller_user_id:
         extensions.append(f"usrName={_escape_value(record.caller_user_id)}")
+    caller_roles = data.get(CALLER_ROLES)
+    if caller_roles:
+        # What authorized the call (#1347), in LEEF 2.0's predefined `role`.
+        extensions.append(f"role={_escape_value(str(caller_roles))}")
     if record.caller_session_id:
         extensions.append(f"sessID={_escape_value(record.caller_session_id)}")
     if record.tenant_id:
@@ -134,7 +145,7 @@ class LEEFExporter:
         if caller_id:
             data["caller_id"] = caller_id
         if caller_roles:
-            data["caller_roles"] = caller_roles
+            data[CALLER_ROLES] = caller_roles
         if cost_cents is not None:
             data["cost_cents"] = cost_cents
         if cost_model:

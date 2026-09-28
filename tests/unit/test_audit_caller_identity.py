@@ -69,7 +69,7 @@ class TestTheHandlerReadsTheIdentityContext:
         assert (kwargs["session_id"], kwargs["tenant_id"]) == ("sess-2", "t-2")
 
     def test_roles_are_not_invented(self) -> None:
-        # IdentityContext carries no roles; nothing may be passed in their place.
+        # This identity names no role (#1347 sets one only from an allow decision); none is passed.
         assert _exported(_completed(USER)).get("caller_roles") is None
 
     @pytest.mark.parametrize("event", [_completed(None), _failed(None)], ids=["completed", "failed"])
