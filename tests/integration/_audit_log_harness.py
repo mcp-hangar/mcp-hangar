@@ -56,6 +56,9 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
     # `unauthorized` is made with a second key, bound to a role without
     # `tool:invoke`, so authorization refuses it before any gate (#1347).
     "auth": [("sampled", "01"), ("failed", "01"), ("refused", "01"), ("unauthorized", "01")],
+    # `front_door` is `auth` served as a front door (#1622): each call is a flat
+    # `tools/call add`, by the `developer` key and by the `viewer` key.
+    "front_door": [("flat_served", "01"), ("flat_unauthorized", "01")],
     # `bound` is `yaml` with an identity the served HTTP path has no source for
     # -- a session, an agent and no user -- declared through the process-wide
     # fallback identity, the seam a stdio session's declared caller uses (ADR-026).
@@ -139,11 +142,15 @@ def _hangar_call(client: Any, call: str, flags: str | None, headers: dict[str, s
     if flags is not None:
         meta["traceparent"] = f"00-{trace_id}-{span_id}-{flags}"
     tool, arguments = TOOLS.get(call, ("add", {"a": 1, "b": 2}))
+    flat = call.startswith("flat_")
     params = {
         "name": "hangar_call",
         "arguments": {"calls": [{"mcp_server": "math", "tool": tool, "arguments": arguments}]},
         "_meta": meta,
     }
+    if flat:  # the front door's flat call: the upstream tool by its own name
+        params = {"name": tool, "arguments": arguments, "_meta": meta}
+        headers = {**headers, "Mcp-Name": tool}
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
     response = client.post("/mcp", headers=headers, content=body)
     response.raise_for_status()
@@ -151,6 +158,8 @@ def _hangar_call(client: Any, call: str, flags: str | None, headers: dict[str, s
     if not text.startswith("{"):  # SSE framing: take the data line
         text = next(line[len("data: ") :] for line in text.splitlines() if line.startswith("data: "))
     result = json.loads(text)["result"]
+    if flat:
+        return {"trace_id": trace_id, "remote_span_id": span_id, "result": result}
     return {"trace_id": trace_id, "remote_span_id": span_id, "batch": json.loads(result["content"][0]["text"])}
 
 
@@ -213,9 +222,11 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     from mcp_hangar.server.bootstrap import bootstrap
     from mcp_hangar.server.lifecycle import mcp_app_for_serving
 
-    if mode in ("auth", "bound"):
+    if mode in ("auth", "bound", "front_door"):
         config["observability"] = {"tracing": {"otlp_endpoint": endpoint, "enabled": True}}
-    if mode == "auth":
+    if mode == "front_door":
+        config["tool_access"] = {"mode": "front_door"}
+    if mode in ("auth", "front_door"):
         config["mcp_servers"]["math"]["tools"] = {"deny_list": [DENIED_TOOL]}
         config["auth"] = {
             "enabled": True,
@@ -225,6 +236,10 @@ def main(mode: str, out: Path, endpoint: str) -> None:
         }
 
     context = bootstrap(config_dict=config)
+    if mode == "front_door":
+        from mcp_hangar.server.lifecycle import warm_the_front_door_catalogue
+
+        warm_the_front_door_catalogue(context.runtime)
 
     provider = get_logger_provider()
     logs = InMemoryLogs()
@@ -240,11 +255,12 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     headers = dict(HEADERS)
     call_headers: dict[str, dict[str, str]] = {}
     app = mcp_app_for_serving(context.mcp_server)
-    if mode == "auth":
+    if mode in ("auth", "front_door"):
         from mcp_hangar.server.api.middleware import create_auth_enforced_app
 
         headers.update(_authenticate(context))
-        call_headers["unauthorized"] = {**HEADERS, **_authenticate(context, VIEWER_PRINCIPAL, VIEWER_ROLE)}
+        viewer = {**HEADERS, **_authenticate(context, VIEWER_PRINCIPAL, VIEWER_ROLE)}
+        call_headers["unauthorized"] = call_headers["flat_unauthorized"] = viewer
         app = create_auth_enforced_app(app, context.auth_components)  # what `run_http` wraps it in
     if mode == "bound":
         _declare_bound_identity()

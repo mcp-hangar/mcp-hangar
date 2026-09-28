@@ -105,9 +105,15 @@ def configured_executor() -> BatchExecutor:
 
 
 def _request_principal(ctx: Context | None) -> Any:
-    """The principal the auth middleware left on this request (``request.state.auth``), or None."""
+    """The principal the auth middleware left on this request (``request.state.auth``), or None.
+
+    *ctx* is FastMCP's ``Context`` on ``hangar_call``, or the lowlevel request
+    context the front door's flat ``tools/call`` receives, which carries the
+    request itself (#1622).
+    """
     try:
-        _auth_state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
+        inner = getattr(ctx, "request_context", None) or ctx
+        _auth_state = getattr(getattr(inner, "request", None), "state", None)
         return getattr(getattr(_auth_state, "auth", None), "principal", None)
     except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call path
         return None
