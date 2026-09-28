@@ -41,6 +41,17 @@ def _caller_fields(identity: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _route_fields(event: ToolInvocationCompleted | ToolInvocationFailed) -> tuple[str, str]:
+    """The record's target pair (#1594): (the logical target, the invoked server as the backend).
+
+    For a group call the event's server is the selected member, and the group
+    is ``logical_target``. An event without one -- persisted before #1594, or a
+    call that named its server -- was addressed to the server that ran it, so a
+    standalone record carries the same value twice, as spans do.
+    """
+    return event.logical_target or event.mcp_server_id, event.mcp_server_id
+
+
 def _refusal_fields(event: ToolCallRefused) -> dict[str, str]:
     """The bounded refusal attributes of *event*, keyed by the ADR-029 vocabulary; unset ones left out."""
     candidates = {
@@ -80,8 +91,10 @@ class OTLPAuditEventHandler:
                     correlation_id=event.correlation_id,
                 )
             )
+            target, backend = _route_fields(event)
             self._exporter.export_tool_invocation(
-                mcp_server_id=event.mcp_server_id,
+                mcp_server_id=target,
+                route_backend=backend,
                 tool_name=event.tool_name,
                 status="success",
                 duration_ms=event.duration_ms,
@@ -92,8 +105,10 @@ class OTLPAuditEventHandler:
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, ToolInvocationFailed):
+            target, backend = _route_fields(event)
             self._exporter.export_tool_invocation(
-                mcp_server_id=event.mcp_server_id,
+                mcp_server_id=target,
+                route_backend=backend,
                 tool_name=event.tool_name,
                 status="error",
                 duration_ms=event.duration_ms,
@@ -104,8 +119,11 @@ class OTLPAuditEventHandler:
             # One record per refusal (#1582). The refusal events that already
             # exist -- ToolApprovalDenied, AuthorizationDenied,
             # EgressPolicyEnforced -- are not subscribed, so none counts twice.
+            # Its server is already the logical target; the backend is set only
+            # once the route was resolved (#1594).
             self._exporter.export_tool_invocation(
                 mcp_server_id=event.mcp_server_id,
+                route_backend=event.route_backend,
                 tool_name=event.tool_name,
                 status="denied",
                 duration_ms=event.elapsed_ms,

@@ -59,7 +59,14 @@ class ToolInvocationRequested(DomainEvent):
 @accepts_legacy_provider_id
 @dataclass
 class ToolInvocationCompleted(DomainEvent):
-    """Published when a tool invocation completes successfully."""
+    """Published when a tool invocation completes successfully.
+
+    ``mcp_server_id`` is the server that ran the call: for a group call, the
+    selected member. ``logical_target`` is what the caller named -- the group
+    for a group call, the server itself otherwise -- which is what audit is
+    keyed on (ADR-029 s5, #1594). Empty on an event persisted before #1594 and
+    on a call no caller named; a reader then falls back to ``mcp_server_id``.
+    """
 
     mcp_server_id: str
     tool_name: str = ""
@@ -67,12 +74,16 @@ class ToolInvocationCompleted(DomainEvent):
     duration_ms: float = 0.0
     result_size_bytes: int = 0
     identity_context: dict[str, Any] | None = None
+    logical_target: str = ""
 
 
 @accepts_legacy_provider_id
 @dataclass
 class ToolInvocationFailed(DomainEvent):
-    """Published when a tool invocation fails."""
+    """Published when a tool invocation fails.
+
+    ``mcp_server_id`` and ``logical_target`` as on ``ToolInvocationCompleted``.
+    """
 
     mcp_server_id: str
     tool_name: str = ""
@@ -81,6 +92,7 @@ class ToolInvocationFailed(DomainEvent):
     error_message: str = ""
     error_type: str = ""
     identity_context: dict[str, Any] | None = None
+    logical_target: str = ""
 
 
 @dataclass
@@ -111,6 +123,10 @@ class ToolCallRefused(DomainEvent):
         l7_rule_kind: Which part of the policy decided.
         l7_policy_id: The content hash of the policy.
         elapsed_ms: Time from the call's start to its refusal.
+        route_backend: The server the call was routed to, once its target was
+            resolved: the selected member for a group, the server itself
+            otherwise (ADR-029's ``hangar.route.backend``, #1594). None when
+            the call was refused before a backend was chosen.
     """
 
     mcp_server_id: str
@@ -124,3 +140,4 @@ class ToolCallRefused(DomainEvent):
     l7_rule_kind: str | None = None
     l7_policy_id: str | None = None
     elapsed_ms: float = 0.0
+    route_backend: str | None = None

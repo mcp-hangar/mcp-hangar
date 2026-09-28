@@ -112,6 +112,10 @@ class InvokeToolCommand(Command):
     # Minted upstream progress token (#883): asks the upstream for
     # notifications/progress, which the relay maps back to the caller's token.
     progress_token: str | None = None
+    # What the caller named (#1594): the group for a group call, where
+    # mcp_server_id is the selected member. Audit is keyed on it (ADR-029 s5);
+    # empty means the call named mcp_server_id itself.
+    logical_target: str = ""
 
     def __init__(
         self,
@@ -121,6 +125,7 @@ class InvokeToolCommand(Command):
         timeout: float = 30.0,
         l7_approval_id: str | None = None,
         progress_token: str | None = None,
+        logical_target: str = "",
         **kwargs: object,
     ):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
@@ -129,6 +134,7 @@ class InvokeToolCommand(Command):
         object.__setattr__(self, "timeout", timeout)
         object.__setattr__(self, "l7_approval_id", l7_approval_id)
         object.__setattr__(self, "progress_token", progress_token)
+        object.__setattr__(self, "logical_target", logical_target)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")

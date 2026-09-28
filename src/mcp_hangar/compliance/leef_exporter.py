@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
+from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,11 @@ def _format_record(record: AuditRecord) -> str:
     extensions.extend(f"{key}={_escape_value(value)}" for key, value in refusal_wire_fields(data))
     if record.provider_id:
         extensions.append(f"src={_escape_value(record.provider_id)}")
+    route_backend = data.get(ROUTE_BACKEND)
+    if route_backend:
+        # LEEF 2.0 predefines no attribute for it: a custom key, camelCase as
+        # its own (#1594). `src` stays the target the caller named.
+        extensions.append(f"routeBackend={_escape_value(str(route_backend))}")
 
     header = f"LEEF:{LEEF_VERSION}|{DEVICE_VENDOR}|{DEVICE_PRODUCT}|{DEVICE_VERSION}|{event_id}|"
     return header + "\t" + "\t".join(extensions)
@@ -116,6 +121,7 @@ class LEEFExporter:
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
+        route_backend: str | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -138,6 +144,8 @@ class LEEFExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        if route_backend:
+            data[ROUTE_BACKEND] = route_backend
 
         record = AuditRecord(
             event_id="",

@@ -1803,6 +1803,7 @@ class McpServer(AggregateRoot):
         timeout: float = 30.0,
         l7_approval_id: str | None = None,
         progress_token: str | None = None,
+        logical_target: str = "",
     ) -> dict[str, Any]:
         """
         Invoke a tool on this mcp_server.
@@ -1820,6 +1821,10 @@ class McpServer(AggregateRoot):
             tool_name: Name of the tool to invoke
             arguments: Tool arguments
             timeout: Timeout in seconds
+            logical_target: What the caller named -- the group, for a call
+                dispatched to this server as a group's member (#1594). Stored
+                on ToolInvocationCompleted/Failed, which audit keys on; empty
+                when the caller named this server.
 
         Returns:
             Tool result dictionary
@@ -1959,6 +1964,7 @@ class McpServer(AggregateRoot):
                         error_message=str(invocation_error),
                         error_type=type(invocation_error).__name__,
                         identity_context=identity_context_dict,
+                        logical_target=logical_target,
                     )
                 )
 
@@ -1990,6 +1996,7 @@ class McpServer(AggregateRoot):
                         error_message=error_msg,
                         error_type=_rpc_error_type(response["error"]),
                         identity_context=identity_context_dict,
+                        logical_target=logical_target,
                     )
                 )
 
@@ -2035,6 +2042,7 @@ class McpServer(AggregateRoot):
                         error_message=error_msg,
                         error_type="tool_error",
                         identity_context=identity_context_dict,
+                        logical_target=logical_target,
                     )
                 )
 
@@ -2062,6 +2070,7 @@ class McpServer(AggregateRoot):
                     duration_ms=duration_ms,
                     result_size_bytes=len(str(result)),
                     identity_context=identity_context_dict,
+                    logical_target=logical_target,
                 )
             )
 

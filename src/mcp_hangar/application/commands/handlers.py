@@ -176,6 +176,7 @@ class InvokeToolHandler(BaseMcpServerHandler):
                 command.timeout,
                 l7_approval_id=command.l7_approval_id,
                 progress_token=command.progress_token,
+                logical_target=command.logical_target,
             )
 
         except Exception as e:  # noqa: BLE001 -- fault-barrier: catch for metrics recording, then re-raise

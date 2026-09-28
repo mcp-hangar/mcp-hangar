@@ -29,7 +29,7 @@ from mcp_hangar.domain.events import ToolCallRefused
 from mcp_hangar.domain.exceptions import AccessDeniedError
 from mcp_hangar.domain.policies.egress_l7 import ToolRules
 from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
-from mcp_hangar.observability.conventions import L7, MCP, Caller, Gate, GenAI, McpServer
+from mcp_hangar.observability.conventions import L7, MCP, Caller, Gate, GenAI, McpServer, Route
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec, _authorize_calls
 from mcp_hangar.server.tools.batch.executor import _GATES, _publish_gate_refusal
 from mcp_hangar.server.tools.batch.models import CallResult
@@ -61,7 +61,11 @@ _ALLOWED = {
     L7.MODE,
     L7.RULE_KIND,
     L7.POLICY_ID,
+    Route.BACKEND,
 }
+
+#: The stages that refuse before a backend is chosen: their record names none (#1594).
+_BEFORE_A_BACKEND = {"global_timeout", "resolve_target", "cancelled_before_execution"}
 
 
 def _refused(bus: Mock) -> list[ToolCallRefused]:
@@ -106,6 +110,9 @@ class TestEveryGate:
         assert record[MCP.TOOL_STATUS] == "denied"
         assert record[Gate.NAME] == gate and record.get(Gate.REASON) == event.gate_reason
         assert record[Caller.TENANT] == _TENANT and record[Caller.TYPE] == "anonymous"
+        # The server named directly is its own backend once resolved (#1594).
+        assert record[McpServer.ID] == _SERVER
+        assert record.get(Route.BACKEND) == (None if gate in _BEFORE_A_BACKEND else _SERVER)
         _assert_bounded(record, result.error)
         assert (CANARY in result.error) is planted, "the canary went in, so its absence is a result"
 
@@ -127,13 +134,16 @@ class TestEveryGate:
             caller_tenant_id=_TENANT,
             global_timeout=60.0,
             batch_start_time=time.perf_counter(),
+            route_backend=None if gate in _BEFORE_A_BACKEND else _SERVER,
         )
         refusal = getattr(BatchExecutor, f"_gate_{gate}")(BatchExecutor(), p)
         _publish_gate_refusal(p, gate, refusal)  # type: ignore[arg-type]
 
         [event] = _refused(p.ctx.event_bus)
         assert (event.gate, event.gate_reason) == (gate, "cancelled")
-        _assert_bounded(_exported(event), refusal.error)
+        record = _exported(event)
+        assert record.get(Route.BACKEND) == p.route_backend
+        _assert_bounded(record, refusal.error)
 
     def test_a_gate_that_broke_is_no_refusal(self, ctx) -> None:
         _arrange_catalogue()
@@ -182,6 +192,8 @@ class TestAnL7Refusal:
         assert (record[L7.VERDICT], record[L7.MODE], record[L7.RULE_KIND]) == (verdict, "enforce", "tool")
         assert record[L7.POLICY_ID] == policy.policy_id
         assert Gate.NAME not in record, "an L7 verdict is not a gate (ADR-029 s5)"
+        # The verdict is the dispatched server's: here the server named directly (#1594).
+        assert record[McpServer.ID] == record[Route.BACKEND] == event.mcp_server_id
         _assert_bounded(record, result.error, "matched")
 
     def test_an_evaluator_failure_is_no_refusal(self, ctx, monkeypatch) -> None:
@@ -216,6 +228,7 @@ class TestAToolInvokeDenial:
         record = _exported(event)
         assert (record[Gate.NAME], record[Gate.REASON]) == ("authorization", "tool_invoke_denied")
         assert (record[MCP.TOOL_STATUS], record[Caller.TENANT]) == ("denied", _TENANT)
+        assert Route.BACKEND not in record, "refused before any backend was chosen (#1594)"
         _assert_bounded(record, denied[0].error)
 
     def test_an_anonymous_caller_is_one_record(self) -> None:

@@ -143,3 +143,24 @@ def test_a_tenant_in_the_canary_split_reads_canary(harness: _Harness) -> None:
 
 def test_a_tenant_outside_the_split_is_load_balanced_on_the_member_that_answered(harness: _Harness) -> None:
     _assert_route(harness, _OUT_OF_SPLIT, "load_balanced")
+
+
+def test_the_audit_record_names_the_group_and_the_member_that_answered(harness: _Harness) -> None:
+    """The `tool_invocation` record is keyed on the group, not the member (#1594)."""
+    served = gs.serving_member(harness.group, tenant_id=_PINNED)
+    assert served == gs.PINNED[_PINNED], served
+
+    def _records() -> list[Received] | None:
+        found = [
+            log
+            for log in harness.receiver.logs(harness.run_id)
+            if log.attributes.get("mcp.event.name") == "tool_invocation"
+            and log.attributes.get(Caller.TENANT) == _PINNED
+            and log.attributes.get("mcp.tool.status") == "success"
+        ]
+        return found or None
+
+    records = poll(_records, _ARRIVAL_TIMEOUT_S)
+    assert records is not None, f"no tool_invocation audit record for {_PINNED} under {harness.run_id}"
+    pairs = {(r.attributes.get(McpServer.ID), r.attributes.get(Route.BACKEND)) for r in records}
+    assert pairs == {(gs.GROUP_ID, served)}, pairs

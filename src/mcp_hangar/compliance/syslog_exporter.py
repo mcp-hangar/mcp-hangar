@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
+from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ def _format_structured_data(record: AuditRecord) -> str:
     data: dict[str, object] = dict(record.data or {})
     fields = {
         "provider": record.provider_id,
+        # An SD-PARAM beside `provider`, camelCase as the others (#1594).
+        "routeBackend": data.get(ROUTE_BACKEND) or None,
         "tool": data.get("tool_name"),
         "status": data.get("status"),
         "duration": data.get("duration_ms"),
@@ -124,6 +126,7 @@ class SyslogExporter:
         cost_output_tokens: int | None = None,
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
+        route_backend: str | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -147,6 +150,8 @@ class SyslogExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        if route_backend:
+            data[ROUTE_BACKEND] = route_backend
 
         record = AuditRecord(
             event_id="",
