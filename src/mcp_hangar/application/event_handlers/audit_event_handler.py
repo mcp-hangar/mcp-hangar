@@ -26,18 +26,21 @@ logger = get_logger(__name__)
 def _caller_fields(identity: dict[str, Any] | None) -> dict[str, Any]:
     """The exporter's caller arguments, from an event's ``IdentityContext.to_dict()``.
 
-    The caller id is the user id, or the agent id when there is no user. Roles
-    are not passed: ``IdentityContext`` carries ids, not roles, and the roles
-    the authorizer resolved for the call are kept on neither the principal nor
-    the event. No identity (auth off) yields no caller fields.
+    The caller id is the user id, or the agent id when there is no user. The
+    roles are what authorized the call (#1347), set on the call's identity from
+    its allow decision; a call nothing authorized -- auth off, or a
+    ``tool:invoke`` denial -- has none, and passes none. No identity (auth off)
+    yields no caller fields.
     """
     identity = identity or {}
+    roles = identity.get("roles") or ()
     return {
         "user_id": identity.get("user_id"),
         "session_id": identity.get("session_id"),
         "tenant_id": identity.get("tenant_id"),
         "caller_type": identity.get("principal_type"),
         "caller_id": identity.get("user_id") or identity.get("agent_id"),
+        "caller_roles": ",".join(roles) if roles else None,
     }
 
 

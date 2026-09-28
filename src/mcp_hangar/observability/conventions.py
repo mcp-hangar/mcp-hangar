@@ -504,7 +504,9 @@ class Caller:
     #: Caller identifier (user ID, service account name, API key ID).
     ID = "mcp.caller.id"
 
-    #: Roles held by the caller at invocation time (comma-separated).
+    #: What authorized the call (comma-separated): the role its allow decision
+    #: matched, or ``opa_policy``. Written on audit records only, never on a
+    #: span (#1347, #1276).
     ROLES = "mcp.caller.roles"
 
     #: Tenant of the authenticated caller (``IdentityContext`` tenant_id).

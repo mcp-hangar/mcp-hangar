@@ -34,7 +34,8 @@ HARNESS = Path(__file__).with_name("_audit_log_harness.py")
 MODES = ("yaml", "env", "none", "tracing_off", "auth", "bound")
 
 # As `_audit_log_harness.py` mints and declares them.
-AUTH_PRINCIPAL, AUTH_TENANT = "user:audit-harness", "tenant-audit"
+AUTH_PRINCIPAL, AUTH_TENANT, AUTH_ROLE = "user:audit-harness", "tenant-audit", "developer"
+VIEWER_PRINCIPAL = "user:audit-viewer"
 BOUND_AGENT, BOUND_SESSION, BOUND_TENANT = "agent-audit", "session-audit", "tenant-bound"
 
 # The `auth` run's resource environment: OTEL_RESOURCE_ATTRIBUTES must beat
@@ -173,10 +174,10 @@ def test_an_authenticated_call_records_its_caller_and_tenant(runs):
     # An API key authenticates a service-account principal.
     assert attributes["mcp.caller.type"] == "service"
     assert attributes["mcp.caller.tenant_id"] == AUTH_TENANT
-    # Neither is invented: the served HTTP path's identity carries no session,
-    # and no identity carries roles.
+    # Not invented: the served HTTP path's identity carries no session.
     assert "mcp.session.id" not in attributes
-    assert "mcp.caller.roles" not in attributes
+    # The role the authorization decision matched, from that decision (#1347).
+    assert attributes["mcp.caller.roles"] == AUTH_ROLE
 
 
 def test_a_declared_session_and_agent_reach_the_record(runs):
@@ -190,6 +191,8 @@ def test_a_declared_session_and_agent_reach_the_record(runs):
     assert attributes["mcp.caller.type"] == "anonymous"
     assert attributes["mcp.caller.tenant_id"] == BOUND_TENANT
     assert "mcp.user.id" not in attributes
+    # Auth is off: an identity, and no decision that authorized anything (#1347).
+    assert "mcp.caller.roles" not in attributes
 
 
 def test_a_failed_call_records_its_duration(runs):
@@ -202,6 +205,7 @@ def test_a_failed_call_records_its_duration(runs):
     assert failures and all(a["mcp.tool.status"] == "error" for a in failures), failures
     assert all(a["mcp.tool.duration_ms"] > 0.0 for a in failures), failures
     assert all(a["mcp.caller.id"] == AUTH_PRINCIPAL for a in failures), failures
+    assert all(a["mcp.caller.roles"] == AUTH_ROLE for a in failures), failures
 
 
 def test_a_refused_call_records_one_denial_with_its_gate(runs):
@@ -219,6 +223,31 @@ def test_a_refused_call_records_one_denial_with_its_gate(runs):
     assert attributes["mcp.caller.id"] == AUTH_PRINCIPAL
     assert attributes["mcp.caller.tenant_id"] == AUTH_TENANT
     assert "mcp.error.type" not in attributes
+    # Authorization admitted it before the gate refused it: the record says by what role (#1347).
+    assert attributes["mcp.caller.roles"] == AUTH_ROLE
+
+
+def test_a_call_authorization_refused_names_no_role(runs):
+    """A `tool:invoke` denial had no authorizing role, so its record carries none (#1347)."""
+    run = runs["auth"]
+    assert run["calls"]["unauthorized"]["batch"]["success"] is False, run["calls"]
+
+    attributes = _record_for(run, "unauthorized")["attributes"]
+
+    assert (attributes["hangar.gate.name"], attributes["hangar.gate.reason"]) == (
+        "authorization",
+        "tool_invoke_denied",
+    )
+    assert attributes["mcp.caller.id"] == VIEWER_PRINCIPAL
+    assert "mcp.caller.roles" not in attributes
+
+
+def test_caller_roles_reach_no_span(runs):
+    """The roles are on the audit record only; the #1276 contract keeps them off spans (#1580)."""
+    keys = runs["auth"]["span_attribute_keys"]
+
+    assert "gen_ai.tool.name" in keys, "spans were recorded, so the absence below is a result"
+    assert "mcp.caller.roles" not in keys
 
 
 def test_an_allowed_call_beside_a_refused_one_still_has_one_record(runs):
@@ -226,7 +255,7 @@ def test_an_allowed_call_beside_a_refused_one_still_has_one_record(runs):
     run = runs["auth"]
 
     assert _record_for(run, "sampled")["attributes"]["mcp.tool.status"] == "success"
-    assert [r["attributes"]["mcp.tool.status"] for r in _tool_records(run)].count("denied") == 1
+    assert [r["attributes"]["mcp.tool.status"] for r in _tool_records(run)].count("denied") == 2  # gate, authz
 
 
 @pytest.mark.parametrize("mode", ["auth", "bound"], ids=["resource-env", "defaults"])

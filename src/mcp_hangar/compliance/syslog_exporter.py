@@ -10,7 +10,14 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import ROUTE_BACKEND, TOOL_INVOCATION_DENIED, event_type_for_status, refusal_data, refusal_wire_fields
+from .refusal import (
+    CALLER_ROLES,
+    ROUTE_BACKEND,
+    TOOL_INVOCATION_DENIED,
+    event_type_for_status,
+    refusal_data,
+    refusal_wire_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,7 @@ def _format_structured_data(record: AuditRecord) -> str:
         "status": data.get("status"),
         "duration": data.get("duration_ms"),
         "user": record.caller_user_id,
+        "roles": data.get(CALLER_ROLES) or None,  # what authorized the call (#1347)
         "session": record.caller_session_id,
         "tenant": record.tenant_id or None,  # an empty tenant is no tenant
         "error": data.get("error_type"),
@@ -140,7 +148,7 @@ class SyslogExporter:
         if caller_id:
             data["caller_id"] = caller_id
         if caller_roles:
-            data["caller_roles"] = caller_roles
+            data[CALLER_ROLES] = caller_roles
         if cost_cents is not None:
             data["cost_cents"] = cost_cents
         if cost_model:

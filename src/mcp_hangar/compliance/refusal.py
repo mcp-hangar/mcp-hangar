@@ -37,6 +37,14 @@ REFUSAL_FIELDS: tuple[tuple[str, str, str], ...] = (
 #: the labelled ``flexString1`` in CEF, whose six ``cs`` slots are all taken.
 ROUTE_BACKEND = "route_backend"
 
+#: The ``AuditRecord.data`` key of what authorized the call (#1347): the role
+#: its allow decision matched, or ``opa_policy``, comma-separated as
+#: ``mcp.caller.roles`` is. Absent when nothing authorized it. Each format
+#: writes it under its own convention: ``caller_roles`` in JSON lines, the
+#: predefined ``role`` in LEEF, ``roles`` in syslog, and ``spriv`` -- the
+#: dictionary's source-user privileges -- in CEF.
+CALLER_ROLES = "caller_roles"
+
 
 def event_type_for_status(status: str) -> str:
     """The audit event type a tool call's *status* is written as."""

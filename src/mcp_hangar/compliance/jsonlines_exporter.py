@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
-from .refusal import REFUSAL_FIELDS, ROUTE_BACKEND, event_type_for_status, refusal_data
+from .refusal import CALLER_ROLES, REFUSAL_FIELDS, ROUTE_BACKEND, event_type_for_status, refusal_data
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ def _record_to_json_line(record: AuditRecord) -> str:
         "status": data.get("status"),
         "duration_ms": data.get("duration_ms"),
         "user_id": record.caller_user_id,
+        CALLER_ROLES: data.get(CALLER_ROLES) or None,  # what authorized the call (#1347)
         "session_id": record.caller_session_id,
         "tenant_id": record.tenant_id or None,  # an empty tenant is no tenant
         "error_type": data.get("error_type"),
@@ -93,7 +94,7 @@ class JSONLinesExporter:
         if caller_id:
             data["caller_id"] = caller_id
         if caller_roles:
-            data["caller_roles"] = caller_roles
+            data[CALLER_ROLES] = caller_roles
         if cost_cents is not None:
             data["cost_cents"] = cost_cents
         if cost_model:

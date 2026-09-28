@@ -53,7 +53,9 @@ CALLS: dict[str, list[tuple[str, str | None]]] = {
     # auth enforcement `serve --http` applies, and each call presents a key
     # minted in the bootstrapped store.
     # `refused` names a tool the server's access policy denies (#1582).
-    "auth": [("sampled", "01"), ("failed", "01"), ("refused", "01")],
+    # `unauthorized` is made with a second key, bound to a role without
+    # `tool:invoke`, so authorization refuses it before any gate (#1347).
+    "auth": [("sampled", "01"), ("failed", "01"), ("refused", "01"), ("unauthorized", "01")],
     # `bound` is `yaml` with an identity the served HTTP path has no source for
     # -- a session, an agent and no user -- declared through the process-wide
     # fallback identity, the seam a stdio session's declared caller uses (ADR-026).
@@ -75,9 +77,14 @@ TOOLS: dict[str, tuple[str, dict[str, int]]] = {
 #: The tool the ``auth`` mode's access policy denies.
 DENIED_TOOL = "multiply"
 
-#: The principal the ``auth`` mode's key authenticates as, and its tenant.
+#: The principal the ``auth`` mode's key authenticates as, its tenant, and its role.
 AUTH_PRINCIPAL = "user:audit-harness"
 AUTH_TENANT = "tenant-audit"
+AUTH_ROLE = "developer"
+
+#: The principal of the ``unauthorized`` call's key, and its role: one that may not invoke tools.
+VIEWER_PRINCIPAL = "user:audit-viewer"
+VIEWER_ROLE = "viewer"
 
 #: The identity the ``bound`` mode declares.
 BOUND_AGENT = "agent-audit"
@@ -152,11 +159,11 @@ def _resource(provider: Any) -> dict[str, Any]:
     return {k: v for k, v in dict(getattr(resource, "attributes", None) or {}).items() if isinstance(v, str)}
 
 
-def _authenticate(context: Any) -> dict[str, str]:
-    """Mint a key in the bootstrapped store, grant it tool calls, return its header."""
+def _authenticate(context: Any, principal: str = AUTH_PRINCIPAL, role: str = AUTH_ROLE) -> dict[str, str]:
+    """Mint a key for *principal* in the bootstrapped store, bind it to *role*, return its header."""
     auth = context.auth_components
-    key = auth.api_key_store.create_key(principal_id=AUTH_PRINCIPAL, name="audit-harness", tenant_id=AUTH_TENANT)
-    auth.role_store.assign_role(AUTH_PRINCIPAL, "developer")
+    key = auth.api_key_store.create_key(principal_id=principal, name=principal, tenant_id=AUTH_TENANT)
+    auth.role_store.assign_role(principal, role)
     return {"X-API-Key": key}
 
 
@@ -231,17 +238,21 @@ def main(mode: str, out: Path, endpoint: str) -> None:
     from starlette.testclient import TestClient
 
     headers = dict(HEADERS)
+    call_headers: dict[str, dict[str, str]] = {}
     app = mcp_app_for_serving(context.mcp_server)
     if mode == "auth":
         from mcp_hangar.server.api.middleware import create_auth_enforced_app
 
         headers.update(_authenticate(context))
+        call_headers["unauthorized"] = {**HEADERS, **_authenticate(context, VIEWER_PRINCIPAL, VIEWER_ROLE)}
         app = create_auth_enforced_app(app, context.auth_components)  # what `run_http` wraps it in
     if mode == "bound":
         _declare_bound_identity()
 
     with TestClient(app, base_url=BASE_URL) as client:
-        calls = {name: _hangar_call(client, name, flags, headers) for name, flags in CALLS[mode]}
+        calls = {
+            name: _hangar_call(client, name, flags, call_headers.get(name, headers)) for name, flags in CALLS[mode]
+        }
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
@@ -283,6 +294,10 @@ def main(mode: str, out: Path, endpoint: str) -> None:
                     }
                     for s in spans.get_finished_spans()
                 ],
+                # Every attribute key any span carried: caller roles must reach none (#1347).
+                "span_attribute_keys": sorted(
+                    {key for s in spans.get_finished_spans() for key in (s.attributes or {})}
+                ),
             }
         )
     )

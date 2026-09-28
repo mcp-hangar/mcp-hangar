@@ -16,7 +16,7 @@ from pathlib import Path
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
 from .cef_formatter import format_audit_record
-from .refusal import ROUTE_BACKEND, event_type_for_status, refusal_data
+from .refusal import CALLER_ROLES, ROUTE_BACKEND, event_type_for_status, refusal_data
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class CEFExporter:
         if caller_id:
             data["caller_id"] = caller_id
         if caller_roles:
-            data["caller_roles"] = caller_roles
+            data[CALLER_ROLES] = caller_roles
         if cost_cents is not None:
             data["cost_cents"] = cost_cents
         if cost_model:

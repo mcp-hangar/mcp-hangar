@@ -226,3 +226,33 @@ def test_flat_tool_call_exports_the_callers_identity(harness: _Harness) -> None:
     assert not getattr(result, "is_error", False), result
 
     _assert_identity(_boundary_span(harness.receiver, harness.front_door.run_id), "flat tool")
+
+
+def test_hangar_calls_audit_record_names_the_authorizing_role(harness: _Harness) -> None:
+    """The role the key's decision matched reaches the audit record, and no span (#1347).
+
+    The span is the enrichment boundary with caller ids opted in: that opt-in
+    names ids, and roles stay on the audit record only (#1276, #1580).
+    """
+    result = _call(
+        harness.egress.base_url,
+        harness.api_key,
+        "hangar_call",
+        {"calls": [{"mcp_server": "math", "tool": _TOOL, "arguments": _ARGS}]},
+    )
+    assert not getattr(result, "is_error", False), result
+
+    def _record() -> Received | None:
+        for record in harness.receiver.logs(harness.egress.run_id):
+            if record.name == "tool_invocation" and record.attributes.get(MCP.TOOL_STATUS) == "success":
+                return record
+        return None
+
+    record = poll(_record, _ARRIVAL_TIMEOUT_S)
+    assert record is not None, "no tool_invocation audit record reached the receiver"
+    assert record.attributes.get(Caller.ROLES) == "developer", sorted(record.attributes.items())
+
+    span = _boundary_span(harness.receiver, harness.egress.run_id)
+    assert span is not None and Caller.ID in span.attributes, "the caller-id opt-in took effect"
+    carrying = [s.name for s in harness.receiver.spans(harness.egress.run_id) if Caller.ROLES in s.attributes]
+    assert not carrying, f"spans carried {Caller.ROLES}: {carrying}"
