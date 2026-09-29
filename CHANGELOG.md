@@ -5,6 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.24.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.23.0...v2.24.0) (2026-09-29)
+
+### Added
+
+- **core:** A tool call Hangar refuses now leaves an audit record. A refusal returns before the upstream is invoked, so neither `ToolInvocationCompleted` nor `ToolInvocationFailed` existed for it, and audit showed successes and upstream failures but never a governance decision. Each refusal now publishes one new domain event, `ToolCallRefused`: a batch gate that says `deny` (all thirteen `_GATES` stages, and the tenant budget when its slot is taken after the gates), a `tool:invoke` authorization denial before the gates (`gate=authorization`), and an L7 `deny` or `require_approval` raised at dispatch. The OTLP audit exporter writes it as `tool_invocation` with `mcp.tool.status=denied`, the caller and tenant fields, and the bounded ADR-029 fields (`hangar.gate.name` and `hangar.gate.reason`, or `hangar.l7.verdict`, `hangar.l7.mode`, `hangar.l7.rule_kind` and `hangar.l7.policy_id`), never the refusal's text. The CEF, LEEF, JSON-lines and syslog exporters write it as `ToolInvocationDenied` (signature, event id and MSGID `103`; CEF severity 5, syslog warning) instead of the `ToolInvocationRequested` an unknown status used to read as. A gate that broke, an authorizer that raised something other than a denial, and an L7 evaluator failure are not refusals and publish nothing. The event is persisted in the server's stream like the other invocation events; the audit subscriptions are effects, so one refusal is one record however many replicas run (#1582). ([#1619](https://github.com/mcp-hangar/mcp-hangar/pull/1619))
+- **observability:** A cold start now shows how long the launch itself took: each launcher opens an `mcp_server.launch` span around spawning the process, running the container or opening the HTTP transport. It carries `mcp.server.id` and the server's own `mcp.server.mode`, the same value the cold start metric reports, so a docker server reads `docker` although `ContainerLauncher` runs it. A failed launch ends ERROR like every other Hangar span, and an expected refusal does not. ([#1571](https://github.com/mcp-hangar/mcp-hangar/pull/1571))
+- **core:** a `front_door` gateway served over HTTP now advertises
+  `tools.listChanged: true` on the handshake era (2025-11-25 and earlier). It
+  sends `notifications/tools/list_changed` on a sessionless `GET /mcp` stream,
+  which the TypeScript SDK client opens after `notifications/initialized`. The
+  stream sends one notification as it opens. After that, it sends one only when
+  that caller's tenant projection changes. It passes the same authentication,
+  DNS-rebinding guard and session-suspension check as a POST. A suspension also
+  ends a stream that is already open. Each principal may hold 32 streams and each
+  tenant 256 (429 past either). The stream pings every 15 s. It ends when its
+  principal's API key or a role is revoked, when a JWT's `exp` passes, and after
+  an hour at the latest, so the client's reconnect authenticates again. New
+  metrics: `mcp_hangar_tool_list_changed_streams`,
+  `mcp_hangar_tool_list_changed_notifications_total{transport}`,
+  `mcp_hangar_tool_list_changed_streams_refused_total{reason}` and
+  `mcp_hangar_tool_list_changed_streams_ended_total{reason}`. POSTs stay stateless (#877).
+  Python SDK 2.0.0 clients open the stream only when they hold a session id, so
+  they still rely on the bounded first-listing wait (#1231). Where no push is
+  served (`egress`), `GET /mcp` on the handshake era now answers 405 instead of
+  holding an empty stream open. ([#1573](https://github.com/mcp-hangar/mcp-hangar/pull/1573))
+- **core:** A tool call's audit record names what authorized it. `mcp.caller.roles` was defined and never written: the `tool:invoke` check discarded its decision. It now carries the role that decision matched, or `opa_policy` for a call an OPA policy admitted without a role, on success, error and denied records alike, including a gate's refusal after authorization. It is read from the decision itself, never from a second role lookup, and is absent when auth is off or `tool:invoke` refused the call. The four compliance formats write it too: `caller_roles` in JSON lines, `role` in LEEF, `roles` in syslog and `spriv` in CEF. No span carries it (#1347). ([#1621](https://github.com/mcp-hangar/mcp-hangar/pull/1621))
+- **core:** A trace now shows what happened to a call's payload on the way through. Request and response mutation each add a `hangar.shaping.mutation` event to `batch.call.<tool>`, with the direction, whether a mutator changed the payload and how long it took. Batch truncation runs in its own `batch.truncate` span under `batch.execute`, which counts the results it cut and says whether it stored a continuation. Only timing, sizes, counts and flags are recorded, never a payload or a continuation id; the default empty mutator pipeline records nothing, and a batch whose calls all take their result whole opens no `batch.truncate` span. `hangar.shaping.*` is new, stable surface. ([#1606](https://github.com/mcp-hangar/mcp-hangar/pull/1606))
+- **core:** background recovery is now traced as bounded operations. Each server
+  the health worker actually checks gets one `mcp_server.health_check` span with
+  `hangar.health.outcome` (`healthy`, `unhealthy`, `error`) and
+  `mcp.health.consecutive_failures`; a recovery command the saga sends on that
+  check's events is its child. A command a saga schedules on a timer fires as
+  `saga.scheduled_command` in a new trace with one link to the span that
+  scheduled it, and no link when that cause is unknown. Each `start_saga` run is
+  one `saga.run` span with `hangar.saga.type`, `hangar.saga.outcome` and one
+  `hangar.saga.step` event per step (`completed`, `no_action`, `failed`,
+  `compensated`, `compensation_failed`). A discovery follower that skips cycles
+  because another instance holds the lease records a `discovery.lease_transition`
+  span when it becomes a follower and when it takes the lease back, never once
+  per skipped cycle and never as a `discovery.cycle`. Skipped servers and idle
+  ticks emit nothing, and saga, timer and lease behaviour is unchanged (#1296). ([#1575](https://github.com/mcp-hangar/mcp-hangar/pull/1575))
+- **core:** `batch.call.<tool>` now records the L7 egress policy verdict the aggregate applied:
+  `hangar.l7.verdict` (`allow`, `audit_observed`, `deny`, `require_approval`, `approval_honored`),
+  `hangar.l7.mode`, `hangar.l7.rule_kind` and `hangar.l7.policy_id`. Reasons, argument values and
+  header values are never exported. An Audit-mode observation does not mark the call refused. A call
+  refused because its arguments could not be inspected now ends `batch.call.<tool>` ERROR with
+  `hangar.call.outcome=error`. The `batch_call_refused` line for an L7 refusal carries `l7_verdict`,
+  `l7_mode`, `l7_rule_kind` and `l7_inspection_failed` in place of the policy's reasons as free text. ([#1596](https://github.com/mcp-hangar/mcp-hangar/pull/1596))
+- `tasks/get`, `tasks/cancel` and `tasks/update` each get one bounded span (`task_relay.get`, `task_relay.cancel`, `task_relay.update`) linked to the tool call that created the task, with its outcome in `hangar.task.outcome`. A task with no known origin gets no link. Task ids are not recorded on spans. ([#1610](https://github.com/mcp-hangar/mcp-hangar/pull/1610))
+- **core:** event delivery and persistence now say which handler and which append.
+  Each handler's run is a `hangar.event.handled` event on its
+  `event.publish.<Type>` span, naming the handler (`hangar.event.handler.name`,
+  its bounded `__qualname__`), its kind (`hangar.event.handler.kind`) and its
+  outcome (`hangar.event.handler.outcome`, with `error.type` on a failure), so one
+  failing handler among successful peers is identifiable. The publish span also
+  carries `hangar.event.id`, `hangar.event.producer` and
+  `hangar.event.delivery_mode` (`live`, `tailed`, `recovered`), and
+  `event_store.append` carries `hangar.event_store.append.outcome` (`appended`,
+  `conflict`, `failed`). When an append fails, its span now ends before the
+  unpersisted delivery instead of containing it, so the append's duration is the
+  store's alone and the delivery is its sibling, as on success. Still one span
+  per event, not one per handler; no payload is recorded, and existing attributes
+  are unchanged. ([#1576](https://github.com/mcp-hangar/mcp-hangar/pull/1576))
+
+### Changed
+
+- **core:** An upstream response is bounded where it is read, not after it is held. The stdio reader stops holding a line once it passes the limit and drops the rest up to its newline, and the HTTP transport stops reading a body once it passes the limit, counting a gzip or deflate body by its inflated size; the standing GET stream drops a single event over it. The call fails with `ResponseTooLarge`, the same on `hangar_call`, on a flat call and on the facade, and the next call on the same server is served. The limit defaults to 32 MiB and is set with `execution.max_response_bytes` or `MCP_MAX_RESPONSE_BYTES` (the environment wins), or per server with `max_response_bytes`. It replaces the 10 MB per-call cap the executor applied after reading a result whole, which dropped the result with `truncated_reason: response_size_exceeded`; that cap, its `reason="per_call"` truncation count and the unreleased `hangar.shaping.drop` trace event are removed (#1613). ([#1614](https://github.com/mcp-hangar/mcp-hangar/pull/1614))
+- **core:** A group call's audit record is now keyed on the group it was addressed to. The `tool_invocation` record took `mcp.server.id` from the invoked server, which for a group call is the selected member, so an auditor asking what was called on a group had to know its membership at the time of each call. `InvokeToolCommand` now carries a `logical_target`, which the executor sets to what the caller named. The aggregate stores it on `ToolInvocationCompleted` and `ToolInvocationFailed`, and the record writes it as `mcp.server.id`, with the member as `hangar.route.backend`, the names spans use since #1286. A standalone call carries its server in both. A refused call's record (#1582) also carries `hangar.route.backend` once a backend was chosen. The CEF, LEEF, syslog and JSON-lines exporters carry the same pair: the member goes in CEF `flexString1` (`flexString1Label=RouteBackend`), LEEF and syslog `routeBackend`, and JSON lines `route_backend`. Events persisted before the change replay unchanged: the new field defaults to empty, and the record then falls back to the invoked server (#1594). ([#1620](https://github.com/mcp-hangar/mcp-hangar/pull/1620))
+- **core:** Spans no longer carry the caller's own identifiers by default. `batch.call.<tool>` used to set `mcp.caller.id`, `mcp.user.id`, `mcp.agent.id` and `mcp.session.id` for every authenticated call, although the telemetry data contract (#1276, ADR-029) makes them opt-in. They are now set only with `observability.tracing.caller_ids: true` or `MCP_TRACING_CALLER_IDS=true` (the environment wins over the file). `mcp.caller.type`, `mcp.caller.tenant_id` and `mcp.correlation_id` are unchanged, and OTLP audit records carry caller identity as before (#1580). ([#1584](https://github.com/mcp-hangar/mcp-hangar/pull/1584))
+- **core:** A call to a server group now says which member served it and why. `batch.call.<tool>` carries `hangar.route.backend` (the member) and `hangar.route.reason` (`standalone`, `load_balanced`, `pinned`, `canary`, `canary_fallback` or `no_available_member`), and `mcp_server.cold_start` and `command.send.InvokeToolCommand` carry `hangar.route.backend`. On those two spans `mcp.server.id` is now the target the caller named -- the group -- instead of the selected member, so it means the same thing on every span of a call. Calls to a server that is not in a group are unchanged (#1286). ([#1595](https://github.com/mcp-hangar/mcp-hangar/pull/1595))
+
+### Fixed
+
+- **core:** A call the tenant budget refuses after every gate has passed, when its slot is taken and the tenant's slots are all busy, now writes one `batch_call_refused` line with `gate=tenant_budget` and its bounded reason. It had a span decision and an audit record but no log line, so a query over `batch_call_refused` missed it. Both refusal paths now log and audit through one helper fed by the same gate decision (#1629). ([#1632](https://github.com/mcp-hangar/mcp-hangar/pull/1632))
+- **core:** No code path can put a caller's roles on a span. `set_governance_attributes` in `mcp_hangar.observability.conventions` took a `caller_roles` argument and wrote it as `mcp.caller.roles`, and wrote the caller's user, agent and session ids without the `observability.tracing.caller_ids` opt-in. Nothing in Hangar called it since `TracedMcpServerService` was removed, so it is removed too. The authorizing role stays on the audit record only (#1347), and a test pins that only the OTLP audit exporter reads the attribute (#1628). ([#1630](https://github.com/mcp-hangar/mcp-hangar/pull/1630))
+- **core:** Task follow-ups reach the upstream under the wire name `taskId`. Hangar relayed `tasks/get`, `tasks/cancel`, the `tasks/result` fetch and its own cancel of a task no caller was handed as `{"task_id": ...}`, so an upstream that reads only the SEP-2663 name found no task: polls came back as upstream errors and cancels went unconfirmed. Every relayed `tasks/*` request now carries `taskId`, built from the wire params models rather than written by hand, and `examples/task_upstream` accepts only that name (#1617). ([#1618](https://github.com/mcp-hangar/mcp-hangar/pull/1618))
+- **core:** A front-door flat `tools/call` now returns its upstream's result whole. With batch truncation on, it was cut like a `hangar_call` batch member, and the caller got an "upstream answered with a result this gateway cannot return" tool error instead of its result, with no continuation tool on that surface to fetch the rest. Over the 10 MB per-call size cap, the caller got an empty success with no word of what it lost. The flat call now takes its result whole, as the Python facade's `invoke` already did: batch truncation leaves it out of the budget, stores no continuation for it, and the per-call size cap does not drop it. `hangar_call` results are cut exactly as before. ([#1611](https://github.com/mcp-hangar/mcp-hangar/pull/1611))
+- **core:** the `task_relay_mint_failed` warning no longer carries the text of a malformed upstream task handle. It now logs the exception's bounded type as `error_type` with its existing identifiers, and the full text, which echoes the handle, moves to an adjacent `task_relay_mint_failed_detail` DEBUG line, as the data-handling contract requires for log lines at INFO and above (#1276). The message returned to the caller is unchanged. ([#1612](https://github.com/mcp-hangar/mcp-hangar/pull/1612))
+- **security:** `headers.param_validation.required` no longer refuses a handshake-era call. A request on a protocol version that predates mandatory `Mcp-Param-*` validation, on the front door or on `hangar_call`, is served, and its `Mcp-Param-*` headers are ignored: they never reach an L7 selector, so they decide no verdict. ADR-025 treats a legacy revision as an era rather than a failure. The L7 evaluator and `required` now read the protocol version through one shared check, so they cannot disagree about which requests are legacy. On a modern revision every unvalidated case is still refused: `hangar_call` with an `Mcp-Param-*` header, an undeclared header, a skipped validation after a failed listing, and a malformed sentinel (#1605). ([#1608](https://github.com/mcp-hangar/mcp-hangar/pull/1608))
+- **core:** An L7 egress header selector now matches an `Mcp-Param-*` header sent in the `=?base64?...?=` sentinel form. The SDK decodes that form before comparing it with the call's body, but the selector globbed the raw wire text, so a validated `eu-west-1` sent as a sentinel, or any non-ASCII value a client must send that way, did not match an `eu-*` rule and the tool rules decided instead. A checked header is now bound for the policy as the SDK's own `decode_header_value` decodes it; a sentinel that does not decode is dropped as unchecked, so the verdict carries the "header rules not consulted" reason. The decoded value reaches no span, log, audit record or event (#1600). ([#1602](https://github.com/mcp-hangar/mcp-hangar/pull/1602))
+- **core:** the approval gate's `approval_gate_error` and `approval_revalidation_failed` warnings no longer carry an internal exception's text. Each now logs the exception's bounded type as `error_type` with its existing identifiers, and the full text moves to an adjacent DEBUG line, as the data-handling contract requires for log lines at INFO and above (#1276). The message returned to the caller is unchanged. ([#1593](https://github.com/mcp-hangar/mcp-hangar/pull/1593))
+- **core:** a batch call that reaches its gates after the batch's global budget ran out is now refused as `batch_timeout` by the `global_timeout` gate every time. Before, when the collecting thread's timeout set the batch's cancel event first, the call read `cancelled` (`CancellationError`, `hangar.gate.name=cancelled_before_execution`), depending on thread timing. An explicit cancellation still reads `cancelled`. ([#1591](https://github.com/mcp-hangar/mcp-hangar/pull/1591))
+- **core:** a caller that waits for a cold server's start on the aggregate's
+  readiness event, rather than in single flight, now links its
+  `mcp_server.startup_wait` span to the start it waits on, as single flight's
+  waiters already did. That is most followers of a concurrent burst, and until
+  now their waits carried no link. The link targets the leader's
+  `mcp_server.cold_start` when the leader came through the batch executor, else
+  the span the start runs in; a wait on a start with no known trace context has
+  no link, and a later start never links to an earlier one. No attribute changes. ([#1592](https://github.com/mcp-hangar/mcp-hangar/pull/1592))
+- **core:** A refused call is logged with its bounded reason only. The `batch_call_refused` warning a gate refusal writes carried `error`, the refusal message the caller is told, which several gates fill with text they do not bound: the approver's own reason, a validator's reason, the server name the caller typed. The data-handling contract (#1276) allows a log line identifiers and bounded codes, so that field is gone; `gate`, `reason`, `error_type`, the identifiers and `elapsed_ms` are unchanged, and the caller still receives the message in the tool result. A gate that broke rather than refused still logs `batch_call_failed` at debug with its error (#1581). ([#1589](https://github.com/mcp-hangar/mcp-hangar/pull/1589))
+
+### Security
+
+- **security:** `anyio>=4.14.2` is now a declared floor, so an existing environment upgraded from PyPI no longer keeps a release carrying GHSA-82r6-8w77-94w6 or GHSA-5p39-cfhj-2xmp (#1635). ([#1636](https://github.com/mcp-hangar/mcp-hangar/pull/1636))
+- **security:** over stdio with auth on, the `hangar_*` management tools are now
+  authorized for the principal `auth.stdio.principal` declares, on its declared
+  roles (ADR-026). `authorize_tool` read the caller only from the HTTP request,
+  which a pipe never carries, so every management tool a declared principal was
+  listed was refused as `Authentication required`. It now resolves the caller
+  the way `hangar_call` does, and decides the declared principal with the same
+  declared-role authorizer: a declared `admin` is served what it is listed and a
+  declared `viewer` is refused, for example,
+  `Not authorized to call 'hangar_warm': mcp_servers:lifecycle permission required`.
+  What the front door lists and what may be called agree for every built-in role.
+  The front door's listing likewise answers from the declared principal only for
+  a caller with no request, so an HTTP request never takes it. HTTP and auth off
+  are unchanged (#1627). ([#1631](https://github.com/mcp-hangar/mcp-hangar/pull/1631))
+- **security:** the front door's flat `tools/call` now checks the caller's
+  `tool:invoke` permission, with the same check `hangar_call` runs
+  (`_authorize_calls`). It never ran it, so with auth on a principal without
+  `tool:invoke`, such as one holding only `viewer`, could invoke any projected
+  upstream tool through the front door that `hangar_call` refused it. A refused
+  flat call is a tool error (`isError`) reading
+  `Not authorized to invoke tool '<tool>': tool:invoke permission required`, the
+  tool is not executed, and one `ToolCallRefused` is audited with
+  `gate=authorization`. An allowed call's audit record carries the role that
+  admitted it in `mcp.caller.roles`. Over stdio with auth on, both
+  `hangar_call` and the flat call now decide `tool:invoke` for the principal
+  `auth.stdio.principal` declares, on its declared roles: a declared principal
+  holding `tool:invoke` is served, where `hangar_call` refused every stdio caller
+  as unauthenticated. An HTTP request never takes the declared principal. Auth
+  off is unchanged (#1622). ([#1623](https://github.com/mcp-hangar/mcp-hangar/pull/1623))
+- **security:** Every L7 `Mcp-Param-*` header check now fails closed on an unknown validation state. A header mapping that does not state validation ran no longer consults header rules; before, a mapping without the status key was read as validated. A request carrying a checked header beside one dropped as unchecked is now recorded as such, so the verdict's reasons carry "header rules not consulted" while the checked header still decides. `headers.param_validation.required` now refuses any modern-revision request carrying an `Mcp-Param-*` header that did not reach the selector, `hangar_call` included; before, it refused only on the front door's failed pre-dispatch listing (#1599). ([#1601](https://github.com/mcp-hangar/mcp-hangar/pull/1601))
+- **security:** An L7 egress header selector no longer matches an `Mcp-Param-*` header nothing checked against the call's body. The SDK checks only the headers the called tool declares with `x-mcp-header`, and `hangar_call` declares none, yet every `Mcp-Param-*` header on a modern request was handed to the policy as validated. A caller could add one with any value, match a header `allow` rule, and get past a tool-name default-deny, since a header verdict outranks the tool rules. A header is now bound for the policy only when the request records it as checked, which only the front door does, per declared header and after re-running the SDK's check; a request whose state is unknown binds none. On `hangar_call` the tool rules decide and the verdict carries the "header rules not consulted" reason (#1597). ([#1598](https://github.com/mcp-hangar/mcp-hangar/pull/1598))
+
 ## [2.23.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.22.1...v2.23.0) (2026-09-24)
 
 ### Added
