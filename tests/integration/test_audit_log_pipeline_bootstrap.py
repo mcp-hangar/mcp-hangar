@@ -273,10 +273,18 @@ def test_a_front_door_viewer_is_refused_and_a_developer_served(runs):
     assert [r["attributes"]["mcp.tool.status"] for r in _tool_records(run)] == ["success", "denied"]
 
 
-def test_caller_roles_reach_no_span(runs):
-    """The roles are on the audit record only; the #1276 contract keeps them off spans (#1580)."""
-    keys = runs["auth"]["span_attribute_keys"]
+@pytest.mark.parametrize(("mode", "served"), [("auth", "sampled"), ("front_door", "flat_served")])
+def test_caller_roles_reach_no_span(runs, mode, served):
+    """The roles are on the audit record only; the #1276 contract keeps them off spans (#1580, #1628).
 
+    Both call paths, `hangar_call` and the front door's flat call, over the
+    real SDK exporter. The served call's record names the role, so a role was
+    bound on the call whose spans carry none.
+    """
+    run = runs[mode]
+    keys = run["span_attribute_keys"]
+
+    assert _record_for(run, served)["attributes"]["mcp.caller.roles"] == AUTH_ROLE
     assert "gen_ai.tool.name" in keys, "spans were recorded, so the absence below is a result"
     assert "mcp.caller.roles" not in keys
 
