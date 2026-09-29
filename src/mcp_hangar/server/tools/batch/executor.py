@@ -217,11 +217,11 @@ def _identity_span_attributes() -> dict[str, str]:
     ``mcp.caller.tenant_id`` selects the calls that actually had a tenant
     instead of every call ever made.
 
-    Deliberately not ``set_governance_attributes``: that helper also asserts
-    ``gen_ai.operation.name=execute_tool`` and ``mcp.method.name=tools/call``,
-    which name the upstream call. ADR-029 keeps those on the one CLIENT span
-    ``execute_tool <tool>``; repeating them here would invite a GenAI-aware
-    backend to count one invocation twice.
+    Deliberately not ``gen_ai.operation.name=execute_tool`` or
+    ``mcp.method.name=tools/call``: those name the upstream call. ADR-029 keeps
+    them on the one CLIENT span ``execute_tool <tool>``; repeating them here
+    would invite a GenAI-aware backend to count one invocation twice. The
+    caller's roles are never set: they go on the audit record only (#1347).
 
     The caller's own identifiers -- ``mcp.caller.id``, ``mcp.user.id``,
     ``mcp.agent.id`` and ``mcp.session.id`` -- are set only when the operator
@@ -1849,7 +1849,7 @@ class BatchExecutor:
         admitted = self._enforce_tenant_budget(pipeline)
         if isinstance(admitted, CallResult):
             _observe_gate("tenant_budget", pipeline, admitted)
-            _publish_gate_refusal(pipeline, "tenant_budget", admitted)
+            _report_gate_refusal(pipeline, "tenant_budget", admitted)
             _observe_call(admitted, refused_by_gate=True)
             return admitted
         try:
@@ -1878,8 +1878,7 @@ class BatchExecutor:
                 name = gate.__name__.removeprefix("_gate_")
                 _observe_gate(name, p, refusal)
                 if refusal is not None:
-                    _log_gate_outcome(p, name, refusal)
-                    _publish_gate_refusal(p, name, refusal)
+                    _report_gate_refusal(p, name, refusal)
                     return refusal
             passed = True
             return None
@@ -2912,6 +2911,12 @@ def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> N
             reason=reason,
             route_backend=p.route_backend,
         )
+
+
+def _report_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
+    """Log and audit a refusal by *gate*, in `_run_gates` or after it, from one `_gate_decision` (#1629)."""
+    _log_gate_outcome(p, gate, refusal)
+    _publish_gate_refusal(p, gate, refusal)
 
 
 def _observe_gate(name: str, p: _CallPipeline, refusal: CallResult | None) -> None:
