@@ -56,6 +56,10 @@ dependencies = [
     "pyjwt[crypto]>=2.13.0",
     # 50.0.0 fixes CVE-2026-69247; 49.0.0 fixes CVE-2026-69248/69249.
     "cryptography>=50.0.0",
+    # not imported directly; arrives via mcp/httpx/starlette. 4.14.2 fixes
+    # GHSA-82r6-8w77-94w6 (TLSStream IDNA 2003 host name encoding) and
+    # GHSA-5p39-cfhj-2xmp (process-pool workers blocked on undrained stderr).
+    "anyio>=4.14.2",
     "pyyaml>=6.0",
     "docker>=7.1.0",
     "aiosqlite>=0.19.0",
