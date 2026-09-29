@@ -64,7 +64,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.shared.inbound import (
     MCP_PARAM_HEADER_PREFIX,
@@ -106,6 +106,9 @@ from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
 from .tool_list_changed import register_publisher, track_listing
+
+if TYPE_CHECKING:
+    from ..server.tools.batch.models import CallResult
 
 logger = logging.getLogger(__name__)
 
@@ -1019,6 +1022,30 @@ def _register_caller_progress_forwarder(mcp_ctx: Any) -> str | None:
     return upstream_token
 
 
+def _authorize_flat_call(
+    mcp_server: str, tool: str, call_id: str, mcp_ctx: Any, identity: Any
+) -> tuple[CallResult | None, tuple[str, ...]]:
+    """The ``tool:invoke`` check ``hangar_call`` makes, for one flat call (#1622).
+
+    ``_authorize_calls`` itself, with the principal read from the request as
+    ``hangar_call`` reads it, so every mode decides alike on both paths: auth
+    off allows, a missing or anonymous principal is refused, and otherwise the
+    authorizer decides. A refusal publishes its ``ToolCallRefused`` there.
+
+    Returns the refusal (a ``CallResult``) or None, and the roles that admitted
+    the call, for its audit record.
+    """
+    # Lazily, for the same import cycle as the batch package (#894).
+    from ..server.tools.batch import _authorize_calls, _request_principal
+
+    roles: dict[int, tuple[str, ...]] = {}
+    call = {"mcp_server": mcp_server, "tool": tool}
+    refused = _authorize_calls(
+        [call], [call_id], _request_principal(mcp_ctx), call_id, identity=identity, authorizing_roles=roles
+    )
+    return refused.get(0), roles.get(0, ())
+
+
 def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Refuse a suspended session before the flat ``tools/call`` does anything.
 
@@ -1203,6 +1230,16 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # `hangar_call` naming that member. See `_member_to_group`.
         mcp_server_id = _member_to_group().get(mcp_server_id, mcp_server_id)
 
+        # The caller's `tool:invoke`, checked as `hangar_call` checks it (#1622).
+        # A refusal is a tool error, the shape every other refusal of an upstream
+        # call takes here, and the call never reaches the executor.
+        call_id = uuid.uuid4().hex[:12]
+        refused, caller_roles = _authorize_flat_call(mcp_server_id, tool_name, call_id, mcp_ctx, identity)
+        if refused is not None:
+            note_failure(refused.error_type)
+            refusal = {"content": [{"type": "text", "text": refused.error}], "isError": True}
+            return CallToolResult.model_validate(refusal)
+
         # Relay the caller's progressToken (#883): the upstream is asked with a
         # freshly minted token, and progress arriving on the standing GET
         # stream (#882) is translated back onto this caller's session.
@@ -1218,7 +1255,6 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # answers, and blocking this loop would freeze every other request on
         # the connection -- including the very progress notifications this
         # call asked for.
-        call_id = uuid.uuid4().hex[:12]
         executor = configured_executor()
         try:
             batch = await asyncio.to_thread(
@@ -1238,6 +1274,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                         # result (#1609). As the facade does (#1453). The
                         # response size is bounded where it is read (#1613).
                         whole_result=True,
+                        caller_roles=caller_roles,
                     )
                 ],
                 max_concurrency=1,

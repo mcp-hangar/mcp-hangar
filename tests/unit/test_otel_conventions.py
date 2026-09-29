@@ -10,6 +10,7 @@ from mcp_hangar.observability.conventions import (
     GenAI,
     Health,
     McpServer,
+    Risk,
 )
 
 
@@ -53,13 +54,17 @@ class TestConventionNamespacing:
         for attr in _public_str_attrs(Cost):
             assert attr.startswith("mcp."), f"{attr} should start with mcp."
 
+    def test_risk_attributes_prefixed(self) -> None:
+        for attr in _public_str_attrs(Risk):
+            assert attr.startswith("mcp.risk."), f"{attr} should start with mcp.risk."
+
 
 class TestConventionUniqueness:
     """Attribute names must be unique across all convention classes."""
 
     def test_no_duplicate_attribute_names(self) -> None:
         all_attrs: list[str] = []
-        for cls in (McpServer, MCP, Enforcement, Audit, Behavioral, Health, Caller, Cost):
+        for cls in (McpServer, MCP, Enforcement, Audit, Behavioral, Health, Caller, Cost, Risk):
             all_attrs.extend(_public_str_attrs(cls))
 
         duplicates = {a for a in all_attrs if all_attrs.count(a) > 1}
@@ -98,127 +103,6 @@ class TestKeyAttributes:
 
     def test_cost_model(self) -> None:
         assert Cost.MODEL == "mcp.cost.model"
-
-
-class TestSetGovernanceAttributes:
-    """Tests for the set_governance_attributes convenience helper."""
-
-    def test_sets_required_provider_and_tool_attributes(self) -> None:
-        """set_governance_attributes sets provider.id and tool.name."""
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(span, mcp_server_id="math", tool_name="add")
-
-        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
-        assert calls[McpServer.ID] == "math"
-        assert calls[GenAI.TOOL_NAME] == "add"
-
-    def test_does_not_set_none_values(self) -> None:
-        """None arguments must not produce empty span attributes."""
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(span, mcp_server_id="p", tool_name="t", user_id=None, session_id=None)
-
-        set_keys = {call.args[0] for call in span.set_attribute.call_args_list}
-        assert MCP.USER_ID not in set_keys
-        assert MCP.SESSION_ID not in set_keys
-
-    def test_sets_optional_identity_attributes_when_provided(self) -> None:
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(
-            span,
-            mcp_server_id="p",
-            tool_name="t",
-            user_id="alice",
-            session_id="sess-1",
-            group_id="group-a",
-        )
-        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
-        assert calls[MCP.USER_ID] == "alice"
-        assert calls[MCP.SESSION_ID] == "sess-1"
-        assert calls[McpServer.GROUP_ID] == "group-a"
-
-    def test_sets_enforcement_attributes_when_provided(self) -> None:
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(
-            span,
-            mcp_server_id="p",
-            tool_name="t",
-            policy_result="deny",
-            enforcement_action="block",
-        )
-        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
-        assert calls[Enforcement.POLICY_RESULT] == "deny"
-        assert calls[Enforcement.ACTION] == "block"
-
-    def test_sets_caller_attributes_when_provided(self) -> None:
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(
-            span,
-            mcp_server_id="p",
-            tool_name="t",
-            caller_type="human",
-            caller_id="alice",
-            caller_roles="admin,viewer",
-        )
-        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
-        assert calls[Caller.TYPE] == "human"
-        assert calls[Caller.ID] == "alice"
-        assert calls[Caller.ROLES] == "admin,viewer"
-
-    def test_sets_cost_attributes_when_provided(self) -> None:
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(
-            span,
-            mcp_server_id="p",
-            tool_name="t",
-            cost_cents=150,
-            cost_model="token",
-            cost_input_tokens=500,
-            cost_output_tokens=200,
-            cost_currency="USD",
-        )
-        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
-        assert calls[Cost.CENTS] == 150
-        assert calls[Cost.MODEL] == "token"
-        assert calls[GenAI.USAGE_INPUT_TOKENS] == 500
-        assert calls[GenAI.USAGE_OUTPUT_TOKENS] == 200
-        assert calls[Cost.CURRENCY] == "USD"
-
-    def test_does_not_set_caller_cost_when_none(self) -> None:
-        from unittest.mock import MagicMock
-
-        from mcp_hangar.observability.conventions import set_governance_attributes
-
-        span = MagicMock()
-        set_governance_attributes(span, mcp_server_id="p", tool_name="t")
-        set_keys = {call.args[0] for call in span.set_attribute.call_args_list}
-        assert Caller.TYPE not in set_keys
-        assert Caller.ID not in set_keys
-        assert Cost.CENTS not in set_keys
-        assert Cost.MODEL not in set_keys
 
 
 class TestTracingUsesConventionConstants:

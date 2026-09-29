@@ -38,7 +38,7 @@ from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import evaluate_headers
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.services.ui_resource_guard import UiResourceGuard
-from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
+from mcp_hangar.fastmcp_server.flat_tool_projection import _authorize_flat_call, is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_request_if_session_suspended
 from mcp_hangar.server.tools.batch import _authorize_calls, _refuse_if_param_headers_unchecked
@@ -160,12 +160,14 @@ PREDICATES: tuple[Predicate, ...] = (
         ),
     ),
     # Role-based authorization: per tool on the management surface, per call on
-    # `hangar_call`, and the authorizer both of them ask.
+    # both invoke paths -- `hangar_call` and the front door's flat call (#1622) --
+    # and the authorizer all of them ask.
     Predicate(authorize_tool, paths=_each((MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL))),
-    Predicate(_authorize_calls, paths=_each((HANGAR_CALL,))),
+    Predicate(_authorize_calls, paths=_each(_INVOKE_PATHS)),
+    Predicate(_authorize_flat_call, paths={FLAT_TOOL_CALL: None}),
     Predicate(
         AuthorizationMiddleware.authorize,
-        paths=_each((HANGAR_CALL, MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL)),
+        paths=_each(_INVOKE_PATHS + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL)),
     ),
     # Tool-access policy: the executor's call-time check, and the decision
     # every projected surface shares.

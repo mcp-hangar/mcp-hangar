@@ -19,12 +19,15 @@ authorization path from its roles.
 
 from __future__ import annotations
 
+from typing import Any
+
 from mcp_hangar.context import set_fallback_identity
 from mcp_hangar.domain.value_objects import Principal
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 
 _principal: Principal | None = None
 _identity: IdentityContext | None = None
+_authorizer: Any = None
 
 
 def set_stdio_principal(principal: Principal) -> None:
@@ -33,8 +36,9 @@ def set_stdio_principal(principal: Principal) -> None:
     Called once during bootstrap, only when the serving transport is stdio and
     the configuration carries `auth.stdio.principal`.
     """
-    global _principal, _identity
+    global _principal, _identity, _authorizer
     _principal = principal
+    _authorizer = _middleware_over_declared_roles(principal)
     _identity = IdentityContext(
         caller=CallerIdentity(
             user_id=principal.id.value,
@@ -52,12 +56,37 @@ def set_stdio_principal(principal: Principal) -> None:
 
 def clear_stdio_principal() -> None:
     """Forget the declared principal. For tests and for a re-bootstrap."""
-    global _principal, _identity
+    global _principal, _identity, _authorizer
     _principal = None
     _identity = None
+    _authorizer = None
     set_fallback_identity(None)
 
 
 def get_stdio_principal() -> Principal | None:
     """The declared principal, or None when no block was configured."""
     return _principal
+
+
+def get_stdio_authorizer() -> Any:
+    """The authorization middleware that decides for the declared principal, or None (#1622).
+
+    The declaration is the principal's role source, as it is for the management
+    surface: the configured role store is never written, so no HTTP principal
+    with the same id can pick the declared roles up.
+    """
+    return _authorizer
+
+
+def _middleware_over_declared_roles(principal: Principal) -> Any:
+    """RBAC over a private in-memory store holding only the declared built-in roles."""
+    from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
+    from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
+    from mcp_hangar.auth.roles import BUILTIN_ROLES
+
+    store = InMemoryRoleStore()
+    names = (principal.metadata or {}).get("roles", [])
+    for name in names if isinstance(names, list) else []:
+        if name in BUILTIN_ROLES:
+            store.assign_role(principal.id.value, name)
+    return AuthorizationMiddleware(authorizer=RBACAuthorizer(store))

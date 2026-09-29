@@ -56,6 +56,10 @@ dependencies = [
     "pyjwt[crypto]>=2.13.0",
     # 50.0.0 fixes CVE-2026-69247; 49.0.0 fixes CVE-2026-69248/69249.
     "cryptography>=50.0.0",
+    # not imported directly; arrives via mcp/httpx/starlette. 4.14.2 fixes
+    # GHSA-82r6-8w77-94w6 (TLSStream IDNA 2003 host name encoding) and
+    # GHSA-5p39-cfhj-2xmp (process-pool workers blocked on undrained stderr).
+    "anyio>=4.14.2",
     "pyyaml>=6.0",
     "docker>=7.1.0",
     "aiosqlite>=0.19.0",
@@ -82,7 +86,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -150,7 +154,7 @@ Repository = "https://github.com/mcp-hangar/mcp-hangar"
 # `hatch` at plugin-load time, then prove it with `docker build .` and the
 # `build` job -- not with a local `pip install`, which has `hatch` on hand and
 # therefore cannot reproduce the failure.
-requires = ["hatchling==1.32.3"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = ["/.github/brand"]

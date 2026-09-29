@@ -31,8 +31,6 @@ References:
     - PRODUCT_ARCHITECTURE.md Section 2: "MCP-aware OTEL semantic conventions"
 """
 
-from typing import Any
-
 
 class McpServer:
     """Attributes describing an MCP mcp_server instance."""
@@ -634,116 +632,6 @@ class Discovery:
     HOLDER = "holder"
     #: On the move back to `holder`: how many cycles were skipped as follower.
     SKIPPED_CYCLES = "hangar.discovery.skipped_cycles"
-
-
-# ---------------------------------------------------------------------------
-# Convenience helpers
-# ---------------------------------------------------------------------------
-
-
-def set_governance_attributes(  # noqa: C901 -- baseline CC=19; split before extending
-    span: Any,
-    *,
-    mcp_server_id: str,
-    tool_name: str,
-    mode: str | None = None,
-    group_id: str | None = None,
-    user_id: str | None = None,
-    session_id: str | None = None,
-    agent_id: str | None = None,
-    policy_result: str | None = None,
-    enforcement_action: str | None = None,
-    cold_start: bool | None = None,
-    caller_type: str | None = None,
-    caller_id: str | None = None,
-    caller_roles: str | None = None,
-    cost_cents: int | None = None,
-    cost_model: str | None = None,
-    cost_input_tokens: int | None = None,
-    cost_output_tokens: int | None = None,
-    cost_currency: str | None = None,
-    risk_score: float | None = None,
-    risk_session_anomaly_score: float | None = None,
-) -> None:
-    """Set standard MCP governance attributes on an OTEL span in one call.
-
-    Only attributes with non-None values are set. This avoids polluting
-    OTLP backends with empty string attributes for optional governance fields.
-
-    **Retained, with no caller in `src/`.** Its one caller was
-    `TracedMcpServerService`, the decorator ADR-029 retires and #1278 deleted.
-    The batch executor's own boundary sets the identity subset directly instead
-    of calling this, because this helper also asserts
-    `gen_ai.operation.name=execute_tool` and `mcp.method.name=tools/call`,
-    which name the upstream call: ADR-029 keeps those on the one CLIENT span
-    `execute_tool <tool>`, and repeating them on the governance span would
-    invite a GenAI-aware backend to count one invocation twice. The function
-    stays because it is public surface an ADR-007 adapter may call with its own
-    process-local invocation data, and removing it would break that without
-    giving anything back.
-
-    Args:
-        span: OpenTelemetry span (or any object with set_attribute method).
-        mcp_server_id: Required. McpServer identifier.
-        tool_name: Required. Tool name as advertised by the mcp_server.
-        mode: Optional. McpServer mode ("subprocess", "docker", "remote").
-        group_id: Optional. McpServer group identifier.
-        user_id: Optional. Human user identity.
-        session_id: Optional. MCP session identifier.
-        agent_id: Optional. Agent or client identifier.
-        policy_result: Optional. Policy evaluation result ("allow", "deny", "quarantine").
-        enforcement_action: Optional. Enforcement action taken.
-        cold_start: Optional. Whether this invocation triggered a cold start.
-        caller_type: Optional. Caller type ("human", "agent", "service", "anonymous").
-        caller_id: Optional. Caller identifier.
-        caller_roles: Optional. Comma-separated roles.
-        cost_cents: Optional. Cost in hundredths of a cent.
-        cost_model: Optional. Pricing model used.
-        cost_input_tokens: Optional. Input tokens consumed.
-        cost_output_tokens: Optional. Output tokens produced.
-        cost_currency: Optional. ISO 4217 currency code.
-    """
-    span.set_attribute(McpServer.ID, mcp_server_id)
-    span.set_attribute(GenAI.TOOL_NAME, tool_name)
-    span.set_attribute(GenAI.OPERATION_NAME, "execute_tool")
-    span.set_attribute(MCP.METHOD_NAME, "tools/call")
-
-    if mode is not None:
-        span.set_attribute(McpServer.MODE, mode)
-    if group_id is not None:
-        span.set_attribute(McpServer.GROUP_ID, group_id)
-    if user_id is not None:
-        span.set_attribute(MCP.USER_ID, user_id)
-    if session_id is not None:
-        span.set_attribute(MCP.SESSION_ID, session_id)
-    if agent_id is not None:
-        span.set_attribute(MCP.AGENT_ID, agent_id)
-    if policy_result is not None:
-        span.set_attribute(Enforcement.POLICY_RESULT, policy_result)
-    if enforcement_action is not None:
-        span.set_attribute(Enforcement.ACTION, enforcement_action)
-    if cold_start is not None:
-        span.set_attribute(MCP.COLD_START, str(cold_start).lower())
-    if caller_type is not None:
-        span.set_attribute(Caller.TYPE, caller_type)
-    if caller_id is not None:
-        span.set_attribute(Caller.ID, caller_id)
-    if caller_roles is not None:
-        span.set_attribute(Caller.ROLES, caller_roles)
-    if cost_cents is not None:
-        span.set_attribute(Cost.CENTS, cost_cents)
-    if cost_model is not None:
-        span.set_attribute(Cost.MODEL, cost_model)
-    if cost_input_tokens is not None:
-        span.set_attribute(GenAI.USAGE_INPUT_TOKENS, cost_input_tokens)
-    if cost_output_tokens is not None:
-        span.set_attribute(GenAI.USAGE_OUTPUT_TOKENS, cost_output_tokens)
-    if cost_currency is not None:
-        span.set_attribute(Cost.CURRENCY, cost_currency)
-    if risk_score is not None:
-        span.set_attribute(Risk.SCORE, risk_score)
-    if risk_session_anomaly_score is not None:
-        span.set_attribute(Risk.SESSION_ANOMALY_SCORE, risk_session_anomaly_score)
 
 
 # legacy aliases
