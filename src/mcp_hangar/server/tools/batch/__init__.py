@@ -105,10 +105,24 @@ def configured_executor() -> BatchExecutor:
 
 
 def _request_principal(ctx: Context | None) -> Any:
-    """The principal the auth middleware left on this request (``request.state.auth``), or None."""
+    """The principal the auth middleware left on this request (``request.state.auth``), or None.
+
+    *ctx* is FastMCP's ``Context`` on ``hangar_call``, or the lowlevel request
+    context the front door's flat ``tools/call`` receives, which carries the
+    request itself (#1622).
+
+    With no request at all -- stdio -- the caller is the principal the
+    configuration declares, or None (ADR-026). A request never borrows it: one
+    that carries no principal is still None.
+    """
     try:
-        _auth_state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
-        return getattr(getattr(_auth_state, "auth", None), "principal", None)
+        inner = getattr(ctx, "request_context", None) or ctx
+        request = getattr(inner, "request", None)
+        if request is None:
+            from ....auth.stdio_principal import get_stdio_principal
+
+            return get_stdio_principal()
+        return getattr(getattr(request.state, "auth", None), "principal", None)
     except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call path
         return None
 
@@ -196,6 +210,12 @@ def _authorize_calls(
         return {}
 
     denied: dict[int, CallResult] = {}
+
+    # A declared stdio principal is decided on its declared roles (ADR-026, #1622).
+    from ....auth.stdio_principal import get_stdio_authorizer, get_stdio_principal
+
+    if principal is not None and principal is get_stdio_principal():
+        authz = get_stdio_authorizer()
 
     # Missing/anonymous principal under configured auth -> deny the whole batch.
     if principal is None or principal.is_anonymous():

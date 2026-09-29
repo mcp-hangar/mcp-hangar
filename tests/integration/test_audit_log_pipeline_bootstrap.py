@@ -31,7 +31,7 @@ import pytest
 pytestmark = pytest.mark.otel_sdk
 
 HARNESS = Path(__file__).with_name("_audit_log_harness.py")
-MODES = ("yaml", "env", "none", "tracing_off", "auth", "bound")
+MODES = ("yaml", "env", "none", "tracing_off", "auth", "bound", "front_door")
 
 # As `_audit_log_harness.py` mints and declares them.
 AUTH_PRINCIPAL, AUTH_TENANT, AUTH_ROLE = "user:audit-harness", "tenant-audit", "developer"
@@ -242,10 +242,49 @@ def test_a_call_authorization_refused_names_no_role(runs):
     assert "mcp.caller.roles" not in attributes
 
 
-def test_caller_roles_reach_no_span(runs):
-    """The roles are on the audit record only; the #1276 contract keeps them off spans (#1580)."""
-    keys = runs["auth"]["span_attribute_keys"]
+def test_a_front_door_viewer_is_refused_and_a_developer_served(runs):
+    """The front door's flat call checks `tool:invoke` as `hangar_call` does (#1622).
 
+    Over streamable HTTP, behind the auth the served app mounts: the `viewer`
+    key is refused as a tool error before the upstream is called, with one
+    `denied` record naming the authorization gate and no role; the `developer`
+    key is served, and its record names the role that admitted it.
+    """
+    run = runs["front_door"]
+    served, refused = run["calls"]["flat_served"]["result"], run["calls"]["flat_unauthorized"]["result"]
+
+    # The stub upstream answers with a bare value rather than a tool result, so
+    # the front door reports that shape; what matters is that the call ran, and
+    # the `success` record below is written only by a call that did.
+    assert "tool:invoke" not in json.dumps(served), served
+    assert refused.get("isError") is True, refused
+    assert refused["content"][0]["text"] == "Not authorized to invoke tool 'add': tool:invoke permission required"
+
+    allowed = _record_for(run, "flat_served")["attributes"]
+    assert (allowed["mcp.tool.status"], allowed["gen_ai.tool.name"]) == ("success", "add")
+    assert (allowed["mcp.caller.id"], allowed["mcp.caller.roles"]) == (AUTH_PRINCIPAL, AUTH_ROLE)
+
+    denied = _record_for(run, "flat_unauthorized")["attributes"]
+    assert (denied["mcp.tool.status"], denied["gen_ai.tool.name"]) == ("denied", "add")
+    assert (denied["hangar.gate.name"], denied["hangar.gate.reason"]) == ("authorization", "tool_invoke_denied")
+    assert denied["mcp.caller.id"] == VIEWER_PRINCIPAL
+    assert "mcp.caller.roles" not in denied
+    # One record per call: the refusal adds nothing, and the refused call ran nothing.
+    assert [r["attributes"]["mcp.tool.status"] for r in _tool_records(run)] == ["success", "denied"]
+
+
+@pytest.mark.parametrize(("mode", "served"), [("auth", "sampled"), ("front_door", "flat_served")])
+def test_caller_roles_reach_no_span(runs, mode, served):
+    """The roles are on the audit record only; the #1276 contract keeps them off spans (#1580, #1628).
+
+    Both call paths, `hangar_call` and the front door's flat call, over the
+    real SDK exporter. The served call's record names the role, so a role was
+    bound on the call whose spans carry none.
+    """
+    run = runs[mode]
+    keys = run["span_attribute_keys"]
+
+    assert _record_for(run, served)["attributes"]["mcp.caller.roles"] == AUTH_ROLE
     assert "gen_ai.tool.name" in keys, "spans were recorded, so the absence below is a result"
     assert "mcp.caller.roles" not in keys
 
