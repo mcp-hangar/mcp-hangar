@@ -217,11 +217,11 @@ def _identity_span_attributes() -> dict[str, str]:
     ``mcp.caller.tenant_id`` selects the calls that actually had a tenant
     instead of every call ever made.
 
-    Deliberately not ``set_governance_attributes``: that helper also asserts
-    ``gen_ai.operation.name=execute_tool`` and ``mcp.method.name=tools/call``,
-    which name the upstream call. ADR-029 keeps those on the one CLIENT span
-    ``execute_tool <tool>``; repeating them here would invite a GenAI-aware
-    backend to count one invocation twice.
+    Deliberately not ``gen_ai.operation.name=execute_tool`` or
+    ``mcp.method.name=tools/call``: those name the upstream call. ADR-029 keeps
+    them on the one CLIENT span ``execute_tool <tool>``; repeating them here
+    would invite a GenAI-aware backend to count one invocation twice. The
+    caller's roles are never set: they go on the audit record only (#1347).
 
     The caller's own identifiers -- ``mcp.caller.id``, ``mcp.user.id``,
     ``mcp.agent.id`` and ``mcp.session.id`` -- are set only when the operator
