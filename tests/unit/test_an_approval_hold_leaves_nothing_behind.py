@@ -20,6 +20,7 @@ import os
 import threading
 from collections import Counter
 from collections.abc import Callable, Iterator
+from concurrent.futures import as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -91,14 +92,37 @@ class _Approver:
     """The delivery channel, with a human who answers from another thread's loop.
 
     ``answer=None`` never answers, so the hold runs to its timeout.
+
+    ``send`` runs inside the approval gate, after the call's request is saved
+    and just before the gate waits for the decision, so ``held`` counts the
+    calls that really are held.
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self.answer: bool | None = True
         self.service: ApprovalGateService | None = None
+        self._held = 0
+        self._held_changed = threading.Condition()
+
+    @property
+    def held(self) -> int:
+        with self._held_changed:
+            return self._held
+
+    def reset_held(self) -> None:
+        with self._held_changed:
+            self._held = 0
+
+    def wait_until_held(self, n: int, timeout: float) -> bool:
+        """Block until `n` calls are held in the gate; False if `timeout` passes first."""
+        with self._held_changed:
+            return self._held_changed.wait_for(lambda: self._held >= n, timeout=timeout)
 
     async def send(self, request: ApprovalRequest) -> None:
+        with self._held_changed:
+            self._held += 1
+            self._held_changed.notify_all()
         if self.answer is None or self.service is None:
             return
         reason = None if self.answer else "no"
@@ -208,11 +232,41 @@ def _timed_out(world: World, n: int) -> list[CallResult]:
 
 
 def _cancelled(world: World, n: int) -> list[CallResult]:
-    # The batch's own deadline passes while the call is held; the batch is
-    # cancelled, and the held call still runs to its approval timeout.
+    """The batch's own deadline passes while the call is held; the held call still runs to its approval timeout.
+
+    The deadline must fall after the hold begins, and a fixed short
+    `global_timeout` cannot promise that: the budget gate runs before the
+    approval gate and reads the same budget, so a worker that starts late on a
+    loaded runner is refused `batch_timeout` and never held (#1633). Instead
+    the budget is generous, so the budget gate always lets the call through,
+    and each batch's collector -- the `as_completed` wait that enforces the
+    deadline -- first waits until all `n` calls are held, then times out at
+    once. That is the collector's own `TimeoutError` branch: it sets the cancel
+    event and waits for the held worker, exactly as a spent deadline does.
+
+    Every batch waits for all `n` rather than its own call: all calls look
+    alike to the approver, and a collector that fired early could cancel a
+    call still on its way to the gate.
+    """
     world.approver.answer = None
     _hold_for(1)
-    return _concurrently(n, lambda: _one_batch(global_timeout=0.2))
+    world.approver.reset_held()
+    held_at_deadline: list[int] = []
+
+    def deadline_after_every_hold(fs: Any, timeout: float | None = None) -> Iterator[Any]:
+        # A failed wait is recorded, never raised: a TimeoutError from here would
+        # read as the deadline and pass silently.
+        world.approver.wait_until_held(n, timeout=10)
+        held_at_deadline.append(world.approver.held)
+        return as_completed(fs, timeout=0)
+
+    with patch("mcp_hangar.server.tools.batch.executor.as_completed", deadline_after_every_hold):
+        results = _concurrently(n, lambda: _one_batch(global_timeout=30.0))
+
+    # Each deadline passed with every call held, and nothing else was held.
+    assert held_at_deadline == [n] * n, f"calls held when each batch's deadline passed: {held_at_deadline}"
+    assert world.approver.held == n
+    return results
 
 
 @dataclass(frozen=True)
