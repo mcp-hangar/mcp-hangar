@@ -215,12 +215,15 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
         the caller is anonymous.
     """
     # A stdio session has no request to carry a principal, so the declared one
-    # (ADR-026) answers instead -- and it answers first, because on stdio there
-    # is nothing else to ask. Its roles are resolved against the same permission
-    # table below, so what is listed is still exactly what may be called.
-    stdio_surface = _stdio_management_tools()
-    if stdio_surface is not None:
-        return stdio_surface
+    # (ADR-026) answers instead, resolved as `authorize_tool` resolves it: only
+    # for a caller with no request, so an HTTP request never borrows it. Its
+    # roles are checked against the same table `authorize_tool` uses.
+    from ...auth.stdio_principal import get_stdio_principal
+    from .batch import _request_principal
+
+    declared = get_stdio_principal()
+    if declared is not None and _request_principal(mcp_ctx) is declared:
+        return _stdio_management_tools() or frozenset()
 
     try:
         from ..context import get_context
@@ -293,7 +296,9 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
     Args:
         tool_name: The registered tool name being invoked.
         mcp_ctx: The MCP request Context the wrapper injected, carrying the
-            authenticated principal on ``request.state.auth``.
+            authenticated principal on ``request.state.auth``. With no request
+            (stdio) the caller is the declared principal, decided on its
+            declared roles (ADR-026, #1627).
 
     Before any of that, a caller whose session is suspended is refused, whatever
     its grants and whether or not auth is on. Every tool this function guards
@@ -320,12 +325,14 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
     if authz is None or not getattr(auth_components, "enabled", False):
         return
 
-    try:
-        inner = getattr(mcp_ctx, "request_context", None) or mcp_ctx
-        auth_state = getattr(getattr(inner, "request", None), "state", None)
-        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
-    except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call
-        principal = None
+    # The principal is read as `hangar_call` reads it, and a declared stdio
+    # principal is decided on its declared roles, as the listing is (ADR-026).
+    from ...auth.stdio_principal import get_stdio_authorizer, get_stdio_principal
+    from .batch import _request_principal
+
+    principal = _request_principal(mcp_ctx)
+    if principal is not None and principal is get_stdio_principal():
+        authz = get_stdio_authorizer()
 
     if principal is None or principal.is_anonymous():
         logger.warning("tool_authorization_denied", tool=tool_name, reason="missing_credentials")
