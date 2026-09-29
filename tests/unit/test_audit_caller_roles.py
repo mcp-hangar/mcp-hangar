@@ -360,3 +360,31 @@ class TestComplianceLinesCarryTheRoles:
             OTLPAuditEventHandler(audit_exporter=factory(output_fn=lines.append)).handle(event)
 
         assert all(OPA_POLICY_ROLE in line for line in lines), lines
+
+
+# Where `mcp.caller.roles` may appear: its definition as a literal, and one read
+# of `Caller.ROLES`, by the exporter that puts it on the audit record. Any other
+# read -- a span helper, an enrichment boundary -- could put a caller's roles
+# on a span (#1347, #1628).
+_ROLES_USES = {
+    ("observability/conventions.py", "literal"),
+    ("infrastructure/observability/otlp_audit_exporter.py", "Caller.ROLES"),
+}
+
+
+def test_only_the_audit_exporter_reads_the_caller_roles_attribute() -> None:
+    import ast
+    from pathlib import Path
+
+    import mcp_hangar
+
+    root = Path(mcp_hangar.__file__).parent
+    found = set()
+    for source in sorted(root.rglob("*.py")):
+        where = source.relative_to(root).as_posix()
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Attribute) and node.attr == "ROLES":
+                found.add((where, "Caller.ROLES"))
+            elif isinstance(node, ast.Constant) and node.value == Caller.ROLES:
+                found.add((where, "literal"))
+    assert found == _ROLES_USES, found
