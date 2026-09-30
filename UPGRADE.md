@@ -1,5 +1,290 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.24.0
+
+### `mcp.server.id` names the group on every span of a group call; the member is `hangar.route.backend`
+
+`mcp_server.cold_start` and `command.send.InvokeToolCommand` used to carry the
+selected group member in `mcp.server.id`, while every other span of the same
+call carried the group. They now carry the group too, and the member moves to
+`hangar.route.backend`.
+
+A trace query, dashboard or alert that selects those spans by member, such as
+`name = "command.send.InvokeToolCommand" AND mcp.server.id = "<member>"`, finds
+nothing after the upgrade for calls routed through a group. Change it to
+`hangar.route.backend = "<member>"`. A query by group keeps working and now
+matches those spans as well. Calls to a server outside any group carry the same
+value in both keys, so their queries need no change.
+
+The lifecycle spans `mcp_server.launch` and `mcp_server.startup_wait` are not
+opened by the call, and keep naming the member they start in `mcp.server.id`,
+so a query over every span of a group call's trace still sees the member there.
+
+### An L7 refusal logs bounded verdict fields, and an uninspectable call is an error trace
+
+`batch_call_refused` for an L7 egress refusal (`error_type` `EgressPolicyDeniedError` or
+`EgressPolicyApprovalRequiredError`) no longer carries `reason`, which held the policy's
+reasons joined into one free-text string, such as `tool 'x' matched a deny rule`. It
+carries `l7_verdict` (`deny` or `require_approval`), `l7_mode` (`enforce`), `l7_rule_kind`
+(`tool`, `argument` or `header`) and `l7_inspection_failed`, next to the `policy_id` it
+already had. A log query or alert matching text in `reason` for these lines has to move
+to those fields. The reasons themselves are still in the `egress_policy_enforced` warning
+and in the `EgressPolicyEnforced` event.
+
+A call the policy refused because it could not inspect the arguments (they could not be
+serialized, or the inspection raised) is now `hangar.call.outcome=error` and ends
+`batch.call.<tool>` ERROR, where it used to read `deny` and UNSET: the verdict is a
+denial, but the evaluator broke. Its log line is `batch_call_failed` at warning with
+`l7_inspection_failed=true`, not `batch_call_refused`. The spans inside the call stay
+UNSET. The caller is refused exactly as before. In Audit mode nothing changes on the span;
+the `egress_policy_violation_observed` warning carries `inspection_failed`.
+
+### GET /mcp: a list_changed stream on a front door, 405 in egress
+
+On the handshake era (2025-11-25 and earlier), `GET /mcp` used to open an
+empty SSE stream that nothing wrote to. It stayed open until the client left.
+It now does one of two things:
+
+- On a `front_door` gateway, it is the stream that carries
+  `notifications/tools/list_changed`, and `initialize` answers
+  `tools.listChanged: true`. A client that re-lists on the notification now
+  sees upstreams that arrive after it connected, without reconnecting.
+- In `egress`, it answers `405 Method Not Allowed`. MCP clients treat a 405 on
+  this GET as "no stream offered".
+
+A proxy in front of the gateway should pass `text/event-stream` responses
+unbuffered and allow an idle interval longer than 15 s, the ping interval.
+On each replica, one principal may hold 32 open streams and one tenant 256. A
+client past either gets 429 on the GET, while its POSTs are unaffected.
+
+A stream ends when its principal's API key or a role is revoked, when a JWT's
+`exp` passes, and after an hour at the latest. The client then reconnects and
+authenticates again. A stream is told about the catalogue of the replica it is
+connected to (#877).
+
+To confirm that streams get through a proxy, watch
+`mcp_hangar_tool_list_changed_streams` (open streams per replica) and
+`mcp_hangar_tool_list_changed_notifications_total{transport="http"}`. A cap
+being hit shows in `mcp_hangar_tool_list_changed_streams_refused_total{reason}`.
+
+### caller user, agent and session ids are off spans unless `observability.tracing.caller_ids` is on
+
+Since 2.22.0 every `batch.call.<tool>` span carried `mcp.caller.id`,
+`mcp.user.id`, `mcp.agent.id` and `mcp.session.id` for an authenticated caller.
+They are now left off by default, as the telemetry data contract requires.
+`mcp.caller.type`, `mcp.caller.tenant_id` and `mcp.correlation_id` are still set.
+The attribute names are unchanged: only whether they are emitted changed.
+
+A dashboard, alert or trace query that selects spans by `mcp.caller.id` or
+`mcp.user.id` finds nothing after the upgrade. Either move it to OTLP audit
+records, which carry caller identity whatever this setting says, or turn the ids
+back on:
+
+```yaml
+observability:
+  tracing:
+    caller_ids: true
+```
+
+`MCP_TRACING_CALLER_IDS=true` does the same, and wins over the file.
+
+### `batch_call_refused` from a gate no longer carries `error`
+
+Since 2.22.0 a call refused by a batch gate logged `batch_call_refused` with an
+`error` field holding the message the caller was told, which could be an
+approver's own reason. That field is gone. A log query or alert that matches on
+the text of `error` in these lines finds nothing after the upgrade: match on
+`reason` (a bounded code such as `approval_denied` or `tool_withdrawn`), `gate`
+or `error_type` instead, which are unchanged. The refusal message still reaches
+the caller in the tool result, and approval decisions keep their reason in the
+event store.
+
+### Audit and compliance feeds now include refused tool calls
+
+A tool call a gate, the `tool:invoke` check or an L7 policy refuses now produces
+a `tool_invocation` audit record with `mcp.tool.status=denied`, where it
+produced none before. The compliance exporters write it under a new event type,
+`ToolInvocationDenied`: CEF signature `103` ("Tool Invocation Denied", severity
+5), LEEF event id `103`, syslog MSGID `103` at warning, and
+`"event_type": "ToolInvocationDenied"` in JSON lines. Nothing is removed or
+renamed. A SIEM rule, parser or dashboard that counts every `tool_invocation`
+record as a call that ran, or that keys on the known event types, should filter
+on the status or add the new type. The refusal's reason is in the bounded fields
+`gate` and `gateReason` (`gate_reason` in JSON lines), or `l7Verdict`, `l7Mode`,
+`l7RuleKind` and `l7PolicyId` for an L7 refusal.
+
+### A group call's audit record names the group in `mcp.server.id`; the member is `hangar.route.backend`
+
+The `tool_invocation` audit record of a call routed through a server group used
+to carry the selected member in `mcp.server.id`. It now carries the group the
+caller named, the same value its spans carry since #1286, and the member moves to
+`hangar.route.backend`.
+
+An audit query, dashboard or alert that selects group calls by member finds
+nothing after the upgrade. Change it:
+
+- Old: `mcp.event.name = "tool_invocation" AND mcp.server.id = "<member>"`
+- New: `mcp.event.name = "tool_invocation" AND hangar.route.backend = "<member>"`
+
+A query by group, `mcp.server.id = "<group>"`, used to need the group's
+membership at the time of each call and now matches directly. Calls to a server
+outside any group carry the same value in both keys, so their queries need no
+change.
+
+The compliance exporters follow the same rule. For a group call, the server
+field now names the group: CEF `cs1` (`cs1Label=ProviderID`), LEEF `src`, syslog
+`provider` and JSON lines `provider_id`. The member moves to a new field: CEF
+`flexString1` (`flexString1Label=RouteBackend`), LEEF `routeBackend`, syslog
+`routeBackend` and JSON lines `route_backend`. A SIEM rule that matched the
+member in the server field, such as CEF `cs1=<member>`, should match
+`flexString1=<member>` instead.
+
+Records written before the upgrade are not rewritten. Replayed events from
+before it carry no group, so their records fall back to the member in both keys.
+
+### L7 header rules no longer match on `hangar_call`
+
+An `MCPEgressPolicy` header rule (`headers.allow`, `headers.deny` or
+`headers.requireApproval`) is no longer consulted for a call made through
+`hangar_call`. That surface declares no `x-mcp-header`, so the SDK checks none of
+its `Mcp-Param-*` headers against the body, and ADR-025 says a selector must not
+match a header nothing checked. The call is decided by the policy's tool rules and
+its `defaultAction`, and the verdict's reasons include "header rules not
+consulted". A policy that relied on a header `allow` rule to let a `hangar_call`
+through a tool-name default-deny now denies it.
+
+The same holds on the front door for an `Mcp-Param-*` header the called tool does
+not declare: only declared headers are matched.
+
+To select on a header, call the tool on the front door (`tool_access.mode:
+front_door`) with the tool declaring the header through `x-mcp-header` on the
+argument it mirrors. That header is checked against the body before dispatch and
+still matches. Otherwise, express the rule as a tool-name rule.
+
+### `headers.param_validation.required` now refuses `hangar_call` with `Mcp-Param-*` headers
+
+With `headers.param_validation.required: true`, a `hangar_call` request on a
+modern protocol version that carries any `Mcp-Param-*` header is now refused
+with `HEADER_MISMATCH` (-32020) and the message "the request's Mcp-Param-*
+headers could not be validated against its body". Before, it was served.
+`hangar_call` declares no `x-mcp-header`, so none of its `Mcp-Param-*` headers
+is ever checked against the body, and none reaches an L7 selector either.
+
+The same refusal now applies on the front door to a call carrying an
+`Mcp-Param-*` header the called tool does not declare, next to a declared one.
+Before, only a failed pre-dispatch listing was refused.
+
+A request with no `Mcp-Param-*` header is not affected, and neither is any
+deployment that leaves `required` at its default, `false`. A handshake-era
+(legacy protocol version) call is not refused either, on the front door or on
+`hangar_call`: its client does not validate headers, by design, so its
+`Mcp-Param-*` headers are ignored and never reach an L7 selector.
+
+To keep a modern call working under `required`, stop sending `Mcp-Param-*`
+headers on `hangar_call`, or call the tool on the front door with the tool
+declaring the header through `x-mcp-header`.
+
+### An upstream response over the size limit fails the call instead of coming back dropped
+
+Until this release a `hangar_call` result over 10 MB (10 485 760 bytes) was
+read whole, then dropped: its entry came back with `success: true`,
+`result: null`, `truncated: true`, `truncated_reason: "response_size_exceeded"`
+and `original_size_bytes`, the trace carried a `hangar.shaping.drop` event and
+`mcp_hangar_batch_truncations_total{reason="per_call"}` went up. A flat call and
+the facade's `invoke` were not cut.
+
+The limit is now enforced while the upstream response is read, over stdio and
+HTTP, for every surface, and its default is 32 MiB (33 554 432 bytes). A
+response over it is not read to the end, and the call fails with
+`error_type: ResponseTooLarge` and the message `The upstream response exceeded
+the limit of <n> bytes and was not read.`, the same on `hangar_call`, on a flat
+call (a tool error, `isError: true`) and on the facade. The call span ends in
+ERROR with `error.type=ResponseTooLarge`. Nothing that was served before is
+refused at the default, since every response under 10 MB is under 32 MiB.
+
+- A client or alert that looked for `truncated_reason: "response_size_exceeded"`
+  should look for `error_type: "ResponseTooLarge"` instead. The
+  `reason="per_call"` series of `mcp_hangar_batch_truncations_total` is no
+  longer written; `reason="batch_budget"` is unchanged, and so is batch
+  truncation, with its continuation.
+- To change the limit, set `execution.max_response_bytes` in the config file,
+  or `MCP_MAX_RESPONSE_BYTES` in the environment, which wins over the file. A
+  server can set its own `max_response_bytes` in its `mcp_servers` entry, which
+  wins over both. Each must be a positive whole number of bytes; any other value
+  refuses the config.
+
+### A front-door caller without `tool:invoke` can no longer call upstream tools
+
+With auth on, the front door's flat `tools/call` now requires the `tool:invoke`
+permission, as `hangar_call` has since #389. A principal whose roles lack it,
+such as one holding only `viewer`, gets a tool error
+(`Not authorized to invoke tool '<tool>': tool:invoke permission required`)
+where it used to be served. An unauthenticated or anonymous caller is refused
+as `Authentication required to invoke tools`.
+
+Grant a role that holds `tool:invoke` (`developer`, `service-account`,
+`admin`) to every principal that calls tools through a front door, for
+example in `auth.role_assignments`:
+
+```yaml
+auth:
+  role_assignments:
+    - principal: "group:agents"
+      role: service-account
+      scope: global
+```
+
+Listing is unchanged: such a caller still sees the tools its tool-access
+policy allows, and is refused when it calls one.
+
+With auth off (the default, and `--unsafe-no-auth`) nothing changes.
+
+Over stdio with `auth.enabled: true`, both invoke paths now decide
+`tool:invoke` for the principal `auth.stdio.principal` declares, on the roles
+it declares. The default declaration is `roles: [viewer]`, which does not hold
+`tool:invoke`, so its flat calls are now refused where they used to be served.
+Declare `developer` or `service-account` where a stdio session must call tools:
+
+```yaml
+auth:
+  stdio:
+    principal:
+      id: local-user
+      tenant_id: local
+      roles: [developer]
+```
+
+The same declaration also makes `hangar_call` over stdio with auth on serve a
+caller it used to refuse as unauthenticated. The declared roles are the
+principal's only role source: the configured role store and any OPA policy are
+not consulted for it.
+
+### `set_governance_attributes` is removed
+
+The 2.22.0 upgrade note said `set_governance_attributes` in
+`mcp_hangar.observability.conventions` was kept for an ADR-007 adapter. It is
+now removed: it wrote `mcp.caller.roles` onto a span, which the telemetry data
+contract never allows, and the caller's own ids without the
+`observability.tracing.caller_ids` opt-in. Nothing in Hangar called it.
+
+An adapter that called it sets the attributes it needs itself, with the
+constants that stay in `mcp_hangar.observability.conventions`:
+
+```python
+# before
+from mcp_hangar.observability.conventions import set_governance_attributes
+set_governance_attributes(span, mcp_server_id="math", tool_name="add", caller_type="human")
+
+# after
+from mcp_hangar.observability.conventions import Caller, GenAI, McpServer
+span.set_attribute(McpServer.ID, "math")
+span.set_attribute(GenAI.TOOL_NAME, "add")
+span.set_attribute(Caller.TYPE, "human")
+```
+
+Leave caller roles off: they belong on the audit record. Caller ids go on a span
+only when the operator turned `observability.tracing.caller_ids` on.
+
 ## Upgrade to 2.23.0
 
 ### a stdio front door advertises tools.listChanged
