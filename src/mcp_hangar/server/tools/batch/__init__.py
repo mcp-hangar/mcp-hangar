@@ -327,7 +327,9 @@ def hangar_call(
     Args:
         calls: list[{mcp_server, tool, arguments, timeout?}] - Invocations to execute
         max_concurrency: int - Parallel workers for this batch (default: 10, range: 1-50)
-        timeout: float - Batch timeout in seconds (default: 60, range: 1-300)
+        timeout: float - Batch timeout in seconds (default: 60, range: 1-300).
+            A call held for approval is not cut short by it: the call reads its
+            approval outcome, and the batch returns when the hold ends.
         fail_fast: bool - Stop batch on first error (default: false)
         max_attempts: int - Total attempts per call including retries (default: 1, range: 1-10)
 

@@ -104,6 +104,8 @@ class _Approver:
         self.service: ApprovalGateService | None = None
         self._held = 0
         self._held_changed = threading.Condition()
+        #: The approval id of every call held so far, for a test that answers later.
+        self.approval_ids: list[str] = []
 
     @property
     def held(self) -> int:
@@ -122,6 +124,7 @@ class _Approver:
     async def send(self, request: ApprovalRequest) -> None:
         with self._held_changed:
             self._held += 1
+            self.approval_ids.append(request.approval_id)
             self._held_changed.notify_all()
         if self.answer is None or self.service is None:
             return

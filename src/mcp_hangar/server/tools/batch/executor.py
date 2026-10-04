@@ -1582,7 +1582,12 @@ class BatchExecutor:
                                     break
 
                     except TimeoutError:
-                        # Global timeout exceeded
+                        # Global timeout exceeded. The gate that stopped a call
+                        # names it (#1541): a call not yet past the budget gate
+                        # reads `batch_timeout`; a call already held for approval
+                        # is not interrupted -- it reads its approval outcome, an
+                        # approval after this point reads `cancelled` -- and
+                        # leaving the pool below waits for that hold to end.
                         logger.warning(
                             "batch_global_timeout",
                             batch_id=batch_id,
