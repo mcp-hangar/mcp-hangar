@@ -10,6 +10,7 @@ from ...application.queries import (
     GetMcpServerToolsQuery,
     ListMcpServersQuery,
 )
+from ...application.read_models.tool_projection import get_tool_projection_registry
 from ...logging_config import get_logger
 from .middleware import dispatch_query
 from .serializers import HangarJSONResponse
@@ -22,9 +23,11 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with {"tools": [...]} where each tool includes mcp_server_id,
-        tool_name, description, and input_schema.
+        tool_name, description, input_schema and digest, and pinned_digest
+        when the tool has an all-tenants pin (#1528).
     """
     mcp_servers = await dispatch_query(ListMcpServersQuery(state_filter=None))
+    registry = get_tool_projection_registry()
     all_tools = []
     for p in mcp_servers:
         try:
@@ -37,6 +40,7 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
                         "tool_name": td.get("name", ""),
                         "description": td.get("description", ""),
                         "input_schema": str(td.get("inputSchema", "")),
+                        **registry.digest_fields(td, named=p.mcp_server_id),
                     }
                 )
         except (RuntimeError, OSError, ValueError, TimeoutError):

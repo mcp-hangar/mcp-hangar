@@ -15,7 +15,7 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ...domain.services.digest_computation import compute_tool_digest
 from ...domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
@@ -622,6 +622,47 @@ class ToolProjectionRegistry:
                     status="active",
                     tenant_overrides=overrides,
                 )
+
+    def digest_fields(
+        self,
+        tool: Mapping[str, Any],
+        *,
+        named: str,
+        served_by: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, str]:
+        """The digest fields a listing shows next to *tool* (#1528).
+
+        ``digest`` is the SEP-1766 fingerprint of *tool* exactly as listed,
+        from :func:`compute_tool_digest` -- the function ``mcp-hangar pin``
+        uses. The projection's digest is reused when its schema is the listed
+        one, so a listing does not hash again what discovery already hashed.
+
+        ``pinned_digest`` is the pin :meth:`resolve_pin` finds for *tenant_id*
+        on the id the caller *named*, then on the server *served_by* (a group's
+        selected member) -- the order the call path resolves a call's own pin
+        in. It is omitted when there is none, as a tool object omits every unset
+        optional field. Pins a member inherits from the groups that own it are
+        not shown here.
+
+        Callers pass only the tools the caller was allowed to list, so a tool
+        the caller cannot see gets no digest and no pin.
+        """
+        name = str(tool.get("name", ""))
+        server = served_by or named
+        with self._lock:
+            projection = self._projections.get((server, name))
+        if projection is not None and projection.schema == dict(tool):
+            digest = projection.digest.sha256
+        else:
+            digest = compute_tool_digest(dict(tool)).sha256
+        fields = {"digest": digest}
+        pin = self.resolve_pin(named, name, tenant_id)
+        if pin is None and server != named:
+            pin = self.resolve_pin(server, name, tenant_id)
+        if pin is not None:
+            fields["pinned_digest"] = pin.sha256
+        return fields
 
     def list_for_server(self, mcp_server: str) -> list[ToolProjection]:
         """Return all projections for *mcp_server* (snapshot)."""

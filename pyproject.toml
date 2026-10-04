@@ -52,8 +52,11 @@ dependencies = [
     # satisfies the constraint, so a floor is what an existing environment keeps.
     # pyjwt 2.13.0 fixes CVE-2026-48522/48523/48524/48525/48526 and CVE-2026-32597;
     # 48524 and 48525 are pre-auth DoS on the JWKS path (`get_signing_key_from_jwt`).
+    # 2.14.0 fixes PYSEC-2026-4140 and 4142..4152 (4145: an HMAC/asymmetric
+    # allow-list accepts a non-canonical PEM public key as the HMAC secret);
+    # 2.15.0 fixes PYSEC-2026-4141.
     # `[crypto]` because JWKS RS256/ES256 needs it; it arrived only via `mcp` before.
-    "pyjwt[crypto]>=2.13.0",
+    "pyjwt[crypto]>=2.15.0",
     # 50.0.0 fixes CVE-2026-69247; 49.0.0 fixes CVE-2026-69248/69249.
     "cryptography>=50.0.0",
     # not imported directly; arrives via mcp/httpx/starlette. 4.14.2 fixes
