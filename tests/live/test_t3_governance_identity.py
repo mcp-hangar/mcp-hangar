@@ -190,12 +190,14 @@ def _assert_identity(span: Received | None, where: str) -> None:
     empty = [key for key, value in attributes.items() if key.startswith(("mcp.caller.", "mcp.session")) and value == ""]
     assert not empty, f"{where}: exported empty identity attributes {empty}"
 
-    # This run found that an API-key caller over streamable-HTTP has no session
-    # id in its IdentityContext: the MCP session exists on the wire, and the
-    # identity bridges do not carry it. Asserted as observed, because the
-    # contract here is that an unknown value is OMITTED -- exporting an empty
-    # `mcp.session.id` would make every span claim a session it never had.
-    # Populating it is identity plumbing, not tracing, and is filed as #1539.
+    # An API-key caller over streamable-HTTP has no session id in its
+    # IdentityContext, and has no session to carry: the gateway serves HTTP
+    # stateless (#877), so the SDK creates and checks none, and a client's
+    # `Mcp-Session-Id` header is unverified -- copying it into identity would let
+    # a caller forge the id session suspension matches on (#1539). The contract
+    # is that an unknown value is OMITTED: an empty `mcp.session.id` would make
+    # every span claim a session it never had. A verified JWT `sid` is the source
+    # that does populate it.
     assert MCP.SESSION_ID not in attributes, (
         f"{where}: a session id is reaching the boundary now -- if the identity bridges were "
         f"taught to carry one, move MCP.SESSION_ID into _REQUIRED and delete this assertion"
