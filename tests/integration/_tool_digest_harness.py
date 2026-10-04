@@ -1,7 +1,7 @@
 """Bootstrap Hangar with digest pins, and read every tool listing over the served app (#1528).
 
 Run as a script, in its own interpreter, by
-``test_a_tools_digest_reads_on_every_listing.py``:
+``test_a_tools_digest_reads_on_hangar_tools_and_rest.py``:
 ``python _tool_digest_harness.py <out.json>``. Not collected by pytest.
 
 A separate process because ``bootstrap()`` fills process-global state that a

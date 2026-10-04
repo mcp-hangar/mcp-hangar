@@ -5,7 +5,7 @@ routes call for each tool they list. Its digest is `compute_tool_digest`'s -- th
 function `mcp-hangar pin` digests a server with -- and its pin is the one
 `resolve_pin` finds for the caller's tenant, on the named id and then on the
 server that served the listing. The served surfaces are pinned end to end in
-`tests/integration/test_a_tools_digest_reads_on_every_listing.py`.
+`tests/integration/test_a_tools_digest_reads_on_hangar_tools_and_rest.py`.
 """
 
 from __future__ import annotations

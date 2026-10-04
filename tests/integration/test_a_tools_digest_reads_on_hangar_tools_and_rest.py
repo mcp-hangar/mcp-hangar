@@ -1,4 +1,4 @@
-"""On the app ``serve --http`` serves, a tool's computed digest reads on every listing (#1528).
+"""On the app ``serve --http`` serves, a tool's computed digest reads on hangar_tools and the REST tool routes (#1528).
 
 ``_tool_digest_harness.py`` runs the real ``bootstrap()`` in a fresh
 interpreter, with API-key auth on and digest pins in the config file, and
