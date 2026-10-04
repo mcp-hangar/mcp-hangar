@@ -7,6 +7,7 @@ routing through the CQRS dispatch helpers.
 # pyright: reportAny=false, reportUnknownMemberType=false
 
 import json
+from typing import Any
 
 from starlette.requests import Request
 from starlette.routing import Route
@@ -26,6 +27,7 @@ from ...application.queries.queries import (
     GetToolInvocationHistoryQuery,
     ListMcpServersQuery,
 )
+from ...application.read_models.tool_projection import get_tool_projection_registry
 from ...domain.exceptions import MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
@@ -175,12 +177,23 @@ async def get_mcp_server_tools(request: Request) -> HangarJSONResponse:
         mcp_server_id: McpServer identifier.
 
     Returns:
-        JSON with {"tools": [...]} array of tool info.
+        JSON with {"tools": [...]} array of tool info. Each tool carries its
+        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
     result = await dispatch_query(GetMcpServerToolsQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse({"tools": [t.to_dict() for t in result]})
+    return HangarJSONResponse({"tools": [_with_digest(t.to_dict(), mcp_server_id) for t in result]})
+
+
+def _with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]:
+    """*tool* with its digest and its all-tenants pin, if any (#1528).
+
+    This route admits only a fleet-wide grant (it is not ``tenant_aware``), so
+    the pin shown is the all-tenants one: the block ``mcp-hangar pin --check``
+    compares. A per-tenant pin is shown on ``hangar_tools`` to that tenant.
+    """
+    return {**tool, **get_tool_projection_registry().digest_fields(tool, named=mcp_server_id)}
 
 
 async def get_mcp_server_health(request: Request) -> HangarJSONResponse:
