@@ -67,7 +67,7 @@ class BackgroundLoop(IBlockingAsyncRunner):
             # dropped is still collected, and this stops its loop when it is.
             # Not at exit: the daemon thread needs nothing then.
             stopper = weakref.finalize(self, _stop, loop)
-            stopper.atexit = False  # type: ignore[misc]  # settable at runtime; the stub says slots
+            stopper.atexit = False  # type: ignore[misc, unused-ignore]  # settable at runtime; older stubs say slots
             self._stopper = stopper
         return self._loop
 
