@@ -14,6 +14,7 @@ from mcp_hangar._sdk_compat import FastMCP
 from ...application.commands import StartMcpServerCommand
 from ...application.mcp.tooling import mcp_tool_wrapper
 from ...application.queries import GetMcpServerQuery, GetMcpServerToolsQuery
+from ...application.read_models.tool_projection import get_tool_projection_registry
 from ...context import get_identity_context
 from ...domain.services import get_tool_access_resolver
 from ...metrics import TOOLS_FILTERED_TOTAL
@@ -70,6 +71,23 @@ def _caller_tenant_id() -> str | None:
 # =============================================================================
 
 
+def _listed(tools: list[Any], *, named: str, served_by: str | None = None, tenant_id: str | None) -> list[dict]:
+    """Each listed tool as its wire dict, with its digest and any pin next to it (#1528).
+
+    Takes the list AFTER the tool-access filter: a tool this caller cannot list
+    gets no digest and no pin, because it is never passed here. A server with
+    predefined tools lists the schemas its configuration declares, so that is
+    what is digested there.
+    """
+    registry = get_tool_projection_registry()
+    listed = []
+    for tool in tools:
+        entry = tool.to_dict()
+        entry.update(registry.digest_fields(entry, named=named, served_by=served_by, tenant_id=tenant_id))
+        listed.append(entry)
+    return listed
+
+
 def _get_tools_for_group(mcp_server: str) -> dict[str, Any]:
     """Get tools for a mcp_server group."""
     ctx = get_context()
@@ -113,7 +131,9 @@ def _get_tools_for_group(mcp_server: str) -> dict[str, Any]:
     return {
         "mcp_server": mcp_server,
         "group": True,
-        "tools": [t.to_dict() for t in filtered_tools],
+        "tools": _listed(
+            filtered_tools, named=mcp_server, served_by=selected.mcp_server_id, tenant_id=_caller_tenant_id()
+        ),
     }
 
 
@@ -146,7 +166,7 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
             "mcp_server": mcp_server,
             "state": mcp_server_obj.state.value,
             "predefined": mcp_server_obj.tools_predefined,
-            "tools": [t.to_dict() for t in filtered_tools],
+            "tools": _listed(filtered_tools, named=mcp_server, tenant_id=tenant_id),
         }
 
     if mcp_server_obj.state.value == "dead":
@@ -178,7 +198,7 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
         "mcp_server": mcp_server,
         "state": mcp_server_obj.state.value,
         "predefined": False,
-        "tools": [t.to_dict() for t in filtered_tools],
+        "tools": _listed(filtered_tools, named=mcp_server, tenant_id=tenant_id),
     }
 
 
@@ -226,13 +246,19 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 mcp_server: str,
                 state: str,
                 predefined: bool,
-                tools: [{name: str, description: str, inputSchema: object}]
+                tools: [{name: str, description: str, inputSchema: object,
+                         digest: str, pinned_digest?: str}]
             }
             Group: {
                 mcp_server: str,
                 group: true,
-                tools: [{name: str, description: str, inputSchema: object}]
+                tools: [{..., digest: str, pinned_digest?: str}]
             }
+            digest is the tool's SHA-256 schema fingerprint, as `mcp-hangar pin`
+            computes it. pinned_digest is the pin declared for your tenant (or
+            for all tenants) on this id, or on the group member that served the
+            listing; absent when none is. They differ when the tool drifted
+            from its pin.
             Error: ValueError with "unknown_mcp_server: <id>" or "no_healthy_members_in_group: <id>"
 
         Example:
