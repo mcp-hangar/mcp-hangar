@@ -1,1 +1,0 @@
-`tasks/get`, `tasks/cancel` and `tasks/update` each get one bounded span (`task_relay.get`, `task_relay.cancel`, `task_relay.update`) linked to the tool call that created the task, with its outcome in `hangar.task.outcome`. A task with no known origin gets no link. Task ids are not recorded on spans.
