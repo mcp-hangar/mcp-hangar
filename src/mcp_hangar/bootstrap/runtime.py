@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
-from ..application.ports.observability import SCRUB_PAYLOADS_BY_DEFAULT, NullObservabilityAdapter, ObservabilityPort
 from ..domain.contracts.persistence import IAuditRepository, IMcpServerConfigRepository
 from ..domain.repository import IMcpServerRepository, InMemoryMcpServerRepository
 from ..domain.security.input_validator import InputValidator
@@ -141,49 +140,6 @@ class PersistenceConfig:
 
 
 @dataclass(frozen=True)
-class ObservabilityConfig:
-    """Configuration for observability integrations.
-
-    Supports Langfuse for LLM observability and tracing.
-
-    Attributes:
-        langfuse_enabled: Whether Langfuse integration is active.
-        langfuse_public_key: Langfuse public API key.
-        langfuse_secret_key: Langfuse secret API key.
-        langfuse_host: Langfuse host URL.
-        langfuse_sample_rate: Fraction of traces to sample (0.0 to 1.0).
-        langfuse_scrub_inputs: Whether to send only the keys of tool inputs.
-        langfuse_scrub_outputs: Whether to send only the keys of tool outputs.
-            Both default to scrubbing; raw payloads reach Langfuse only when
-            one is set to false (#1534).
-    """
-
-    langfuse_enabled: bool = False
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_host: str = "https://cloud.langfuse.com"
-    langfuse_sample_rate: float = 1.0
-    langfuse_scrub_inputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
-    langfuse_scrub_outputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
-
-
-_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
-
-
-def _scrub_flag(env: dict[str, str], key: str) -> bool:
-    """Read a Langfuse scrub flag: an explicit opt-out, never an opt-in (#1534).
-
-    Unset means :data:`SCRUB_PAYLOADS_BY_DEFAULT`. Only a recognisably false
-    value turns scrubbing off; anything else, a typo included, keeps it on, so
-    a malformed setting fails closed rather than shipping raw payloads.
-    """
-    value = env.get(key)
-    if value is None:
-        return SCRUB_PAYLOADS_BY_DEFAULT
-    return value.strip().lower() not in _FALSE_VALUES
-
-
-@dataclass(frozen=True)
 class Runtime:
     """Container for runtime dependencies.
 
@@ -207,10 +163,6 @@ class Runtime:
     config_repository: IMcpServerConfigRepository | None = None
     audit_repository: IAuditRepository | None = None
     recovery_service: RecoveryService | None = None
-
-    # Observability components (optional)
-    observability_config: ObservabilityConfig | None = None
-    observability: ObservabilityPort | None = None
 
 
 def apply_rate_limit_config(
@@ -295,7 +247,6 @@ def create_runtime(
     command_bus: CommandBus | None = None,
     query_bus: QueryBus | None = None,
     persistence_config: PersistenceConfig | None = None,
-    observability_config: ObservabilityConfig | None = None,
     env: dict[str, str] | None = None,
     rate_limit: dict[str, Any] | None = None,
     persistence_backend: Any = None,
@@ -308,7 +259,6 @@ def create_runtime(
         command_bus: Optional command bus override.
         query_bus: Optional query bus override.
         persistence_config: Optional persistence configuration.
-        observability_config: Optional observability configuration.
         env: Optional environment mapping (defaults to os.environ).
         rate_limit: Optional ``rate_limit`` config section
             (``{"rps": <int>, "burst": <int>}``). Values take precedence over the
@@ -387,43 +337,6 @@ def create_runtime(
         config_repository = InMemoryMcpServerConfigRepository()
         audit_repository = InMemoryAuditRepository()
 
-    # Configure observability if enabled
-    langfuse_enabled = env.get("HANGAR_LANGFUSE_ENABLED", "false").lower() == "true"
-
-    if observability_config is None and langfuse_enabled:
-        observability_config = ObservabilityConfig(
-            langfuse_enabled=True,
-            langfuse_public_key=env.get("LANGFUSE_PUBLIC_KEY", ""),
-            langfuse_secret_key=env.get("LANGFUSE_SECRET_KEY", ""),
-            langfuse_host=env.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-            langfuse_sample_rate=float(env.get("HANGAR_LANGFUSE_SAMPLE_RATE", "1.0")),
-            langfuse_scrub_inputs=_scrub_flag(env, "HANGAR_LANGFUSE_SCRUB_INPUTS"),
-            langfuse_scrub_outputs=_scrub_flag(env, "HANGAR_LANGFUSE_SCRUB_OUTPUTS"),
-        )
-
-    observability: ObservabilityPort = NullObservabilityAdapter()
-
-    if observability_config and observability_config.langfuse_enabled:
-        try:
-            from ..infrastructure.observability import LangfuseConfig, LangfuseObservabilityAdapter
-
-            langfuse_config = LangfuseConfig(
-                enabled=True,
-                public_key=observability_config.langfuse_public_key,
-                secret_key=observability_config.langfuse_secret_key,
-                host=observability_config.langfuse_host,
-                sample_rate=observability_config.langfuse_sample_rate,
-                scrub_inputs=observability_config.langfuse_scrub_inputs,
-                scrub_outputs=observability_config.langfuse_scrub_outputs,
-            )
-            observability = LangfuseObservabilityAdapter(langfuse_config)
-        except ImportError:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Langfuse enabled but package not installed. Install with: pip install mcp-hangar[observability]"
-            )
-
     return Runtime(
         repository=repo,
         event_bus=eb,
@@ -438,6 +351,4 @@ def create_runtime(
         config_repository=config_repository,
         audit_repository=audit_repository,
         recovery_service=recovery_service,
-        observability_config=observability_config,
-        observability=observability,
     )

@@ -4,8 +4,6 @@ These tests use property-based testing to discover edge cases
 that might not be covered by example-based tests.
 """
 
-import sys
-
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -187,84 +185,6 @@ class TestNullObservabilityAdapterProperties:
             healthy=healthy,
             latency_ms=latency_ms,
         )
-
-
-@pytest.mark.skipif(
-    sys.version_info >= (3, 14), reason="Langfuse uses Pydantic v1 which is incompatible with Python 3.14+"
-)
-class TestLangfuseConfigProperties:
-    """Property-based tests for LangfuseConfig validation."""
-
-    @given(
-        sample_rate=st.floats(min_value=-10.0, max_value=10.0),
-    )
-    @settings(deadline=None)
-    def test_sample_rate_validation_is_consistent(self, sample_rate: float) -> None:
-        """Sample rate validation is consistent for all float values."""
-        from mcp_hangar.integrations.langfuse import LangfuseConfig
-
-        config = LangfuseConfig(
-            enabled=True,
-            public_key="pk-test",
-            secret_key="sk-test",
-            sample_rate=sample_rate,
-        )
-
-        errors = config.validate()
-
-        if 0.0 <= sample_rate <= 1.0:
-            assert not any("sample_rate" in e for e in errors)
-        else:
-            assert any("sample_rate" in e for e in errors)
-
-    @given(
-        public_key=st.text(max_size=100),
-        secret_key=st.text(max_size=100),
-        enabled=st.booleans(),
-    )
-    @settings(max_examples=100)
-    def test_validation_never_raises(
-        self,
-        public_key: str,
-        secret_key: str,
-        enabled: bool,
-    ) -> None:
-        """Config validation never raises exceptions."""
-        from mcp_hangar.integrations.langfuse import LangfuseConfig
-
-        config = LangfuseConfig(
-            enabled=enabled,
-            public_key=public_key,
-            secret_key=secret_key,
-        )
-
-        # Should never raise
-        errors = config.validate()
-        assert isinstance(errors, list)
-
-    @given(
-        public_key=st.text(min_size=1, max_size=100).filter(lambda x: x.strip()),
-        secret_key=st.text(min_size=1, max_size=100).filter(lambda x: x.strip()),
-    )
-    def test_enabled_config_with_keys_validates(
-        self,
-        public_key: str,
-        secret_key: str,
-    ) -> None:
-        """Enabled config with non-empty keys passes validation."""
-        from mcp_hangar.integrations.langfuse import LangfuseConfig
-
-        config = LangfuseConfig(
-            enabled=True,
-            public_key=public_key,
-            secret_key=secret_key,
-        )
-
-        errors = config.validate()
-
-        # Should have no key-related errors
-        assert not any("public_key" in e for e in errors)
-        assert not any("secret_key" in e for e in errors)
 
 
 class TestProviderConfigProperties:

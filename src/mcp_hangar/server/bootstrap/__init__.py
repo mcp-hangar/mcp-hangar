@@ -5,7 +5,7 @@ application components. It is the composition root of the application.
 
 The bootstrap process:
 1. Load configuration
-2. Initialize observability (tracing, Langfuse)
+2. Initialize observability (tracing, audit export)
 3. Initialize runtime (event bus, command bus, query bus)
 4. Initialize event store (for event sourcing)
 5. Register event handlers
@@ -32,7 +32,6 @@ from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator
-from ...application.ports.observability import ObservabilityPort
 from ...domain.events import set_instance_id
 from ...domain.exceptions import ConfigurationError
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
@@ -121,9 +120,6 @@ class ApplicationContext:
     unload_mcp_server_handler: UnloadMcpServerHandler | None = None
     """Handler for unloading mcp_servers at runtime."""
 
-    observability_adapter: ObservabilityPort | None = None
-    """Observability adapter for tracing (Langfuse, etc.)."""
-
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
@@ -177,8 +173,8 @@ class ApplicationContext:
                     error=str(e),
                 )
 
-        # Shutdown observability (tracing, Langfuse)
-        shutdown_observability(self.observability_adapter)
+        # Shutdown observability (tracing, audit export)
+        shutdown_observability()
 
         # Last: the fleet writer's loop has to outlive every server's stop.
         close_what_bootstrap_started()
@@ -503,8 +499,8 @@ def bootstrap(
 
     warn_about_endpoints_the_ssrf_policy_does_not_cover(full_config)
 
-    # Initialize observability (tracing, Langfuse) early
-    _, observability_adapter = init_observability(full_config)
+    # Initialize observability (tracing, audit export) early
+    init_observability(full_config)
 
     if _backend is not None:
         # The metric history store is reached through a module-level accessor
@@ -687,7 +683,6 @@ def bootstrap(
         config=full_config,
         load_mcp_server_handler=load_handler,
         unload_mcp_server_handler=unload_handler,
-        observability_adapter=observability_adapter,
         discovery_registry=discovery_registry,
         approval_service=components.approval_service,
         saga_manager=get_saga_manager(),

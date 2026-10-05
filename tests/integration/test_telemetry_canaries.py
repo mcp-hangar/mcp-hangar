@@ -25,7 +25,7 @@ never sent or a sink never captured.
 
 Not covered here yet, and tracked on #1535: the live-gateway tier with a real
 OTLP receiver (#1293, ``tests/live``), exceptions raised on other paths (a
-transport failure, a validation error), the Langfuse route, metric labels and
+transport failure, a validation error), metric labels and
 the rest of the identifier table. Of that table, the calling principal is a
 canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
 (#1580).

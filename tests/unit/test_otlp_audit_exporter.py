@@ -300,7 +300,7 @@ from mcp_hangar.server.bootstrap.observability import init_observability, shutdo
 
 init_observability({"observability": {"tracing": {"otlp_endpoint": ENDPOINT}}})
 m.OTLPAuditExporter().export_tool_invocation("math", "add", "success", 1.0)
-shutdown_observability(None)
+shutdown_observability()
 m.OTLPAuditExporter().export_tool_invocation("math", "after-hangar-shutdown", "success", 1.0)
 emit(
     built=len(built),
