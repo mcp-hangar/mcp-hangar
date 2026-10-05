@@ -42,6 +42,7 @@ from mcp_hangar.domain.events import (
     McpServerStateChanged,
     McpServerStopped,
     PolicyPushRejected,
+    ToolApprovalCancelled,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,
@@ -201,6 +202,14 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         mcp_server_id="p1",
         tool_name="t",
         expired_at="2025-01-01T00:00:00+00:00",
+    ),
+    "ToolApprovalCancelled": ToolApprovalCancelled(
+        approval_id="a1",
+        mcp_server_id="p1",
+        tool_name="t",
+        attempted_by="user@example.com",
+        cancelled_at="2025-01-01T00:00:00+00:00",
+        reason="approved after the held call was cancelled; the call did not run",
     ),
 }
 

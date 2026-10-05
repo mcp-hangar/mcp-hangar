@@ -43,6 +43,7 @@ from ...domain.contracts.authorization import GrantScope
 from ...domain.contracts.command import CommandHandler
 from ...domain.exceptions import MissingCredentialsError
 from ...domain.value_objects.security import Principal
+from ..models import ApprovalState
 
 #: Authorization tuple for resolving an approval. Matches
 #: ``PERMISSION_APPROVAL_RESOLVE`` in ``auth/roles.py`` -- the permission that
@@ -58,6 +59,8 @@ class ResolveOutcome(Enum):
     EXPIRED = "expired"
     NOT_FOUND = "not_found"
     ALREADY_TERMINAL = "already_terminal"
+    #: The held call was cancelled; an approval for it is refused (#1702).
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,8 @@ class ResolveApprovalHandler(CommandHandler):
             # The caller's grant is held within a tenant this approval does not
             # name. Same answer as a foreign tenant: existence is scoped too.
             return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+        if existing.state is ApprovalState.CANCELLED:
+            return ResolveApprovalResult(ResolveOutcome.CANCELLED, state=existing.state.value)
         if existing.is_terminal():
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=existing.state.value)
         if existing.is_expired():
@@ -193,10 +198,14 @@ class ResolveApprovalHandler(CommandHandler):
         if not success:
             # Another resolver can win between the preflight read and the
             # service's own read. Report the state that now exists rather than
-            # inventing a failure after a successful decision elsewhere.
+            # inventing a failure after a successful decision elsewhere. The
+            # service also refuses an approval for a held call whose batch was
+            # cancelled, and records it `cancelled`.
             updated = await repository.get(command.approval_id)
             if updated is None:
                 return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+            if updated.state is ApprovalState.CANCELLED:
+                return ResolveApprovalResult(ResolveOutcome.CANCELLED, state=updated.state.value)
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=updated.state.value)
 
         updated = await repository.get(command.approval_id)

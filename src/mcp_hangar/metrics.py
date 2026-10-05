@@ -1333,7 +1333,8 @@ APPROVAL_DELIVERIES_TOTAL = Counter(
 APPROVAL_DECISIONS_TOTAL = Counter(
     name="mcp_hangar_approval_decisions",
     description="Total approval holds by how they ended",
-    # decision: granted, denied, expired. `expired` climbing alongside a flat
+    # decision: granted, denied, expired, cancelled (an approval that arrived
+    # after the held call's batch was cancelled -- not a grant). `expired` climbing alongside a flat
     # `sent` is the same story from the other end.
     labels=["channel", "decision"],
 )

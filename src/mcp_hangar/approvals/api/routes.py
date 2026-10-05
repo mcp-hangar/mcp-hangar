@@ -133,7 +133,7 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
     """List approval requests filtered by state.
 
     Query params:
-        state: Filter by state (default: pending). One of: pending, approved, denied, expired.
+        state: Filter by state (default: pending). One of: pending, approved, denied, expired, cancelled.
         provider_id: Optional provider filter.
     """
     service = _get_approval_service(request)
@@ -222,6 +222,13 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
     if result.outcome is ResolveOutcome.ALREADY_TERMINAL:
         return HangarJSONResponse(
             {"error": "Approval already resolved", "state": result.state},
+            status_code=409,
+        )
+    if result.outcome is ResolveOutcome.CANCELLED:
+        # The held call's batch was cancelled, so the call will not run and
+        # there is nothing left to approve. Recorded `cancelled`, not a grant.
+        return HangarJSONResponse(
+            {"error": "Approval refused: the held call was cancelled and did not run", "state": result.state},
             status_code=409,
         )
     if result.outcome is ResolveOutcome.EXPIRED:

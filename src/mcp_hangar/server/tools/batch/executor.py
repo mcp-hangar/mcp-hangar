@@ -1066,6 +1066,7 @@ class BatchExecutor:
         tenant_id: str | None = None,
         scopes: list[tuple[str, str | None, str | None]] | None = None,
         governance: _Governance | None = None,
+        abandoned: threading.Event | None = None,
     ) -> CallResult | None:
         """Check if the tool requires approval and block until resolved.
 
@@ -1084,6 +1085,8 @@ class BatchExecutor:
                 is the one this gate applies, read with the rest of the call's
                 governance as one set (#1431). Without it, the approval lists
                 of *scopes* are read here, as one set.
+            abandoned: The batch's cancel event. An approval that arrives
+                after it is set is refused and recorded ``cancelled`` (#1702).
         """
         # Cleared per call: worker threads are reused across calls, so a stale
         # id from the previous call in this thread must never be revalidated
@@ -1168,6 +1171,7 @@ class BatchExecutor:
                     correlation_id=call.call_id,
                     tenant_id=_tenant_id,
                     requested_by=_requested_by,
+                    abandoned=abandoned,
                 )
             )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
@@ -1586,7 +1590,8 @@ class BatchExecutor:
                         # names it (#1541): a call not yet past the budget gate
                         # reads `batch_timeout`; a call already held for approval
                         # is not interrupted -- it reads its approval outcome, an
-                        # approval after this point reads `cancelled` -- and
+                        # approval after this point is refused, recorded
+                        # `cancelled` and reads `CancellationError` (#1702) -- and
                         # leaving the pool below waits for that hold to end.
                         logger.warning(
                             "batch_global_timeout",
@@ -2383,6 +2388,7 @@ class BatchExecutor:
                 tenant_id=p.caller_tenant_id,
                 scopes=p.policy_scopes(),
                 governance=p.governance,
+                abandoned=p.cancel_event,
             )
             if approval_result is not None:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
