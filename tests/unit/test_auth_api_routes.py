@@ -1,19 +1,35 @@
 """The `/auth/*` REST handlers: keys, roles and policies over HTTP."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from starlette.datastructures import State
+
+from mcp_hangar.domain.exceptions import ValidationError
+from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
+
+CALLER = "user:admin"
+
+
+def _scope_for(principal_id: str | None) -> dict:
+    """A request scope carrying the auth context the served stack attaches, or none (auth off)."""
+    if principal_id is None:
+        return {}
+    principal = Principal(id=PrincipalId(principal_id), type=PrincipalType.USER)
+    return {"state": State({"auth": SimpleNamespace(principal=principal)})}
 
 
 class TestAuthRoutes:
     """Tests for the auth API route handlers."""
 
-    def _make_request(self, body=None, path_params=None, query_params=None):
+    def _make_request(self, body=None, path_params=None, query_params=None, caller=CALLER):
         request = AsyncMock()
         request.json = AsyncMock(return_value=body or {})
         request.path_params = path_params or {}
         request.query_params = query_params or {}
+        request.scope = _scope_for(caller)
         return request
 
     # --- auth_routes list ---
@@ -57,7 +73,7 @@ class TestAuthRoutes:
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.principal_id == "user:alice"
         assert cmd.name == "my-key"
-        assert cmd.created_by == "system"
+        assert cmd.created_by == CALLER
 
     @pytest.mark.asyncio
     async def test_create_api_key_with_expires_at(self):
@@ -86,7 +102,7 @@ class TestAuthRoutes:
         from mcp_hangar.auth.api.routes import revoke_api_key
 
         request = self._make_request(
-            body={"revoked_by": "admin", "reason": "compromised"},
+            body={"reason": "compromised"},
             path_params={"key_id": "k1"},
         )
 
@@ -96,7 +112,7 @@ class TestAuthRoutes:
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.key_id == "k1"
-        assert cmd.revoked_by == "admin"
+        assert cmd.revoked_by == CALLER
         assert cmd.reason == "compromised"
 
     @pytest.mark.asyncio
@@ -106,13 +122,14 @@ class TestAuthRoutes:
         request = AsyncMock()
         request.path_params = {"key_id": "k2"}
         request.json = AsyncMock(side_effect=json.JSONDecodeError("err", "", 0))
+        request.scope = _scope_for(CALLER)
 
         with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
             await revoke_api_key(request)
 
         cmd = mock_dispatch.call_args[0][0]
-        assert cmd.revoked_by == "system"
+        assert cmd.revoked_by == CALLER
         assert cmd.reason == ""
 
     # --- list_api_keys ---
@@ -155,7 +172,6 @@ class TestAuthRoutes:
                 "principal_id": "user:alice",
                 "role_name": "admin",
                 "scope": "tenant:x",
-                "assigned_by": "superadmin",
             }
         )
 
@@ -167,7 +183,7 @@ class TestAuthRoutes:
         assert cmd.principal_id == "user:alice"
         assert cmd.role_name == "admin"
         assert cmd.scope == "tenant:x"
-        assert cmd.assigned_by == "superadmin"
+        assert cmd.assigned_by == CALLER
 
     # --- revoke_role ---
 
@@ -313,6 +329,7 @@ class TestAuthRoutes:
             response = await delete_role(request)
 
         assert response.status_code == 204
+        assert mock_dispatch.call_args[0][0].deleted_by == CALLER
 
     # --- update_role ---
 
@@ -322,7 +339,7 @@ class TestAuthRoutes:
 
         request = self._make_request(
             path_params={"role_name": "deployer"},
-            body={"permissions": ["mcp_server:write:*"], "description": "Updated", "updated_by": "admin"},
+            body={"permissions": ["mcp_server:write:*"], "description": "Updated"},
         )
 
         with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
@@ -333,6 +350,7 @@ class TestAuthRoutes:
         assert cmd.role_name == "deployer"
         assert cmd.permissions == ["mcp_server:write:*"]
         assert cmd.description == "Updated"
+        assert cmd.updated_by == CALLER
 
     # --- list_principals ---
 
@@ -529,3 +547,78 @@ class TestAuthRoutes:
                 mock_dispatch.return_value = {"ok": True}
                 response = await set_tool_access_policy(request)
                 assert response.status_code == 200, f"Scope {scope} should be accepted"
+
+
+class TestActorIsTheCaller:
+    """No auth mutation takes its actor from the body (#1649)."""
+
+    @staticmethod
+    def _request(body, path_params=None, caller=CALLER):
+        request = AsyncMock()
+        request.json = AsyncMock(return_value=body)
+        request.path_params = path_params or {}
+        request.query_params = {}
+        request.scope = _scope_for(caller)
+        return request
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("route", "body", "path_params", "field"),
+        [
+            ("create_api_key", {"principal_id": "u", "name": "k"}, None, "created_by"),
+            ("revoke_api_key", {}, {"key_id": "k1"}, "revoked_by"),
+            ("assign_role", {"principal_id": "u", "role_name": "admin"}, None, "assigned_by"),
+            ("revoke_role", {"principal_id": "u", "role_name": "admin"}, None, "revoked_by"),
+            ("create_custom_role", {"role_name": "ops"}, None, "created_by"),
+            ("update_role", {"permissions": []}, {"role_name": "ops"}, "updated_by"),
+        ],
+    )
+    @pytest.mark.parametrize("value", ["user:someone-else", CALLER, None])
+    async def test_a_body_actor_field_is_refused_whatever_it_says(self, route, body, path_params, field, value):
+        import mcp_hangar.auth.api.routes as routes
+
+        request = self._request({**body, field: value}, path_params)
+
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            with pytest.raises(ValidationError) as refused:
+                await getattr(routes, route)(request)
+
+        assert refused.value.field == field
+        mock_dispatch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_with_auth_off_the_actor_is_anonymous_not_system(self):
+        from mcp_hangar.auth.api.routes import assign_role
+
+        request = self._request({"principal_id": "u", "role_name": "viewer"}, caller=None)
+
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = {}
+            await assign_role(request)
+
+        assert mock_dispatch.call_args[0][0].assigned_by == "anonymous"
+
+    @pytest.mark.asyncio
+    async def test_the_router_dict_state_shape_is_read_too(self):
+        from mcp_hangar.auth.api.routes import assign_role
+
+        request = self._request({"principal_id": "u", "role_name": "viewer"})
+        request.scope = {"state": {"auth": request.scope["state"].auth}}
+
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = {}
+            await assign_role(request)
+
+        assert mock_dispatch.call_args[0][0].assigned_by == CALLER
+
+    @pytest.mark.asyncio
+    async def test_a_non_object_revoke_body_is_treated_as_empty(self):
+        from mcp_hangar.auth.api.routes import revoke_api_key
+
+        request = self._request(["not", "an", "object"], {"key_id": "k1"})
+
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = {}
+            await revoke_api_key(request)
+
+        assert mock_dispatch.call_args[0][0].revoked_by == CALLER
