@@ -18,8 +18,10 @@ What changes for you:
   that ran `serve` next to its file is unchanged, and so is the container image
   (its working directory is `/app`).
 - **`init`, `add`, `remove` and `status` in a directory with a
-  `./config.yaml`** used to edit or report `~/.config/mcp-hangar/config.yaml`.
-  They now use `./config.yaml`, the file `serve` there reads. Pass
+  `./config.yaml`** used to write or report `~/.config/mcp-hangar/config.yaml`.
+  They now use `./config.yaml`, the file `serve` there reads. `init -y` backs
+  that file up and replaces it, and `add` and `remove` edit it in place -- so
+  run them in a directory whose `config.yaml` is Hangar's, or pass
   `--config ~/.config/mcp-hangar/config.yaml` (or `init --config-path`) to keep
   the old target.
 - **`status` with a named file that does not exist** used to report whichever
