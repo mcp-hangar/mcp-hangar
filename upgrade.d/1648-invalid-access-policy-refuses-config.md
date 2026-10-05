@@ -4,8 +4,8 @@ A `tools:` access policy (`allow_list` / `deny_list` / `approval_list`) on a
 server, a group, a group member or a `tool_access.member` tenant entry, and an
 `access:` block, is now refused when one of its fields is invalid: an
 `approval_timeout_seconds` that is not a positive integer, an empty or
-non-string pattern, a whitespace-only `approval_channel`, or a list that is not
-a list.
+non-string pattern, a whitespace-only `approval_channel`, or a list given as a
+number.
 
 Before, the gateway logged `invalid_tools_access_config` (or the group, member,
 tenant or `access` variant) at warning and booted with **no policy** for that
