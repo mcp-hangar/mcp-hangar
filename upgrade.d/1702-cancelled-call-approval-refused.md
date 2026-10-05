@@ -16,7 +16,8 @@ The approval record moves to a new terminal state, `cancelled`
 (`GET /api/approvals?state=cancelled` lists them), and the gate publishes
 `ToolApprovalCancelled`, whose `attempted_by` names the approver, instead of
 `ToolApprovalGranted`. The `mcp_hangar_approval_decisions` counter gains the
-`decision="cancelled"` value.
+`decision="cancelled"` value. On a `cancelled` record, `decided_by` names who
+tried to approve the call, not who let it through: nothing did.
 
 A denial after the deadline is still recorded as a denial, and an unanswered
 hold still expires. An approval tool or dashboard that treats every `409` from
