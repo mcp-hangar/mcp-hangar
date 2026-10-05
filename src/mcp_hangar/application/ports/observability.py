@@ -1,11 +1,9 @@
 """Port for observability integrations.
 
 This module defines the interface for tracing tool invocations and recording
-metrics. Implementations adapt external observability platforms to this contract.
-
-Nothing implements or calls this port since the Langfuse adapter was removed
-(#1683): Hangar's tool spans are OpenTelemetry's. ``IAuditExporter`` below is
-wired and used.
+metrics. Since the Langfuse adapter was removed (#1683) only the Null adapter
+implements it and nothing calls it: Hangar's tool spans are OpenTelemetry's.
+``IAuditExporter`` below is wired and used.
 """
 
 import logging
