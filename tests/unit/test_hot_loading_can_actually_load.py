@@ -410,3 +410,33 @@ class TestGatingWithoutAGateIsRefused:
 
 def _raises() -> bool:
     raise RuntimeError("context not built")
+
+
+class TestALoadWithAListThatIsNotAListIsRefused:
+    """`deny_tools="add"` used to be split into `a`, `d`, `d` (#1718). Worse, the
+    policy was parsed only after the server was installed, started and put in
+    the runtime store, so a policy that failed to parse left the server loaded
+    with no policy at all. It is now parsed before anything happens.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _leave_the_global_resolver_as_we_found_it(self):
+        from mcp_hangar.domain.services import reset_tool_access_resolver
+
+        reset_tool_access_resolver()
+        yield
+        reset_tool_access_resolver()
+
+    @pytest.mark.parametrize("kwarg", ["allow_tools", "deny_tools", "approval_tools"])
+    @pytest.mark.parametrize("value", ["add", "", {"add": None}], ids=["str", "empty-str", "mapping"])
+    async def test_nothing_is_installed_started_or_registered(self, monkeypatch, kwarg, value):
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        handler, started, store = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        with pytest.raises(ValueError, match="expected a list of patterns"):
+            await handler.handle(LoadMcpServerCommand(name="mcp-server-time", user_id=None, **{kwarg: value}))
+
+        assert started == []
+        assert store.added == []
+        assert get_tool_access_resolver().iter_registered_policies() == []
