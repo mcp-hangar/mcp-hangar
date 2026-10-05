@@ -72,6 +72,28 @@ class TestServeConfigOption:
         assert result.exit_code == 0, result.output
         assert _config_path_from_run_server(mock_run) == "/tmp/local.yaml"
 
+    @pytest.mark.parametrize("argv", [[], ["serve"]])
+    def test_serve_envvars_apply_to_default_and_explicit_command(self, runner, argv):
+        """The implicit default command must resolve envvars like `serve` does."""
+        from mcp_hangar.server.cli.main import app
+
+        env = {
+            "MCP_MODE": "http",
+            "MCP_HTTP_HOST": "127.0.0.1",
+            "MCP_HTTP_PORT": "9099",
+            "MCP_LOG_LEVEL": "debug",
+        }
+
+        with patch("mcp_hangar.server.lifecycle.run_server") as mock_run:
+            result = runner.invoke(app, argv, env=env)
+
+        assert result.exit_code == 0, result.output
+        cli_config = mock_run.call_args.args[0]
+        assert cli_config.http_mode is True
+        assert cli_config.http_host == "127.0.0.1"
+        assert cli_config.http_port == 9099
+        assert cli_config.log_level == "DEBUG"
+
 
 class TestGeneratedClientEntryStarts:
     """The args written into a client's config must actually start the server."""

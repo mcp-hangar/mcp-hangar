@@ -121,9 +121,20 @@ def main_callback(
     # If no subcommand, default to serve
     if ctx.invoked_subcommand is None:
         # Import and run the serve command
+        from .cli_compat import parse_args
         from .commands.serve import serve_command
 
-        serve_command(ctx)
+        defaults = parse_args([])
+        serve_command(
+            ctx,
+            config=config,
+            http=defaults.http_mode,
+            host=defaults.http_host,
+            port=defaults.http_port,
+            log_level=defaults.log_level,
+            json_logs=defaults.json_logs,
+            unsafe_no_auth=defaults.unsafe_no_auth,
+        )
 
 
 # Import and register subcommand modules

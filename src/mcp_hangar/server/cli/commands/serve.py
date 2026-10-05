@@ -28,7 +28,6 @@ def serve_command(
         typer.Option(
             "--http",
             help="Run in HTTP mode instead of stdio",
-            envvar="MCP_MODE",
             is_flag=True,
         ),
     ] = False,
