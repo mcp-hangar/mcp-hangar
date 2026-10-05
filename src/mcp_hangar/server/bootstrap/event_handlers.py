@@ -34,6 +34,7 @@ from ...domain.events import (
     ToolRestored,
     ToolWithdrawn,
 )
+from ...domain.exceptions import ConfigurationError
 from ...domain.model.mcp_server_group import GroupCreated
 from ...domain.repository import IMcpServerRepository
 from ...domain.services import tool_catalogue_changes
@@ -291,7 +292,6 @@ def _create_compliance_exporter(format_name: str, output_path: str | None) -> IA
     configured SIEM export ran with none, so each now raises
     `ConfigurationError` naming the value.
     """
-    from ...domain.exceptions import ConfigurationError
 
     class_name = _COMPLIANCE_FORMATS.get(format_name)
     if class_name is None:
