@@ -440,3 +440,20 @@ class TestALoadWithAListThatIsNotAListIsRefused:
         assert started == []
         assert store.added == []
         assert get_tool_access_resolver().iter_registered_policies() == []
+
+    @pytest.mark.parametrize("kwarg", ["allow_tools", "deny_tools", "approval_tools"])
+    @pytest.mark.parametrize("value", [[""], ["   "]], ids=["empty", "whitespace"])
+    async def test_a_bad_pattern_no_longer_leaves_the_server_loaded_without_a_policy(self, monkeypatch, kwarg, value):
+        """A list is what the `hangar_load` signature lets through, so this is the
+        case that reached the handler: it raised only after `runtime_store.add`,
+        and the server stayed loaded with no policy."""
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        handler, started, store = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        with pytest.raises(ValueError, match="pattern"):
+            await handler.handle(LoadMcpServerCommand(name="mcp-server-time", user_id=None, **{kwarg: value}))
+
+        assert started == []
+        assert store.added == []
+        assert get_tool_access_resolver().iter_registered_policies() == []

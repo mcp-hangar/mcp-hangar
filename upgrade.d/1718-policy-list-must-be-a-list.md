@@ -30,5 +30,7 @@ tools:
 
 A configuration that used the old form booted with a different policy from
 the one written; it will not boot on this release until the list is fixed.
-`hangar_load` likewise refuses `allow_tools`, `deny_tools` or `approval_tools`
-that is not a list, before anything is installed.
+`hangar_load` now refuses a policy that fails to parse (an empty pattern in
+`allow_tools`, `deny_tools` or `approval_tools`, or a value that is not a list)
+before anything is installed. It used to install and start the server first,
+and leave it loaded with no policy.
