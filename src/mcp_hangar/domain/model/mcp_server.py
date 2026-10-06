@@ -41,6 +41,7 @@ from ..events import (
 from ..exceptions import (
     CannotStartMcpServerError,
     CapabilityBlockedError,
+    ClientError,
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
@@ -2220,7 +2221,10 @@ class McpServer(AggregateRoot):
             if "error" in response:
                 check_error = Exception(response["error"].get("message", "unknown"))
                 check_error_type = _rpc_error_type(response["error"])
-        except (OSError, TimeoutError) as e:
+        # A ClientError is a probe that got no answer: over HTTP, a refused
+        # connection is one (#1698). Caught here, it degrades the server like a
+        # timeout does; escaping, it left a stopped upstream READY for good.
+        except (OSError, TimeoutError, ClientError) as e:
             check_error = e
             check_error_type = bounded_error_type(type(e).__qualname__)
 
