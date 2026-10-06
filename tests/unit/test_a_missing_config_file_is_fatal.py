@@ -128,6 +128,20 @@ class TestInProcess:
         finally:
             await hangar.stop()
 
+    @pytest.mark.security
+    @pytest.mark.skipif(not hasattr(os, "getuid") or os.getuid() == 0, reason="root reads any file")
+    def test_an_unreadable_file_is_refused(self, tmp_path):
+        from mcp_hangar.server.config import load_configuration
+
+        locked = tmp_path / "config.yaml"
+        locked.write_text("mcp_servers: {}\n", encoding="utf-8")
+        locked.chmod(0)
+        try:
+            with pytest.raises(MissingConfigFileError, match="is not readable"):
+                load_configuration(str(locked), load_servers=False)
+        finally:
+            locked.chmod(0o600)
+
     def test_with_no_path_the_file_init_writes_is_read(self, tmp_path, monkeypatch):
         """The implicit default still works when there is a file to find."""
         from mcp_hangar.server.config import load_configuration
