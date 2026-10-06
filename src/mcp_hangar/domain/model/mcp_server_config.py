@@ -56,6 +56,21 @@ class RemoteConfig:
     http: dict[str, Any] | None = None
 
 
+#: The ``ToolsConfig`` fields that hold tool name patterns.
+_PATTERN_LISTS = ("allow_list", "deny_list", "approval_list")
+
+
+def _require_pattern_list(name: str, value: object) -> None:
+    """Refuse a pattern list that is not a list.
+
+    Iterating is not enough of a check: a string iterates as its characters, so
+    ``deny_list: add`` became the patterns ``a``, ``d``, ``d`` and left ``add``
+    allowed, and a mapping iterates as its keys (#1718).
+    """
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"Invalid {name}: expected a list of patterns, got {type(value).__name__} {value!r}")
+
+
 @dataclass
 class ToolsConfig:
     """Tool access configuration for a mcp_server, group, or member.
@@ -101,18 +116,12 @@ class ToolsConfig:
                 "allow_list takes precedence, deny_list will be ignored."
             )
 
-        # Validate patterns are valid strings
-        for pattern in self.allow_list:
-            if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError(f"Invalid allow_list pattern: {pattern!r}")
-
-        for pattern in self.deny_list:
-            if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError(f"Invalid deny_list pattern: {pattern!r}")
-
-        for pattern in self.approval_list:
-            if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError(f"Invalid approval_list pattern: {pattern!r}")
+        for name in _PATTERN_LISTS:
+            patterns = getattr(self, name)
+            _require_pattern_list(name, patterns)
+            for pattern in patterns:
+                if not isinstance(pattern, str) or not pattern.strip():
+                    raise ValueError(f"Invalid {name} pattern: {pattern!r}")
 
         if not isinstance(self.approval_timeout_seconds, int) or isinstance(self.approval_timeout_seconds, bool):
             raise ValueError(f"Invalid approval_timeout_seconds: {self.approval_timeout_seconds!r}")
@@ -158,6 +167,14 @@ def parse_tools_access_config(data: dict[str, Any]) -> "ToolsConfig | None":
     allow_list = data.get("allow_list", [])
     deny_list = data.get("deny_list", [])
     approval_list = data.get("approval_list", [])
+
+    # Before the emptiness check below: `deny_list: ""` or `deny_list: {}` is
+    # falsy, and would otherwise read as "no policy" rather than as a mistake.
+    # A key with no value (YAML null) is left as it was: alone it declares no
+    # policy, and beside another list `ToolsConfig` refuses it.
+    for name, value in zip(_PATTERN_LISTS, (allow_list, deny_list, approval_list), strict=True):
+        if value is not None:
+            _require_pattern_list(name, value)
 
     if not (allow_list or deny_list or approval_list):
         return None

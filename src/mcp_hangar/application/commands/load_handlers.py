@@ -20,6 +20,7 @@ from ...domain.exceptions import (
 )
 from ...domain.model.mcp_server_config import parse_tools_access_config
 from ...domain.services import get_tool_access_resolver
+from ...domain.value_objects import ToolAccessPolicy
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
 from ...redactor import OutputRedactor
@@ -170,8 +171,8 @@ class LoadMcpServerHandler(CommandHandler):
         if self._log_buffers.attach(mcp_server_id, mcp_server):
             logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=mcp_server_id)
 
-    def _register_tool_policy(self, mcp_server_id: str, command: LoadMcpServerCommand) -> None:
-        """Register the loaded server's tool access policy, if it declared one.
+    def _build_tool_policy(self, command: LoadMcpServerCommand) -> ToolAccessPolicy | None:
+        """Build the loaded server's tool access policy, if it declared one.
 
         Built through the same parser the YAML surface uses rather than
         assembled here: two surfaces hand-building the same policy is how
@@ -179,18 +180,28 @@ class LoadMcpServerHandler(CommandHandler):
         that inside the config parser, and #685 is the same divergence one layer
         out. The old code here also only looked at allow/deny, so a load asking
         for approval alone built no policy at all.
+
+        Called before anything is installed or started. It used to run after
+        the server was already in the runtime store, so a policy that failed to
+        parse left the server loaded with no policy at all (#1718).
+
+        Raises:
+            ValueError: When a list is not a list of patterns.
         """
         tools_config = parse_tools_access_config(
             {
-                "allow_list": command.allow_tools or [],
-                "deny_list": command.deny_tools or [],
-                "approval_list": command.approval_tools or [],
+                "allow_list": [] if command.allow_tools is None else command.allow_tools,
+                "deny_list": [] if command.deny_tools is None else command.deny_tools,
+                "approval_list": [] if command.approval_tools is None else command.approval_tools,
             }
         )
-        if tools_config is None:
+        return None if tools_config is None else tools_config.to_policy()
+
+    def _register_tool_policy(self, mcp_server_id: str, policy: ToolAccessPolicy | None) -> None:
+        """Register a policy built by `_build_tool_policy`, if there is one."""
+        if policy is None:
             return
 
-        policy = tools_config.to_policy()
         get_tool_access_resolver().set_mcp_server_policy(mcp_server_id, policy)
         logger.debug(
             "hot_loaded_mcp_server_tool_policy_set",
@@ -259,6 +270,9 @@ class LoadMcpServerHandler(CommandHandler):
             refusal = self._refuse_gating_without_a_gate(command)
             if refusal is not None:
                 return refusal
+            # Raises on an invalid list, and so refuses the load, before
+            # anything is downloaded or started.
+            tool_policy = self._build_tool_policy(command)
 
             # Check both original name and sanitized version
             sanitized_name = _sanitize_mcp_server_id(command.name)
@@ -364,7 +378,7 @@ class LoadMcpServerHandler(CommandHandler):
             )
             self._runtime_store.add(mcp_server, metadata)
 
-            self._register_tool_policy(mcp_server_id, command)
+            self._register_tool_policy(mcp_server_id, tool_policy)
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 

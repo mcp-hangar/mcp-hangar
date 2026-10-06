@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated
 
@@ -45,6 +44,7 @@ import typer
 import yaml
 from rich.console import Console
 
+from ..config_path import DEFAULT_RULE_HELP, resolve_config_path
 from ..services.pinning import (
     Observation,
     find_drift,
@@ -61,7 +61,7 @@ def pin_command(
     ctx: typer.Context,
     config_path: Annotated[
         Path | None,
-        typer.Option("--config", "-c", help="Path to config.yaml. Defaults to $MCP_CONFIG, else ./config.yaml."),
+        typer.Option("--config", "-c", help="Path to config.yaml. " + DEFAULT_RULE_HELP),
     ] = None,
     mcp_server: Annotated[
         list[str] | None,
@@ -99,7 +99,7 @@ def pin_command(
         err_console.print("[red]--write and --check ask different questions; pass one.[/red]")
         raise typer.Exit(2)
 
-    path = Path(config_path or os.getenv("MCP_CONFIG") or "config.yaml")
+    path = resolve_config_path(config_path, getattr(ctx.obj, "config", None)).path
     if not path.is_file():
         err_console.print(f"[red]No such configuration file:[/red] {path}")
         raise typer.Exit(2)

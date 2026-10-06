@@ -129,10 +129,17 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     and this is today's rule again. With no list, or in ``egress``, the body has
     no ``catalogue`` field and nothing here changed.
 
+    A compliance (SIEM) file feed whose writes fail is reported in a
+    ``compliance_export`` field and does **not** fail readiness (#1701): a 503
+    drains the replica, and refusing calls because the audit feed is broken is
+    a mode Hangar does not offer. The field carries the format, the count and
+    the reason, not the path, since this endpoint answers without
+    authentication; ``hangar_health`` has the path.
+
     Extracted from the endpoint closure so the decision is unit-testable; the
     bug lived in a closure nothing could reach.
     """
-    from ..observability.health import get_event_store_durability_status
+    from ..observability.health import get_compliance_export_status, get_event_store_durability_status
     from .catalogue_readiness import catalogue_readiness
 
     ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
@@ -157,6 +164,9 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
         }
     if catalogue is not None:
         body["catalogue"] = catalogue
+    compliance = get_compliance_export_status()
+    if compliance is not None:
+        body["compliance_export"] = compliance.report(with_output=False)
     return body, (200 if event_store_ok and catalogue_ok else 503)
 
 
