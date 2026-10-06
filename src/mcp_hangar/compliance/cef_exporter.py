@@ -7,18 +7,17 @@ destination: file, stderr, or a callback function.
 This module is part of the compliance layer.
 """
 
-import logging
 import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+from mcp_hangar.observability.health import ComplianceExportStatus
 
 from .cef_formatter import format_audit_record
+from .file_output import FileOutput
 from .refusal import CALLER_ROLES, ROUTE_BACKEND, event_type_for_status, refusal_data
-
-logger = logging.getLogger(__name__)
 
 
 class CEFExporter:
@@ -49,6 +48,7 @@ class CEFExporter:
         """
         self._output_fn = output_fn
         self._output_path = Path(output_path) if output_path else None
+        self._file: FileOutput | None = FileOutput(self._output_path, "cef") if self._output_path else None
         self._lines_exported: int = 0
 
     def _emit(self, cef_line: str) -> None:
@@ -59,12 +59,8 @@ class CEFExporter:
         """
         if self._output_fn is not None:
             self._output_fn(cef_line)
-        elif self._output_path is not None:
-            try:
-                with self._output_path.open("a", encoding="utf-8") as f:
-                    f.write(cef_line + "\n")
-            except OSError as e:
-                logger.error("Failed to write CEF line to %s: %s", self._output_path, e)
+        elif self._file is not None:
+            if not self._file.append(cef_line):
                 return
         else:
             sys.stderr.write(cef_line + "\n")
@@ -194,3 +190,8 @@ class CEFExporter:
     def lines_exported(self) -> int:
         """Total number of CEF lines emitted."""
         return self._lines_exported
+
+    @property
+    def export_status(self) -> ComplianceExportStatus | None:
+        """The file feed's write health; None when the output is not a file."""
+        return self._file.status if self._file is not None else None

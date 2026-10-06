@@ -4,30 +4,40 @@
 #
 # Solo maintainer today (@mapyr). Team placeholders left as comments — uncomment
 # and replace owner once `@mcp-hangar/maintainers` and `@mcp-hangar/security` teams exist.
+#
+# Every pattern below must match at least one file
+# (tests/unit/test_codeowners_patterns_match_files.py). ADRs live in
+# mcp-hangar/docs, not here.
 
 # Default: maintainer reviews everything not matched below
-*                                       @mapyr
+*                                                   @mapyr
 
-# Security-sensitive runtime code
-/src/mcp_hangar/server/security/        @mapyr  # @mcp-hangar/security
-/src/mcp_hangar/server/api/middleware*  @mapyr  # @mcp-hangar/security
-/src/mcp_hangar/auth/                   @mapyr  # @mcp-hangar/security
-
-# Architecture decision records — immutable after Accepted
-/docs/adr/                              @mapyr  # @mcp-hangar/maintainers
-/docs/adr/AGENTS.md                     @mapyr  # @mcp-hangar/maintainers
+# Security-sensitive runtime code: identity, authorization, enforcement gates
+/src/mcp_hangar/auth/                               @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/server/api/middleware*              @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/fastmcp_server/asgi.py              @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/server/session_guard.py             @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/domain/security/                    @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/domain/policies/                    @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/domain/services/digest_computation.py  @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/domain/services/digest_validator.py    @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/server/tools/batch/executor.py      @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/server/config.py                    @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/approvals/                          @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/compliance/                         @mapyr  # @mcp-hangar/security
 
 # Release machinery
-/.github/workflows/release.yml          @mapyr  # @mcp-hangar/maintainers
-/.github/workflows/version-bump.yml     @mapyr  # @mcp-hangar/maintainers
-/pyproject.toml                         @mapyr  # @mcp-hangar/maintainers
-/CHANGELOG.md                           @mapyr  # @mcp-hangar/maintainers
+/.github/workflows/release.yml                      @mapyr  # @mcp-hangar/maintainers
+/pyproject.toml                                     @mapyr  # @mcp-hangar/maintainers
+/CHANGELOG.md                                       @mapyr  # @mcp-hangar/maintainers
+/changelog.d/                                       @mapyr  # @mcp-hangar/maintainers
+/upgrade.d/                                         @mapyr  # @mcp-hangar/maintainers
 
 # Repo governance
-/.github/CODEOWNERS                     @mapyr  # @mcp-hangar/maintainers
-/.github/workflows/                     @mapyr  # @mcp-hangar/maintainers
-/AGENTS.md                              @mapyr  # @mcp-hangar/maintainers
-/docs/development/GIT_FLOW.md           @mapyr  # @mcp-hangar/maintainers
+/.github/CODEOWNERS                                 @mapyr  # @mcp-hangar/maintainers
+/.github/workflows/                                 @mapyr  # @mcp-hangar/maintainers
+/.github/labels.yml                                 @mapyr  # @mcp-hangar/maintainers
+/AGENTS.md                                          @mapyr  # @mcp-hangar/maintainers
 
 # Licensing
-/LICENSE                                @mapyr
+/LICENSE                                            @mapyr
