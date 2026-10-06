@@ -2163,6 +2163,44 @@ class McpServer(AggregateRoot):
                 error_type=bounded_error_type(type(exc).__qualname__),
             )
 
+    def recheck_catalogue(self) -> bool:
+        """Re-list a READY server's tools, and project them if they changed (#1693). Never starts it.
+
+        For the pin re-check worker: an upstream can change a tool without
+        sending ``tools/list_changed``, and the digest gate compares a pin with
+        the catalogue, not with the upstream. Copy the client under the lock,
+        list outside it, swap the catalogue under it only if the server is
+        still READY on that client -- the three phases ``health_check`` uses.
+        A listing that fails keeps the catalogue it had.
+
+        Returns:
+            Whether the catalogue changed and was announced.
+        """
+        with self._lock:
+            if self._state != McpServerState.READY or self._client is None:
+                return False
+            client = self._client
+        try:
+            response = client.call("tools/list", {}, timeout=5.0)
+        except (OSError, TimeoutError) as exc:
+            logger.warning(
+                "tool_catalogue_recheck_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+            return False
+        if "result" not in response:
+            return False
+        with self._lock:
+            if self._state != McpServerState.READY or self._client is not client:
+                return False
+            before = self._tools.to_dict()
+            self._tools.update_from_list(response.get("result", {}).get("tools", []))
+            changed = self._tools.to_dict() != before
+        if changed:
+            self._announce_catalogue()
+        return changed
+
     def _refresh_tools(self) -> bool:
         """Refresh tool catalog from mcp_server.
 
