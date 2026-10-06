@@ -338,6 +338,16 @@ class ToolProjectionRegistry:
                     return tenant_pin
             return self._config_pins_all_tenants.get(key)
 
+    def config_pins(self) -> list[tuple[str, str, str | None, ToolDigest]]:
+        """Every pin as ``(scope id, tool, tenant id or None for all tenants, digest)`` (#1693)."""
+        with self._lock:
+            found: list[tuple[str, str, str | None, ToolDigest]] = [
+                (scope, tool, None, digest) for (scope, tool), digest in self._config_pins_all_tenants.items()
+            ]
+            for (scope, tool), by_tenant in self._config_pins.items():
+                found.extend((scope, tool, tenant_id, digest) for tenant_id, digest in by_tenant.items())
+        return found
+
     def digest_enforcement(self, mcp_server: str) -> DigestEnforcement:
         """Return the digest-enforcement mode for *mcp_server* (block if unset)."""
         with self._lock:

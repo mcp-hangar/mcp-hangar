@@ -24,7 +24,7 @@ include_external_packages = False
 # `domain.contracts.launcher -> http_client` -- a port importing its own
 # adapter. Those are the leaks the contract exists to make visible.
 #
-# Component packages (auth, approvals, compliance, integrations, bootstrap,
+# Component packages (auth, approvals, compliance, bootstrap,
 # observability) carry their own internal layering and are deliberately out of
 # scope here; exhaustive = False keeps them unconstrained rather than
 # pretending this contract governs them.

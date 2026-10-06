@@ -52,14 +52,15 @@ class TestTheBlocksThatHoldSecrets:
 
         assert config["persistence"]["postgresql"]["password"] == "s3cret"
 
-    def test_a_langfuse_key(self, config_file, monkeypatch) -> None:
-        # Documented as interpolating in reference/configuration.md, and it did not.
-        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-live")
-        path = config_file({"mcp_servers": {}, "observability": {"langfuse": {"secret_key": "${LANGFUSE_SECRET_KEY}"}}})
+    def test_an_otlp_endpoint(self, config_file, monkeypatch) -> None:
+        # Was a Langfuse key, documented as interpolating and it did not; that
+        # block is gone (#1683), and `observability` is still a section like any other.
+        monkeypatch.setenv("OTLP_ENDPOINT", "http://collector:4317")
+        path = config_file({"mcp_servers": {}, "observability": {"tracing": {"otlp_endpoint": "${OTLP_ENDPOINT}"}}})
 
         config = load_config_from_file(path)
 
-        assert config["observability"]["langfuse"]["secret_key"] == "sk-live"
+        assert config["observability"]["tracing"]["otlp_endpoint"] == "http://collector:4317"
 
     def test_an_approval_adapter_signing_secret(self, config_file, monkeypatch) -> None:
         monkeypatch.setenv("SLACK_SIGNING_SECRET", "whsec")

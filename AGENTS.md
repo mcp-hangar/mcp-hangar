@@ -137,7 +137,6 @@ mcp-hangar/
 │   │   └── bootstrap.py           # Auth component bootstrap
 │   ├── approvals/                 # Approval gate workflow
 │   ├── compliance/                # Compliance reporting
-│   ├── integrations/              # Third-party adapters (Langfuse, etc.)
 │   ├── bootstrap/runtime.py       # Composition root (protocols + config)
 │   └── facade.py                  # High-level API hiding complexity
 │
@@ -243,7 +242,7 @@ For ADR work specifically, see `docs/internal/ADR_AGENTS.md` — agents may draf
 
 ## Optional Modules
 
-Auth, compliance, approvals, and integrations live under `src/mcp_hangar/` as first-class packages. Bootstrap uses try/except ImportError for graceful degradation if any module is removed or broken.
+Auth, compliance, and approvals live under `src/mcp_hangar/` as first-class packages. Bootstrap uses try/except ImportError for graceful degradation if any module is removed or broken.
 
 - Auth module has its own commands/queries/handlers/infrastructure
 

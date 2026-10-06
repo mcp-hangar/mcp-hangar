@@ -216,10 +216,10 @@ class TestApprovalGateServiceCheck:
 
         captured_id = None
 
-        async def capturing_register(approval_id):
+        async def capturing_register(approval_id, **kwargs):
             nonlocal captured_id
             captured_id = approval_id
-            await original_register(approval_id)
+            await original_register(approval_id, **kwargs)
 
         hold_registry.register = capturing_register
 
@@ -255,10 +255,10 @@ class TestApprovalGateServiceCheck:
         captured_id = None
         original_register = hold_registry.register
 
-        async def capturing_register(approval_id):
+        async def capturing_register(approval_id, **kwargs):
             nonlocal captured_id
             captured_id = approval_id
-            await original_register(approval_id)
+            await original_register(approval_id, **kwargs)
 
         hold_registry.register = capturing_register
 

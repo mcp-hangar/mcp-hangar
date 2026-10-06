@@ -84,7 +84,7 @@ with t.get_tracer("case").start_as_current_span("hangar-span"):
     t.inject_trace_context(carrier)
     ids = [t.get_current_trace_id(), t.get_current_span_id()]
 extracted = trace.get_current_span(t.extract_trace_context(carrier)).get_span_context()
-shutdown_observability(None)
+shutdown_observability()
 with trace.get_tracer("host").start_as_current_span("after-hangar-shutdown"):
     pass
 emit(
@@ -274,7 +274,7 @@ assert config.tracing.console_export
 assert init_tracing(config.tracing)
 with t.get_tracer("case").start_as_current_span("console-span"):
     pass
-shutdown_observability(None)
+shutdown_observability()
 """,
         MCP_TRACING_CONSOLE="true",
     )

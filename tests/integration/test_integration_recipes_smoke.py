@@ -49,6 +49,12 @@ class TestLangfuseRecipe:
         assert "LANGFUSE_SECRET_KEY" in content, "Langfuse README must document secret key config"
         assert "LANGFUSE_PUBLIC_KEY" in content, "Langfuse README must document public key config"
 
+    def test_readme_configures_the_otlp_exporter_not_the_removed_adapter(self) -> None:
+        content = pathlib.Path("examples/langfuse/README.md").read_text()
+        assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" in content
+        assert "/api/public/otel/v1/traces" in content
+        assert "  langfuse:" not in content, "the observability.langfuse block was removed (#1683)"
+
     def test_readme_warns_about_secrets(self) -> None:
         content = pathlib.Path("examples/langfuse/README.md").read_text()
         assert "secret" in content.lower(), "Langfuse README must warn about secret handling"

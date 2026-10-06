@@ -2,8 +2,7 @@
 
 This module handles initialization of:
 - OpenTelemetry tracing (distributed tracing)
-- Langfuse integration (LLM-specific observability)
-- Observability adapters for the application
+- OTLP audit log export
 
 Configuration via environment variables:
     MCP_TRACING_ENABLED: Enable OpenTelemetry (default: true)
@@ -24,14 +23,10 @@ Configuration via environment variables:
         providers Hangar builds, never to one registered before it
     MCP_LOG_FIELD_LENGTH_LIMIT, MCP_EVENT_TEXT_LENGTH_LIMIT: see logging_config
         and domain.events.base (defaults: 2048 and 4096)
-    MCP_LANGFUSE_ENABLED: Enable Langfuse (default: false)
-    LANGFUSE_PUBLIC_KEY: Langfuse public key
-    LANGFUSE_SECRET_KEY: Langfuse secret key
-    LANGFUSE_HOST: Langfuse host (default: https://cloud.langfuse.com)
-    MCP_LANGFUSE_SAMPLE_RATE: Sample rate 0.0-1.0 (default: 1.0)
-    MCP_LANGFUSE_SCRUB_INPUTS, MCP_LANGFUSE_SCRUB_OUTPUTS: Send only the keys of
-        tool inputs and outputs, never their values (default: true). Setting
-        one to false is the opt-in to shipping raw payloads to Langfuse
+    Langfuse takes these spans over OTLP: point OTEL_EXPORTER_OTLP_TRACES_*
+        at its OTLP endpoint. The Langfuse adapter and its MCP_LANGFUSE_* /
+        HANGAR_LANGFUSE_* settings were removed (#1683); see
+        _refuse_or_warn_on_removed_langfuse_settings
 
 Or via config.yaml:
     observability:
@@ -42,14 +37,6 @@ Or via config.yaml:
         caller_ids: false  # MCP_TRACING_CALLER_IDS wins over this
       audit:
         enabled: true  # MCP_AUDIT_EXPORT_ENABLED wins over this
-      langfuse:
-        enabled: true
-        public_key: ${LANGFUSE_PUBLIC_KEY}
-        secret_key: ${LANGFUSE_SECRET_KEY}
-        host: https://cloud.langfuse.com
-        sample_rate: 1.0
-        scrub_inputs: true
-        scrub_outputs: true
 """
 
 import os
@@ -57,14 +44,13 @@ import platform
 from dataclasses import dataclass
 from typing import Any
 
-from ...application.ports.observability import SCRUB_PAYLOADS_BY_DEFAULT, NullObservabilityAdapter, ObservabilityPort
 from ...domain.contracts.l7_verdict_observer import set_default_l7_verdict_observer
 from ...domain.contracts.metrics_publisher import set_default_metrics_publisher
+from ...domain.exceptions import ConfigurationError
 from ...infrastructure.metrics_publisher import PrometheusMetricsPublisher
 from ...infrastructure.observability.l7_verdicts import ContextL7VerdictObserver
 from ...infrastructure.observability.otlp_audit_exporter import init_audit_log_export, shutdown_audit_log_export
 from ...logging_config import get_logger
-from .components import create_observability_adapter
 
 logger = get_logger(__name__)
 
@@ -86,24 +72,10 @@ class TracingConfig:
 
 
 @dataclass
-class LangfuseBootstrapConfig:
-    """Configuration for Langfuse integration."""
-
-    enabled: bool = False
-    public_key: str = ""
-    secret_key: str = ""
-    host: str = "https://cloud.langfuse.com"
-    sample_rate: float = 1.0
-    scrub_inputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
-    scrub_outputs: bool = SCRUB_PAYLOADS_BY_DEFAULT
-
-
-@dataclass
 class ObservabilityConfig:
     """Combined observability configuration."""
 
     tracing: TracingConfig
-    langfuse: LangfuseBootstrapConfig
     audit_otlp_endpoint: str | None = None
     """Where OTLP audit records go; None keeps audit export off."""
     audit_export_enabled: bool = True
@@ -135,22 +107,6 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         caller_ids=_get_bool_env("MCP_TRACING_CALLER_IDS", _file_bool(tracing_dict.get("caller_ids", False))),
     )
 
-    # Langfuse config
-    langfuse_dict = obs_config.get("langfuse", {})
-    langfuse = LangfuseBootstrapConfig(
-        enabled=_get_bool_env("MCP_LANGFUSE_ENABLED", langfuse_dict.get("enabled", False)),
-        public_key=os.getenv("LANGFUSE_PUBLIC_KEY", _expand_env(langfuse_dict.get("public_key", ""))),
-        secret_key=os.getenv("LANGFUSE_SECRET_KEY", _expand_env(langfuse_dict.get("secret_key", ""))),
-        host=os.getenv("LANGFUSE_HOST", langfuse_dict.get("host", "https://cloud.langfuse.com")),
-        sample_rate=float(os.getenv("MCP_LANGFUSE_SAMPLE_RATE", str(langfuse_dict.get("sample_rate", 1.0)))),
-        scrub_inputs=_get_bool_env(
-            "MCP_LANGFUSE_SCRUB_INPUTS", langfuse_dict.get("scrub_inputs", SCRUB_PAYLOADS_BY_DEFAULT)
-        ),
-        scrub_outputs=_get_bool_env(
-            "MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", SCRUB_PAYLOADS_BY_DEFAULT)
-        ),
-    )
-
     # Audit records go to the tracing endpoint, but only to one set explicitly,
     # in the env or the file (#1289): `otlp_endpoint` defaults to localhost, and
     # nobody chose that. Not gated on `tracing.enabled`: audit is its own signal,
@@ -164,7 +120,6 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
 
     return ObservabilityConfig(
         tracing=tracing,
-        langfuse=langfuse,
         audit_otlp_endpoint=audit_otlp_endpoint,
         audit_export_enabled=audit_enabled,
     )
@@ -185,14 +140,55 @@ def _get_bool_env(key: str, default: bool) -> bool:
     return value.lower() in ("true", "1", "yes")
 
 
-def _expand_env(value: str) -> str:
-    """Expand ${VAR} patterns in string."""
-    if not value:
-        return value
-    if value.startswith("${") and value.endswith("}"):
-        env_var = value[2:-1]
-        return os.getenv(env_var, "")
-    return value
+# The Langfuse adapter's settings, removed with it (#1683). It was built and never
+# called after 2.22.0, so none of them did anything; Langfuse takes Hangar's spans
+# over OTLP instead. LANGFUSE_PUBLIC_KEY / _SECRET_KEY / _HOST are not here: they
+# are the Langfuse SDK's own variables, and a co-located application may set them.
+_REMOVED_LANGFUSE_SCRUB_ENV = (
+    "MCP_LANGFUSE_SCRUB_INPUTS",
+    "MCP_LANGFUSE_SCRUB_OUTPUTS",
+    "HANGAR_LANGFUSE_SCRUB_INPUTS",
+    "HANGAR_LANGFUSE_SCRUB_OUTPUTS",
+)
+_REMOVED_LANGFUSE_ENV = (
+    "MCP_LANGFUSE_ENABLED",
+    "MCP_LANGFUSE_SAMPLE_RATE",
+    "HANGAR_LANGFUSE_ENABLED",
+    "HANGAR_LANGFUSE_SAMPLE_RATE",
+)
+LANGFUSE_OVER_OTLP = (
+    "Langfuse takes Hangar's spans over OTLP: set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT to its OTLP "
+    "traces endpoint, OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and the Basic auth header in "
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS (examples/langfuse/README.md)"
+)
+
+
+def _refuse_or_warn_on_removed_langfuse_settings(config: dict[str, Any]) -> None:
+    """Refuse a removed Langfuse scrub setting; warn about the other removed ones.
+
+    A scrub setting is refused whatever its value: it asked Hangar to keep
+    payloads away from a third party, and a setting that silently stops
+    applying is the failure #1655 was about. Hangar's spans carry no tool
+    arguments or results (#1276), so there is nothing left for it to scrub;
+    redacting what spans do carry belongs in the OpenTelemetry pipeline. The
+    rest of an `observability.langfuse` block is named by the config schema.
+    """
+    langfuse = (config.get("observability") or {}).get("langfuse")
+    scrub = [key for key in _REMOVED_LANGFUSE_SCRUB_ENV if key in os.environ]
+    if isinstance(langfuse, dict):
+        scrub += [f"observability.langfuse.{key}" for key in ("scrub_inputs", "scrub_outputs") if key in langfuse]
+    if scrub:
+        raise ConfigurationError(
+            f"{', '.join(scrub)}: the Langfuse adapter and its scrub settings were removed (#1683), so this "
+            "no longer applies. Hangar's spans carry no tool arguments or results; to redact what they do "
+            "carry, use an OpenTelemetry Collector processor (attributes or redaction) in front of Langfuse. "
+            f"{LANGFUSE_OVER_OTLP}. Delete the setting to start.",
+            details={"settings": scrub},
+        )
+
+    stale = [key for key in _REMOVED_LANGFUSE_ENV if key in os.environ]
+    if stale:
+        logger.warning("langfuse_settings_removed", settings=stale, replacement=LANGFUSE_OVER_OTLP)
 
 
 def init_tracing(config: TracingConfig) -> bool:
@@ -260,52 +256,6 @@ def _install_startup_observer() -> None:
         logger.warning("startup_observer_install_failed", error=str(e))
 
 
-def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
-    """Initialize Langfuse observability adapter.
-
-    Args:
-        config: Langfuse configuration.
-
-    Returns:
-        ObservabilityPort implementation (LangfuseObservabilityAdapter or NullObservabilityAdapter).
-    """
-    if not config.enabled:
-        logger.info("langfuse_disabled_by_config")
-        return NullObservabilityAdapter()
-
-    if not config.public_key or not config.secret_key:
-        logger.warning(
-            "langfuse_disabled_missing_credentials",
-            has_public_key=bool(config.public_key),
-            has_secret_key=bool(config.secret_key),
-        )
-        return NullObservabilityAdapter()
-
-    try:
-        adapter = create_observability_adapter(config)
-        if adapter is None:
-            raise ImportError
-        logger.info(
-            "langfuse_initialized",
-            host=config.host,
-            sample_rate=config.sample_rate,
-        )
-        return adapter
-
-    except ImportError:
-        logger.info(
-            "langfuse_disabled_not_installed",
-            hint="Install with: pip install mcp-hangar[observability]",
-        )
-        return NullObservabilityAdapter()
-    except ValueError as e:
-        logger.warning("langfuse_config_invalid", error=str(e))
-        return NullObservabilityAdapter()
-    except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse init failure must not crash application
-        logger.warning("langfuse_initialization_failed", error=str(e))
-        return NullObservabilityAdapter()
-
-
 def init_l7_verdict_observer() -> None:
     """Connect the aggregate's L7 verdict port to the adapter the batch executor reads (#1295).
 
@@ -347,15 +297,21 @@ def init_metrics_publisher() -> None:
     PROCESS_START_TIME.set(time.time())
 
 
-def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, ObservabilityPort]:
+def init_observability(config: dict[str, Any]) -> ObservabilityConfig:
     """Initialize all observability components.
 
     Args:
         config: Full application configuration dict.
 
     Returns:
-        Tuple of (ObservabilityConfig, ObservabilityPort adapter).
+        The parsed ObservabilityConfig.
+
+    Raises:
+        ConfigurationError: If a removed Langfuse scrub setting is present.
     """
+    # First, so a refused config has exported nothing.
+    _refuse_or_warn_on_removed_langfuse_settings(config)
+
     obs_config = _parse_observability_config(config)
 
     # Read here once, not per call: the executor asks the tracing module (#1580).
@@ -375,34 +331,17 @@ def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, Obs
         logger.info("audit_log_export_disabled_by_config")
     init_audit_log_export(obs_config.audit_otlp_endpoint, obs_config.tracing.service_name)
 
-    # Initialize Langfuse
-    observability_adapter = init_langfuse(obs_config.langfuse)
-
     logger.info(
         "observability_initialized",
         tracing_enabled=tracing_enabled,
         audit_log_export=obs_config.audit_otlp_endpoint is not None,
-        langfuse_enabled=obs_config.langfuse.enabled
-        and not isinstance(observability_adapter, NullObservabilityAdapter),
     )
 
-    return obs_config, observability_adapter
+    return obs_config
 
 
-def shutdown_observability(adapter: ObservabilityPort | None) -> None:
-    """Shutdown observability components gracefully.
-
-    Args:
-        adapter: ObservabilityPort adapter to shutdown.
-    """
-    # Shutdown Langfuse adapter
-    if adapter is not None:
-        try:
-            adapter.shutdown()
-            logger.debug("langfuse_shutdown_complete")
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse shutdown must not crash application
-            logger.warning("langfuse_shutdown_error", error=str(e))
-
+def shutdown_observability() -> None:
+    """Shutdown observability components gracefully."""
     # Shutdown OpenTelemetry tracing. shutdown_tracing() logs its own outcome:
     # it shuts down only a provider Hangar registered, within a bound.
     try:

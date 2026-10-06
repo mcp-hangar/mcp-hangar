@@ -98,7 +98,7 @@ class TestContractIsIntact:
             )
 
     def test_component_packages_are_out_of_scope_deliberately(self, hexagon):
-        """auth/approvals/compliance/integrations/bootstrap carry their own internal
+        """auth/approvals/compliance/bootstrap carry their own internal
         layering; exhaustive = False says so rather than pretending otherwise."""
         assert hexagon.get("exhaustive", "").strip().lower() == "false"
 

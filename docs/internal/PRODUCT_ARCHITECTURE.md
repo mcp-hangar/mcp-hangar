@@ -74,7 +74,6 @@ license boundary.
 | Tool Access Policies                               | `src/mcp_hangar/auth/`                        | Governance feature, commercial differentiator                   |
 | Event sourcing persistence (SQLite/Postgres)       | `src/mcp_hangar/infrastructure/persistence/`  | Enterprise durability, commercial differentiator                |
 | Compliance export (CEF/LEEF/JSON-lines/syslog)     | `src/mcp_hangar/compliance/`                  | Enterprise value                                                |
-| Langfuse integration                               | `src/mcp_hangar/integrations/`                | Partner integration, commercial value                           |
 
 ### Architectural boundary (historical — the enterprise/core split is gone)
 
@@ -101,8 +100,8 @@ shared kernel    logging_config : lock_hierarchy : redactor : errors : protocol 
 
 A layer may import anything below it and nothing above. The contract carries a **debt
 ledger** of edges that exist today and should not; it is capped so it can only shrink
-(33 → 9 so far). Component packages (`auth`, `approvals`, `compliance`, `integrations`,
-`bootstrap`, `observability`) carry their own internal layering and are deliberately out of
+(33 → 9 so far). Component packages (`auth`, `approvals`, `compliance`, `bootstrap`,
+`observability`) carry their own internal layering and are deliberately out of
 scope (`exhaustive = False`).
 
 Note this gate polices *layering*, not the old core/enterprise split — that distinction no
@@ -162,7 +161,7 @@ The `src/mcp_hangar/` package absorbed former enterprise features before the v1.
 - JWT/OIDC integration (Keycloak, Entra ID, Okta)
 - Tool Access Policies (glob-pattern allow/deny, 3-level merge)
 - Event sourcing persistence (SQLite, Postgres)
-- Langfuse LLM observability integration
+- Langfuse over OTLP (the dedicated adapter was removed, #1683)
 - Tool schema drift detection
 - Behavioral reports (per-MCP server)
 - Config export/backup
@@ -411,7 +410,6 @@ mcp-hangar/
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
 │   ├── approvals/             # Approval gate workflow
 │   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines, syslog)
-│   ├── integrations/          # Langfuse adapter, future partner integrations
 │   ├── observability/         # Tracing, metrics, audit pipeline
 │   └── tasks_wire.py          # Vendored SEP-2663 task wire (ADR-015)
 │
