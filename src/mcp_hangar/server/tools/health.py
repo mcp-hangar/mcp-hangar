@@ -11,6 +11,7 @@ from mcp_hangar._sdk_compat import FastMCP
 from ... import metrics as m
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ...logging_config import get_logger
+from ...observability.health import get_compliance_export_status
 from ..catalogue_readiness import catalogue_detail
 from ..context import get_context
 from ..validation import not_rate_limited, tool_error_hook, tool_error_mapper
@@ -201,6 +202,13 @@ def hangar_health() -> dict:
     catalogue = catalogue_detail(ctx.repository)
     if catalogue is not None:
         health["catalogue"] = catalogue
+    # The compliance (SIEM) file feed: a failing write makes this replica
+    # degraded, and the calls it serves go unexported (#1701).
+    compliance = get_compliance_export_status()
+    if compliance is not None:
+        health["compliance_export"] = compliance.report(with_output=True)
+        if compliance.failing:
+            health["status"] = "degraded"
     return health
 
 

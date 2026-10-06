@@ -19,6 +19,7 @@ import yaml
 from rich.console import Console
 
 from ....server.config_schema import validate_config
+from ..config_path import DEFAULT_RULE_HELP, resolve_config_path
 
 app = typer.Typer(name="config", help="Inspect and validate configuration")
 
@@ -27,9 +28,10 @@ console = Console()
 
 @app.command(name="check")
 def check_command(
+    ctx: typer.Context,
     config_path: Annotated[
         Path,
-        typer.Argument(help="Path to config.yaml. Defaults to $MCP_CONFIG, else ./config.yaml."),
+        typer.Argument(help="Path to config.yaml. " + DEFAULT_RULE_HELP),
     ] = None,  # type: ignore[assignment]
 ) -> None:
     """Report configuration keys that nothing reads.
@@ -37,9 +39,8 @@ def check_command(
     Exit code 0 = every key is known, 1 = at least one is not, 2 = the file is
     missing or is not YAML.
     """
-    import os
-
-    path = Path(config_path or os.getenv("MCP_CONFIG") or "config.yaml")
+    # The positional path, then the global --config (#1682), then the shared default.
+    path = resolve_config_path(config_path, getattr(ctx.obj, "config", None)).path
 
     if not path.is_file():
         console.print(f"[red]No such configuration file:[/red] {path}")
