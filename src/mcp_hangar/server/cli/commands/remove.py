@@ -12,6 +12,7 @@ import questionary
 import typer
 from rich.console import Console
 
+from ..config_path import resolve_config_path
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
 
@@ -134,7 +135,7 @@ def remove_command(
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
 
     # Determine config path
-    config_path = global_opts.config or (Path.home() / ".config" / "mcp-hangar" / "config.yaml")
+    config_path = resolve_config_path(global_opts.config).path
 
     # Check if mcp_server exists
     configured = _get_configured_mcp_servers(config_path)

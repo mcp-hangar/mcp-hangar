@@ -15,6 +15,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from ..config_path import resolve_config_path
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
 from ..services import ConfigFileManager, McpServerDefinition, get_all_mcp_servers, get_mcp_server, search_mcp_servers
@@ -149,7 +150,7 @@ def add_command(
         mcp-hangar add filesystem -y
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
-    config_mgr = ConfigFileManager(global_opts.config)
+    config_mgr = ConfigFileManager(resolve_config_path(global_opts.config).path)
 
     # Search mode
     if search:

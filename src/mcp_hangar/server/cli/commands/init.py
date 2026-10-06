@@ -26,6 +26,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..config_path import resolve_config_path
 from ..errors import CLIError, PermissionError
 from ..main import GlobalOptions
 from ..services import (
@@ -428,7 +429,9 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
 
     # Initialize managers
-    effective_config_path = config_path or global_opts.config or ConfigFileManager.DEFAULT_CONFIG_PATH
+    # The file every other command reads (#1657). Absolute, because it is
+    # written into the client's config, and the client starts Hangar elsewhere.
+    effective_config_path = resolve_config_path(config_path, global_opts.config).path.absolute()
     config_mgr = ConfigFileManager(effective_config_path)
 
     # Step 1: Detect available runtimes
