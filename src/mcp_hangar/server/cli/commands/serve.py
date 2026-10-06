@@ -11,7 +11,8 @@ from typing import Annotated
 
 import typer
 
-from ..config_path import DEFAULT_RULE_HELP, resolve_config_path
+from ..config_path import DEFAULT_RULE_HELP, MissingConfigFileError, require_config_file, resolve_config_path
+from ..errors import CLIError
 
 
 def serve_command(
@@ -100,7 +101,12 @@ def serve_command(
     # `serve --config X` before `mcp-hangar --config X`, then the shared
     # default. The result is always a path: bootstrap watches the file it is
     # given, and with none every reload failed (#1657).
-    resolved_config = resolve_config_path(config, getattr(global_opts, "config", None)).path
+    resolved = resolve_config_path(config, getattr(global_opts, "config", None))
+    # Before anything starts: a missing file is fatal, never a demo config (#1650).
+    try:
+        resolved_config = require_config_file(resolved)
+    except MissingConfigFileError as e:
+        raise CLIError(message=e.message, exit_code=1) from e
 
     # Build CLIConfig for backward compatibility with existing server code
     from ..cli_compat import CLIConfig
@@ -119,6 +125,7 @@ def serve_command(
         log_level=log_level.upper(),
         json_logs=json_logs,
         unsafe_no_auth=unsafe_no_auth,
+        config_source=resolved.source,
     )
 
     # Import and run the server

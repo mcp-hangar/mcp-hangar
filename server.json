@@ -21,7 +21,7 @@
       "environmentVariables": [
         {
           "name": "MCP_CONFIG",
-          "description": "Path to config.yaml declaring the upstream MCP servers and policy. Without it Hangar starts on a demo config that serves no real upstream.",
+          "description": "Path to config.yaml declaring the upstream MCP servers and policy. Without it Hangar reads ./config.yaml, else ~/.config/mcp-hangar/config.yaml (written by `mcp-hangar init`), and refuses to start if neither exists.",
           "format": "filepath",
           "isRequired": false
         }

@@ -61,12 +61,15 @@ class TestReadingTheConfigurationDoesNotBuildTheRuntime:
 
         assert fresh_runtime._runtime is not None
 
-    def test_the_default_configuration_does_not_build_it_either(self, fresh_runtime, tmp_path) -> None:
-        # The no-config-file path declares a subprocess server of its own, and
-        # would have had exactly the same effect.
+    def test_a_missing_file_does_not_build_it_either(self, fresh_runtime, tmp_path) -> None:
+        # There used to be a built-in default configuration here, declaring a
+        # subprocess server of its own. A missing file is now refused (#1650),
+        # and refusing must not build the runtime on the way out.
+        from mcp_hangar.server.cli.config_path import MissingConfigFileError
         from mcp_hangar.server.config import load_configuration
 
-        load_configuration(str(tmp_path / "does-not-exist.yaml"), load_servers=False)
+        with pytest.raises(MissingConfigFileError):
+            load_configuration(str(tmp_path / "does-not-exist.yaml"), load_servers=False)
 
         assert fresh_runtime._runtime is None
 

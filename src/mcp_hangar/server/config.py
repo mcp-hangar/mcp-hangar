@@ -1938,10 +1938,12 @@ class ServerConfigLoader(IConfigLoader):
 
 
 def load_configuration(config_path: str | None = None, *, load_servers: bool = True) -> dict[str, Any]:
-    """Load mcp_server configuration from file or use defaults.
+    """Load the configuration file, or refuse.
 
     Args:
-        config_path: Where to read from. Defaults to `MCP_CONFIG`.
+        config_path: Where to read from. Without one, the CLI's order decides
+            (`resolve_config_path`): `MCP_CONFIG`, then `./config.yaml`, then
+            `~/.config/mcp-hangar/config.yaml`.
         load_servers: Whether to build the declared servers as well as read the
             file. **Bootstrap passes False**, and the reason is not tidiness:
             building a server reaches for the runtime, and the runtime is a
@@ -1955,26 +1957,25 @@ def load_configuration(config_path: str | None = None, *, load_servers: bool = T
 
     Returns:
         Full configuration dictionary
+
+    Raises:
+        MissingConfigFileError: If the file is not a readable regular file.
+            There is no fallback: a missing file used to boot a built-in demo
+            configuration with every `hangar_*` tool and none of the operator's
+            pins, policies or auth, so a typo in `--config` served an
+            ungoverned gateway (#1650).
     """
+    # Here, not at the top: the `cli` package imports the command modules.
+    from .cli.config_path import ConfigPathSource, ResolvedConfigPath, require_config_file, resolve_config_path
+
     if config_path is None:
-        config_path = os.getenv("MCP_CONFIG", "config.yaml")
+        resolved = resolve_config_path()
+    else:
+        resolved = ResolvedConfigPath(Path(config_path), ConfigPathSource.ARGUMENT)
+    source = str(require_config_file(resolved))
 
-    if Path(config_path).exists():
-        logger.info("loading_config_from_file", config_path=config_path)
-        return apply_configuration(_read_config_file(config_path), source=config_path, load_servers=load_servers)
-
-    logger.info("config_not_found_using_default", config_path=config_path)
-    default_config = {
-        "math_subprocess": {
-            "mode": "subprocess",
-            "command": ["python", "-m", "examples.provider_math.server"],
-            # Explicit even though the subprocess launcher now defaults to
-            # it: this config is what a reader copies as a starting point.
-            "env": {"MCP_TRANSPORT": "stdio"},
-            "idle_ttl_s": 180,
-        },
-    }
-    return apply_configuration({"mcp_servers": default_config}, source="the default config", load_servers=load_servers)
+    logger.info("loading_config_from_file", config_path=source)
+    return apply_configuration(_read_config_file(source), source=source, load_servers=load_servers)
 
 
 def apply_configuration(config: Any, *, source: str, load_servers: bool = True) -> dict[str, Any]:

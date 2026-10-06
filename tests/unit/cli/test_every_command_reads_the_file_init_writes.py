@@ -206,10 +206,14 @@ class TestTheGlobalConfigFlag:
     def test_it_outranks_mcp_config_for_serve(self, runner, work, monkeypatch):
         # `serve --config` used to read MCP_CONFIG itself, so the environment
         # beat a global flag the user had typed.
-        monkeypatch.setenv("MCP_CONFIG", "/from/env.yaml")
+        # Both files exist: `serve` refuses a path that does not (#1650).
+        from_env, from_flag = work / "env.yaml", work / "flag.yaml"
+        for named in (from_env, from_flag):
+            named.write_text("mcp_servers: {}\n", encoding="utf-8")
+        monkeypatch.setenv("MCP_CONFIG", str(from_env))
 
-        assert _served_config(runner, ["--config", "/from/flag.yaml", "serve"]) == "/from/flag.yaml"
-        assert _served_config(runner, ["serve"]) == "/from/env.yaml"
+        assert _served_config(runner, ["--config", str(from_flag), "serve"]) == str(from_flag)
+        assert _served_config(runner, ["serve"]) == str(from_env)
 
     def test_status_does_not_fall_back_past_a_named_file(self, runner, work, tmp_path):
         _write(user_config_path(), {"mcp_servers": {"other": {"mode": "subprocess"}}})
