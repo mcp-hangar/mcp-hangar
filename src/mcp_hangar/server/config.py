@@ -733,6 +733,7 @@ def _load_group_members(
         # removes anything, and reusing the running aggregate would ignore an
         # edited inline member (#1424).
         member_mcp_server = _staged_config().servers.get(member_id)
+        defined_inline = member_mcp_server is None
         if member_mcp_server is None:
             if not _defines_a_server(member_spec):
                 raise ConfigurationError(
@@ -765,9 +766,13 @@ def _load_group_members(
             priority=member_spec.get("priority", 1),
         )
 
-        # Parse member-level tool access policy
-        member_tools_config = member_spec.get("tools")
-        if isinstance(member_tools_config, dict):
+        # Parse member-level tool access policy. A list is the tool schemas of
+        # a server this entry defines inline, which `_load_mcp_server_config`
+        # read above; on a member that names a declared server it is nothing.
+        if "tools" in member_spec and not (defined_inline and isinstance(member_spec["tools"], list)):
+            member_tools_config = _require_mapping(
+                member_spec["tools"], f"tools access policy for group '{group_id}' member '{member_id}'"
+            )
             try:
                 tools_access_config = parse_tools_access_config(member_tools_config)
                 if tools_access_config is not None:
@@ -864,8 +869,21 @@ _WITHDRAWAL_KEYS: dict[str, str] = {
 }
 
 
+def _require_mapping(block: Any, what: str, *, expected: str = "a mapping") -> dict[str, Any]:
+    """Refuse a policy block that is present and is not a mapping (#1728).
+
+    Every site used to skip a block of any other shape, so `tools: add`, a
+    `tool_access.member` tenant entry of `add` or `access: {prompt: add}`
+    booted that scope with no policy at all. A key written with no value (YAML
+    null) is refused too: a block is there, and what it says is unreadable.
+    """
+    if not isinstance(block, dict):
+        raise ConfigurationError(f"Invalid {what}: expected {expected}, got {type(block).__name__} {block!r}")
+    return block
+
+
 def _register_access_policies(
-    access_config: Any,
+    scope: dict[str, Any],
     register: Callable[[Any, "PolicyKind"], None],
     *,
     where: str,
@@ -893,15 +911,18 @@ def _register_access_policies(
     ``resources/read`` / ``prompts/get`` at all is #1045; until that is answered
     the answer here is "not supported", not "invalid".
 
-    A missing or non-mapping block registers nothing, which leaves that kind
-    unrestricted for this scope -- the rule tools have always followed for an
-    undefined scope, applied per kind.
+    A missing block, or a missing kind, registers nothing, which leaves that
+    kind unrestricted for this scope -- the rule tools have always followed for
+    an undefined scope, applied per kind. A block or a kind that is present and
+    is not a mapping is refused (#1728): it used to register nothing too.
 
     Raises:
-        ConfigurationError: When a non-tool kind carries an ``approval_list``.
+        ConfigurationError: When the block or a kind is not a mapping, a policy
+            does not parse, or a non-tool kind carries an ``approval_list``.
     """
-    if not isinstance(access_config, dict):
+    if "access" not in scope:
         return
+    access_config = _require_mapping(scope["access"], f"access block on {where}")
 
     from ..domain.model.mcp_server_config import parse_tools_access_config
 
@@ -909,9 +930,9 @@ def _register_access_policies(
         logger.warning("unknown_access_kind", where=where, kind=unknown, known=list(_ACCESS_KINDS))
 
     for kind in _ACCESS_KINDS:
-        spec = access_config.get(kind)
-        if not isinstance(spec, dict):
+        if kind not in access_config:
             continue
+        spec = _require_mapping(access_config[kind], f"access.{kind} policy on {where}")
         try:
             parsed = parse_tools_access_config(spec)
         except (ValueError, TypeError) as e:
@@ -1049,32 +1070,44 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # 1. A list of predefined tool schemas
     # 2. A dict with allow_list/deny_list/approval_list for access policy
     tools_config = spec_dict.get("tools")
-    tools = None
+    tools: list[dict[str, Any]] | None = None
     tools_access_policy = None
 
-    if tools_config:
-        if isinstance(tools_config, list):
-            # List format: predefined tool schemas
-            tools = []
-            for tool_spec in tools_config:
-                tools.append(
-                    {
-                        "name": tool_spec.get("name"),
-                        "description": tool_spec.get("description", ""),
-                        "inputSchema": tool_spec.get("inputSchema", tool_spec.get("input_schema", {})),
-                        "outputSchema": tool_spec.get("outputSchema", tool_spec.get("output_schema")),
-                    }
-                )
-        elif isinstance(tools_config, dict):
-            # Dict format: access policy (allow_list / deny_list / approval_list)
-            try:
-                tools_access_config = parse_tools_access_config(tools_config)
-                if tools_access_config is not None:
-                    tools_access_policy = tools_access_config.to_policy()
-            except (ValueError, TypeError) as e:
-                # Refused, never dropped: logging it and booting enforced no
-                # policy on the server, so a typo turned enforcement off (#1648).
-                raise ConfigurationError(f"Invalid tools access policy for mcp_server '{mcp_server_id}': {e}") from e
+    if isinstance(tools_config, list):
+        # List format: predefined tool schemas
+        tools = []
+        for tool_spec in tools_config:
+            # `tools: [add]` reads as an allow list and is not one (#1728).
+            _require_mapping(
+                tool_spec,
+                f"tool schema in the tools list of mcp_server '{mcp_server_id}'",
+                expected="a mapping with a name (a tool access policy is a mapping: tools: {deny_list: [...]})",
+            )
+            tools.append(
+                {
+                    "name": tool_spec.get("name"),
+                    "description": tool_spec.get("description", ""),
+                    "inputSchema": tool_spec.get("inputSchema", tool_spec.get("input_schema", {})),
+                    "outputSchema": tool_spec.get("outputSchema", tool_spec.get("output_schema")),
+                }
+            )
+        tools = tools or None
+    elif "tools" in spec_dict:
+        # Dict format: access policy (allow_list / deny_list / approval_list).
+        # Anything else is refused, never skipped: a skipped block is no policy (#1728).
+        tools_config = _require_mapping(
+            tools_config,
+            f"tools access policy for mcp_server '{mcp_server_id}'",
+            expected="a mapping (an access policy) or a list (tool schemas)",
+        )
+        try:
+            tools_access_config = parse_tools_access_config(tools_config)
+            if tools_access_config is not None:
+                tools_access_policy = tools_access_config.to_policy()
+        except (ValueError, TypeError) as e:
+            # Refused, never dropped: logging it and booting enforced no
+            # policy on the server, so a typo turned enforcement off (#1648).
+            raise ConfigurationError(f"Invalid tools access policy for mcp_server '{mcp_server_id}': {e}") from e
 
     # Process auth configuration for remote mcp_servers.
     #
@@ -1169,7 +1202,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # kind in the SAME resolver the `tools:` block above feeds, so one config
     # reload cannot leave the two surfaces disagreeing.
     _register_access_policies(
-        spec_dict.get("access"),
+        spec_dict,
         lambda policy, kind: _staged_config().policies.set_mcp_server_policy(mcp_server_id, policy, kind=kind),
         where=f"mcp_servers.{mcp_server_id}",
     )
@@ -1181,20 +1214,29 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     #       deny_list: [dangerous_tool]
     #       access:
     #         prompt: {deny_list: [internal_*]}
-    tool_access_config = spec_dict.get("tool_access")
-    if isinstance(tool_access_config, dict):
-        member_policies_config = tool_access_config.get("member", {})
-        if isinstance(member_policies_config, dict):
+    #
+    # Each level that is present must be a mapping: one that was not was
+    # skipped, and the tenant got no policy (#1728).
+    if "tool_access" in spec_dict:
+        tool_access_config = _require_mapping(
+            spec_dict["tool_access"], f"tool_access block on mcp_servers.{mcp_server_id}"
+        )
+        if "member" in tool_access_config:
+            member_policies_config = _require_mapping(
+                tool_access_config["member"], f"tool_access.member block on mcp_servers.{mcp_server_id}"
+            )
             resolver = _staged_config().policies
-            for tenant_id, member_policy_spec in member_policies_config.items():
-                if not isinstance(member_policy_spec, dict):
-                    continue
+            for tenant_id, raw_member_policy_spec in member_policies_config.items():
+                member_policy_spec = _require_mapping(
+                    raw_member_policy_spec,
+                    f"tools access policy on mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
+                )
 
                 def _register_member_access(policy: Any, kind: "PolicyKind", tenant_id: str = tenant_id) -> None:
                     resolver.set_standalone_member_policy(mcp_server_id, tenant_id, policy, kind=kind)
 
                 _register_access_policies(
-                    member_policy_spec.get("access"),
+                    member_policy_spec,
                     _register_member_access,
                     where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
                 )
@@ -1278,9 +1320,10 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     )
 
     # Parse group-level tool access policy
-    group_tools_config = spec_dict.get("tools")
     group_tools_policy = None
-    if isinstance(group_tools_config, dict):
+    if "tools" in spec_dict:
+        # A group is not a server and has no tool schemas: a mapping is its only form.
+        group_tools_config = _require_mapping(spec_dict["tools"], f"tools access policy for group '{group_id}'")
         try:
             tools_access_config = parse_tools_access_config(group_tools_config)
             if tools_access_config is not None:
@@ -1310,7 +1353,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     # Group-level prompt / resource policies (#1028), same block shape as a
     # server's. A group member is checked against its group on every surface.
     _register_access_policies(
-        spec_dict.get("access"),
+        spec_dict,
         lambda policy, kind: _staged_config().policies.set_group_policy(group_id, policy, kind=kind),
         where=f"mcp_servers.{group_id}",
     )
