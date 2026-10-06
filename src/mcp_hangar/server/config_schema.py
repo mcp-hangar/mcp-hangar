@@ -141,7 +141,7 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     "interceptors": frozenset({"validators"}),
     "logging": frozenset({"file", "json_format", "level"}),
     # `audit.enabled` (#1327), read by `bootstrap/observability._parse_observability_config`.
-    "observability": frozenset({"audit", "langfuse", "tracing"}),
+    "observability": frozenset({"audit", "tracing"}),
     "persistence": frozenset({"backend", "postgresql", "sqlite"}),
     # The command-bus limit, read by `bootstrap/runtime.resolve_rate_limit_config`,
     # and `per_caller` (#1471), read by `infrastructure/caller_rate_limit.parse_per_caller`,
@@ -211,6 +211,16 @@ def _group_reset_timeouts(spec: dict[str, Any]) -> list[str]:
 # it, so the message says why it is gone. Strict mode and `config check` still
 # refuse it, as they refuse any key nothing reads.
 _REMOVED_SECTION_KEYS: dict[str, dict[str, str]] = {
+    "observability": {
+        # The adapter was built and never called after 2.22.0 (#1683). Its scrub
+        # keys also refuse the boot, in `bootstrap/observability`.
+        "langfuse": (
+            "was removed with the Langfuse adapter, which nothing called (#1683). Langfuse takes Hangar's "
+            "spans over OTLP: set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT to its OTLP traces endpoint, "
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and the Basic auth header in "
+            "OTEL_EXPORTER_OTLP_TRACES_HEADERS (examples/langfuse/README.md). Delete the key."
+        ),
+    },
     "tool_access": {
         # In the schema since it was written (#984), with no reader behind it:
         # a `rules:` block validated, even under strict mode, and did nothing.
