@@ -16,6 +16,8 @@ import os
 from dataclasses import dataclass
 from importlib.metadata import version
 
+from .config_path import resolve_config_path
+
 
 def _get_version() -> str:
     """Get package version from metadata."""
@@ -173,7 +175,8 @@ Environment Variables:
         http_mode=http_mode,
         http_host=http_host,
         http_port=http_port,
-        config_path=parsed.config,
+        # Always a path, as `serve` passes one: bootstrap watches it for reload (#1657).
+        config_path=str(resolve_config_path(parsed.config).path),
         log_file=parsed.log_file,
         log_level=log_level,
         json_logs=json_logs,

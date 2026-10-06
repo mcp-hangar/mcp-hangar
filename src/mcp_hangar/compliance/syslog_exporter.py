@@ -1,6 +1,5 @@
 """RFC 5424 syslog audit exporter for compliance events."""
 
-import logging
 import os
 import socket
 import sys
@@ -9,7 +8,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+from mcp_hangar.observability.health import ComplianceExportStatus
 
+from .file_output import FileOutput
 from .refusal import (
     CALLER_ROLES,
     ROUTE_BACKEND,
@@ -18,8 +19,6 @@ from .refusal import (
     refusal_data,
     refusal_wire_fields,
 )
-
-logger = logging.getLogger(__name__)
 
 FACILITY_LOCAL0 = 16
 APP_NAME = "mcp-hangar"
@@ -99,17 +98,14 @@ class SyslogExporter:
     ) -> None:
         self._output_fn: Callable[[str], None] | None = output_fn
         self._output_path: Path | None = Path(output_path) if output_path else None
+        self._file: FileOutput | None = FileOutput(self._output_path, "syslog") if self._output_path else None
         self._lines_exported: int = 0
 
     def _emit(self, syslog_line: str) -> None:
         if self._output_fn is not None:
             _ = self._output_fn(syslog_line)
-        elif self._output_path is not None:
-            try:
-                with self._output_path.open("a", encoding="utf-8") as f:
-                    _ = f.write(syslog_line + "\n")
-            except OSError as e:
-                logger.error("Failed to write syslog line to %s: %s", self._output_path, e)
+        elif self._file is not None:
+            if not self._file.append(syslog_line):
                 return
         else:
             _ = sys.stderr.write(syslog_line + "\n")
@@ -201,3 +197,8 @@ class SyslogExporter:
     @property
     def lines_exported(self) -> int:
         return self._lines_exported
+
+    @property
+    def export_status(self) -> ComplianceExportStatus | None:
+        """The file feed's write health; None when the output is not a file."""
+        return self._file.status if self._file is not None else None
