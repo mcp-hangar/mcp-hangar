@@ -15,6 +15,10 @@ class ApprovalState(str, Enum):  # noqa: UP042
     APPROVED = "approved"
     DENIED = "denied"
     EXPIRED = "expired"
+    #: The call was abandoned -- its batch was cancelled while it was held --
+    #: and an approval arrived for it. Terminal and never a grant: the call did
+    #: not run, so the record must not say that someone let it (#1702).
+    CANCELLED = "cancelled"
 
 
 @dataclass(init=False)
@@ -96,6 +100,7 @@ class ApprovalRequest:
             ApprovalState.APPROVED,
             ApprovalState.DENIED,
             ApprovalState.EXPIRED,
+            ApprovalState.CANCELLED,
         )
 
     def approve(self, decided_by: str) -> None:
@@ -156,6 +161,16 @@ class ApprovalResult:
             approval_id=approval_id,
             error_code="approval_denied",
             reason=reason,
+        )
+
+    @classmethod
+    def cancelled(cls, approval_id: str) -> "ApprovalResult":
+        """The call's batch was cancelled while it was held; an approval for it is not dispatched."""
+        return cls(
+            approved=False,
+            approval_id=approval_id,
+            error_code="CancellationError",
+            reason="Cancelled: the batch was cancelled while the call was held for approval",
         )
 
     @classmethod

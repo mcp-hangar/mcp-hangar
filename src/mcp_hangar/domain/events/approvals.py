@@ -61,6 +61,25 @@ class ToolApprovalExpired(DomainEvent):
     expired_at: str = ""
 
 
+@accepts_legacy_provider_id
+@dataclass
+class ToolApprovalCancelled(DomainEvent):
+    """Published when an approval arrives for a held call its caller already abandoned (#1702).
+
+    The batch was cancelled while the call was held, so the call does not run.
+    Not a grant: ``attempted_by`` is who tried to approve it, deliberately not
+    named ``decided_by``, which on ``ToolApprovalGranted`` means a call was let
+    through.
+    """
+
+    approval_id: str
+    mcp_server_id: str
+    tool_name: str = ""
+    attempted_by: str = ""
+    cancelled_at: str = ""
+    reason: str = ""
+
+
 # =============================================================================
 # Tool Withdrawal Events (#231 — call-path enforcement)
 # =============================================================================

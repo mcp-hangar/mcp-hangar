@@ -21,6 +21,10 @@ from dataclasses import dataclass, field
 class _HoldEntry:
     event: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
+    #: Set when the held call has been abandoned -- its batch was cancelled
+    #: while it was held. The caller's event, not the registry's: the registry
+    #: only reads it, so an approval can be refused for a call that will not run.
+    abandoned: threading.Event | None = None
 
 
 class ApprovalHoldRegistry:
@@ -30,10 +34,25 @@ class ApprovalHoldRegistry:
         self._holds: dict[str, _HoldEntry] = {}
         self._lock = threading.Lock()
 
-    async def register(self, approval_id: str) -> None:
-        """Register a new hold for the given approval_id."""
+    async def register(self, approval_id: str, abandoned: threading.Event | None = None) -> None:
+        """Register a new hold for the given approval_id.
+
+        Args:
+            approval_id: The held approval.
+            abandoned: Set by the caller once it will no longer run the call.
+        """
         with self._lock:
-            self._holds[approval_id] = _HoldEntry()
+            self._holds[approval_id] = _HoldEntry(abandoned=abandoned)
+
+    def is_abandoned(self, approval_id: str) -> bool:
+        """Whether the call held under *approval_id* here has been abandoned by its caller.
+
+        False for a hold this instance does not have: only the instance that
+        holds the call knows whether it still will run it.
+        """
+        with self._lock:
+            entry = self._holds.get(approval_id)
+        return entry is not None and entry.abandoned is not None and entry.abandoned.is_set()
 
     async def resolve(self, approval_id: str, approved: bool) -> bool:
         """Set decision for a pending hold.

@@ -43,6 +43,7 @@ from .analysis import (
     SessionUnsuspended,
 )
 from .approvals import (
+    ToolApprovalCancelled,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,
@@ -307,6 +308,7 @@ __all__ = [
     "TenantSuspended",
     "ToolAccessPolicyCleared",
     "ToolAccessPolicySet",
+    "ToolApprovalCancelled",
     "ToolApprovalDenied",
     "ToolApprovalExpired",
     "ToolApprovalGranted",
