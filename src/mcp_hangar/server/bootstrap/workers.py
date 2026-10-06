@@ -7,6 +7,7 @@ from typing import Any, cast
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
 from ...group_recovery import GroupRecoveryWorker
 from ...logging_config import get_logger
+from ...pin_recheck import PinRecheckWorker, pin_recheck_interval_s
 from ..state import GROUPS, get_runtime
 from .coordination import may_manage
 
@@ -30,7 +31,7 @@ WORKER_STOP_TIMEOUT_SECONDS = 10.0
 
 def create_background_workers(
     config: dict[str, Any] | None = None,
-) -> list[BackgroundWorker | MetricsSnapshotWorker | GroupRecoveryWorker]:
+) -> list[BackgroundWorker | MetricsSnapshotWorker | GroupRecoveryWorker | PinRecheckWorker]:
     """Create (but don't start) background workers.
 
     Args:
@@ -38,7 +39,12 @@ def create_background_workers(
 
     Returns:
         List of worker instances (not started).
+
+    Raises:
+        ValueError: ``tool_projection.pin_recheck_interval_s`` is out of range.
     """
+    # Read first, so a bad value refuses the boot before anything is built.
+    pin_recheck_s = pin_recheck_interval_s(config)
     mcp_servers = get_runtime().repository
 
     gc_worker = BackgroundWorker(
@@ -67,6 +73,11 @@ def create_background_workers(
     group_recovery_worker = GroupRecoveryWorker(GROUPS, interval_s=GROUP_RECOVERY_INTERVAL_SECONDS)
 
     workers: list[Any] = [gc_worker, health_worker, metrics_worker, group_recovery_worker]
+
+    # Per replica too: each re-lists the catalogue it serves from (#1693). Built
+    # whenever it is on, pins or not -- a reload can add the first pin.
+    if pin_recheck_s > 0:
+        workers.append(PinRecheckWorker(mcp_servers, GROUPS, interval_s=pin_recheck_s))
     worker_names = [worker.task for worker in workers]
 
     logger.info("background_workers_created", workers=worker_names)

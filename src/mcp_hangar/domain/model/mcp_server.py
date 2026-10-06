@@ -41,6 +41,7 @@ from ..events import (
 from ..exceptions import (
     CannotStartMcpServerError,
     CapabilityBlockedError,
+    ClientError,
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
@@ -2162,6 +2163,44 @@ class McpServer(AggregateRoot):
                 error_type=bounded_error_type(type(exc).__qualname__),
             )
 
+    def recheck_catalogue(self) -> bool:
+        """Re-list a READY server's tools, and project them if they changed (#1693). Never starts it.
+
+        For the pin re-check worker: an upstream can change a tool without
+        sending ``tools/list_changed``, and the digest gate compares a pin with
+        the catalogue, not with the upstream. Copy the client under the lock,
+        list outside it, swap the catalogue under it only if the server is
+        still READY on that client -- the three phases ``health_check`` uses.
+        A listing that fails keeps the catalogue it had.
+
+        Returns:
+            Whether the catalogue changed and was announced.
+        """
+        with self._lock:
+            if self._state != McpServerState.READY or self._client is None:
+                return False
+            client = self._client
+        try:
+            response = client.call("tools/list", {}, timeout=5.0)
+        except (OSError, TimeoutError) as exc:
+            logger.warning(
+                "tool_catalogue_recheck_failed",
+                mcp_server_id=self.mcp_server_id,
+                error_type=bounded_error_type(type(exc).__qualname__),
+            )
+            return False
+        if "result" not in response:
+            return False
+        with self._lock:
+            if self._state != McpServerState.READY or self._client is not client:
+                return False
+            before = self._tools.to_dict()
+            self._tools.update_from_list(response.get("result", {}).get("tools", []))
+            changed = self._tools.to_dict() != before
+        if changed:
+            self._announce_catalogue()
+        return changed
+
     def _refresh_tools(self) -> bool:
         """Refresh tool catalog from mcp_server.
 
@@ -2220,7 +2259,10 @@ class McpServer(AggregateRoot):
             if "error" in response:
                 check_error = Exception(response["error"].get("message", "unknown"))
                 check_error_type = _rpc_error_type(response["error"])
-        except (OSError, TimeoutError) as e:
+        # A ClientError is a probe that got no answer: over HTTP, a refused
+        # connection is one (#1698). Caught here, it degrades the server like a
+        # timeout does; escaping, it left a stopped upstream READY for good.
+        except (OSError, TimeoutError, ClientError) as e:
             check_error = e
             check_error_type = bounded_error_type(type(e).__qualname__)
 

@@ -159,6 +159,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # which checks its own keys. `rules` was listed here too and never read
     # (#1422): see `_REMOVED_SECTION_KEYS`.
     "tool_access": frozenset({"mode", "required_catalogue"}),
+    # `pin_recheck_interval_s` (#1693), read by `pin_recheck.pin_recheck_interval_s`
+    # when the workers are built. Not the per-server `tool_projection` block.
+    "tool_projection": frozenset({"pin_recheck_interval_s"}),
     "truncation": None,  # TruncationConfig.from_dict owns these
     # `tenants` (ADR-024, #1048), read by `config._init_ui_resources_from_config`.
     # Shipped in 2.13.1 without an entry here, so `HANGAR_CONFIG_STRICT=1` --

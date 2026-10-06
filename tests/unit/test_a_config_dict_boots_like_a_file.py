@@ -94,6 +94,7 @@ def _config() -> dict[str, Any]:
         "retry": {"default_policy": {"max_attempts": 2}},
         "startup_checks": {"enforce": True},
         "tool_access": {"mode": "front_door"},
+        "tool_projection": {"pin_recheck_interval_s": 30},
         "truncation": {"enabled": False},
         # Interpolated on both paths: `${VAR:-default}` resolves to `reports`.
         "ui_resources": {"tenants": {TENANT: {"allowlist": ["ui://${HANGAR_PARITY_UI:-reports}/"]}}},
@@ -156,6 +157,8 @@ PROBES: dict[str, Callable[[ApplicationContext], Any]] = {
     "retry": _from_context_config("retry"),
     "startup_checks": _from_context_config("startup_checks"),
     "tool_access": lambda context: get_tool_access_resolver().topology_mode,
+    # Read by `create_background_workers` from the same dict (#1693).
+    "tool_projection": _from_context_config("tool_projection"),
     "truncation": _from_context_config("truncation"),
     "ui_resources": lambda context: sorted(get_ui_resource_guard().policy_for(TENANT).allowlist),
 }

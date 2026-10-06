@@ -34,6 +34,7 @@ from ...domain.events import (
     ToolRestored,
     ToolWithdrawn,
 )
+from ...domain.exceptions import ConfigurationError
 from ...domain.model.mcp_server_group import GroupCreated
 from ...domain.repository import IMcpServerRepository
 from ...domain.services import tool_catalogue_changes
@@ -41,6 +42,7 @@ from ...infrastructure.event_bus import EventBus
 from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler, remove_series_of_deregistered
 from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter, audit_log_export_configured
 from ...logging_config import get_logger
+from ...observability.health import set_compliance_export_status
 from ..api.sessions import get_session_suspension_registry
 from .group_circuit_metric import observe_created_group
 
@@ -137,26 +139,30 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe(ToolCallRefused, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
     runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
 
-    compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").lower()
+    compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").strip().lower()
+    # Cleared first: a status left by an earlier boot in this process would
+    # report a feed this one does not have.
+    set_compliance_export_status(None)
     if compliance_format:
         compliance_output = os.getenv("MCP_COMPLIANCE_OUTPUT")
         compliance_exporter = _create_compliance_exporter(compliance_format, compliance_output)
-        if compliance_exporter is not None:
-            compliance_handler = OTLPAuditEventHandler(
-                audit_exporter=compliance_exporter,
-                cost_attributor=cost_attributor,
-            )
-            # The SIEM feed. The reason this taxonomy exists at all: without
-            # it, three replicas send three CEF records for one tool call.
-            runtime.event_bus.subscribe(ToolInvocationCompleted, compliance_handler.handle, kind=HandlerKind.EFFECT)
-            runtime.event_bus.subscribe(ToolInvocationFailed, compliance_handler.handle, kind=HandlerKind.EFFECT)
-            runtime.event_bus.subscribe(ToolCallRefused, compliance_handler.handle, kind=HandlerKind.EFFECT)
-            runtime.event_bus.subscribe(McpServerStateChanged, compliance_handler.handle, kind=HandlerKind.EFFECT)
-            logger.info(
-                "compliance_exporter_registered",
-                format=compliance_format,
-                output=compliance_output or "stderr",
-            )
+        # The file feed's write health, for readiness and `hangar_health` (#1701).
+        set_compliance_export_status(getattr(compliance_exporter, "export_status", None))
+        compliance_handler = OTLPAuditEventHandler(
+            audit_exporter=compliance_exporter,
+            cost_attributor=cost_attributor,
+        )
+        # The SIEM feed. The reason this taxonomy exists at all: without
+        # it, three replicas send three CEF records for one tool call.
+        runtime.event_bus.subscribe(ToolInvocationCompleted, compliance_handler.handle, kind=HandlerKind.EFFECT)
+        runtime.event_bus.subscribe(ToolInvocationFailed, compliance_handler.handle, kind=HandlerKind.EFFECT)
+        runtime.event_bus.subscribe(ToolCallRefused, compliance_handler.handle, kind=HandlerKind.EFFECT)
+        runtime.event_bus.subscribe(McpServerStateChanged, compliance_handler.handle, kind=HandlerKind.EFFECT)
+        logger.info(
+            "compliance_exporter_registered",
+            format=compliance_format,
+            output=compliance_output or "stderr",
+        )
 
     detection_enforcement_handler = DetectionEnforcementHandler(
         event_bus=runtime.event_bus,
@@ -267,34 +273,50 @@ def init_event_handlers(runtime: "Runtime") -> None:
     )
 
 
-_COMPLIANCE_FORMATS = {"cef", "leef", "jsonlines", "json-lines", "syslog"}
+#: `MCP_COMPLIANCE_FORMAT` value -> the exporter class in `mcp_hangar.compliance`.
+_COMPLIANCE_FORMATS = {
+    "cef": "CEFExporter",
+    "leef": "LEEFExporter",
+    "jsonlines": "JSONLinesExporter",
+    "json-lines": "JSONLinesExporter",
+    "syslog": "SyslogExporter",
+}
 
 
-def _create_compliance_exporter(format_name: str, output_path: str | None) -> IAuditExporter | None:
-    if format_name not in _COMPLIANCE_FORMATS:
-        logger.warning("unknown_compliance_format", format=format_name, supported=sorted(_COMPLIANCE_FORMATS))
-        return None
+def _create_compliance_exporter(format_name: str, output_path: str | None) -> IAuditExporter:
+    """Build the SIEM exporter `MCP_COMPLIANCE_FORMAT` asks for, or refuse startup (#1701).
 
-    _FORMAT_TO_CLASS = {
-        "cef": "CEFExporter",
-        "leef": "LEEFExporter",
-        "jsonlines": "JSONLinesExporter",
-        "json-lines": "JSONLinesExporter",
-        "syslog": "SyslogExporter",
-    }
-    class_name = _FORMAT_TO_CLASS.get(format_name)
+    An unknown format, an exporter that cannot be imported, and an output path
+    that cannot be appended to each used to log a warning (or, for the path,
+    one error per record) and serve calls with no export. An operator who
+    configured SIEM export ran with none, so each now raises
+    `ConfigurationError` naming the value.
+    """
+
+    class_name = _COMPLIANCE_FORMATS.get(format_name)
     if class_name is None:
-        return None
+        raise ConfigurationError(
+            f"Unknown MCP_COMPLIANCE_FORMAT {format_name!r}; expected one of: {', '.join(sorted(_COMPLIANCE_FORMATS))}"
+        )
 
     try:
         mod = importlib.import_module("mcp_hangar.compliance")
         exporter_cls = getattr(mod, class_name)
-        exporter: IAuditExporter = exporter_cls(output_path=output_path)
-        return exporter
-    except (ImportError, AttributeError):
-        logger.warning(
-            "compliance_exporter_unavailable",
-            format=format_name,
-            reason="compliance module not installed",
-        )
-        return None
+    except (ImportError, AttributeError) as e:
+        raise ConfigurationError(
+            f"MCP_COMPLIANCE_FORMAT {format_name!r} is set, and its exporter cannot be loaded: {e}"
+        ) from e
+
+    if output_path:
+        from ...compliance.file_output import probe
+
+        try:
+            probe(output_path)
+        except OSError as e:
+            raise ConfigurationError(
+                f"MCP_COMPLIANCE_OUTPUT {output_path!r} cannot be appended to: {e}. "
+                "Create the directory and make it writable, or unset MCP_COMPLIANCE_OUTPUT to export to stderr."
+            ) from e
+
+    exporter: IAuditExporter = exporter_cls(output_path=output_path)
+    return exporter

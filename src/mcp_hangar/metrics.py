@@ -1141,6 +1141,23 @@ OTLP_AUDIT_EXPORT_FAILURES_TOTAL = Counter(
     description="Total number of failed OTLP audit log-record export batches (collector unreachable or export error)",
 )
 
+#: Every value of the `format` label on `mcp_hangar_compliance_export_failures_total`
+#: (#1701): the four SIEM exporters, `json-lines` counted as `jsonlines`.
+COMPLIANCE_EXPORT_FORMATS = ("cef", "leef", "jsonlines", "syslog")
+#: Every value of its `reason` label, from the `OSError` the write raised.
+COMPLIANCE_EXPORT_FAILURE_REASONS = ("not_found", "permission_denied", "is_a_directory", "no_space", "os_error")
+
+COMPLIANCE_EXPORT_FAILURES_TOTAL = Counter(
+    # The compliance (SIEM) file feed's dropped records (#1701). A failed write
+    # used to log one error per record and drop it while calls were still served.
+    name="mcp_hangar_compliance_export_failures",
+    description=(
+        "Total number of compliance (SIEM) export records dropped on a failed write, by format and reason: "
+        + ", ".join(COMPLIANCE_EXPORT_FAILURE_REASONS)
+    ),
+    labels=["format", "reason"],
+)
+
 # -----------------------------------------------------------------------------
 # Task Relay Metrics (ADR-014 Phase 3)
 # -----------------------------------------------------------------------------
@@ -1333,7 +1350,8 @@ APPROVAL_DELIVERIES_TOTAL = Counter(
 APPROVAL_DECISIONS_TOTAL = Counter(
     name="mcp_hangar_approval_decisions",
     description="Total approval holds by how they ended",
-    # decision: granted, denied, expired. `expired` climbing alongside a flat
+    # decision: granted, denied, expired, cancelled (an approval that arrived
+    # after the held call's batch was cancelled -- not a grant). `expired` climbing alongside a flat
     # `sent` is the same story from the other end.
     labels=["channel", "decision"],
 )
@@ -1451,6 +1469,7 @@ def _register_all_metrics():
         # OTLP trace and audit export metrics
         OTLP_EXPORT_FAILURES_TOTAL,
         OTLP_AUDIT_EXPORT_FAILURES_TOTAL,
+        COMPLIANCE_EXPORT_FAILURES_TOTAL,
     ]
 
     # Concurrency metrics (defined above alongside other batch metrics)
@@ -1914,6 +1933,19 @@ def record_otlp_audit_export_failure() -> None:
     metered exporter the audit log pipeline wraps its OTLP exporter in.
     """
     OTLP_AUDIT_EXPORT_FAILURES_TOTAL.inc()
+
+
+def record_compliance_export_failure(format_name: str, reason: str) -> None:
+    """Record one compliance export record dropped on a failed write.
+
+    Both labels are closed sets, so the series count stays bounded: an
+    unlisted format is counted as `other`, an unlisted reason as `os_error`.
+    """
+    if format_name not in COMPLIANCE_EXPORT_FORMATS:
+        format_name = "jsonlines" if format_name == "json-lines" else "other"
+    if reason not in COMPLIANCE_EXPORT_FAILURE_REASONS:
+        reason = "os_error"
+    COMPLIANCE_EXPORT_FAILURES_TOTAL.inc(format=format_name, reason=reason)
 
 
 # =============================================================================

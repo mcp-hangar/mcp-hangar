@@ -17,6 +17,7 @@ from mcp_hangar.server import (
     _ensure_data_dir,
     parse_args,
 )
+from mcp_hangar.server.cli.config_path import resolve_config_path
 
 
 class TestParseArgs:
@@ -26,11 +27,13 @@ class TestParseArgs:
         """Should return CLIConfig with default values when no args provided."""
         with patch.dict(os.environ, {}, clear=True):
             config = parse_args([])
+            default_config = str(resolve_config_path().path)
 
         assert config.http_mode is False
         assert config.http_host == "0.0.0.0"
         assert config.http_port == 8000
-        assert config.config_path is None
+        # Always a path, never None: bootstrap watches it for reload (#1657).
+        assert config.config_path == default_config
         assert config.log_file is None
 
     def test_http_flag(self):
