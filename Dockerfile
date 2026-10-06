@@ -33,7 +33,7 @@ COPY --from=py-builder /app/dist/*.whl /tmp/
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     # [redis]: the truncation continuation cache on N>1 replicas needs a shared
     # store, and the image is the HA artefact -- same class as [postgres] (#1008).
-    pip install --no-cache-dir "$(ls /tmp/*.whl)[kubernetes,postgres,redis]" opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp fpdf2 websockets && \
+    pip install --no-cache-dir "$(ls /tmp/*.whl)[kubernetes,postgres,redis]" opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp fpdf2 && \
     rm /tmp/*.whl
 
 USER hangar

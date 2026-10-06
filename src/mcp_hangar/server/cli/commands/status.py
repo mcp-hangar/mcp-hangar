@@ -19,6 +19,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
+from ..config_path import resolve_config_path
 from ..main import GlobalOptions
 
 console = Console()
@@ -74,39 +75,31 @@ def _get_status_from_config(config_path: Path | None) -> dict:
     """Get status from configuration file when server is not running.
 
     Args:
-        config_path: Path to config file, or None to search default locations
+        config_path: Path to config file, or None for the file every command
+            reads (`resolve_config_path`). A named file that is missing is not
+            replaced by another one: that would report a configuration nothing
+            else reads (#1657).
 
     Returns:
         Status dictionary with MCP servers in COLD state
     """
     import yaml
 
-    # Search for config file
-    search_paths = [
-        config_path,
-        Path.home() / ".config" / "mcp-hangar" / "config.yaml",
-        Path("config.yaml"),
-    ]
-
+    used_path = resolve_config_path(config_path).path
     config = None
-    used_path = None
-
-    for path in search_paths:
-        if path and path.exists():
-            try:
-                with open(path) as f:
-                    config = yaml.safe_load(f)
-                used_path = path
-                break
-            except Exception:  # noqa: BLE001 -- fault-barrier: config read must not crash status display
-                continue
+    if used_path.exists():
+        try:
+            with open(used_path) as f:
+                config = yaml.safe_load(f)
+        except Exception:  # noqa: BLE001 -- fault-barrier: config read must not crash status display
+            config = None
 
     if not config:
         return {
             "server_running": False,
             "config_path": None,
             "mcp_servers": [],
-            "error": "No configuration found",
+            "error": f"No configuration found at {used_path}",
         }
 
     # Build mcp_server list from config
