@@ -14,7 +14,8 @@ What changes for you:
 
 - **`serve` with no flag, no `MCP_CONFIG` and no `./config.yaml`** used to boot
   the built-in demo config. It now reads `~/.config/mcp-hangar/config.yaml` if
-  `init` wrote one. A `./config.yaml` beside the process still wins, so a setup
+  `init` wrote one, and refuses to start if there is none (see "A missing
+  configuration file stops the gateway"). A `./config.yaml` beside the process still wins, so a setup
   that ran `serve` next to its file is unchanged, and so is the container image
   (its working directory is `/app`).
 - **`init`, `add`, `remove` and `status` in a directory with a

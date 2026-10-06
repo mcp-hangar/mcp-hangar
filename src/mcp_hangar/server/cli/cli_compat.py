@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass
 from importlib.metadata import version
 
-from .config_path import resolve_config_path
+from .config_path import ConfigPathSource, resolve_config_path
 
 
 def _get_version() -> str:
@@ -58,6 +58,9 @@ class CLIConfig:
 
     unsafe_no_auth: bool = False
     """Allow non-loopback HTTP binding without authentication enabled."""
+
+    config_source: ConfigPathSource | None = None
+    """Which rule chose `config_path`, so a missing file is reported by where it was named (#1650)."""
 
 
 def parse_args(args: list[str] | None = None) -> CLIConfig:
@@ -170,17 +173,19 @@ Environment Variables:
     http_port = parsed.port if parsed.port is not None else env_http_port
     log_level = parsed.log_level if parsed.log_level is not None else env_log_level
     json_logs = parsed.json_logs or env_json_logs
+    resolved_config = resolve_config_path(parsed.config)
 
     return CLIConfig(
         http_mode=http_mode,
         http_host=http_host,
         http_port=http_port,
         # Always a path, as `serve` passes one: bootstrap watches it for reload (#1657).
-        config_path=str(resolve_config_path(parsed.config).path),
+        config_path=str(resolved_config.path),
         log_file=parsed.log_file,
         log_level=log_level,
         json_logs=json_logs,
         unsafe_no_auth=parsed.unsafe_no_auth,
+        config_source=resolved_config.source,
     )
 
 
