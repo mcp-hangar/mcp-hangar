@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from .config_path import DEFAULT_RULE_HELP
 from .errors import CLIError, handle_cli_error
 
 # Global state
@@ -54,8 +55,10 @@ def main_callback(
         typer.Option(
             "--config",
             "-c",
-            help="Path to config.yaml file",
-            envvar="MCP_CONFIG",
+            # No `envvar`: `resolve_config_path` reads $MCP_CONFIG, below every
+            # flag. Typer folding it in here let a subcommand's env-filled
+            # option outrank this flag (#1657).
+            help="Path to config.yaml. " + DEFAULT_RULE_HELP,
         ),
     ] = None,
     verbose: Annotated[

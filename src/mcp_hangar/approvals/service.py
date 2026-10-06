@@ -11,12 +11,14 @@ Called from mcp_tool_wrapper's check_approval hook. Coordinates:
 
 import asyncio
 import concurrent.futures
+import threading
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from mcp_hangar.domain.events import (
+    ToolApprovalCancelled,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,
@@ -47,6 +49,9 @@ logger = get_logger(__name__)
 #: latency is invisible to a human approver, and the read is one indexed row per
 #: held call.
 SHARED_POLL_INTERVAL_S = 2.0
+
+#: Why an approval was recorded `cancelled` rather than `approved` (#1702).
+CANCELLED_REASON = "approved after the held call was cancelled; the call did not run"
 
 # Dedicated thread pool for _publish() to avoid deadlock with the default
 # executor.  The batch executor's worker threads block on future.result() via
@@ -106,6 +111,7 @@ class ApprovalGateService:
         provider_id: str | None = None,
         tenant_id: str | None = None,
         requested_by: str | None = None,
+        abandoned: threading.Event | None = None,
     ) -> ApprovalResult:
         """Called from mcp_tool_wrapper check_approval hook.
 
@@ -115,6 +121,11 @@ class ApprovalGateService:
         4. Register hold, deliver notification
         5. Wait for resolution or timeout
         6. Publish outcome event, return result
+
+        ``abandoned`` is the caller's cancel event. Once it is set the caller
+        will not run the call, so an approval that arrives after it is recorded
+        ``cancelled``, not granted (#1702). The hold itself is not cut short: a
+        denial or a timeout still names the call (#1541).
         """
         resolved_provider_id = provider_id or mcp_server_id
         if resolved_provider_id is None:
@@ -172,7 +183,7 @@ class ApprovalGateService:
             )
             await self._publish(requested_event)
 
-            await self._hold_registry.register(approval_id)
+            await self._hold_registry.register(approval_id, abandoned=abandoned)
 
             try:
                 await self._delivery.send(request)
@@ -195,9 +206,38 @@ class ApprovalGateService:
                 else:
                     wait_span.set_attribute("approval.decision", "expired")
 
+            # State already updated by resolve() -- reload for event data.
+            updated = await self._repository.get(approval_id) if decision is not None else None
+
+            if decision is not None and (
+                (updated is not None and updated.state is ApprovalState.CANCELLED)
+                or (decision is True and abandoned is not None and abandoned.is_set())
+            ):
+                # The caller gave up on the call while it was held, and then an
+                # approval arrived. Resolved here, it was already refused and
+                # recorded; resolved on another instance, or a moment before the
+                # cancel, it was accepted -- and is recorded cancelled now.
+                # Either way the trail says cancelled, never granted.
+                attempted_by = updated.decided_by if updated is not None else None
+                cancelled_at = datetime.now(UTC)
+                await self._repository.update_state(
+                    approval_id, ApprovalState.CANCELLED, attempted_by, cancelled_at, CANCELLED_REASON
+                )
+                await self._publish(
+                    ToolApprovalCancelled(
+                        approval_id=approval_id,
+                        mcp_server_id=resolved_provider_id,
+                        tool_name=tool_name,
+                        attempted_by=attempted_by or "",
+                        cancelled_at=cancelled_at.isoformat(),
+                        reason=CANCELLED_REASON,
+                    )
+                )
+                gate_span.set_attribute("approval.result", "cancelled")
+                APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="cancelled")
+                return ApprovalResult.cancelled(approval_id)
+
             if decision is True:
-                # State already updated by resolve() -- just reload for event data
-                updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
                 decided_at = updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
 
@@ -215,8 +255,6 @@ class ApprovalGateService:
                 return ApprovalResult.granted(approval_id)
 
             if decision is False:
-                # State already updated by resolve() -- just reload for event data
-                updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
                 decided_at = updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
                 reason = updated.reason if updated else None
@@ -265,10 +303,24 @@ class ApprovalGateService:
         on this instance, so its absence must not turn a durable decision into
         an apparent failure for the resolver.
 
-        Returns False only when the approval is missing or already terminal.
+        Returns False when the approval is missing or already terminal, and
+        when it approves a call held here that its caller has abandoned: that
+        approval is recorded ``cancelled`` and the hold is released with a
+        refusal, so nothing records a grant for a call that will not run
+        (#1702). A denial of an abandoned call is still recorded as a denial.
         """
         request = await self._repository.get(approval_id)
         if request is None or request.is_terminal():
+            return False
+
+        if approved and self._hold_registry.is_abandoned(approval_id):
+            await self._repository.update_state(
+                approval_id, ApprovalState.CANCELLED, decided_by, datetime.now(UTC), CANCELLED_REASON
+            )
+            # Woken with a refusal, so a waiter that missed the record still
+            # does not dispatch.
+            await self._hold_registry.resolve(approval_id, False)
+            logger.info("approval_refused_call_cancelled", approval_id=approval_id)
             return False
 
         # Store decided_by/reason before resolving the hold so check() can read them
@@ -341,7 +393,7 @@ class ApprovalGateService:
             return None
         if record.state == ApprovalState.APPROVED:
             return True
-        if record.state == ApprovalState.DENIED:
+        if record.state in (ApprovalState.DENIED, ApprovalState.CANCELLED):
             return False
         return None
 

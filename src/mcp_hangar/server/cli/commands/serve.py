@@ -11,6 +11,8 @@ from typing import Annotated
 
 import typer
 
+from ..config_path import DEFAULT_RULE_HELP, resolve_config_path
+
 
 def serve_command(
     ctx: typer.Context,
@@ -19,8 +21,7 @@ def serve_command(
         typer.Option(
             "--config",
             "-c",
-            help="Path to config.yaml file",
-            envvar="MCP_CONFIG",
+            help="Path to config.yaml. " + DEFAULT_RULE_HELP,
         ),
     ] = None,
     http: Annotated[
@@ -95,11 +96,10 @@ def serve_command(
     # Get global options
     global_opts = ctx.obj
 
-    # A --config passed to `serve` overrides the top-level option; when it is
-    # absent, fall back to the value resolved by the main CLI callback. This
-    # lets both `mcp-hangar --config X serve` and `mcp-hangar serve --config X`
-    # work.
-    resolved_config = config if config is not None else getattr(global_opts, "config", None)
+    # `serve --config X` before `mcp-hangar --config X`, then the shared
+    # default. The result is always a path: bootstrap watches the file it is
+    # given, and with none every reload failed (#1657).
+    resolved_config = resolve_config_path(config, getattr(global_opts, "config", None)).path
 
     # Build CLIConfig for backward compatibility with existing server code
     from ..cli_compat import CLIConfig
@@ -113,7 +113,7 @@ def serve_command(
         http_mode=http_mode,
         http_host=host,
         http_port=port,
-        config_path=str(resolved_config) if resolved_config else None,
+        config_path=str(resolved_config),
         log_file=log_file,
         log_level=log_level.upper(),
         json_logs=json_logs,

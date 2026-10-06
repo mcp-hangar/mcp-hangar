@@ -219,21 +219,15 @@ mcp_servers:
 #   rps: 10      # tokens (requests) added per second
 #   burst: 20    # maximum burst capacity (bucket size)
 
-# Observability - OpenTelemetry tracing and Langfuse integration (optional)
-# Provides end-to-end tracing for MCP tool invocations
+# Observability - OpenTelemetry tracing (optional)
+# Provides end-to-end tracing for MCP tool invocations. To send the spans to
+# Langfuse, point OTEL_EXPORTER_OTLP_TRACES_ENDPOINT at its OTLP endpoint: see
+# examples/langfuse/README.md. There is no `langfuse:` block any more (#1683).
 # observability:
 #   tracing:
 #     caller_ids: false   # Put caller user, agent and session ids on spans.
 #                         # Off by default; MCP_TRACING_CALLER_IDS wins over this.
 #                         # Tenant, principal type and correlation id are always on.
-#   langfuse:
-#     enabled: true
-#     public_key: ${LANGFUSE_PUBLIC_KEY}   # From Langfuse dashboard
-#     secret_key: ${LANGFUSE_SECRET_KEY}   # From Langfuse dashboard
-#     host: https://cloud.langfuse.com    # Or self-hosted URL
-#     sample_rate: 1.0                    # 0.0-1.0, fraction of traces to sample
-#     scrub_inputs: false                 # Redact sensitive input data
-#     scrub_outputs: false                # Redact sensitive output data
 
 # Storage backend (optional) -- ONE decision for everything the gateway persists
 #

@@ -123,6 +123,7 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "ToolApprovalGranted": 1,
     "ToolApprovalDenied": 1,
     "ToolApprovalExpired": 1,
+    "ToolApprovalCancelled": 1,
     # Runtime withdrawal (v2 = `kind`, #1140)
     "ToolWithdrawn": 2,
     "ToolRestored": 2,

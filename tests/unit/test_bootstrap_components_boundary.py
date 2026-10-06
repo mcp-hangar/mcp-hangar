@@ -1,7 +1,7 @@
 """Tests for bootstrap optional-module fallback behavior.
 
 Verifies that the server bootstraps correctly both with and without
-optional modules (auth, compliance, integrations, approvals). When
+optional modules (auth, compliance, approvals). When
 these modules are unavailable, null/noop fallbacks must be used.
 When present, real implementations must load.
 
@@ -17,7 +17,6 @@ import pytest
 _OPTIONAL_MODULE_PREFIXES = (
     "mcp_hangar.auth",
     "mcp_hangar.compliance",
-    "mcp_hangar.integrations",
     "mcp_hangar.approvals",
 )
 
@@ -272,28 +271,6 @@ class TestBootstrapWithoutComponents:
         )
         assert mod.list_builtin_roles() == [], "list_builtin_roles() must return empty list without the auth module"
 
-    def test_langfuse_fallback_without_components(self, monkeypatch):
-        """When the integrations module is blocked, init_langfuse() returns
-        NullObservabilityAdapter even when Langfuse is configured."""
-        _block_optional_modules(monkeypatch)
-
-        from mcp_hangar.application.ports.observability import NullObservabilityAdapter
-        from mcp_hangar.server.bootstrap.observability import (
-            LangfuseBootstrapConfig,
-            init_langfuse,
-        )
-
-        config = LangfuseBootstrapConfig(
-            enabled=True,
-            public_key="pk-test",
-            secret_key="sk-test",
-        )
-
-        result = init_langfuse(config)
-        assert isinstance(result, NullObservabilityAdapter), (
-            f"Expected NullObservabilityAdapter fallback, got {type(result).__name__}"
-        )
-
 
 # ---------------------------------------------------------------------------
 # Tests: API Router component boundary
@@ -365,10 +342,3 @@ class TestBootstrapWithComponents:
         assert AuthComponents is not None
         assert NullAuthComponents is not None
         assert callable(bootstrap_auth)
-
-    def test_langfuse_importable(self):
-        """Langfuse integration must be importable when the integrations module is installed."""
-        from mcp_hangar.integrations.langfuse import LangfuseConfig, LangfuseObservabilityAdapter
-
-        assert LangfuseConfig is not None
-        assert LangfuseObservabilityAdapter is not None

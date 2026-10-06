@@ -82,6 +82,7 @@ class CreateApiKeyHandler(CommandHandler):
             "raw_key": raw_key,
             "principal_id": command.principal_id,
             "name": command.name,
+            "created_by": command.created_by,
             "expires_at": command.expires_at.isoformat() if command.expires_at else None,
             "warning": "Save this key now - it cannot be retrieved later!",
         }

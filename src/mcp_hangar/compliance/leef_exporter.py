@@ -1,13 +1,14 @@
 """LEEF audit exporter for compliance events."""
 
-import logging
 import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+from mcp_hangar.observability.health import ComplianceExportStatus
 
+from .file_output import FileOutput
 from .refusal import (
     CALLER_ROLES,
     ROUTE_BACKEND,
@@ -16,8 +17,6 @@ from .refusal import (
     refusal_data,
     refusal_wire_fields,
 )
-
-logger = logging.getLogger(__name__)
 
 LEEF_VERSION = "2.0"
 DEVICE_VENDOR = "MCP Hangar"
@@ -97,17 +96,14 @@ class LEEFExporter:
     ) -> None:
         self._output_fn: Callable[[str], None] | None = output_fn
         self._output_path: Path | None = Path(output_path) if output_path else None
+        self._file: FileOutput | None = FileOutput(self._output_path, "leef") if self._output_path else None
         self._lines_exported: int = 0
 
     def _emit(self, leef_line: str) -> None:
         if self._output_fn is not None:
             _ = self._output_fn(leef_line)
-        elif self._output_path is not None:
-            try:
-                with self._output_path.open("a", encoding="utf-8") as f:
-                    _ = f.write(leef_line + "\n")
-            except OSError as e:
-                logger.error("Failed to write LEEF line to %s: %s", self._output_path, e)
+        elif self._file is not None:
+            if not self._file.append(leef_line):
                 return
         else:
             _ = sys.stderr.write(leef_line + "\n")
@@ -198,3 +194,8 @@ class LEEFExporter:
     @property
     def lines_exported(self) -> int:
         return self._lines_exported
+
+    @property
+    def export_status(self) -> ComplianceExportStatus | None:
+        """The file feed's write health; None when the output is not a file."""
+        return self._file.status if self._file is not None else None

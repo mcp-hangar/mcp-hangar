@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from ...application.ports.observability import ObservabilityPort
 from ...logging_config import get_logger
 from .composition import get_persistence_backend
 
@@ -293,20 +292,3 @@ def create_persistent_event_store(driver: str, config: dict[str, Any]) -> Any | 
     db_path = config.get("path", "data/events.db")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     return sqlite_event_store(db_path)
-
-
-def create_observability_adapter(config: Any) -> ObservabilityPort | None:
-    """Build the Langfuse observability adapter from config."""
-    langfuse_config = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseConfig")
-    adapter_type = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseObservabilityAdapter")
-
-    adapter_config = langfuse_config(
-        enabled=True,
-        public_key=config.public_key,
-        secret_key=config.secret_key,
-        host=config.host,
-        sample_rate=config.sample_rate,
-        scrub_inputs=config.scrub_inputs,
-        scrub_outputs=config.scrub_outputs,
-    )
-    return cast(ObservabilityPort, adapter_type(adapter_config))

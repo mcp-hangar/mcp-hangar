@@ -786,13 +786,11 @@ def _load_group_members(
                         has_deny_list=bool(member_tools_policy.deny_list),
                         has_approval_list=bool(member_tools_policy.approval_list),
                     )
-            except ValueError as e:
-                logger.warning(
-                    "invalid_member_tools_access_config",
-                    group_id=group_id,
-                    member_id=member_id,
-                    error=str(e),
-                )
+            except (ValueError, TypeError) as e:
+                # Refused, never dropped: a dropped policy is no policy (#1648).
+                raise ConfigurationError(
+                    f"Invalid tools access policy for group '{group_id}' member '{member_id}': {e}"
+                ) from e
 
         if saga:
             saga.register_member(member_id, group_id)
@@ -916,14 +914,12 @@ def _register_access_policies(
             continue
         try:
             parsed = parse_tools_access_config(spec)
-        except ValueError as e:
-            logger.warning("invalid_access_config", where=where, kind=kind, error=str(e))
-            continue
+        except (ValueError, TypeError) as e:
+            # Refused, never dropped: a dropped policy leaves the kind unrestricted (#1648).
+            raise ConfigurationError(f"Invalid access.{kind} policy on {where}: {e}") from e
         if parsed is None:
             continue
         if parsed.approval_list:
-            from ..domain.exceptions import ConfigurationError
-
             raise ConfigurationError(
                 f"access.{kind}.approval_list on {where} asks for a human approval hold that no "
                 f"{kind} path performs: the gate runs on tool calls only, so an approval-listed "
@@ -1075,12 +1071,10 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                 tools_access_config = parse_tools_access_config(tools_config)
                 if tools_access_config is not None:
                     tools_access_policy = tools_access_config.to_policy()
-            except ValueError as e:
-                logger.warning(
-                    "invalid_tools_access_config",
-                    mcp_server_id=mcp_server_id,
-                    error=str(e),
-                )
+            except (ValueError, TypeError) as e:
+                # Refused, never dropped: logging it and booting enforced no
+                # policy on the server, so a typo turned enforcement off (#1648).
+                raise ConfigurationError(f"Invalid tools access policy for mcp_server '{mcp_server_id}': {e}") from e
 
     # Process auth configuration for remote mcp_servers.
     #
@@ -1101,8 +1095,6 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         try:
             capabilities = McpServerCapabilities.from_dict(capabilities_data)
         except (ValueError, TypeError) as e:
-            from ..domain.exceptions import ConfigurationError
-
             raise ConfigurationError(f"Invalid capabilities for mcp_server '{mcp_server_id}': {e}") from e
     else:
         logger.warning(
@@ -1116,8 +1108,6 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             spec_dict.get("max_response_bytes"), f"mcp_servers.{mcp_server_id}.max_response_bytes"
         )
     except ValueError as e:
-        from ..domain.exceptions import ConfigurationError  # a local of this function, bound below too
-
         raise ConfigurationError(str(e)) from e
 
     # Everything the server is built from, and nothing else: a reload keeps the
@@ -1221,13 +1211,12 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                             has_deny_list=bool(member_policy.deny_list),
                             has_approval_list=bool(member_policy.approval_list),
                         )
-                except ValueError as e:
-                    logger.warning(
-                        "invalid_standalone_member_tools_access_config",
-                        mcp_server_id=mcp_server_id,
-                        tenant_id=tenant_id,
-                        error=str(e),
-                    )
+                except (ValueError, TypeError) as e:
+                    # Refused, never dropped: a dropped policy is no policy (#1648).
+                    raise ConfigurationError(
+                        "Invalid tools access policy on "
+                        f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}: {e}"
+                    ) from e
 
     _register_tool_projection_block(mcp_server_id, spec_dict.get("tool_projection"))
     _register_header_exposure_block(mcp_server_id, spec_dict.get("header_exposure"))
@@ -1296,12 +1285,9 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
             tools_access_config = parse_tools_access_config(group_tools_config)
             if tools_access_config is not None:
                 group_tools_policy = tools_access_config.to_policy()
-        except ValueError as e:
-            logger.warning(
-                "invalid_group_tools_access_config",
-                group_id=group_id,
-                error=str(e),
-            )
+        except (ValueError, TypeError) as e:
+            # Refused, never dropped: a dropped policy is no policy (#1648).
+            raise ConfigurationError(f"Invalid tools access policy for group '{group_id}': {e}") from e
 
     # Register group-level policy
     if group_tools_policy is not None:
