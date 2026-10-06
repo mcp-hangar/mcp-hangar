@@ -18,6 +18,18 @@ def runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def the_named_files_exist(monkeypatch):
+    """These pin which path `serve` passes on; the paths are fictional.
+
+    `serve` refuses a file that does not exist (#1650), which
+    `test_a_missing_config_file_is_fatal.py` covers.
+    """
+    from mcp_hangar.server.cli.commands import serve
+
+    monkeypatch.setattr(serve, "require_config_file", lambda resolved: resolved.path)
+
+
 def _config_path_from_run_server(mock_run_server):
     """Extract config_path from the CLIConfig passed to run_server."""
     assert mock_run_server.called, "run_server was not invoked"
