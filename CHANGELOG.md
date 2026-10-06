@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.24.0...v2.25.0) (2026-10-06)
+
+### Removed
+
+- **core:** the Langfuse adapter is removed, with its configuration. Nothing called it after 2.22.0, so `observability.langfuse`, `MCP_LANGFUSE_*` and `HANGAR_LANGFUSE_*` sent nothing to Langfuse, and `Runtime.observability` was built and never read. Langfuse takes Hangar's spans over OTLP instead: point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at its OTLP endpoint (`examples/langfuse/README.md`). A removed scrub setting (`MCP_LANGFUSE_SCRUB_*`, `HANGAR_LANGFUSE_SCRUB_*`, `observability.langfuse.scrub_*`) now refuses the boot, whatever its value, so a deployment that asked for scrubbing finds out the setting no longer applies; the other removed settings are named in a `langfuse_settings_removed` warning, and `config check` names the `observability.langfuse` block. The `langfuse` extra is gone. This also closes the typo that turned scrubbing off (#1655) and the second configuration path (#1666) (#1683). ([#1734](https://github.com/mcp-hangar/mcp-hangar/pull/1734))
+
+### Fixed
+
+- **core:** a refused connection now fails a remote server's health check. The HTTP
+  client reports one as `ClientError`, which `McpServer.health_check` did not catch:
+  it escaped to the health worker as `background_task_failed`, no failure was
+  recorded, and a stopped remote server stayed `ready`, in rotation, for as long as
+  the upstream was down. Every `ClientError` from the probe now counts as a failed
+  check, as a timeout already did: the server degrades after
+  `max_consecutive_failures`, and its group counts each failed check against its
+  own `health.unhealthy_threshold` and `circuit_breaker.failure_threshold`. ([#1724](https://github.com/mcp-hangar/mcp-hangar/pull/1724))
+- **deps:** `/api/ws/events` works on a pip or uv install. uvicorn upgrades a
+  WebSocket connection only through a library it can import, and none was
+  declared -- only the container image installed `websockets` -- so outside the
+  image uvicorn logged "No supported WebSocket library detected" and the event
+  stream answered 404. `websockets>=16.0` is now a base dependency, and the
+  Dockerfile no longer installs it separately. ([#1727](https://github.com/mcp-hangar/mcp-hangar/pull/1727))
+- **core:** every CLI command now reads the same configuration file, by one rule: a path on the command line (the command's own flag, then the global `--config`), then `$MCP_CONFIG`, then `./config.yaml` if the working directory has one, then `~/.config/mcp-hangar/config.yaml`, the file `init` writes. `pin --check` and `serve` straight after `init` used to miss the file `init` had written; `pin` and `config check` ignored the global `--config` (#1682); and a gateway started on the implicit `./config.yaml` handed bootstrap no path, so every reload -- the watcher, SIGHUP, the reload tool and `POST /api/config/reload` -- failed with "No configuration path specified". The resolved path is now always passed to bootstrap (#1657). ([#1722](https://github.com/mcp-hangar/mcp-hangar/pull/1722))
+
+### Security
+
+- **security:** a tool access policy block that is not a mapping now refuses the configuration instead of being skipped. `tools: add` on a server, a group or a group member, a `tool_access.member.<tenant>` entry of `add`, or `access: {prompt: add}` booted that scope with no policy at all; so did each of those keys written with no value. Every policy block that is present -- `tools`, `access`, `access.<kind>`, `tool_access`, `tool_access.member` and each tenant entry -- must now be a mapping (or, for `tools` on a server or an inline group member, a list of tool schema mappings), and the boot fails (or the reload is refused, keeping the previous policy) with an error naming the scope (#1728). ([#1740](https://github.com/mcp-hangar/mcp-hangar/pull/1740))
+- **security:** a tool access list given as a string or a mapping now refuses the configuration instead of being misread. `deny_list: add` (no brackets) was split into the patterns `a`, `d`, `d`, so the gateway booted with `add` allowed; a mapping was used by its keys. `allow_list`, `deny_list` and `approval_list` at every policy site now refuse anything but a list, and the boot fails (or the reload is refused, keeping the previous policy) with an error naming the scope and the field. A `hangar_load` whose policy fails to parse (an empty pattern such as `deny_tools=[""]`, or a value that is not a list) is now refused before anything is installed; the policy used to be parsed only after the server was started and stored, so the server stayed loaded with no policy (#1718). ([#1726](https://github.com/mcp-hangar/mcp-hangar/pull/1726))
+- **security:** an approval that arrives after its held call was cancelled is now refused and recorded `cancelled`, not granted. When a `hangar_call` batch deadline passed while a call was held for approval, a later approve was accepted with `200`, the record said `approved` and `ToolApprovalGranted` carried the approver as `decided_by`, although the call never ran. The resolve now answers `409` with `state: "cancelled"`, the record moves to the new terminal state `cancelled`, and the gate publishes the new `ToolApprovalCancelled` event (with the approver as `attempted_by`) instead of a grant. The caller still reads `CancellationError`, and a denial or a timeout after the deadline still names the call as before (#1702). ([#1729](https://github.com/mcp-hangar/mcp-hangar/pull/1729))
+- **security:** a SIEM export the gateway cannot perform now refuses startup instead of being dropped. An unknown `MCP_COMPLIANCE_FORMAT` (for example `cefx`) used to log `unknown_compliance_format` at warning and serve calls with no export, and an `MCP_COMPLIANCE_OUTPUT` whose directory did not exist logged one error per record and dropped every one. Both now fail the boot with a `ConfigurationError` naming the value. A write that fails at runtime is counted in `mcp_hangar_compliance_export_failures_total{format,reason}`, reported as a `compliance_export` field in `/health/ready` and `hangar_health` (which turns `degraded`), and logged once per burst as `compliance_export_write_failed` and `compliance_export_write_recovered`; calls are still served (#1701). ([#1721](https://github.com/mcp-hangar/mcp-hangar/pull/1721))
+- **security:** a digest pin is now re-checked against the upstream on an interval, not only against the catalogue from the last start. An upstream that changed a pinned tool without sending `tools/list_changed` was served under the old pin until the gateway restarted. Every READY server a pin covers (on the server or on a group it belongs to, for all tenants or for one) is now re-listed every `tool_projection.pin_recheck_interval_s` seconds (default 60, 0 turns it off, otherwise 5 to 3600); a drifted tool is refused with `digest_mismatch` from the next call, and one `DigestMismatchEvent` is published when the drift is first seen. A server that is not READY is not listed and not started (#1693). ([#1732](https://github.com/mcp-hangar/mcp-hangar/pull/1732))
+- **security:** a configuration file that does not exist now stops the gateway instead of booting a built-in demo configuration. `mcp-hangar --config /typo.yaml serve`, an `MCP_CONFIG` naming a missing file, a `config_path` passed to `bootstrap()` or `Hangar.from_config()`, and a start with no file anywhere used to log `config_not_found_using_default` at INFO and serve a `math_subprocess` backend with every `hangar_*` tool and none of the operator's pins, policies or auth. Every entry point now exits 1, or raises `MissingConfigFileError`, with a message naming the path and where it came from; with no file anywhere it says to run `mcp-hangar init`. A path that is a directory or unreadable is refused the same way (#1650). ([#1739](https://github.com/mcp-hangar/mcp-hangar/pull/1739))
+- **security:** an auth mutation is recorded against the authenticated caller, not
+  whoever the request body names. `POST /api/auth/keys`, `DELETE /api/auth/keys/{key_id}`,
+  `POST /api/auth/roles/assign`, `DELETE /api/auth/roles/revoke`, `POST /api/auth/roles`,
+  `PATCH /api/auth/roles/{role_name}` and `DELETE /api/auth/roles/{role_name}` took
+  `created_by` / `revoked_by` / `assigned_by` / `updated_by` from the body, defaulting
+  to `"system"`, so an admin key could grant a role or mint a key and have the event,
+  the log line and the response attribute it to someone else. The actor is now the
+  caller's principal id (`anonymous` with auth disabled), a body that still carries
+  one of those fields is refused with 422, and `POST /api/auth/keys` echoes
+  `created_by` in its response. ([#1715](https://github.com/mcp-hangar/mcp-hangar/pull/1715))
+- **security:** an access policy with one invalid field now refuses the configuration instead of being dropped. A `tools:` policy (on a server, a group, a group member or a `tool_access.member` tenant) or an `access:` block with, for example, `approval_timeout_seconds: 0`, an empty pattern or a whitespace-only `approval_channel` used to log a warning and boot with no policy for that scope, so denied tools ran and approval-listed tools ran without a hold. The boot, and a reload, are now refused with an error naming the scope and the field; a refused reload leaves the previous policy in force (#1648). ([#1714](https://github.com/mcp-hangar/mcp-hangar/pull/1714))
+
 ## [2.24.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.23.0...v2.24.0) (2026-10-04)
 
 ### Added
