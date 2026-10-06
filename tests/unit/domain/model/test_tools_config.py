@@ -209,3 +209,49 @@ class TestToolsConfigGlobPatterns:
         assert not policy.is_tool_allowed("get_dashboard")
         assert not policy.is_tool_allowed("list_a")
         assert policy.is_tool_allowed("list_ab")  # ? matches single char
+
+
+class TestAPatternListMustBeAList:
+    """A string iterates as its characters and a mapping as its keys (#1718).
+
+    `deny_list: add` became the patterns `a`, `d`, `d`: each a valid non-empty
+    string, so it passed the per-pattern check and `add` stayed allowed.
+    """
+
+    @pytest.mark.parametrize("field", ["allow_list", "deny_list", "approval_list"])
+    @pytest.mark.parametrize("value", ["add", {"add": None}, 5, None], ids=["str", "mapping", "int", "none"])
+    def test_a_value_that_is_not_a_list_is_refused_naming_the_field(self, field, value):
+        with pytest.raises(ValueError, match=rf"Invalid {field}: expected a list of patterns"):
+            ToolsConfig(**{field: value})
+
+    @pytest.mark.parametrize("field", ["allow_list", "deny_list", "approval_list"])
+    def test_a_tuple_is_still_a_list_of_patterns(self, field):
+        config = ToolsConfig(**{field: ("add",)})
+
+        assert getattr(config.to_policy(), field) == ("add",)
+
+    @pytest.mark.parametrize("field", ["allow_list", "deny_list", "approval_list"])
+    def test_a_non_string_item_is_refused_naming_the_field(self, field):
+        with pytest.raises(ValueError, match=rf"Invalid {field} pattern: \['add'\]"):
+            ToolsConfig(**{field: [["add"]]})
+
+
+class TestParseRefusesAPatternListThatIsNotAList:
+    """The parser returns "no policy" for empty lists; a falsy non-list must not
+    take that exit and silently declare nothing."""
+
+    @pytest.mark.parametrize("field", ["allow_list", "deny_list", "approval_list"])
+    @pytest.mark.parametrize(
+        "value", ["add", "", {}, {"add": None}, 0], ids=["str", "empty-str", "empty-map", "map", "zero"]
+    )
+    def test_it_is_refused_naming_the_field(self, field, value):
+        from mcp_hangar.domain.model.mcp_server_config import parse_tools_access_config
+
+        with pytest.raises(ValueError, match=rf"Invalid {field}: expected a list of patterns"):
+            parse_tools_access_config({field: value})
+
+    @pytest.mark.parametrize("field", ["allow_list", "deny_list", "approval_list"])
+    def test_a_key_with_no_value_alone_is_still_no_policy(self, field):
+        from mcp_hangar.domain.model.mcp_server_config import parse_tools_access_config
+
+        assert parse_tools_access_config({field: None}) is None
