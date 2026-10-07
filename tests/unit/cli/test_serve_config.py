@@ -73,15 +73,17 @@ class TestServeConfigOption:
         assert _config_path_from_run_server(mock_run) == "/tmp/local.yaml"
 
     @pytest.mark.parametrize("argv", [[], ["serve"]])
-    def test_serve_envvars_apply_to_default_and_explicit_command(self, runner, argv):
+    @pytest.mark.parametrize("mode", ["http", "true", "1", "yes"])
+    def test_serve_envvars_apply_to_default_and_explicit_command(self, runner, argv, mode):
         """The implicit default command must resolve envvars like `serve` does."""
         from mcp_hangar.server.cli.main import app
 
         env = {
-            "MCP_MODE": "http",
+            "MCP_MODE": mode,
             "MCP_HTTP_HOST": "127.0.0.1",
             "MCP_HTTP_PORT": "9099",
             "MCP_LOG_LEVEL": "debug",
+            "MCP_JSON_LOGS": "1",
         }
 
         with patch("mcp_hangar.server.lifecycle.run_server") as mock_run:
@@ -93,6 +95,18 @@ class TestServeConfigOption:
         assert cli_config.http_host == "127.0.0.1"
         assert cli_config.http_port == 9099
         assert cli_config.log_level == "DEBUG"
+        assert cli_config.json_logs is True
+
+    @pytest.mark.parametrize("argv", [[], ["serve"]])
+    def test_invalid_port_env_exits_cleanly(self, runner, argv):
+        """Both default and explicit serve reject an invalid env port cleanly."""
+        from mcp_hangar.server.cli.main import app
+
+        with patch("mcp_hangar.server.lifecycle.run_server") as mock_run:
+            result = runner.invoke(app, argv, env={"MCP_HTTP_PORT": "abc"})
+
+        assert result.exit_code == 2
+        assert not mock_run.called
 
 
 class TestGeneratedClientEntryStarts:

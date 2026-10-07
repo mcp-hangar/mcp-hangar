@@ -18,6 +18,9 @@ from importlib.metadata import version
 
 from .config_path import resolve_config_path
 
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+_HTTP_MODE_ENV_VALUES = _TRUE_ENV_VALUES | {"http"}
+
 
 def _get_version() -> str:
     """Get package version from metadata."""
@@ -25,6 +28,25 @@ def _get_version() -> str:
         return version("mcp-hangar")
     except Exception:  # noqa: BLE001 -- fault-barrier: version lookup must not crash CLI
         return "unknown"
+
+
+def env_enables_http_mode(value: str | None) -> bool:
+    """Return whether an env value requests HTTP server mode."""
+    return (value or "").strip().lower() in _HTTP_MODE_ENV_VALUES
+
+
+def _env_flag_enabled(value: str | None) -> bool:
+    return (value or "").strip().lower() in _TRUE_ENV_VALUES
+
+
+def _env_int(parser: argparse.ArgumentParser, name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        parser.error(f"environment variable {name} must be an integer")
 
 
 @dataclass(frozen=True)
@@ -158,11 +180,11 @@ Environment Variables:
 
     # Resolve values: defaults -> env -> CLI args
     # Environment variable defaults
-    env_http_mode = os.getenv("MCP_MODE", "stdio") == "http"
+    env_http_mode = env_enables_http_mode(os.getenv("MCP_MODE", "stdio"))
     env_http_host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
-    env_http_port = int(os.getenv("MCP_HTTP_PORT", "8000"))
+    env_http_port = _env_int(parser, "MCP_HTTP_PORT", 8000)
     env_log_level = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
-    env_json_logs = os.getenv("MCP_JSON_LOGS", "false").lower() == "true"
+    env_json_logs = _env_flag_enabled(os.getenv("MCP_JSON_LOGS", "false"))
 
     # CLI overrides env
     http_mode = parsed.http or env_http_mode
@@ -184,4 +206,4 @@ Environment Variables:
     )
 
 
-__all__ = ["CLIConfig", "parse_args"]
+__all__ = ["CLIConfig", "env_enables_http_mode", "parse_args"]

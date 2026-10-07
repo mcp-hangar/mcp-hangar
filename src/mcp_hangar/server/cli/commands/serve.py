@@ -102,11 +102,11 @@ def serve_command(
     resolved_config = resolve_config_path(config, getattr(global_opts, "config", None)).path
 
     # Build CLIConfig for backward compatibility with existing server code
-    from ..cli_compat import CLIConfig
+    from ..cli_compat import CLIConfig, env_enables_http_mode
 
     # Resolve http mode from environment if flag not set
     http_mode = http
-    if not http_mode and os.getenv("MCP_MODE", "").lower() == "http":
+    if not http_mode and env_enables_http_mode(os.getenv("MCP_MODE")):
         http_mode = True
 
     cli_config = CLIConfig(
