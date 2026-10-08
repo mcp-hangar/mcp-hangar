@@ -4,7 +4,6 @@
   "packages": {
     ".": {
       "package-name": "mcp-hangar",
-      "release-as": "2.25.0",
       "release-type": "python",
       "bump-minor-pre-major": false,
       "bump-patch-for-minor-pre-major": false,
