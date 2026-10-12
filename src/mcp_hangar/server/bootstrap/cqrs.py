@@ -10,7 +10,7 @@ from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
-from ..config import ServerConfigLoader
+from ..config import ServerConfigLoader, declared_in_config
 from ..context import get_context
 from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_saga
 from .components import register_auth_cqrs
@@ -120,6 +120,9 @@ def init_cqrs(
         # rather than leaving it registered under an id that is free (#1506).
         log_buffers=LogBuffers(),
         restore_gap=fleet_restore_gap(runtime),
+        # A delete of a server the configuration declares would last until the
+        # next reload; it is refused instead (#1744).
+        declared_in_config=declared_in_config,
     )
 
     if discovery_registry is not None:

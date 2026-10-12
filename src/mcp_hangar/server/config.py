@@ -213,6 +213,16 @@ class _StagedConfig:
 _BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
 
 
+def declared_in_config(mcp_server_id: str) -> bool:
+    """Whether the configuration in force declares *mcp_server_id*.
+
+    Read from the servers the last committed configuration built, which a
+    reload replaces as a whole: a server the file no longer declares is out of
+    it, and one the API or a discovery source added was never in it (#1744).
+    """
+    return mcp_server_id in _BUILT_FROM
+
+
 def _kept_or_built(mcp_server_id: str, built_with: dict[str, Any], built: McpServer) -> McpServer:
     """The running server, when the file would build it with the arguments it was built with; *built* otherwise.
 

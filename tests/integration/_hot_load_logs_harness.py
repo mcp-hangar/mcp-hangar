@@ -22,9 +22,11 @@ runtime store, the buffer registry, the endpoint -- is the real one, and the
 handler under test is built exactly as ``server/bootstrap/hot_loading.py``
 builds it, including the ``LogBuffers`` port.
 
-``kept`` is declared in the file and is the delete case: ``hangar_unload``
-refuses a configured server, and ``DeleteMcpServerHandler`` works on the
-repository, where a hot-loaded server never is.
+``added`` is the delete case: a server added through ``POST
+/api/mcp_servers``, because ``hangar_unload`` refuses a configured server,
+``DeleteMcpServerHandler`` works on the repository, where a hot-loaded server
+never is, and refuses one the file declares (#1744). ``kept`` is declared in the
+file, and its refused delete must leave its log where it was.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from _reload_keeps_harness import MOCK_PROVIDER, _server
 from _reload_served_harness import BASE_URL, _served_app, _write
 
 #: What each server writes to its own stderr at startup.
-BANNERS = {"kept": "kept is up", "hot-one": "hot-one is up", "hot-two": "hot-two is up"}
+BANNERS = {"kept": "kept is up", "added": "added is up", "hot-one": "hot-one is up", "hot-two": "hot-two is up"}
 
 
 def _config() -> dict[str, Any]:
@@ -156,6 +158,10 @@ class _HotGateway(_LogGateway):
     def delete(self, mcp_server: str) -> int:
         return self.client.delete(f"/api/mcp_servers/{mcp_server}").status_code
 
+    def add(self, mcp_server: str) -> int:
+        body = {"mcp_server_id": mcp_server, **_server(env={"MOCK_STDERR_BANNER": BANNERS[mcp_server]})}
+        return self.client.post("/api/mcp_servers", json=body).status_code
+
 
 def run(workdir: Path) -> dict[str, Any]:
     from starlette.testclient import TestClient
@@ -226,11 +232,22 @@ def run(workdir: Path) -> dict[str, Any]:
         # A second one, loaded and then deleted rather than unloaded, to show
         # the release is not the unload path's alone.
         gateway.load("hot-two")
-        out["deleted"] = {
+        added = gateway.add("added")
+        out["added"] = {
+            "status": added,
+            "logs": gateway.started("added", BANNERS["added"]),
+            "wired": wired("added"),
+        }
+        out["refused"] = {
             "status": gateway.delete("kept"),
-            "logs": gateway.logs("kept"),
-            "registered": get_log_buffer("kept") is not None,
             "in_repository": repository.exists("kept"),
+            "wired": wired("kept"),
+        }
+        out["deleted"] = {
+            "status": gateway.delete("added"),
+            "logs": gateway.logs("added"),
+            "registered": get_log_buffer("added") is not None,
+            "in_repository": repository.exists("added"),
             # Untouched by the delete beside it.
             "hot_two_registered": get_log_buffer("hot-two") is not None,
             "hot_two_logs": gateway.logs_holding("hot-two", BANNERS["hot-two"]),

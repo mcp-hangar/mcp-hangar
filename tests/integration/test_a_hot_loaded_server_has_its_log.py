@@ -80,8 +80,24 @@ def test_unloading_releases_the_log(run: dict[str, Any]) -> None:
     assert unloaded["logs"] == 404
 
 
+def test_a_server_added_over_the_api_is_the_delete_case(run: dict[str, Any]) -> None:
+    # It gets no log buffer yet (#1747), so the release on delete is asserted
+    # at handler level for now, in test_a_hot_loaded_server_gets_a_log_buffer.
+    assert run["added"]["status"] == 201
+
+
+def test_deleting_a_configured_server_is_refused_and_keeps_its_log(run: dict[str, Any]) -> None:
+    refused = run["refused"]
+
+    assert refused["status"] == 409
+    assert refused["in_repository"]
+    assert refused["wired"]
+
+
 def test_deleting_releases_the_log(run: dict[str, Any]) -> None:
     deleted = run["deleted"]
+    # The REST-added server had no buffer to release (#1747); this holds the
+    # line until it does, and the handler-level test proves the release.
 
     assert deleted["status"] in (200, 204)
     assert not deleted["in_repository"]
