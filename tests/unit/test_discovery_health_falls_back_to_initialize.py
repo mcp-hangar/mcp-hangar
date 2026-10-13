@@ -20,6 +20,10 @@ from typing import Any
 
 import pytest
 
+# The validator skips the health check without aiohttp, an optional extra that
+# not every CI job installs; there is nothing to test there.
+pytest.importorskip("aiohttp")
+
 from mcp_hangar.application.discovery.security_validator import (
     SecurityConfig,
     SecurityValidator,
