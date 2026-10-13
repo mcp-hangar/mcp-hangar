@@ -237,6 +237,7 @@ def run(workdir: Path) -> dict[str, Any]:
             "status": added,
             "logs": gateway.started("added", BANNERS["added"]),
             "wired": wired("added"),
+            "registered": get_log_buffer("added") is not None,
         }
         out["refused"] = {
             "status": gateway.delete("kept"),

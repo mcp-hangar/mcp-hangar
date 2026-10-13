@@ -80,10 +80,14 @@ def test_unloading_releases_the_log(run: dict[str, Any]) -> None:
     assert unloaded["logs"] == 404
 
 
-def test_a_server_added_over_the_api_is_the_delete_case(run: dict[str, Any]) -> None:
-    # It gets no log buffer yet (#1747), so the release on delete is asserted
-    # at handler level for now, in test_a_hot_loaded_server_gets_a_log_buffer.
-    assert run["added"]["status"] == 201
+def test_a_server_added_over_the_api_has_its_log(run: dict[str, Any]) -> None:
+    """The third way a server joins gets a buffer too (#1747), as reload and hot-load do."""
+    added = run["added"]
+
+    assert added["status"] == 201
+    assert added["logs"] == ["added is up"]
+    assert added["wired"], "the server writes into a buffer the logs API does not read"
+    assert added["registered"]
 
 
 def test_deleting_a_configured_server_is_refused_and_keeps_its_log(run: dict[str, Any]) -> None:
@@ -96,8 +100,9 @@ def test_deleting_a_configured_server_is_refused_and_keeps_its_log(run: dict[str
 
 def test_deleting_releases_the_log(run: dict[str, Any]) -> None:
     deleted = run["deleted"]
-    # The REST-added server had no buffer to release (#1747); this holds the
-    # line until it does, and the handler-level test proves the release.
+    # Registered before the delete (test_a_server_added_over_the_api_has_its_log),
+    # so this is a release, not a buffer that was never there (#1747).
+    assert run["added"]["registered"]
 
     assert deleted["status"] in (200, 204)
     assert not deleted["in_repository"]

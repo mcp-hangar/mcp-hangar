@@ -78,6 +78,7 @@ class CreateMcpServerHandler(CommandHandler):
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
         coordinated: Callable[[], bool] | None = None,
+        log_buffers: ILogBuffers | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -93,11 +94,15 @@ class CreateMcpServerHandler(CommandHandler):
                 process of one gateway, so every replica that learned about the
                 server would start its own copy. Absent means standalone, where
                 every mode is available and always was.
+            log_buffers: Where a created server gets the log buffer its output
+                is read into (#1747), as a reloaded (#1502) and a hot-loaded
+                (#1506) one do. None means no buffer, as before.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
         self._coordinated = coordinated or (lambda: False)
+        self._log_buffers = log_buffers
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -157,6 +162,10 @@ class CreateMcpServerHandler(CommandHandler):
         if self._fleet_writer is not None:
             self._fleet_writer.save(snapshot_of(mcp_server))
 
+        # Before it joins the repository, so nothing can start it -- and write
+        # output -- with no buffer attached.
+        if self._log_buffers is not None and self._log_buffers.attach(command.mcp_server_id, mcp_server):
+            logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=command.mcp_server_id)
         self._repository.add(command.mcp_server_id, mcp_server)
 
         self._event_bus.publish(
@@ -763,7 +772,8 @@ def register_crud_handlers(
         fleet_writer: Where fleet changes are recorded so a restart can rebuild
             them. None leaves the fleet in memory only, as before.
         coordinated: Whether this gateway shares its state with peers.
-        log_buffers: Where a deleted server's log buffer is released (#1506).
+        log_buffers: Where a created server's log buffer is attached (#1747) and
+            a deleted server's is released (#1506).
         restore_gap: Why the next start will not read the fleet back, or None
             when it will; reported by the L7 policy push (#1306).
         declared_in_config: Whether the configuration declares a server, which
@@ -773,7 +783,11 @@ def register_crud_handlers(
     command_bus.register(
         CreateMcpServerCommand,
         CreateMcpServerHandler(
-            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, coordinated=coordinated
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            coordinated=coordinated,
+            log_buffers=log_buffers,
         ),
     )
     command_bus.register(
