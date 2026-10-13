@@ -1350,7 +1350,7 @@ wheels = [
 
 [[package]]
 name = "mcp-hangar"
-version = "2.27.2"
+version = "2.27.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
