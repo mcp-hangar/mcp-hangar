@@ -153,6 +153,8 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # `max_per_tenant` (#1146), read by `config._init_resource_links_from_config`.
     "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
+    # `trusted_networks` (#1752), read by `config._init_ssrf_from_config`.
+    "ssrf": frozenset({"trusted_networks"}),
     "startup_checks": frozenset({"enforce"}),
     # `mode`, read by `config._init_topology_mode_from_config`, and
     # `required_catalogue` (#1446), read by `catalogue_readiness.required_catalogue`,

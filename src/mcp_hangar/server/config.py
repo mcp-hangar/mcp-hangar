@@ -23,6 +23,7 @@ from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
+from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
@@ -1736,6 +1737,40 @@ def _tenant_limits(full_config: dict[str, Any]) -> dict[str, TenantLimits]:
     return parse_tenant_limits(execution_config.get("tenant_limits") if isinstance(execution_config, dict) else None)
 
 
+def _init_ssrf_from_config(full_config: dict[str, Any]) -> None:
+    """Put ``ssrf.trusted_networks`` in force (#1752).
+
+    ::
+
+        ssrf:
+          trusted_networks: ["10.96.0.0/12"]
+
+    The private networks a remote endpoint registered over the API may resolve
+    into -- for the Kubernetes operator, the cluster's Service range. Every
+    caller allowed to register a server gets them, not only the operator. Read
+    by the registration check and by the connect-time check on every request,
+    so a reload that narrows the list refuses the next connection; an absent
+    section trusts nothing.
+    """
+    networks = _trusted_networks(full_config)
+    set_trusted_networks(networks)
+    if networks:
+        logger.info("ssrf_trusted_networks_configured", networks=[str(n) for n in networks])
+
+
+def _trusted_networks(full_config: dict[str, Any]) -> tuple[TrustedNetwork, ...]:
+    """The checked ``ssrf.trusted_networks``, empty when there is none."""
+    section = full_config.get("ssrf")
+    if section is None:
+        return ()
+    if not isinstance(section, dict):
+        raise ConfigurationError(f"ssrf must be a mapping, got {type(section).__name__}")
+    try:
+        return parse_trusted_networks(section.get("trusted_networks"))
+    except ValueError as e:
+        raise ConfigurationError(str(e)) from e
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1847,6 +1882,7 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_response_limit_from_config,
     _init_interceptors_from_config,
     _init_ui_resources_from_config,
+    _init_ssrf_from_config,
 )
 
 
@@ -1871,6 +1907,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     _max_links_per_tenant(full_config)
     _max_response_bytes(full_config)
     _ui_resource_policies(full_config)
+    _trusted_networks(full_config)
     # Checked, not applied: `run_http` reads it when the server starts (#1447).
     http_graceful_shutdown_timeout(full_config)
     try:
@@ -1891,8 +1928,8 @@ def apply_process_config(full_config: dict[str, Any]) -> None:
     """Apply every process-wide section of a configuration: startup's step, and a reload's.
 
     `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
-    `headers.param_validation`, `resource_links`, `interceptors` and
-    `ui_resources`. A section that is absent is put back to its default, so
+    `headers.param_validation`, `resource_links`, `interceptors`,
+    `ui_resources` and `ssrf`. A section that is absent is put back to its default, so
     deleting a block and reloading removes it. Checked first, so nothing is
     applied unless all of it can be.
     """

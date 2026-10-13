@@ -34,6 +34,7 @@ from structlog.testing import capture_logs
 
 from mcp_hangar.domain.contracts.validator import ValidationContext
 from mcp_hangar.domain.exceptions import ConfigurationError
+from mcp_hangar.domain.security.ssrf import set_trusted_networks, trusted_networks
 from mcp_hangar.domain.services import get_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
 from mcp_hangar.fastmcp_server import resource_link_read_through
@@ -92,6 +93,7 @@ def _config() -> dict[str, Any]:
         "relay_tasks_enabled": False,
         "resource_links": {"max_per_tenant": 17},
         "retry": {"default_policy": {"max_attempts": 2}},
+        "ssrf": {"trusted_networks": ["10.96.0.0/12"]},
         "startup_checks": {"enforce": True},
         "tool_access": {"mode": "front_door"},
         "tool_projection": {"pin_recheck_interval_s": 30},
@@ -155,6 +157,7 @@ PROBES: dict[str, Callable[[ApplicationContext], Any]] = {
     "relay_tasks_enabled": _from_context_config("relay_tasks_enabled"),
     "resource_links": lambda context: resource_link_read_through._MAX_LINKS_PER_TENANT,
     "retry": _from_context_config("retry"),
+    "ssrf": lambda context: [str(network) for network in trusted_networks()],
     "startup_checks": _from_context_config("startup_checks"),
     "tool_access": lambda context: get_tool_access_resolver().topology_mode,
     # Read by `create_background_workers` from the same dict (#1693).
@@ -181,6 +184,7 @@ APPLIED: dict[str, Any] = {
     "http": 45,
     "interceptors": {"small": True, "large": False},
     "resource_links": 17,
+    "ssrf": ["10.96.0.0/12"],
     "tool_access": "front_door",
     "ui_resources": ["ui://reports/"],
 }
@@ -195,6 +199,7 @@ def _reset_process_settings() -> None:
     resource_link_read_through.set_max_links_per_tenant(resource_link_read_through.DEFAULT_MAX_LINKS_PER_TENANT)
     reset_ui_resource_guard()
     reset_concurrency_manager()
+    set_trusted_networks(())
     repository = get_runtime().repository
     if repository.exists(SERVER):
         repository.remove(SERVER)
