@@ -102,8 +102,8 @@ dev = [
     # The discovery security check's HTTP client (security_validator.py). In a
     # deployment the kubernetes extra brings it; without it here the check is
     # skipped in every test run and its tests can only skip (#1756). Security
-    # floor: 3.13.3 and 3.13.4 fix the PYSEC-2026-1099..1101 and 2095..2103 set.
-    "aiohttp>=3.13.4",
+    # floor: the deps-floor-audit job refuses anything older than 3.14.3.
+    "aiohttp>=3.14.3",
 ]
 # The kubernetes discovery source imports this. Until now it was declared
 # nowhere -- not a dependency, not an extra, not in the image -- so the source
