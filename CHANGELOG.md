@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.0...v2.27.1) (2026-10-13)
+
+### Fixed
+
+- **core:** discovery no longer quarantines a server only because it has no
+  health endpoint. When the health path (`mcp-hangar.io/health-path`, default
+  `/health`) answers 404, the security check sends an MCP `initialize` to the
+  server's MCP path (`mcp-hangar.io/path`, default `/mcp`) and passes it on a
+  JSON-RPC result, JSON or SSE. A 5xx or a timeout on the health path still fails
+  the check, and a failed fallback names both probes. Servers that serve only MCP,
+  including the Kubernetes operator's container-mode servers, no longer need
+  `discovery.security.require_health_check: false`. ([#1757](https://github.com/mcp-hangar/mcp-hangar/pull/1757))
+
 ## [2.27.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.26.0...v2.27.0) (2026-10-13)
 
 ### Added
