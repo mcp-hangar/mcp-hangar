@@ -1420,7 +1420,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.13.0" },
+    { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.13.4" },
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "anyio", specifier = ">=4.14.2" },
     { name = "atheris", marker = "python_full_version >= '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'fuzz'", specifier = ">=3.1.0" },
