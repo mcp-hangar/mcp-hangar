@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.2...v2.27.3) (2026-10-13)
+
+### Fixed
+
+- **core:** CEF and LEEF records name the running release as the device version
+  instead of the `0.15.0` they carried since that release, and a CEF state-change
+  record carries its transition (`msg=cold -> initializing`). Two transitions of
+  one server used to be byte-identical CEF lines ([#1810](https://github.com/mcp-hangar/mcp-hangar/pull/1810))
+
 ## [2.27.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.1...v2.27.2) (2026-10-13)
 
 ### Fixed
