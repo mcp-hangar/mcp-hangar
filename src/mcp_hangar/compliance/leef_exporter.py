@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mcp_hangar import __version__
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 from mcp_hangar.observability.health import ComplianceExportStatus
 
@@ -21,7 +22,10 @@ from .refusal import (
 LEEF_VERSION = "2.0"
 DEVICE_VENDOR = "MCP Hangar"
 DEVICE_PRODUCT = "MCP Hangar"
-DEVICE_VERSION = "0.15.0"
+# The running release, not a literal: a literal stayed 0.15.0 from that
+# release on, and a SIEM correlating by device version was told every gateway
+# was a year old (#1705).
+DEVICE_VERSION = __version__
 
 _EVENT_ID_MAP: dict[str, str] = {
     "ToolInvocationRequested": "100",

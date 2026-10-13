@@ -12,6 +12,7 @@ This module is part of the compliance layer.
 
 from datetime import UTC, datetime
 
+from mcp_hangar import __version__
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
 from .refusal import CALLER_ROLES, ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusal_wire_fields
@@ -20,7 +21,10 @@ from .refusal import CALLER_ROLES, ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusa
 CEF_VERSION = "0"
 DEVICE_VENDOR = "MCP Hangar"
 DEVICE_PRODUCT = "MCP Hangar"
-DEVICE_VERSION = "0.15.0"
+# The running release, not a literal: a literal stayed 0.15.0 from that
+# release on, and a SIEM correlating by device version was told every gateway
+# was a year old (#1705).
+DEVICE_VERSION = __version__
 
 # Map event types to CEF signature IDs and human-readable names.
 # Signature IDs follow a numbering scheme:
@@ -207,6 +211,13 @@ def format_audit_record(record: AuditRecord) -> str:
     error_type = data.get("error_type")
     if error_type:
         extensions.append(f"reason={_escape_extension_value(str(error_type))}")
+
+    # A state change's transition (#1705). Every custom-string slot is taken,
+    # so it goes in `msg`, CEF's free-text message; without it two transitions
+    # of one server were byte-identical lines.
+    from_state, to_state = data.get("from_state"), data.get("to_state")
+    if from_state is not None and to_state is not None:
+        extensions.append(f"msg={_escape_extension_value(f'{from_state} -> {to_state}')}")
 
     # A refused call's bounded gate or L7 fields (#1582).
     extensions.extend(f"{key}={_escape_extension_value(value)}" for key, value in refusal_wire_fields(data))
