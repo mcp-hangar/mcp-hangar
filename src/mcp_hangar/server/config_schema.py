@@ -245,15 +245,86 @@ def _section_problems(name: str, section: Any, allowed: frozenset[str]) -> list[
     return named + _unknown(name, rest, allowed)
 
 
+#: The keys an access policy block reads, and the kinds of an ``access`` block.
+#: Copies of ``domain.model.mcp_server_config._POLICY_KEYS`` and
+#: ``server.config._ACCESS_KINDS``, because this module is loaded by path from a
+#: source checkout and imports nothing (the docs gate does that); a test holds
+#: the copies to the originals.
+POLICY_KEYS = frozenset({"allow_list", "deny_list", "approval_list", "approval_timeout_seconds", "approval_channel"})
+ACCESS_KINDS = ("prompt", "resource")
+
+_POLICY_HINTS = {
+    "allow": "allow_list",
+    "deny": "deny_list",
+    "approve": "approval_list",
+    "approval": "approval_list",
+    "approvals": "approval_list",
+}
+
+
+def _policy_block_problems(where: str, block: Any, extra: frozenset[str] = frozenset()) -> list[str]:
+    """The keys of one access policy block that no policy reads (#1773).
+
+    ``tools: {allow: [read], deny: [add]}`` booted with no policy at all: the
+    parser read the lists it knows and found none. The loader refuses it; this
+    is the same refusal for `config check`, which does not run the loader.
+    """
+    if not isinstance(block, dict):
+        return []
+    problems = []
+    for key in sorted((k for k in block if k not in POLICY_KEYS and k not in extra), key=str):
+        hint = _POLICY_HINTS.get(str(key).lower())
+        problems.append(
+            f"{where}.{key} is not a key an access policy reads"
+            + (f" (did you mean {hint}?)" if hint else "")
+            + f"; it reads {', '.join(sorted(POLICY_KEYS))}, and an unread key leaves the policy unenforced"
+        )
+    return problems
+
+
+def _access_problems(where: str, scope: Any) -> list[str]:
+    """The policy blocks under a scope's ``access:`` mapping."""
+    access = scope.get("access") if isinstance(scope, dict) else None
+    if not isinstance(access, dict):
+        return []
+    problems: list[str] = []
+    for kind in ACCESS_KINDS:
+        problems += _policy_block_problems(f"{where}.access.{kind}", access.get(kind))
+    return problems
+
+
+def _policy_problems(where: str, spec: Any) -> list[str]:
+    """Every access policy block of one server or group spec: its own, its tenants', its members'."""
+    if not isinstance(spec, dict):
+        return []
+    problems = _policy_block_problems(f"{where}.tools", spec.get("tools"))
+    problems += _access_problems(where, spec)
+
+    tool_access = spec.get("tool_access")
+    members_by_tenant = tool_access.get("member") if isinstance(tool_access, dict) else None
+    if isinstance(members_by_tenant, dict):
+        for tenant, member_spec in members_by_tenant.items():
+            tenant_where = f"{where}.tool_access.member.{tenant}"
+            problems += _policy_block_problems(tenant_where, member_spec, frozenset({"access"}))
+            problems += _access_problems(tenant_where, member_spec)
+
+    members = spec.get("members")
+    if isinstance(members, list):
+        for member in members:
+            if isinstance(member, dict):
+                problems += _policy_block_problems(f"{where}.members.{member.get('id')}.tools", member.get("tools"))
+    return problems
+
+
 def _server_spec_problems(server_id: str, spec: Any) -> list[str]:
     where = f"mcp_servers.{server_id}"
     if not isinstance(spec, dict) or spec.get("mode") != "group":
-        return _unknown(where, spec, SERVER_SPEC_KEYS)
+        return _unknown(where, spec, SERVER_SPEC_KEYS) + _policy_problems(where, spec)
 
     message = _REMOVED_GROUP_RESET_TIMEOUT.format(group=server_id)
     problems = [f"{where}.{key} {message}" for key in _group_reset_timeouts(spec)]
     rest = {key: value for key, value in spec.items() if key != "circuit_reset_timeout_s"}
-    return problems + _unknown(where, rest, SERVER_SPEC_KEYS)
+    return problems + _unknown(where, rest, SERVER_SPEC_KEYS) + _policy_problems(where, spec)
 
 
 def validate_config(config: dict[str, Any]) -> list[str]:

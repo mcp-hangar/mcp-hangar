@@ -156,8 +156,12 @@ class TestApprovalListReachesThePolicy:
         assert cfg is not None
         assert cfg.to_policy().requires_approval("multiply") is True
 
-    def test_a_tools_block_with_no_access_keys_is_still_not_a_policy(self):
-        assert parse_tools_access_config({"something_else": 1}) is None
+    def test_a_tools_block_with_no_access_keys_is_no_policy_and_one_with_a_stranger_is_refused(self):
+        assert parse_tools_access_config({}) is None
+        # It used to be None as well: a key nothing reads was a policy that was
+        # not in force, with nothing saying so (#1773).
+        with pytest.raises(ValueError, match="something_else"):
+            parse_tools_access_config({"something_else": 1})
 
     def test_an_empty_approval_pattern_is_rejected(self):
         with pytest.raises(ValueError, match="approval_list"):
