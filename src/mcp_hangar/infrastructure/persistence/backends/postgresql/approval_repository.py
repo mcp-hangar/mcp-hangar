@@ -17,6 +17,7 @@ than by accident:
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any
 
@@ -242,6 +243,50 @@ class PostgresApprovalRepository:
                         ),
                     )
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    async def transition(
+        self,
+        approval_id: str,
+        from_states: Collection[ApprovalState],
+        state: ApprovalState,
+        decided_by: str | None,
+        decided_at: datetime | None,
+        reason: str | None,
+    ) -> bool:
+        """Move the request only from *from_states*; True when this call did (#1794).
+
+        One conditional ``UPDATE``: PostgreSQL re-checks ``state`` after a
+        concurrent writer commits, so of two racing connections exactly one
+        sees a row count of 1.
+        """
+        self._ensure_table()
+        sources = [candidate.value for candidate in from_states]
+        if not sources:
+            return False
+        with self._connections.get_connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE approval_requests
+                        SET state = %s, decided_by = %s, decided_at = %s, reason = %s
+                        WHERE approval_id = %s AND state = ANY(%s)
+                        """,
+                        (
+                            state.value,
+                            decided_by,
+                            decided_at.isoformat() if decided_at else None,
+                            reason,
+                            approval_id,
+                            sources,
+                        ),
+                    )
+                    moved = bool(cur.rowcount == 1)
+                conn.commit()
+                return moved
             except Exception:
                 conn.rollback()
                 raise
