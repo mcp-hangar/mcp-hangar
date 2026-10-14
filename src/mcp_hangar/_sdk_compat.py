@@ -37,10 +37,12 @@ except ImportError:  # SDK v1
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Static typing follows the SDK v1 FastMCP surface until the pin flips to v2,
-    # so mypy keeps checking the server surface (the runtime resolution below
-    # would otherwise degrade FastMCP to Any under ignore_missing_imports).
-    from mcp.server.fastmcp import Context, FastMCP
+    # Static typing follows the pinned SDK's server surface, so mypy keeps checking
+    # it (the runtime resolution below would otherwise degrade FastMCP to Any under
+    # ignore_missing_imports). 2.3.0 turned `mcp.server.fastmcp` into a stub that
+    # raises on import, so the v2 names are the typed ones.
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver import MCPServer as FastMCP
 else:
     try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
         from mcp.server.mcpserver import Context

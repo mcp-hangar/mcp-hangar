@@ -1182,7 +1182,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         permitted = management_tools_for(mcp_ctx)
         if not permitted:
             return []
-        registered = mcp.list_tools()
+        # Awaited on SDK v2, a plain list on v1; typed Any so neither is a lie to mypy.
+        registered: Any = mcp.list_tools()
         if hasattr(registered, "__await__"):
             registered = await registered
         return [tool for tool in registered if tool.name in permitted]
