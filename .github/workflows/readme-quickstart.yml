@@ -1,0 +1,36 @@
+# Runs the README quickstart's shell blocks literally on a clean runner.
+#
+# Why this exists: the quickstart was verified by reading it. Run as written it
+# exited 127 (the installer's PATH line is not loaded in the same shell), and
+# its policy example used keys the parser ignored (#1713, #1773). A reader
+# follows the commands in order, in an empty directory, with nothing of ours on
+# PATH; this job is that reader. Blocks marked `<!-- ci:quickstart -->` in
+# README.md are the ones it runs (scripts/readme_quickstart.py).
+name: readme-quickstart
+
+on:
+  pull_request:
+    paths:
+      - README.md
+      - scripts/readme_quickstart.py
+      - examples/rugpull/**
+      - .github/workflows/readme-quickstart.yml
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quickstart:
+    name: README quickstart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Run the quickstart blocks
+        run: python scripts/readme_quickstart.py README.md

@@ -37,20 +37,24 @@ Upgrading rather than installing fresh? The migration steps live in the
 
 ## Quickstart
 
+<!-- ci:quickstart -->
 ```bash
-mcp-hangar init -y
+curl -sSL https://mcp-hangar.io/install.sh | bash && export PATH="$HOME/.mcp-hangar/bin:$PATH" && mcp-hangar init -y
 ```
 
 `init` finds your MCP client (Claude Code, Cursor, Claude Desktop), writes a
 config, starts each server once to check it works, and -- while they are up --
-records a **digest pin** for every tool they serve. Restart your client and your
-tools are where they were, with Hangar in the path of every call to them.
+records a **digest pin** for every tool they serve. Restart your client and it
+has a `mcp-hangar` server beside the ones you already had. Your existing entries
+are left as they are; a server is behind Hangar once it is listed under
+`mcp_servers` in the config `init` wrote.
 
 Now watch a call stop being allowed. An MCP server decides what it advertises
 every time it connects, and the dangerous change is not a new parameter, it is a
 new *description*: same inputs, same outputs, different instructions for the
 model.
 
+<!-- ci:quickstart -->
 ```bash
 # a demo upstream that rewrites its own tool description on request
 git clone https://github.com/mcp-hangar/mcp-hangar
@@ -70,8 +74,23 @@ YAML
 mcp-hangar pin --config demo.yaml --write
 ```
 
-Point your client at `demo.yaml` — add `--config /path/to/demo.yaml` to the entry
-`init` wrote — restart it, and ask it to call `echo`. It works.
+Point your client at `demo.yaml`: in its MCP config, replace the `mcp-hangar`
+entry `init` wrote with this one (use the absolute path of `demo.yaml` and of
+the `mcp-hangar` binary, `~/.mcp-hangar/bin/mcp-hangar` if you used the
+installer), restart it, and ask it to call `echo`. It works.
+
+```json
+{
+  "mcpServers": {
+    "mcp-hangar": {
+      "command": "/home/you/.mcp-hangar/bin/mcp-hangar",
+      "args": ["--config", "/home/you/demo.yaml", "serve"]
+    }
+  }
+}
+```
+
+This is the shape `init` writes; only the config path changes.
 
 Now rewrite the tool's description by adding two lines to the `demo` server in
 `demo.yaml`, and restart the client once more:
@@ -130,7 +149,7 @@ mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /
 One line, from nothing to a client wired to a pinned fleet:
 
 ```bash
-curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y
+curl -sSL https://mcp-hangar.io/install.sh | bash && export PATH="$HOME/.mcp-hangar/bin:$PATH" && mcp-hangar init -y
 ```
 
 ## What you get
