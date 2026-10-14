@@ -57,13 +57,14 @@ model.
 <!-- ci:quickstart -->
 ```bash
 # a demo upstream that rewrites its own tool description on request;
-# it runs on the Python that has mcp-hangar (and so the mcp SDK) installed
+# it needs the mcp SDK, which the installer's Python has (if you installed with
+# pip, put the Python you installed into in place of $HOME/.mcp-hangar/venv/bin/python)
 git clone https://github.com/mcp-hangar/mcp-hangar
 cat > demo.yaml <<YAML
 mcp_servers:
   demo:
     mode: subprocess
-    command: [$(dirname "$(command -v mcp-hangar)")/python, $PWD/mcp-hangar/examples/rugpull/server.py]
+    command: [$HOME/.mcp-hangar/venv/bin/python, $PWD/mcp-hangar/examples/rugpull/server.py]
 tool_access:
   mode: front_door
 auth:
