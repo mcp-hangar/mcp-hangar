@@ -164,8 +164,8 @@ tools:                        # LIST -- pre-start visibility projection
     inputSchema: { type: object, properties: { a: { type: number } } }
 
 tools:                        # DICT -- access policy
-  allow: [create_issue, list_issues]
-  deny: [delete_repository]
+  allow_list: [create_issue, list_issues]
+  deny_list: [delete_repository]
 ```
 
 The **list** form only lets a tool be listed before its provider has started.

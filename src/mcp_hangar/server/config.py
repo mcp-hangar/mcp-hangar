@@ -785,7 +785,9 @@ def _load_group_members(
                 member_spec["tools"], f"tools access policy for group '{group_id}' member '{member_id}'"
             )
             try:
-                tools_access_config = parse_tools_access_config(member_tools_config)
+                tools_access_config = parse_tools_access_config(
+                    member_tools_config, where=f"mcp_servers.{group_id}.members.{member_id}.tools"
+                )
                 if tools_access_config is not None:
                     member_tools_policy = tools_access_config.to_policy()
                     resolver.set_member_policy(
@@ -945,7 +947,7 @@ def _register_access_policies(
             continue
         spec = _require_mapping(access_config[kind], f"access.{kind} policy on {where}")
         try:
-            parsed = parse_tools_access_config(spec)
+            parsed = parse_tools_access_config(spec, where=f"{where}.access.{kind}")
         except (ValueError, TypeError) as e:
             # Refused, never dropped: a dropped policy leaves the kind unrestricted (#1648).
             raise ConfigurationError(f"Invalid access.{kind} policy on {where}: {e}") from e
@@ -1112,7 +1114,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             expected="a mapping (an access policy) or a list (tool schemas)",
         )
         try:
-            tools_access_config = parse_tools_access_config(tools_config)
+            tools_access_config = parse_tools_access_config(tools_config, where=f"mcp_servers.{mcp_server_id}.tools")
             if tools_access_config is not None:
                 tools_access_policy = tools_access_config.to_policy()
         except (ValueError, TypeError) as e:
@@ -1252,7 +1254,11 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
                 )
                 try:
-                    member_tools_cfg = parse_tools_access_config(member_policy_spec)
+                    member_tools_cfg = parse_tools_access_config(
+                        member_policy_spec,
+                        where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
+                        extra_keys=("access",),
+                    )
                     if member_tools_cfg is not None:
                         member_policy = member_tools_cfg.to_policy()
                         resolver.set_standalone_member_policy(mcp_server_id, tenant_id, member_policy)
@@ -1336,7 +1342,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
         # A group is not a server and has no tool schemas: a mapping is its only form.
         group_tools_config = _require_mapping(spec_dict["tools"], f"tools access policy for group '{group_id}'")
         try:
-            tools_access_config = parse_tools_access_config(group_tools_config)
+            tools_access_config = parse_tools_access_config(group_tools_config, where=f"mcp_servers.{group_id}.tools")
             if tools_access_config is not None:
                 group_tools_policy = tools_access_config.to_policy()
         except (ValueError, TypeError) as e:
