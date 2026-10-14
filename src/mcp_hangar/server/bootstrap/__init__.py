@@ -434,9 +434,6 @@ def bootstrap(
     init_metrics_publisher()
     init_l7_verdict_observer()
 
-    # Ensure data directory exists
-    _ensure_data_dir()
-
     # Load configuration early (needed for runtime rate-limit and event store config)
     # Read the configuration, but do not build the servers it declares yet.
     # Building one reaches for the runtime singleton, and the runtime takes the
@@ -445,6 +442,14 @@ def bootstrap(
     # in-memory config repository for the rest of its life, and every durable
     # half of the fleet then quietly does nothing.
     full_config = _read_configuration(config_path, config_dict)
+
+    # The working directory's `data/`, for the relative defaults that still live
+    # there. Not when the configuration puts the event store at an absolute path,
+    # as the one `init` writes does: every client starts Hangar somewhere of its
+    # own choosing, and an empty `data/` left in it, or a refusal to start in a
+    # directory nobody can write, is what that path exists to avoid (#1772).
+    if not Path(str((full_config.get("event_store") or {}).get("path", "data/events.db"))).is_absolute():
+        _ensure_data_dir()
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.

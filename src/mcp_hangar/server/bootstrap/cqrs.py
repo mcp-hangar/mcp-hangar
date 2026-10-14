@@ -13,7 +13,7 @@ from ...logging_config import get_logger
 from ..config import ServerConfigLoader, declared_in_config
 from ..context import get_context
 from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_saga
-from .components import register_auth_cqrs
+from .components import absolute_state_dir, register_auth_cqrs
 from .composition import close_at_shutdown
 from .logs import LogBuffers
 from .persistence import fleet_restore_gap
@@ -191,7 +191,12 @@ def _create_saga_state_store(
 
     from ...infrastructure.persistence.database_common import SQLiteConfig, SQLiteConnectionFactory
 
-    saga_db_path = "data/saga_state.db"
+    # Beside the event store when the configuration gives it an absolute path, as
+    # the one `init` writes does: a database left at `data/` relative to wherever
+    # the client spawned Hangar was a file it still wrote there (#1772). Any other
+    # configuration keeps the `data/saga_state.db` it has always had.
+    state_dir = absolute_state_dir(full_config)
+    saga_db_path = str(state_dir / "saga_state.db") if state_dir else "data/saga_state.db"
     try:
         factory = SQLiteConnectionFactory(SQLiteConfig(path=saga_db_path))
         store = SagaStateStore(factory)
