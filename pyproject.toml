@@ -312,9 +312,10 @@ relative_files = true
 #     Pinning those branches with deterministic tests would let this rise again.
 #
 # Two entries are visible debt rather than a target:
-#   approvals/persistence/sqlite_approval_repository.py at 31.2 -- the store
+#   approvals/persistence/sqlite_approval_repository.py at 64.9 -- the store
 #     holding approval state, tenant scoping and the arguments hash. Unit tests
-#     use a fake repository, so the real SQL paths are barely exercised.
+#     use a fake repository; the real SQL of `transition` is exercised by the
+#     multi-process race test (#1794), the rest of the paths barely.
 #   domain/value_objects/tool_access_policy.py at 84.2 -- _CompositePolicy's
 #     merge and approval-list handling, i.e. the consent-preservation logic.
 #   server/tools/batch/executor.py at 85.3 -- the invoke path, including the
@@ -328,13 +329,13 @@ drift_allowance = 3.0
   "application/tasks/tool_pin_context.py" = 94.4
   "approvals/api/routes.py" = 90.0
   "approvals/bootstrap.py" = 98.3
-  "approvals/commands/resolve.py" = 92.5
+  "approvals/commands/resolve.py" = 96.7
   "approvals/delivery/event_stream.py" = 100.0
   "approvals/delivery/noop.py" = 100.0
   "approvals/hold_registry.py" = 100.0
   "approvals/models.py" = 97.9
   "approvals/pending.py" = 100.0
-  "approvals/persistence/sqlite_approval_repository.py" = 31.2
+  "approvals/persistence/sqlite_approval_repository.py" = 64.9
   "approvals/service.py" = 96.1
   "auth/commands/handlers.py" = 99.2
   "auth/infrastructure/middleware.py" = 96.9
