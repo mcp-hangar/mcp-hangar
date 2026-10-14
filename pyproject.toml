@@ -21,23 +21,32 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    # Pinned EXACTLY, not merely bounded, and now on the stable 2.0.0.
+    # Pinned EXACTLY, not merely bounded. This pin is a contract with the SDK, and
+    # what it protects against is a wrong wire, not an ImportError.
     #
-    # The exactness is no longer about beta drift -- it is that `_sdk_compat`
-    # shims specific SDK internals (`_lowlevel_server`, `add_request_handler`,
-    # `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`) and the relay registers custom
-    # `tasks/*` methods that the SDK deliberately does not carry in
-    # `SPEC_CLIENT_METHODS`. A floating pin lets any of that move under us
-    # silently, and the failure mode is a wrong wire rather than an ImportError.
-    # Bump deliberately, with the relay smoke harness run against the candidate.
+    # Why exact: `_sdk_compat` shims SDK internals (`_lowlevel_server`,
+    # `add_request_handler`, `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`), the front
+    # door installs its own `tools/list` and `tools/call` handlers, and the relay
+    # registers `tasks/*` methods the SDK deliberately does not carry in
+    # `SPEC_CLIENT_METHODS`. Any of those can change between two SDK releases
+    # without a failing import, and 2.3.0 proved it: it stopped running the
+    # `tools/list` handler before dispatch and asked `get_tool_input_schema`
+    # instead, so every `Mcp-Param-*` check on a projected tool was silently
+    # skipped (#1791) -- a deny that did not deny.
+    #
+    # How to move it: run the weekly canary against the candidate (#1793), then
+    # the full integration tier, the relay smoke (`task-relay-smoke.yml`, by
+    # dispatch) and the conformance workflow. A failure there is the pin doing its
+    # job. Move `mcp` and `mcp-types` together to the same version, and raise the
+    # floors in `scripts/check_dependency_floors.py` that the move implies.
     #
     # The v1 line on `main` solves the same class of problem with `>=1.28.1,<2`
     # (#561): both branches must be unable to follow the SDK somewhere their
     # code does not run. Do not widen either to match the other.
-    "mcp==2.0.0",
-    "mcp-types==2.0.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
+    "mcp==2.3.0",
+    "mcp-types==2.3.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
-    # Mirrors the floor `mcp==2.0.0` declares; we inherit it rather than choose it.
+    # Mirrors the floor `mcp==2.3.0` declares; we inherit it rather than choose it.
     # Declared at the same value so the metadata cannot claim an install that the
     # resolver can never produce (see scripts/check_dependency_floors.py).
     "pydantic>=2.12.0",
