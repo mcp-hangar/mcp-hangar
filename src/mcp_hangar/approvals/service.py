@@ -206,8 +206,23 @@ class ApprovalGateService:
                 else:
                     wait_span.set_attribute("approval.decision", "expired")
 
+            if decision is None:
+                # The wait elapsed. Expire the request only if it is still
+                # pending: a decision that landed between the deadline and this
+                # write -- on this instance or another -- wins, and is honoured
+                # as the decision, not overwritten as expired (#1794).
+                expired_at = datetime.now(UTC)
+                if not await self._repository.transition(
+                    approval_id, (ApprovalState.PENDING,), ApprovalState.EXPIRED, None, expired_at, None
+                ):
+                    decision = await self._decision_from_record(approval_id)
+                if decision is None:
+                    return await self._finish_expired(
+                        approval_id, resolved_provider_id, tool_name, channel, gate_span, expired_at
+                    )
+
             # State already updated by resolve() -- reload for event data.
-            updated = await self._repository.get(approval_id) if decision is not None else None
+            updated = await self._repository.get(approval_id)
 
             if decision is not None and (
                 (updated is not None and updated.state is ApprovalState.CANCELLED)
@@ -220,9 +235,18 @@ class ApprovalGateService:
                 # Either way the trail says cancelled, never granted.
                 attempted_by = updated.decided_by if updated is not None else None
                 cancelled_at = datetime.now(UTC)
-                await self._repository.update_state(
-                    approval_id, ApprovalState.CANCELLED, attempted_by, cancelled_at, CANCELLED_REASON
-                )
+                if updated is not None and updated.state is ApprovalState.APPROVED:
+                    # Only from approved: a record already cancelled stays as the
+                    # resolver wrote it, and nothing else may overwrite a decision
+                    # another instance made (#1794).
+                    await self._repository.transition(
+                        approval_id,
+                        (ApprovalState.APPROVED,),
+                        ApprovalState.CANCELLED,
+                        attempted_by,
+                        cancelled_at,
+                        CANCELLED_REASON,
+                    )
                 await self._publish(
                     ToolApprovalCancelled(
                         approval_id=approval_id,
@@ -273,21 +297,27 @@ class ApprovalGateService:
                 APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="denied")
                 return ApprovalResult.denied(approval_id, reason)
 
-            # Timeout
-            expired_at = datetime.now(UTC)
-            await self._repository.update_state(approval_id, ApprovalState.EXPIRED, None, expired_at, None)
-
-            await self._publish(
-                ToolApprovalExpired(
-                    approval_id=approval_id,
-                    mcp_server_id=resolved_provider_id,
-                    tool_name=tool_name,
-                    expired_at=expired_at.isoformat(),
-                )
+    async def _finish_expired(
+        self,
+        approval_id: str,
+        mcp_server_id: str,
+        tool_name: str,
+        channel: str,
+        gate_span: Any,
+        expired_at: datetime,
+    ) -> ApprovalResult:
+        """Publish the one terminal event of a request nobody decided, and close its span."""
+        await self._publish(
+            ToolApprovalExpired(
+                approval_id=approval_id,
+                mcp_server_id=mcp_server_id,
+                tool_name=tool_name,
+                expired_at=expired_at.isoformat(),
             )
-            gate_span.set_attribute("approval.result", "expired")
-            APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="expired")
-            return ApprovalResult.expired(approval_id)
+        )
+        gate_span.set_attribute("approval.result", "expired")
+        APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="expired")
+        return ApprovalResult.expired(approval_id)
 
     async def resolve(
         self,
@@ -314,19 +344,31 @@ class ApprovalGateService:
             return False
 
         if approved and self._hold_registry.is_abandoned(approval_id):
-            await self._repository.update_state(
-                approval_id, ApprovalState.CANCELLED, decided_by, datetime.now(UTC), CANCELLED_REASON
-            )
-            # Woken with a refusal, so a waiter that missed the record still
-            # does not dispatch.
-            await self._hold_registry.resolve(approval_id, False)
-            logger.info("approval_refused_call_cancelled", approval_id=approval_id)
+            if await self._repository.transition(
+                approval_id,
+                (ApprovalState.PENDING,),
+                ApprovalState.CANCELLED,
+                decided_by,
+                datetime.now(UTC),
+                CANCELLED_REASON,
+            ):
+                # Woken with a refusal, so a waiter that missed the record still
+                # does not dispatch.
+                await self._hold_registry.resolve(approval_id, False)
+                logger.info("approval_refused_call_cancelled", approval_id=approval_id)
             return False
 
-        # Store decided_by/reason before resolving the hold so check() can read them
+        # Store decided_by/reason before resolving the hold so check() can read
+        # them. From pending only: a request another instance decided, expired
+        # or cancelled since the read above stays as it is, and this caller is
+        # told it lost (#1794).
         decided_at = datetime.now(UTC)
         state = ApprovalState.APPROVED if approved else ApprovalState.DENIED
-        await self._repository.update_state(approval_id, state, decided_by, decided_at, reason)
+        if not await self._repository.transition(
+            approval_id, (ApprovalState.PENDING,), state, decided_by, decided_at, reason
+        ):
+            logger.info("approval_resolve_lost_race", approval_id=approval_id)
+            return False
 
         released_locally = await self._hold_registry.resolve(approval_id, approved)
         if not released_locally:

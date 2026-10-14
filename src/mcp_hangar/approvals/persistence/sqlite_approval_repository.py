@@ -3,6 +3,7 @@
 Follows the same async pattern as audit_repository.py.
 """
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -28,6 +29,24 @@ class ApprovalRepository(Protocol):
         decided_at: datetime | None,
         reason: str | None,
     ) -> None: ...
+
+    async def transition(
+        self,
+        approval_id: str,
+        from_states: Collection[ApprovalState],
+        state: ApprovalState,
+        decided_by: str | None,
+        decided_at: datetime | None,
+        reason: str | None,
+    ) -> bool:
+        """Move the request to *state* only if it is in one of *from_states*.
+
+        True when this call made the change, False when the request was missing
+        or another actor had already moved it. The check and the write are one
+        statement, so of any number of racing callers -- across processes
+        sharing the store -- exactly one gets True (#1794).
+        """
+        ...
 
 
 class SqliteApprovalRepository:
@@ -180,6 +199,38 @@ class SqliteApprovalRepository:
                     approval_id,
                 ),
             )
+
+    async def transition(
+        self,
+        approval_id: str,
+        from_states: Collection[ApprovalState],
+        state: ApprovalState,
+        decided_by: str | None,
+        decided_at: datetime | None,
+        reason: str | None,
+    ) -> bool:
+        await self._ensure_table()
+        sources = [candidate.value for candidate in from_states]
+        if not sources:
+            return False
+        marks = ", ".join("?" for _ in sources)
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                f"""
+                UPDATE approval_requests
+                SET state = ?, decided_by = ?, decided_at = ?, reason = ?
+                WHERE approval_id = ? AND state IN ({marks})
+                """,  # noqa: S608 -- placeholders only; the values are bound
+                (
+                    state.value,
+                    decided_by,
+                    decided_at.isoformat() if decided_at else None,
+                    reason,
+                    approval_id,
+                    *sources,
+                ),
+            )
+            return bool(cursor.rowcount == 1)
 
     @staticmethod
     def _row_to_request(row: Any) -> ApprovalRequest:

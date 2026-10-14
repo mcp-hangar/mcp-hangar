@@ -5,6 +5,7 @@ This follows the Builder pattern and improves code clarity.
 """
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,6 +59,57 @@ class RemoteConfig:
 
 #: The ``ToolsConfig`` fields that hold tool name patterns.
 _PATTERN_LISTS = ("allow_list", "deny_list", "approval_list")
+
+#: Every key an access policy block reads. Anything else in the block is a policy
+#: the operator wrote and nothing enforces (#1773).
+_POLICY_KEYS = (*_PATTERN_LISTS, "approval_timeout_seconds", "approval_channel")
+
+#: Spellings people reach for, and the key that means it. Only to make the
+#: refusal say what to write; none of them is accepted.
+_POLICY_KEY_HINTS = {
+    "allow": "allow_list",
+    "allowed": "allow_list",
+    "allowlist": "allow_list",
+    "allow_tools": "allow_list",
+    "deny": "deny_list",
+    "denied": "deny_list",
+    "denylist": "deny_list",
+    "deny_tools": "deny_list",
+    "block": "deny_list",
+    "approve": "approval_list",
+    "approval": "approval_list",
+    "approvals": "approval_list",
+    "require_approval": "approval_list",
+    "approval_tools": "approval_list",
+    "approval_timeout": "approval_timeout_seconds",
+    "timeout": "approval_timeout_seconds",
+}
+
+
+def _refuse_unknown_policy_keys(data: dict[str, Any], where: str | None, extra_keys: Collection[str]) -> None:
+    """Refuse a key of an access policy block that nothing reads.
+
+    ``tools: {allow: [read], deny: [add]}`` is the shape the README showed. It
+    parsed as a block with no lists, which is no policy, so the gateway booted,
+    listed ``add`` and ran it -- a policy the operator wrote, not in force, with
+    nothing saying so. A key this parser does not read is a mistake, never a
+    comment (#1773).
+    """
+    unknown = sorted((key for key in data if key not in _POLICY_KEYS and key not in extra_keys), key=str)
+    if not unknown:
+        return
+    prefix = f"{where}." if where else ""
+    lines = []
+    for key in unknown:
+        hint = _POLICY_KEY_HINTS.get(str(key).lower())
+        lines.append(f"{prefix}{key}" + (f" (did you mean {hint}?)" if hint else ""))
+    raise ValueError(
+        "not a key an access policy reads: "
+        + ", ".join(lines)
+        + f". It reads {', '.join(_POLICY_KEYS)}"
+        + (f" and {', '.join(sorted(extra_keys))}" if extra_keys else "")
+        + "; a key it does not read leaves the policy unenforced."
+    )
 
 
 def _require_pattern_list(name: str, value: object) -> None:
@@ -148,7 +200,9 @@ class ToolsConfig:
         return not self.allow_list and not self.deny_list and not self.approval_list
 
 
-def parse_tools_access_config(data: dict[str, Any]) -> "ToolsConfig | None":
+def parse_tools_access_config(
+    data: dict[str, Any], *, where: str | None = None, extra_keys: Collection[str] = ()
+) -> "ToolsConfig | None":
     """Build a :class:`ToolsConfig` from a ``tools:``-style mapping.
 
     Every config site that turns YAML into a tool access policy goes through
@@ -161,9 +215,17 @@ def parse_tools_access_config(data: dict[str, Any]) -> "ToolsConfig | None":
     Returns ``None`` when the mapping declares no access policy at all, so
     callers keep their "only register a policy when one is configured" shape.
 
+    Args:
+        data: The block.
+        where: Its path in the configuration, to name in a refusal.
+        extra_keys: Keys the caller reads from the same mapping itself (the
+            ``access`` block of a per-tenant entry).
+
     Raises:
-        ValueError: When a declared pattern or approval setting is invalid.
+        ValueError: When the block carries a key no access policy reads, or a
+            declared pattern or approval setting is invalid.
     """
+    _refuse_unknown_policy_keys(data, where, extra_keys)
     allow_list = data.get("allow_list", [])
     deny_list = data.get("deny_list", [])
     approval_list = data.get("approval_list", [])
@@ -317,7 +379,7 @@ class McpServerConfig:
                 predefined_tools = tools_data
             elif isinstance(tools_data, dict):
                 # Dict format: access policy (allow/deny/approval)
-                tools_access_config = parse_tools_access_config(tools_data)
+                tools_access_config = parse_tools_access_config(tools_data, where=f"mcp_servers.{mcp_server_id}.tools")
 
         # Parse capabilities declaration
         capabilities_data = data.get("capabilities")
