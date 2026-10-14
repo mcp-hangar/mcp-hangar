@@ -2,8 +2,9 @@
 """Run the README quickstart's shell blocks literally, in order (#1774).
 
 A fenced ``bash`` block that follows a ``<!-- ci:quickstart -->`` marker line is
-part of the quickstart. They are written to one script and run with ``bash -e``
-in an empty directory under a throwaway ``HOME``, so a step that only works on
+part of the quickstart. They are joined into one script and run with ``bash -e``
+in an empty directory under a throwaway ``HOME`` -- one shell, as a reader has
+it, so a PATH exported by the first block is still there for the second -- so a step that only works on
 the author's machine -- a binary that is on the author's PATH, a file left from
 last week -- fails here instead of in front of a reader.
 
@@ -41,12 +42,12 @@ def main(argv: list[str]) -> int:
         return 1
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
         env = {**os.environ, "HOME": home}
-        for number, block in enumerate(blocks, 1):
-            print(f"--- quickstart block {number}/{len(blocks)} ---\n{block}", flush=True)
-            result = subprocess.run(["bash", "-e", "-c", block], cwd=work, env=env, check=False)
-            if result.returncode:
-                print(f"block {number} exited {result.returncode}", file=sys.stderr)
-                return result.returncode
+        script = "\n".join(blocks)
+        print(script, flush=True)
+        result = subprocess.run(["bash", "-e", "-c", script], cwd=work, env=env, check=False)
+        if result.returncode:
+            print(f"the quickstart exited {result.returncode}", file=sys.stderr)
+            return result.returncode
     return 0
 
 
