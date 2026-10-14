@@ -30,7 +30,6 @@ def serve_command(
         typer.Option(
             "--http",
             help="Run in HTTP mode instead of stdio",
-            envvar="MCP_MODE",
             is_flag=True,
         ),
     ] = False,
@@ -109,11 +108,11 @@ def serve_command(
         raise CLIError(message=e.message, exit_code=1) from e
 
     # Build CLIConfig for backward compatibility with existing server code
-    from ..cli_compat import CLIConfig
+    from ..cli_compat import CLIConfig, env_enables_http_mode
 
     # Resolve http mode from environment if flag not set
     http_mode = http
-    if not http_mode and os.getenv("MCP_MODE", "").lower() == "http":
+    if not http_mode and env_enables_http_mode(os.getenv("MCP_MODE")):
         http_mode = True
 
     cli_config = CLIConfig(
