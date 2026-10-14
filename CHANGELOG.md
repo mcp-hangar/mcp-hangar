@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.3...v2.27.4) (2026-10-14)
+
+### Fixed
+
+- **security:** every state change of an approval request is now a conditional
+  update from `pending` with a row-count check, in both the SQLite and the
+  PostgreSQL repository. A resolve on one replica, an expiry on another and a
+  cancel from a batch deadline used to overwrite each other, so the record and the
+  event could disagree with what the held call did. Now one of them wins and the
+  rest are told so: a lost resolve answers `409` with the winning `state`, and a
+  decision that lands as the hold's deadline passes is honoured instead of being
+  overwritten as `expired`. Held calls publish exactly one terminal event ([#1817](https://github.com/mcp-hangar/mcp-hangar/pull/1817))
+- **security:** `Mcp-Param-*` headers of a call to a front-door tool are compared
+  with its body under mcp 2.3.0, as they are under 2.0.0. 2.3.0 asks
+  `Server.get_tool_input_schema` for the schema instead of running `tools/list`,
+  and that hook only knows the SDK's own tools, so the check was skipped for every
+  projected upstream tool and a call an L7 header rule denies reached its upstream.
+  Hangar now answers the hook from its projection, and runs the pre-dispatch
+  listing itself where the SDK no longer does. Nothing changes on 2.0.0, the pinned
+  version; this lets the pin move ([#1816](https://github.com/mcp-hangar/mcp-hangar/pull/1816))
+
+### Security
+
+- **security:** a key an access policy does not read now refuses the boot and the
+  reload, naming its path, and `mcp-hangar config check` reports it. `tools: {allow:
+  [read], deny: [add]}` -- the shape the README showed -- parsed as a block with no
+  lists, which is no policy: the gateway booted, listed `add` and ran it. The
+  refusal covers every place a policy is written (a server's `tools`, a group's, a
+  group member's, `access.<kind>` and each `tool_access.member.<tenant>` entry),
+  suggests `allow_list` / `deny_list` / `approval_list` for the spellings people
+  reach for, and a refused reload keeps the previous policy. The README example is
+  corrected ([#1820](https://github.com/mcp-hangar/mcp-hangar/pull/1820))
+
 ## [2.27.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.2...v2.27.3) (2026-10-13)
 
 ### Fixed
