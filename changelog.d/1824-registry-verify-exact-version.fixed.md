@@ -1,1 +1,0 @@
-The release workflow's registry check now asks the MCP Registry for the exact version instead of searching one page of a list capped at 30 entries, so it no longer fails once the registry holds more than 30 versions (#1824).

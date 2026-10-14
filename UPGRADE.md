@@ -1,5 +1,28 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.27.5
+
+### `init` writes absolute paths; state follows a configured `event_store.path`
+
+When `event_store.path` is absolute, the saga state file (`saga_state.db`) and the approvals database (`mcp_hangar.db`) now live in the same directory as the event store instead of in `data/` under the working directory. Configurations without an absolute `event_store.path` are unchanged.
+
+Entries written by an earlier `mcp-hangar init` use a bare `mcp-hangar` command and a relative `data/` path, which fails when the client spawns Hangar with a minimal `PATH` or an unwritable working directory. Rerun `mcp-hangar init` to refresh them. If you move to the new location, copy any existing `data/*.db` files next to the new `event_store.path` first.
+
+### The MCP SDK is 2.3.0
+
+`mcp-hangar` now requires `mcp==2.3.0` and `mcp-types==2.3.0`; it was 2.0.0 for
+both. Both stay pinned exactly. Nothing in the configuration changes.
+
+- A project that pins `mcp` itself, or installs `mcp-hangar` beside a package
+  that does, needs `mcp==2.3.0`.
+- The SDK's own defaults changed with it: a 4 MiB request-body limit, a
+  30-minute idle expiry and a cap of 10,000 stateful sessions. Hangar does not
+  override them.
+- `Mcp-Param-*` headers of projected tools are still checked against a call's
+  arguments. 2.3.0 stopped checking them for any tool the SDK had not registered
+  itself. Hangar answers for its own tools since 2.27.4, which this release
+  includes.
+
 ## Upgrade to 2.27.4
 
 ### An access policy with a key nothing reads refuses the configuration

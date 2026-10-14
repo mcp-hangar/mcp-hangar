@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.4...v2.27.5) (2026-10-14)
+
+### Changed
+
+- **deps:** `mcp` and `mcp-types` move from 2.0.0 to 2.3.0, still pinned exactly.
+  The SDK's own defaults come with it: a 4 MiB request-body limit, a 30-minute idle
+  expiry and a 10,000-session cap on stateful sessions. Hangar sets none of them
+  itself. The pin comment now states what the exactness protects against and how
+  to move it ([#1819](https://github.com/mcp-hangar/mcp-hangar/pull/1819))
+
+### Fixed
+
+- The release workflow's registry check now asks the MCP Registry for the exact version instead of searching one page of a list capped at 30 entries, so it no longer fails once the registry holds more than 30 versions (#1824). ([#1825](https://github.com/mcp-hangar/mcp-hangar/pull/1825))
+- `mcp-hangar init` now writes an entry a client can start from any directory: the command is an absolute path to the installed launcher, and the generated config names an absolute `event_store.path` (under `$XDG_STATE_HOME` or `~/.local/state/mcp-hangar`). The saga state and approvals databases follow it, so starting Hangar no longer creates `data/` in whatever directory the client spawned it from (#1772). ([#1821](https://github.com/mcp-hangar/mcp-hangar/pull/1821))
+
 ## [2.27.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.3...v2.27.4) (2026-10-14)
 
 ### Fixed
