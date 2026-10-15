@@ -663,9 +663,10 @@ def bootstrap(
     if discovery_orchestrator is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
         from ...application.discovery.discovery_registry import DiscoveryRegistry
+        from ...infrastructure.discovery.registry import create_source
 
         discovery_registry = DiscoveryRegistry(orchestrator=discovery_orchestrator)
-        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        register_discovery_handlers(runtime.command_bus, discovery_registry, source_factory=create_source)
         _register_configured_sources(discovery_registry, full_config)
         logger.info("discovery_registry_created")
 
