@@ -134,4 +134,9 @@ def test_a_subscriber_is_upgraded_and_acknowledged(gateway: int) -> None:
         _send_text(sock, json.dumps({"type": "subscribe", "event_types": ["McpServerStarted"]}))
         ack = json.loads(_recv_text(sock))
 
-    assert ack == {"type": "subscribed", "event_types": ["McpServerStarted"], "mcp_server_ids": []}
+    assert ack == {
+        "type": "subscribed",
+        "event_types": ["McpServerStarted"],
+        "rejected_event_types": [],
+        "mcp_server_ids": [],
+    }
