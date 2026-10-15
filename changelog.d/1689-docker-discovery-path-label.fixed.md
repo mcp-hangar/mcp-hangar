@@ -1,0 +1,1 @@
+Docker discovery builds an endpoint with a path. A discovered http container used to get `http://host:port` and answered its first call with 404 when it served MCP at `/mcp`. The path comes from a new `mcp.hangar.path` label and defaults to `/mcp`, matching Kubernetes `mcp-hangar.io/path`.

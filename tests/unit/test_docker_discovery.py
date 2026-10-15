@@ -516,7 +516,18 @@ class TestParseContainerHttpMode:
         assert result is not None
         assert result.connection_info["host"] == "127.0.0.1"
         assert result.connection_info["port"] == 18080
-        assert result.connection_info["endpoint"] == "http://127.0.0.1:18080"
+        assert result.connection_info["endpoint"] == "http://127.0.0.1:18080/mcp"
+
+    def test_path_label_sets_the_endpoint_path(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        ports = {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]}
+        for label, expected in (("/rpc", "/rpc"), ("rpc", "/rpc"), ("/", "/"), ("", "/mcp")):
+            container = _make_http_container(ports=ports)
+            container.labels["mcp.hangar.path"] = label
+            result = DockerDiscoverySource()._parse_container(container)
+            assert result.connection_info["path"] == expected
+            assert result.connection_info["endpoint"] == f"http://127.0.0.1:18080{expected}"
 
     def test_sse_mode_endpoint_uses_published_host_port(self, mock_docker):
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
@@ -531,7 +542,7 @@ class TestParseContainerHttpMode:
         result = source._parse_container(container)
 
         assert result is not None
-        assert result.connection_info["endpoint"] == "http://127.0.0.1:29000"
+        assert result.connection_info["endpoint"] == "http://127.0.0.1:29000/mcp"
 
     def test_http_mode_falls_back_to_bridge_ip_without_publish(self, mock_docker):
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
@@ -546,7 +557,7 @@ class TestParseContainerHttpMode:
         result = source._parse_container(container)
 
         assert result is not None
-        assert result.connection_info["endpoint"] == "http://10.88.0.23:8080"
+        assert result.connection_info["endpoint"] == "http://10.88.0.23:8080/mcp"
 
     def test_http_mode_returns_none_when_unreachable(self, mock_docker):
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
