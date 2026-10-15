@@ -1,0 +1,1 @@
+Setting or clearing a tool access policy over REST now records the caller: `ToolAccessPolicySet` carries `set_by` and `ToolAccessPolicyCleared` carries `cleared_by` (empty on events recorded before). With auth off the config-reload route records `anonymous`, like the auth routes, instead of `api`; one helper, `server/api/actor.py`, now reads the actor for both.

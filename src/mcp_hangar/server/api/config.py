@@ -20,6 +20,7 @@ from starlette.routing import Route
 from ...application.commands.commands import ReloadConfigurationCommand
 from ...domain.exceptions import ConfigurationUnavailableError, ValidationError
 from ..config_serializer import serialize_full_config, write_config_backup
+from .actor import request_actor
 from .middleware import dispatch_command, get_context
 from .serializers import HangarJSONResponse
 
@@ -32,14 +33,10 @@ def _requested_by(request: Request) -> str:
 
     Reload was recorded as ``requested_by="api"`` regardless of who triggered
     it, which makes the audit trail useless for the one operation that
-    re-applies every governance input. Falls back to ``"api"`` only when auth
-    is disabled and there is genuinely no principal to name.
+    re-applies every governance input. With auth disabled there is no
+    principal to name and the actor is ``anonymous``, as on the auth routes.
     """
-    state = request.scope.get("state")
-    auth_context = state.get("auth") if isinstance(state, dict) else getattr(state, "auth", None)
-    principal = getattr(auth_context, "principal", None)
-    principal_id = getattr(principal, "id", None)
-    return str(principal_id) if principal_id is not None else "api"
+    return request_actor(request)
 
 
 def _sanitize(config: dict) -> dict:
