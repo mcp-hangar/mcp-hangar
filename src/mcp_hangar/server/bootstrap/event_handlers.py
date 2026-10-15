@@ -140,6 +140,15 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
 
     compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").strip().lower()
+    if not compliance_format and os.getenv("MCP_COMPLIANCE_OUTPUT", "").strip():
+        # An output with no format was ignored without a word: an operator who
+        # meant to turn SIEM export on ran with none. Refused, like an unknown
+        # format (#1701, #1723).
+        raise ConfigurationError(
+            "MCP_COMPLIANCE_OUTPUT is set but MCP_COMPLIANCE_FORMAT is not, so no SIEM export would run. "
+            f"Set MCP_COMPLIANCE_FORMAT to one of: {', '.join(sorted(_COMPLIANCE_FORMATS))}, "
+            "or unset MCP_COMPLIANCE_OUTPUT."
+        )
     # Cleared first: a status left by an earlier boot in this process would
     # report a feed this one does not have.
     set_compliance_export_status(None)
