@@ -25,6 +25,8 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
+      description: A test of a security or governance control reaches it through bootstrap() or the served app, not by constructing the component (see AGENTS.md, Testing).
+      placeholder: "- [ ] <behaviour> holds when driven through bootstrap() / the served app"
     validations: {required: true}
   - type: input
     id: max-loc
