@@ -1055,7 +1055,8 @@ class McpServer(AggregateRoot):
                         )
                     )
             except Exception:  # noqa: BLE001 -- fault-barrier: reader thread must not crash on pipe error
-                pass
+                # Say so: capture ends here, and it used to end without a trace (#1688).
+                logger.warning("stderr_reader_stopped", mcp_server_id=mcp_server_id, exc_info=True)
 
         t = threading.Thread(target=_reader, daemon=True, name=f"stderr-reader-{mcp_server_id}")
         t.start()

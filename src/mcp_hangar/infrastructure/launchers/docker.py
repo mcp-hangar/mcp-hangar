@@ -256,6 +256,9 @@ class DockerLauncher(McpServerLauncher):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,  # Capture stderr for live log streaming
                 text=True,
+                # MCP stdio is UTF-8; a locale codec ended capture on the first byte it rejected (#1688).
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 shell=False,  # Never use shell
             )
