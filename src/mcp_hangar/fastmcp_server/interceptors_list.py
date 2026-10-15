@@ -78,8 +78,12 @@ INTERCEPTOR_EXT_HEADER = "MCP-Interceptor-Ext"
 INTERCEPTOR_EXT_VALUE = "io.modelcontextprotocol/interceptors"
 
 # Interceptor types per PR #2624 (``validation`` / ``mutation``).
-_VALIDATOR = "mcp-hangar-validator"
-_MUTATOR = "mcp-hangar-mutator"
+# The names before the reverse-DNS rename (#315). ``interceptors/list`` answered
+# with them in its negotiated shape after the default shape had moved on, so the
+# two shapes named one interceptor two ways (#1690). Both are still accepted by
+# ``interceptor/invoke``; only the reverse-DNS ids are ever answered.
+_LEGACY_VALIDATOR = "mcp-hangar-validator"
+_LEGACY_MUTATOR = "mcp-hangar-mutator"
 
 _VALIDATOR_EVENTS = ("tools/call", "tools/list")
 _MUTATOR_EVENTS = ("tools/call",)
@@ -103,6 +107,8 @@ def interceptor_ext_negotiated(request: Request) -> bool:
 #: reversed ``mcp-hangar.io`` domain, giving a globally unambiguous namespace.
 VALIDATOR_ID = "io.mcp-hangar.validator"
 MUTATOR_ID = "io.mcp-hangar.mutator"
+
+_LEGACY_NAMES = {_LEGACY_VALIDATOR: VALIDATOR_ID, _LEGACY_MUTATOR: MUTATOR_ID}
 
 
 def interceptors_list_response() -> dict[str, Any]:
@@ -145,7 +151,7 @@ def interceptors_list_response_v2() -> dict[str, Any]:
     return {
         "interceptors": [
             {
-                "name": _VALIDATOR,
+                "name": VALIDATOR_ID,
                 "version": __version__,
                 "description": "Validates tool calls/listings at the host trust boundary.",
                 "type": "validation",
@@ -156,7 +162,7 @@ def interceptors_list_response_v2() -> dict[str, Any]:
                 "trustBoundary": "host",
             },
             {
-                "name": _MUTATOR,
+                "name": MUTATOR_ID,
                 "version": __version__,
                 "description": "Mutates tool-call payloads at the host trust boundary.",
                 "type": "mutation",
@@ -185,8 +191,8 @@ async def interceptors_list_handler(request: Request) -> JSONResponse:
 
 # Registry of Hangar interceptors keyed by name -> (type, supported events).
 _INTERCEPTORS: dict[str, tuple[str, tuple[str, ...]]] = {
-    _VALIDATOR: ("validation", _VALIDATOR_EVENTS),
-    _MUTATOR: ("mutation", _MUTATOR_EVENTS),
+    VALIDATOR_ID: ("validation", _VALIDATOR_EVENTS),
+    MUTATOR_ID: ("mutation", _MUTATOR_EVENTS),
 }
 
 
@@ -220,6 +226,8 @@ def interceptor_invoke_result(params: dict[str, Any]) -> dict[str, Any]:
     event = params.get("event")
     phase = params.get("phase")
 
+    if isinstance(name, str):
+        name = _LEGACY_NAMES.get(name, name)
     if not isinstance(name, str) or name not in _INTERCEPTORS:
         raise ValueError(f"unknown interceptor: {name!r}")
     if not isinstance(event, str) or not event:
