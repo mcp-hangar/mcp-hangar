@@ -10,7 +10,14 @@ from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 from mcp_hangar.observability.health import ComplianceExportStatus
 
 from .file_output import FileOutput
-from .refusal import CALLER_ROLES, REFUSAL_FIELDS, ROUTE_BACKEND, event_type_for_status, refusal_data
+from .refusal import (
+    CALLER_ROLES,
+    REFUSAL_FIELDS,
+    ROUTE_BACKEND,
+    caller_cost_data,
+    event_type_for_status,
+    refusal_data,
+)
 
 
 def _record_to_json_line(record: AuditRecord) -> str:
@@ -32,6 +39,8 @@ def _record_to_json_line(record: AuditRecord) -> str:
         "to_state": data.get("to_state"),
     }
     payload.update({data_key: data.get(data_key) for _key, data_key, _wire in REFUSAL_FIELDS})
+    # The caller and cost fields (#1705); a zero cost is kept, only None is left out.
+    payload.update({key: value for key, _wire, value in caller_cost_data(data)})
     return json.dumps({key: value for key, value in payload.items() if value is not None})
 
 

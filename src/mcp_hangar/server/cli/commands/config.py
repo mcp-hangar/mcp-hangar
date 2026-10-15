@@ -18,8 +18,35 @@ import typer
 import yaml
 from rich.console import Console
 
+from ....domain.exceptions import ConfigurationError
+from ....pin_recheck import pin_recheck_interval_s
+from ....server.config import _max_consecutive_failures
 from ....server.config_schema import validate_config
 from ..config_path import DEFAULT_RULE_HELP, resolve_config_path
+
+
+def _value_problems(config: dict) -> list[str]:
+    """Values the boot refuses, found without booting (#1733).
+
+    `validate_config` reads key names only, so `pin_recheck_interval_s: 2` or
+    `max_consecutive_failures: 500` passed `config check` and then refused the
+    gateway. These call the readers the boot calls.
+    """
+    problems = []
+    try:
+        pin_recheck_interval_s(config)
+    except ValueError as exc:
+        problems.append(str(exc))
+    servers = config.get("mcp_servers")
+    if isinstance(servers, dict):
+        for server_id, spec in servers.items():
+            if isinstance(spec, dict) and spec.get("mode") != "group" and "max_consecutive_failures" in spec:
+                try:
+                    _max_consecutive_failures(str(server_id), spec)
+                except ConfigurationError as exc:
+                    problems.append(str(exc))
+    return problems
+
 
 app = typer.Typer(name="config", help="Inspect and validate configuration")
 
@@ -34,9 +61,9 @@ def check_command(
         typer.Argument(help="Path to config.yaml. " + DEFAULT_RULE_HELP),
     ] = None,  # type: ignore[assignment]
 ) -> None:
-    """Report configuration keys that nothing reads.
+    """Report configuration keys that nothing reads and values the boot refuses.
 
-    Exit code 0 = every key is known, 1 = at least one is not, 2 = the file is
+    Exit code 0 = every key is known and every checked value is accepted, 1 = not, 2 = the file is
     missing or is not YAML.
     """
     # The positional path, then the global --config (#1682), then the shared default.
@@ -57,16 +84,22 @@ def check_command(
         raise typer.Exit(2)
 
     problems = validate_config(config)
+    value_problems = _value_problems(config)
 
-    if not problems:
-        console.print(f"[green]OK[/green] {path}: every key is one Hangar reads.")
+    if not problems and not value_problems:
+        console.print(f"[green]OK[/green] {path}: every key is one Hangar reads and every checked value is accepted.")
         return
 
-    console.print(f"[red]FAIL[/red] {path}: {len(problems)} key(s) nothing reads:\n")
-    for problem in problems:
-        console.print(f"  {problem}")
-    console.print(
-        "\nA key Hangar does not read is kept and ignored, so the setting simply "
-        "does not apply. Check the spelling against the allowed set above."
-    )
+    if problems:
+        console.print(f"[red]FAIL[/red] {path}: {len(problems)} key(s) nothing reads:\n")
+        for problem in problems:
+            console.print(f"  {problem}")
+        console.print(
+            "\nA key Hangar does not read is kept and ignored, so the setting simply "
+            "does not apply. Check the spelling against the allowed set above."
+        )
+    if value_problems:
+        console.print(f"[red]FAIL[/red] {path}: {len(value_problems)} value(s) the gateway refuses at boot:\n")
+        for problem in value_problems:
+            console.print(f"  {problem}")
     raise typer.Exit(1)

@@ -242,7 +242,12 @@ class ApprovalGateService:
                 if decision is True:
                     wait_span.set_attribute("approval.decision", "approved")
                 elif decision is False:
-                    wait_span.set_attribute("approval.decision", "denied")
+                    # A refused late approval wakes the hold with False too, and
+                    # the gate span reads cancelled for it (#1731): the record
+                    # says which of the two this was.
+                    woken_by = await self._repository.get(approval_id)
+                    cancelled = woken_by is not None and woken_by.state is ApprovalState.CANCELLED
+                    wait_span.set_attribute("approval.decision", "cancelled" if cancelled else "denied")
                 else:
                     wait_span.set_attribute("approval.decision", "expired")
 

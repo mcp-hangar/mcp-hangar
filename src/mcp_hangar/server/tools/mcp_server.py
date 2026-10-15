@@ -306,7 +306,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
         Returns:
             McpServer: {
-                mcp_server: str,
+                mcp_server_id: str,
                 state: str,
                 mode: str,
                 alive: bool,
@@ -314,7 +314,8 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 health: {consecutive_failures: int, last_check: str, ...},
                 idle_time: float,
                 meta: object,
-                dead: {reason, since, retry_allowed_at, revived_by} | null
+                dead: {reason, since, retry_allowed_at, revived_by} | null,
+                tools_policy: object
             }
             Group: {
                 group_id: str,
@@ -344,7 +345,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
 
         Example:
             hangar_details("math")
-            # {"mcp_server": "math", "state": "ready", "mode": "subprocess",
+            # {"mcp_server_id": "math", "state": "ready", "mode": "subprocess",
             #  "alive": true, "tools": [...], "health": {"consecutive_failures": 0},
             #  "idle_time": 12.5, "meta": {}}
 
