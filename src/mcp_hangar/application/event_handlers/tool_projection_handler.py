@@ -29,10 +29,10 @@ event cost (#922).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...application.read_models.tool_projection import get_tool_projection_registry
-from ...domain.events import McpServerStarted
+from ...domain.events import McpServerStarted, ToolAdmissionRequested
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -44,14 +44,19 @@ logger = get_logger(__name__)
 class ToolProjectionPopulationHandler:
     """Populates the ToolProjectionRegistry when a mcp_server starts."""
 
-    def __init__(self, repository: IMcpServerRepository) -> None:
+    def __init__(self, repository: IMcpServerRepository, event_bus: Any = None) -> None:
         """Initialize with the mcp_server repository.
 
         Args:
             repository: Repository used to fetch the started mcp_server and
                 read its discovered tool schemas.
+            event_bus: Where a request to admit a withheld tool is published
+                (#1801). None: the tool is withheld and nothing is announced.
         """
         self._repository = repository
+        self._event_bus = event_bus
+        #: (server, tool, digest) already announced, so a re-listing asks once.
+        self._requested: set[tuple[str, str, str]] = set()
 
     def handle(self, event: object) -> None:
         """On McpServerStarted, populate the registry from the server's tools."""
@@ -78,9 +83,34 @@ class ToolProjectionPopulationHandler:
         # Other servers' projections, and every withdrawal and pin overlay, are
         # keyed apart and left alone.
         tools = catalog.list_tools()
-        get_tool_projection_registry().build_from_tools(mcp_server_id, tools)
+        registry = get_tool_projection_registry()
+        registry.build_from_tools(mcp_server_id, tools)
+        self._request_admission(registry, mcp_server_id)
         logger.debug(
             "tool_projection_populated_from_discovery",
             mcp_server_id=mcp_server_id,
             tool_count=len(tools),
         )
+
+    def _request_admission(self, registry: Any, mcp_server_id: str) -> None:
+        """Publish ``ToolAdmissionRequested`` once for each tool the server withholds (#1801)."""
+        if self._event_bus is None or registry.new_tools_policy(mcp_server_id) != "withhold":
+            return
+        for projection in registry.list_for_server(mcp_server_id):
+            if not registry.is_unadmitted(mcp_server_id, projection.tool):
+                continue
+            key = (mcp_server_id, projection.tool, projection.digest.sha256)
+            if key in self._requested:
+                continue
+            self._requested.add(key)
+            logger.warning(
+                "tool_withheld_until_admitted",
+                mcp_server_id=mcp_server_id,
+                tool=projection.tool,
+                observed_digest=projection.digest.sha256,
+            )
+            self._event_bus.publish(
+                ToolAdmissionRequested(
+                    mcp_server_id=mcp_server_id, tool_name=projection.tool, observed_digest=projection.digest.sha256
+                )
+            )

@@ -9,12 +9,13 @@ All handlers:
 
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from ...domain.contracts.command import CommandHandler
-from ...domain.discovery.discovery_source import DiscoveryMode
-from ...domain.exceptions import McpServerNotFoundError
-from ...domain.value_objects.discovery import DiscoverySourceSpec
+from ...domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+from ...domain.exceptions import McpServerNotFoundError, ValidationError
+from ...domain.value_objects.discovery import DiscoverySourceSpec, config_source_id
 from ...logging_config import get_logger
 from ..discovery.discovery_registry import DiscoveryRegistry
 from .discovery_commands import (
@@ -28,20 +29,30 @@ from .discovery_commands import (
 logger = get_logger(__name__)
 
 
+#: Builds the source a registered spec describes: `(source_type, config) -> DiscoverySource`,
+#: where config carries the spec's `mode`. Injected, because building one is
+#: infrastructure (`infrastructure/discovery/registry.create_source`).
+SourceFactory = Callable[[str, dict[str, Any]], DiscoverySource]
+
+
 class RegisterDiscoverySourceHandler(CommandHandler):
     """Handler for RegisterDiscoverySourceCommand.
 
-    Generates a UUID source_id, creates a DiscoverySourceSpec, and registers
-    it in the DiscoveryRegistry. Does NOT start the underlying source.
+    Generates a UUID source_id, creates a DiscoverySourceSpec, builds the source
+    it describes and adds it to the running orchestrator, so the spec is
+    listed and scanned and not only stored (#1674). Without a factory (a
+    registry used on its own) the spec is stored and nothing is built.
     """
 
-    def __init__(self, registry: DiscoveryRegistry) -> None:
+    def __init__(self, registry: DiscoveryRegistry, source_factory: SourceFactory | None = None) -> None:
         """Initialize the handler.
 
         Args:
             registry: DiscoveryRegistry to register sources in.
+            source_factory: Builds the live source for a spec; None stores the spec only.
         """
         self._registry = registry
+        self._source_factory = source_factory
         self._lock = threading.Lock()
 
     def handle(self, command: RegisterDiscoverySourceCommand) -> dict[str, Any]:
@@ -52,8 +63,15 @@ class RegisterDiscoverySourceHandler(CommandHandler):
 
         Returns:
             Dict with source_id and registered flag.
+
+        Raises:
+            ValidationError: The source type is unknown or unavailable, or a source of
+                that type is already held (422).
         """
-        source_id = str(uuid.uuid4())
+        # The orchestrator keeps one source per type and lists it under the id derived
+        # from that type, so a source that is built takes that id: the id POST returns
+        # is then the one GET /sources shows. A spec-only registration keeps a UUID.
+        source_id = config_source_id(command.source_type) if self._source_factory else str(uuid.uuid4())
         spec = DiscoverySourceSpec(
             source_id=source_id,
             source_type=command.source_type,
@@ -61,7 +79,19 @@ class RegisterDiscoverySourceHandler(CommandHandler):
             enabled=command.enabled,
             config=dict(command.config) if command.config else {},
         )
-        self._registry.register_source(spec)
+        if self._source_factory is None:
+            self._registry.register_source(spec)
+        else:
+            try:
+                source = self._source_factory(spec.source_type, {**spec.config, "mode": spec.mode.value})
+                if not spec.enabled:
+                    source.disable()
+                with self._lock:
+                    self._registry.register_live_source(spec, source)
+            except ImportError as exc:
+                raise ValidationError(f"The {spec.source_type!r} discovery source is unavailable: {exc}") from exc
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
         logger.info(
             "discovery_source_registered",
             source_id=source_id,
@@ -253,14 +283,20 @@ class ToggleDiscoverySourceHandler(CommandHandler):
         return {"source_id": command.source_id, "enabled": spec.enabled}
 
 
-def register_discovery_handlers(command_bus: Any, registry: DiscoveryRegistry) -> None:
+def register_discovery_handlers(
+    command_bus: Any, registry: DiscoveryRegistry, source_factory: SourceFactory | None = None
+) -> None:
     """Register all discovery source command handlers with the command bus.
 
     Args:
         command_bus: Command bus to register handlers on.
         registry: DiscoveryRegistry instance for handler injection.
+        source_factory: Builds the live source for a source registered over REST (#1674).
     """
-    command_bus.register(RegisterDiscoverySourceCommand, RegisterDiscoverySourceHandler(registry=registry))
+    command_bus.register(
+        RegisterDiscoverySourceCommand,
+        RegisterDiscoverySourceHandler(registry=registry, source_factory=source_factory),
+    )
     command_bus.register(UpdateDiscoverySourceCommand, UpdateDiscoverySourceHandler(registry=registry))
     command_bus.register(DeregisterDiscoverySourceCommand, DeregisterDiscoverySourceHandler(registry=registry))
     command_bus.register(TriggerSourceScanCommand, TriggerSourceScanHandler(registry=registry))

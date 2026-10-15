@@ -335,15 +335,67 @@ def _policy_problems(where: str, spec: Any) -> list[str]:
     return problems
 
 
+#: The keys a server's or group's own ``tool_projection`` block reads, and the
+#: keys one ``tenant_overrides.<tenant>`` entry reads (#1733). A copy of what
+#: ``server.config._register_tool_projection_block`` looks up, for the reason
+#: ``POLICY_KEYS`` is a copy; a test holds it to the reader. The all-gateway
+#: ``tool_projection`` section is a different block with its own key, in SECTIONS.
+TOOL_PROJECTION_SCOPE_KEYS = frozenset(
+    {
+        "digest_enforcement",
+        "new_tools",
+        "pins",
+        "tenant_overrides",
+        "upstream",
+        "withdrawn",
+        "withdrawn_prompts",
+        "withdrawn_resources",
+    }
+)
+TOOL_PROJECTION_TENANT_KEYS = frozenset({"pins", "withdrawn", "withdrawn_prompts", "withdrawn_resources"})
+
+
+def _tool_projection_problems(where: str, spec: Any) -> list[str]:
+    """Keys of a scope's ``tool_projection`` block that the block's reader never looks at."""
+    block = spec.get("tool_projection") if isinstance(spec, dict) else None
+    if not isinstance(block, dict):
+        return []
+    block_where = f"{where}.tool_projection"
+    problems = []
+    for key in sorted((k for k in block if k not in TOOL_PROJECTION_SCOPE_KEYS), key=str):
+        hint = (
+            "; it is a gateway-wide setting, read from the top-level `tool_projection:` section, not per server"
+            if key == "pin_recheck_interval_s"
+            else ""
+        )
+        problems.append(
+            f"{block_where} has unknown key {key!r}{hint}; allowed keys: {sorted(TOOL_PROJECTION_SCOPE_KEYS)}"
+        )
+    overrides = block.get("tenant_overrides")
+    if isinstance(overrides, dict):
+        for tenant, entry in overrides.items():
+            problems += _unknown(f"{block_where}.tenant_overrides.{tenant}", entry, TOOL_PROJECTION_TENANT_KEYS)
+    return problems
+
+
 def _server_spec_problems(server_id: str, spec: Any) -> list[str]:
     where = f"mcp_servers.{server_id}"
     if not isinstance(spec, dict) or spec.get("mode") != "group":
-        return _unknown(where, spec, SERVER_SPEC_KEYS) + _policy_problems(where, spec)
+        return (
+            _unknown(where, spec, SERVER_SPEC_KEYS)
+            + _policy_problems(where, spec)
+            + _tool_projection_problems(where, spec)
+        )
 
     message = _REMOVED_GROUP_RESET_TIMEOUT.format(group=server_id)
     problems = [f"{where}.{key} {message}" for key in _group_reset_timeouts(spec)]
     rest = {key: value for key, value in spec.items() if key != "circuit_reset_timeout_s"}
-    return problems + _unknown(where, rest, SERVER_SPEC_KEYS) + _policy_problems(where, spec)
+    return (
+        problems
+        + _unknown(where, rest, SERVER_SPEC_KEYS)
+        + _policy_problems(where, spec)
+        + _tool_projection_problems(where, spec)
+    )
 
 
 def validate_config(config: dict[str, Any]) -> list[str]:

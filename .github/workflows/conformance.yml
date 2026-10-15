@@ -23,8 +23,6 @@ on:
       - "tests/conformance/**"
       - ".github/workflows/conformance.yml"
       - "pyproject.toml"
-  push:
-    branches: [mcp2]
   schedule:
     - cron: "17 5 * * 2" # weekly; also how the scenario-drift check runs
   workflow_dispatch: {}

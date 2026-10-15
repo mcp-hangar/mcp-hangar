@@ -372,7 +372,7 @@ def status_command(
     Examples:
         mcp-hangar status
         mcp-hangar status --watch
-        mcp-hangar status my-MCP server
+        mcp-hangar status my-mcp-server
         mcp-hangar status --details
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()

@@ -32,7 +32,14 @@ on:
       - "examples/task_upstream/**"
       - ".github/workflows/task-relay-smoke.yml"
   push:
-    branches: [mcp2]
+    branches: [main]
+    paths:
+      - "src/mcp_hangar/fastmcp_server/task_relay_*.py"
+      - "src/mcp_hangar/tasks_wire.py"
+      - "src/mcp_hangar/application/tasks/**"
+      - "src/mcp_hangar/domain/services/task_*.py"
+      - "examples/task_upstream/**"
+      - ".github/workflows/task-relay-smoke.yml"
   workflow_dispatch: {}
 
 permissions:

@@ -821,6 +821,7 @@ def _register_config_pins(
     pins: Any,
     *,
     tenant_id: str | None,
+    upstream: str | None = None,
 ) -> None:
     """Register a `{tool_name: sha256}` pin block on the projection registry.
 
@@ -834,6 +835,7 @@ def _register_config_pins(
         mcp_server_id: Owning mcp_server identifier.
         pins: The raw mapping from the config file; a non-mapping is ignored.
         tenant_id: Tenant the pins apply to, or ``None`` for all tenants.
+        upstream: The upstream identity the block's pins are bound to (``tool_projection.upstream``), if any (#1802).
     """
     if not isinstance(pins, dict):
         return
@@ -850,7 +852,7 @@ def _register_config_pins(
             )
             continue
         try:
-            digest = ToolDigest(tool_name=tool_name, sha256=sha256)
+            digest = ToolDigest(tool_name=tool_name, sha256=sha256, upstream=upstream)
         except ValueError as e:
             logger.warning(
                 "invalid_config_digest_pin",
@@ -1053,7 +1055,27 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
     # All-tenants digest pins: {tool_name: sha256}. The counterpart of
     # `withdrawn:`, and the only pin that holds a caller carrying no tenant
     # identity -- which is every caller when auth is off (#902).
-    _register_config_pins(tp_registry, scope_id, tool_projection_config.get("pins", {}), tenant_id=None)
+    # The upstream the pins were taken from (#1802): the pins hold only for a server
+    # that still points at it. A value that is not a string is refused by name, not
+    # dropped, because dropping it would leave the pins unbound and unsaid.
+    # What happens to a tool that appears after the pins were taken (#1801).
+    new_tools = tool_projection_config.get("new_tools")
+    if new_tools is not None:
+        if new_tools not in ("withhold", "allow"):
+            raise ConfigurationError(
+                f"Invalid tool_projection.new_tools for '{scope_id}': expected 'withhold' or 'allow', got {new_tools!r}"
+            )
+        tp_registry.set_new_tools_policy(scope_id, new_tools)
+
+    upstream = tool_projection_config.get("upstream")
+    if upstream is not None and not (isinstance(upstream, str) and upstream):
+        raise ConfigurationError(
+            f"Invalid tool_projection.upstream for '{scope_id}': expected the identity string "
+            f"`mcp-hangar pin` writes, got {type(upstream).__name__} {upstream!r}"
+        )
+    _register_config_pins(
+        tp_registry, scope_id, tool_projection_config.get("pins", {}), tenant_id=None, upstream=upstream
+    )
 
     # Global withdrawals (all tenants), of every kind.
     _register_config_withdrawals(tp_registry, scope_id, tool_projection_config, tenant_id=None)
@@ -1064,7 +1086,9 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
             if not isinstance(tenant_spec, dict):
                 continue
             _register_config_withdrawals(tp_registry, scope_id, tenant_spec, tenant_id=tenant_id_key)
-            _register_config_pins(tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key)
+            _register_config_pins(
+                tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key, upstream=upstream
+            )
 
 
 def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> int:

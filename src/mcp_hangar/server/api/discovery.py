@@ -209,6 +209,12 @@ async def register_source(request: Request) -> HangarJSONResponse:
         enabled: Whether to activate immediately (default: true).
         config: Source-specific configuration dict (default: {}).
 
+    The source is built and added to the running orchestrator, so it is listed by
+    ``GET /discovery/sources`` and used by the next scan. The orchestrator holds one
+    source per type: a type already held (from the config or an earlier call) is
+    refused with 422, and so is a type that is unknown or unavailable. The returned
+    ``source_id`` is the id the listing shows.
+
     Returns:
         JSON with {"source_id": ..., "registered": true} and HTTP 201.
 

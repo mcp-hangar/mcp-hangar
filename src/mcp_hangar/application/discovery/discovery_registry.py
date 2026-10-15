@@ -8,6 +8,7 @@ import threading
 from dataclasses import replace
 from typing import Any
 
+from ...domain.discovery.discovery_source import DiscoverySource
 from ...domain.value_objects.discovery import DiscoverySourceSpec
 from ...logging_config import get_logger
 from .discovery_orchestrator import DiscoveryOrchestrator
@@ -37,6 +38,9 @@ class DiscoveryRegistry:
         """
         self._orchestrator = orchestrator
         self._sources: dict[str, DiscoverySourceSpec] = {}
+        #: Ids whose live source this registry built and added (#1674), so removing
+        #: the spec removes that source and never one that came from the config.
+        self._built: set[str] = set()
         self._lock = threading.RLock()
 
     def register_source(self, spec: DiscoverySourceSpec) -> None:
@@ -58,6 +62,33 @@ class DiscoveryRegistry:
             mode=spec.mode.value,
         )
 
+    def register_live_source(self, spec: DiscoverySourceSpec, source: DiscoverySource) -> None:
+        """Register *spec* and start *source* for it, so the spec names something that runs (#1674).
+
+        The orchestrator holds one source per type. A type it already holds,
+        from the config or an earlier registration, is refused: replacing it
+        would drop a running source behind its owner's back.
+
+        Raises:
+            ValueError: A source of this type is already held.
+        """
+        with self._lock:
+            held = self._orchestrator.get_source(spec.source_type)
+            if held is not None:
+                raise ValueError(
+                    f"A {spec.source_type!r} discovery source is already held; update it instead of registering another"
+                )
+            self._orchestrator.add_source_live(source)
+            self._sources[spec.source_id] = spec
+            self._built.add(spec.source_id)
+        logger.info(
+            "discovery_source_registered",
+            source_id=spec.source_id,
+            source_type=spec.source_type,
+            mode=spec.mode.value,
+            live=True,
+        )
+
     def unregister_source(self, source_id: str) -> None:
         """Remove a discovery source spec.
 
@@ -70,7 +101,11 @@ class DiscoveryRegistry:
         with self._lock:
             if source_id not in self._sources:
                 raise KeyError(f"Discovery source not found: {source_id}")
-            del self._sources[source_id]
+            spec = self._sources.pop(source_id)
+            built = source_id in self._built
+            self._built.discard(source_id)
+        if built:
+            self._orchestrator.remove_source_live(spec.source_type)
         logger.info("discovery_source_unregistered", source_id=source_id)
 
     def update_source(self, source_id: str, **kwargs: Any) -> DiscoverySourceSpec:

@@ -1,0 +1,1 @@
+`MCP_COMPLIANCE_OUTPUT` set without `MCP_COMPLIANCE_FORMAT` now refuses startup with a `ConfigurationError` naming both settings and the formats. It started the gateway with no SIEM export and logged nothing.
