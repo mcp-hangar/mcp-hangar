@@ -1,0 +1,1 @@
+`mcp_hangar_mcp_server_info` exports one series per server. A remote server showed both `mode="remote"` and `mode="subprocess"`: state events that did not carry the mode wrote the default beside the real one. A state event without a mode now leaves the series alone, and one with a mode replaces it.
