@@ -34,6 +34,11 @@ try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists)
 except ImportError:  # SDK v1
     from mcp.shared.exceptions import McpError  # type: ignore[attr-defined,no-redef]
 
+try:  # SDK v2: the error whose text a client is shown.
+    from mcp.server.mcpserver.exceptions import ToolError as SdkToolError  # noqa: F401 -- re-exported
+except ImportError:  # SDK v1
+    from mcp.server.fastmcp.exceptions import ToolError as SdkToolError  # type: ignore[no-redef]  # noqa: F401
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,6 +54,15 @@ else:
         from mcp.server.mcpserver import MCPServer as FastMCP
     except ImportError:  # SDK v1
         from mcp.server.fastmcp import Context, FastMCP
+
+
+class InvalidArgument(SdkToolError, ValueError):
+    """An argument that is not valid, which a client is shown the text of.
+
+    A ``ValueError`` still, for callers that catch one; also the SDK's ``ToolError``,
+    the one exception whose text a client sees (mcp 2.3.0 reports any other as
+    ``Error executing tool <name>``).
+    """
 
 
 # SDK v1 shipped a pluggable task store under ``mcp.shared.experimental.tasks``

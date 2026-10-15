@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from .._sdk_compat import SdkToolError
 from ..context import get_identity_context
 from ..domain.contracts.session_suspension import ISessionSuspensionRegistry, is_well_formed_session_id
 from ..logging_config import get_logger
@@ -74,12 +75,14 @@ SESSION_SUSPENDED_REASON = "session_suspended"
 SUSPENSION_UNCHECKED_REASON = "session_suspension_unchecked"
 
 
-class SessionSuspendedError(PermissionError):
+class SessionSuspendedError(PermissionError, SdkToolError):
     """The caller's session is suspended, or whether it is could not be told.
 
     ``PermissionError``, like ``ToolAccessNotAuthorizedError``, so it is not
-    swallowed by the value-error handling in tool bodies. The message is one of
-    two fixed strings and never names the session or the tool.
+    swallowed by the value-error handling in tool bodies, and the SDK's
+    ``ToolError``, so the client is shown the text (mcp 2.3.0 reports any other
+    exception as ``Error executing tool <name>``). The message is one of two
+    fixed strings and never names the session or the tool.
     """
 
     def __init__(self, message: str = SESSION_SUSPENDED_MESSAGE) -> None:
