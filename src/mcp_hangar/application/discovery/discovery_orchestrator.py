@@ -732,7 +732,13 @@ class DiscoveryOrchestrator:
         }
 
     async def approve_mcp_server(self, name: str) -> dict[str, Any]:
-        """Approve a quarantined mcp_server.
+        """Approve a quarantined or pending mcp_server.
+
+        A server waits in one of two places: quarantine, where it failed
+        validation, and pending, where it passed but ``auto_register`` is off.
+        ``hangar_discovered`` lists the second kind, and approval only looked
+        in the first, so with ``auto_register: false`` nothing could ever
+        register a discovered server (#1667).
 
         Args:
             name: McpServer name
@@ -741,6 +747,10 @@ class DiscoveryOrchestrator:
             Result dictionary
         """
         mcp_server = self._lifecycle_manager.approve(name)
+        was_pending = False
+        if mcp_server is None:
+            mcp_server = self._discovery_service.approve_pending(name)
+            was_pending = mcp_server is not None
 
         if mcp_server:
             # Register with main registry
@@ -751,6 +761,9 @@ class DiscoveryOrchestrator:
                     logger.error(f"Error registering approved mcp_server {name}: {e}")
                     return {"approved": False, "mcp_server": name, "error": str(e)}
 
+            if was_pending:
+                # Tracked from here on, so a later cycle sees it unchanged and its TTL runs.
+                self._lifecycle_manager.add_mcp_server(mcp_server)
             self._validator.record_registration(mcp_server)
             main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
 
@@ -759,11 +772,11 @@ class DiscoveryOrchestrator:
         return {
             "approved": False,
             "mcp_server": name,
-            "error": "McpServer not found in quarantine",
+            "error": "McpServer not found in quarantine or pending",
         }
 
     async def reject_mcp_server(self, name: str) -> dict[str, Any]:
-        """Reject a quarantined mcp_server.
+        """Reject a quarantined or pending mcp_server.
 
         Args:
             name: McpServer name
@@ -771,7 +784,7 @@ class DiscoveryOrchestrator:
         Returns:
             Result dictionary
         """
-        mcp_server = self._lifecycle_manager.reject(name)
+        mcp_server = self._lifecycle_manager.reject(name) or self._discovery_service.reject_pending(name)
 
         if mcp_server:
             return {"rejected": True, "mcp_server": name}
@@ -779,7 +792,7 @@ class DiscoveryOrchestrator:
         return {
             "rejected": False,
             "mcp_server": name,
-            "error": "McpServer not found in quarantine",
+            "error": "McpServer not found in quarantine or pending",
         }
 
     async def get_sources_status(self) -> list[dict[str, Any]]:

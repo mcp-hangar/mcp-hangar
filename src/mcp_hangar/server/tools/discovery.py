@@ -222,7 +222,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             # {"approved": true, "mcp_server": "my-new-mcp_server", "status": "registered"}
 
             hangar_approve("unknown")
-            # {"approved": false, "mcp_server": "unknown", "error": "McpServer not found in quarantine"}
+            # {"approved": false, "mcp_server": "unknown", "error": "McpServer not found in quarantine or pending"}
 
             hangar_approve("x")  # when not configured
             # {"error": "Discovery not configured. Enable discovery in config.yaml"}
