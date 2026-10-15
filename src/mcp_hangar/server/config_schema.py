@@ -343,6 +343,7 @@ def _policy_problems(where: str, spec: Any) -> list[str]:
 TOOL_PROJECTION_SCOPE_KEYS = frozenset(
     {
         "digest_enforcement",
+        "new_tools",
         "pins",
         "tenant_overrides",
         "upstream",

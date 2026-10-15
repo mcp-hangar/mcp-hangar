@@ -325,6 +325,28 @@ class DigestMismatchEvent(DomainEvent):
     observed_upstream: str | None = None
 
 
+@dataclass
+class ToolAdmissionRequested(DomainEvent):
+    """Published when a tool appears on a server after its pins were taken and is withheld (#1801).
+
+    The server declares ``tool_projection.new_tools: withhold`` and has pins; the
+    tool is in none of them, so it is neither listed nor callable until it is
+    pinned (``mcp-hangar pin --write``), which is the admission. One event for
+    each tool and definition, not one for each listing.
+
+    Attributes:
+        mcp_server_id: The server that now serves the tool.
+        tool_name: The new tool.
+        observed_digest: The digest of the definition the server serves, which is
+            what pinning it would approve.
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    observed_digest: str
+    schema_version: int = 1
+
+
 # ---------------------------------------------------------------------------
 # Mutator Events (SEP-1763)
 # ---------------------------------------------------------------------------
