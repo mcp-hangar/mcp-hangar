@@ -67,7 +67,7 @@ def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerReposit
     An upstream's ``list_changed`` arrives only on the replica holding its GET
     stream, so the announcement is local by construction.
     """
-    tool_projection_handler = ToolProjectionPopulationHandler(repository=repository)
+    tool_projection_handler = ToolProjectionPopulationHandler(repository=repository, event_bus=event_bus)
     event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
     tool_catalogue_changes.register_listener(tool_projection_handler.project)
     return tool_projection_handler
@@ -140,6 +140,15 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
 
     compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").strip().lower()
+    if not compliance_format and os.getenv("MCP_COMPLIANCE_OUTPUT", "").strip():
+        # An output with no format was ignored without a word: an operator who
+        # meant to turn SIEM export on ran with none. Refused, like an unknown
+        # format (#1701, #1723).
+        raise ConfigurationError(
+            "MCP_COMPLIANCE_OUTPUT is set but MCP_COMPLIANCE_FORMAT is not, so no SIEM export would run. "
+            f"Set MCP_COMPLIANCE_FORMAT to one of: {', '.join(sorted(_COMPLIANCE_FORMATS))}, "
+            "or unset MCP_COMPLIANCE_OUTPUT."
+        )
     # Cleared first: a status left by an earlier boot in this process would
     # report a feed this one does not have.
     set_compliance_export_status(None)

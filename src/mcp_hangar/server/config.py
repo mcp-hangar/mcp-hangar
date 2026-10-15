@@ -23,7 +23,9 @@ from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.input_validator import validate_mcp_server_id
+from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
+from ..domain.value_objects.config import MaxConsecutiveFailures
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 from ..metrics import remove_group_series
@@ -211,6 +213,16 @@ class _StagedConfig:
 #: built with. A reload keeps the running server only when the file would build
 #: it with the same ones (#1424, #1426).
 _BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
+
+
+def declared_in_config(mcp_server_id: str) -> bool:
+    """Whether the configuration in force declares *mcp_server_id*.
+
+    Read from the servers the last committed configuration built, which a
+    reload replaces as a whole: a server the file no longer declares is out of
+    it, and one the API or a discovery source added was never in it (#1744).
+    """
+    return mcp_server_id in _BUILT_FROM
 
 
 def _kept_or_built(mcp_server_id: str, built_with: dict[str, Any], built: McpServer) -> McpServer:
@@ -774,7 +786,9 @@ def _load_group_members(
                 member_spec["tools"], f"tools access policy for group '{group_id}' member '{member_id}'"
             )
             try:
-                tools_access_config = parse_tools_access_config(member_tools_config)
+                tools_access_config = parse_tools_access_config(
+                    member_tools_config, where=f"mcp_servers.{group_id}.members.{member_id}.tools"
+                )
                 if tools_access_config is not None:
                     member_tools_policy = tools_access_config.to_policy()
                     resolver.set_member_policy(
@@ -807,6 +821,7 @@ def _register_config_pins(
     pins: Any,
     *,
     tenant_id: str | None,
+    upstream: str | None = None,
 ) -> None:
     """Register a `{tool_name: sha256}` pin block on the projection registry.
 
@@ -820,6 +835,7 @@ def _register_config_pins(
         mcp_server_id: Owning mcp_server identifier.
         pins: The raw mapping from the config file; a non-mapping is ignored.
         tenant_id: Tenant the pins apply to, or ``None`` for all tenants.
+        upstream: The upstream identity the block's pins are bound to (``tool_projection.upstream``), if any (#1802).
     """
     if not isinstance(pins, dict):
         return
@@ -836,7 +852,7 @@ def _register_config_pins(
             )
             continue
         try:
-            digest = ToolDigest(tool_name=tool_name, sha256=sha256)
+            digest = ToolDigest(tool_name=tool_name, sha256=sha256, upstream=upstream)
         except ValueError as e:
             logger.warning(
                 "invalid_config_digest_pin",
@@ -934,7 +950,7 @@ def _register_access_policies(
             continue
         spec = _require_mapping(access_config[kind], f"access.{kind} policy on {where}")
         try:
-            parsed = parse_tools_access_config(spec)
+            parsed = parse_tools_access_config(spec, where=f"{where}.access.{kind}")
         except (ValueError, TypeError) as e:
             # Refused, never dropped: a dropped policy leaves the kind unrestricted (#1648).
             raise ConfigurationError(f"Invalid access.{kind} policy on {where}: {e}") from e
@@ -1039,7 +1055,27 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
     # All-tenants digest pins: {tool_name: sha256}. The counterpart of
     # `withdrawn:`, and the only pin that holds a caller carrying no tenant
     # identity -- which is every caller when auth is off (#902).
-    _register_config_pins(tp_registry, scope_id, tool_projection_config.get("pins", {}), tenant_id=None)
+    # The upstream the pins were taken from (#1802): the pins hold only for a server
+    # that still points at it. A value that is not a string is refused by name, not
+    # dropped, because dropping it would leave the pins unbound and unsaid.
+    # What happens to a tool that appears after the pins were taken (#1801).
+    new_tools = tool_projection_config.get("new_tools")
+    if new_tools is not None:
+        if new_tools not in ("withhold", "allow"):
+            raise ConfigurationError(
+                f"Invalid tool_projection.new_tools for '{scope_id}': expected 'withhold' or 'allow', got {new_tools!r}"
+            )
+        tp_registry.set_new_tools_policy(scope_id, new_tools)
+
+    upstream = tool_projection_config.get("upstream")
+    if upstream is not None and not (isinstance(upstream, str) and upstream):
+        raise ConfigurationError(
+            f"Invalid tool_projection.upstream for '{scope_id}': expected the identity string "
+            f"`mcp-hangar pin` writes, got {type(upstream).__name__} {upstream!r}"
+        )
+    _register_config_pins(
+        tp_registry, scope_id, tool_projection_config.get("pins", {}), tenant_id=None, upstream=upstream
+    )
 
     # Global withdrawals (all tenants), of every kind.
     _register_config_withdrawals(tp_registry, scope_id, tool_projection_config, tenant_id=None)
@@ -1050,7 +1086,46 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
             if not isinstance(tenant_spec, dict):
                 continue
             _register_config_withdrawals(tp_registry, scope_id, tenant_spec, tenant_id=tenant_id_key)
-            _register_config_pins(tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key)
+            _register_config_pins(
+                tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key, upstream=upstream
+            )
+
+
+def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> int:
+    """The server's failure threshold, refused when outside 1-100 (#1665).
+
+    `MaxConsecutiveFailures` holds the range and nothing called it, so 0 and 500
+    both booted: 0 degrades a server on its first success-less tick, 500 never.
+    """
+    value = spec_dict.get("max_consecutive_failures", 3)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': max_consecutive_failures must be an integer, got {value!r}"
+        )
+    try:
+        return int(MaxConsecutiveFailures(value))
+    except ValueError as e:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': max_consecutive_failures {value}: {e} (allowed 1-100)"
+        ) from e
+
+
+def _subprocess_command(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
+    """The command a subprocess server runs: its `command` followed by its `args` (#1658).
+
+    `args` was read for docker only, so a subprocess server started without the
+    paths `init` and `add` write there, and nothing said so.
+    """
+    command = spec_dict.get("command")
+    args = spec_dict.get("args")
+    if args is None or McpServerMode.normalize(spec_dict.get("mode", "subprocess")) != McpServerMode.SUBPROCESS:
+        return command
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise ConfigurationError(f"mcp_server '{mcp_server_id}': args must be a list of strings, got {args!r}")
+    if not isinstance(command, list):
+        # No command, or one the server refuses by its own check: leave it to that check.
+        return command
+    return [*command, *args]
 
 
 @_within_staging
@@ -1101,7 +1176,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             expected="a mapping (an access policy) or a list (tool schemas)",
         )
         try:
-            tools_access_config = parse_tools_access_config(tools_config)
+            tools_access_config = parse_tools_access_config(tools_config, where=f"mcp_servers.{mcp_server_id}.tools")
             if tools_access_config is not None:
                 tools_access_policy = tools_access_config.to_policy()
         except (ValueError, TypeError) as e:
@@ -1147,13 +1222,13 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # running server when these are unchanged (#1426).
     built_with: dict[str, Any] = {
         "mode": spec_dict.get("mode", "subprocess"),
-        "command": spec_dict.get("command"),
+        "command": _subprocess_command(mcp_server_id, spec_dict),
         "image": spec_dict.get("image"),
         "endpoint": spec_dict.get("endpoint"),
         "env": spec_dict.get("env", {}),
         "idle_ttl_s": spec_dict.get("idle_ttl_s", 300),
         "health_check_interval_s": spec_dict.get("health_check_interval_s", 60),
-        "max_consecutive_failures": spec_dict.get("max_consecutive_failures", 3),
+        "max_consecutive_failures": _max_consecutive_failures(mcp_server_id, spec_dict),
         "max_response_bytes": max_response_bytes,
         "volumes": spec_dict.get("volumes", []),
         "build": spec_dict.get("build"),
@@ -1241,7 +1316,11 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
                 )
                 try:
-                    member_tools_cfg = parse_tools_access_config(member_policy_spec)
+                    member_tools_cfg = parse_tools_access_config(
+                        member_policy_spec,
+                        where=f"mcp_servers.{mcp_server_id}.tool_access.member.{tenant_id}",
+                        extra_keys=("access",),
+                    )
                     if member_tools_cfg is not None:
                         member_policy = member_tools_cfg.to_policy()
                         resolver.set_standalone_member_policy(mcp_server_id, tenant_id, member_policy)
@@ -1325,7 +1404,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
         # A group is not a server and has no tool schemas: a mapping is its only form.
         group_tools_config = _require_mapping(spec_dict["tools"], f"tools access policy for group '{group_id}'")
         try:
-            tools_access_config = parse_tools_access_config(group_tools_config)
+            tools_access_config = parse_tools_access_config(group_tools_config, where=f"mcp_servers.{group_id}.tools")
             if tools_access_config is not None:
                 group_tools_policy = tools_access_config.to_policy()
         except (ValueError, TypeError) as e:
@@ -1726,6 +1805,40 @@ def _tenant_limits(full_config: dict[str, Any]) -> dict[str, TenantLimits]:
     return parse_tenant_limits(execution_config.get("tenant_limits") if isinstance(execution_config, dict) else None)
 
 
+def _init_ssrf_from_config(full_config: dict[str, Any]) -> None:
+    """Put ``ssrf.trusted_networks`` in force (#1752).
+
+    ::
+
+        ssrf:
+          trusted_networks: ["10.96.0.0/12"]
+
+    The private networks a remote endpoint registered over the API may resolve
+    into -- for the Kubernetes operator, the cluster's Service range. Every
+    caller allowed to register a server gets them, not only the operator. Read
+    by the registration check and by the connect-time check on every request,
+    so a reload that narrows the list refuses the next connection; an absent
+    section trusts nothing.
+    """
+    networks = _trusted_networks(full_config)
+    set_trusted_networks(networks)
+    if networks:
+        logger.info("ssrf_trusted_networks_configured", networks=[str(n) for n in networks])
+
+
+def _trusted_networks(full_config: dict[str, Any]) -> tuple[TrustedNetwork, ...]:
+    """The checked ``ssrf.trusted_networks``, empty when there is none."""
+    section = full_config.get("ssrf")
+    if section is None:
+        return ()
+    if not isinstance(section, dict):
+        raise ConfigurationError(f"ssrf must be a mapping, got {type(section).__name__}")
+    try:
+        return parse_trusted_networks(section.get("trusted_networks"))
+    except ValueError as e:
+        raise ConfigurationError(str(e)) from e
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1837,6 +1950,7 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_response_limit_from_config,
     _init_interceptors_from_config,
     _init_ui_resources_from_config,
+    _init_ssrf_from_config,
 )
 
 
@@ -1861,6 +1975,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     _max_links_per_tenant(full_config)
     _max_response_bytes(full_config)
     _ui_resource_policies(full_config)
+    _trusted_networks(full_config)
     # Checked, not applied: `run_http` reads it when the server starts (#1447).
     http_graceful_shutdown_timeout(full_config)
     try:
@@ -1881,8 +1996,8 @@ def apply_process_config(full_config: dict[str, Any]) -> None:
     """Apply every process-wide section of a configuration: startup's step, and a reload's.
 
     `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
-    `headers.param_validation`, `resource_links`, `interceptors` and
-    `ui_resources`. A section that is absent is put back to its default, so
+    `headers.param_validation`, `resource_links`, `interceptors`,
+    `ui_resources` and `ssrf`. A section that is absent is put back to its default, so
     deleting a block and reloading removes it. Checked first, so nothing is
     applied unless all of it can be.
     """

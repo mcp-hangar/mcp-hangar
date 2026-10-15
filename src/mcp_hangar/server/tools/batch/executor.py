@@ -470,6 +470,12 @@ def _approval_policy(
     return None
 
 
+def _upstream_of(server: Any) -> str | None:
+    """The identity of the upstream *server* fronts, or None when it cannot say (#1802)."""
+    identity = getattr(server, "upstream_identity", None)
+    return identity() if callable(identity) else None
+
+
 @dataclass(frozen=True)
 class _Governance:
     """What governs one call, decided against one configuration's overlays (#1431).
@@ -737,6 +743,9 @@ class _CallPipeline:
     #: that returns None without a note let the call through (`allow`); one
     #: that does not apply, or defers, says so here, because None alone cannot.
     gate_note: tuple[str, str | None, str | None] | None = None
+    #: Set by _gate_approval when a human granted the call: the approval to move
+    #: to cancelled if the batch is cancelled before the call is dispatched (#1730).
+    granted_approval_id: str | None = None
 
     def note(self, outcome: str, reason: str | None = None, revision: str | None = None) -> None:
         """Say what the running gate decided, beyond the CallResult or None it returns."""
@@ -2162,7 +2171,15 @@ class BatchExecutor:
                     unknown=DigestUnknownPolicy.BLOCK,
                     allowlist=frozenset({pin}),
                 )
-            ).validate_tool(projection.schema, p.call.mcp_server, p.call.call_id, tenant_id=p.caller_tenant_id)
+            ).validate_tool(
+                projection.schema,
+                p.call.mcp_server,
+                p.call.call_id,
+                tenant_id=p.caller_tenant_id,
+                # The upstream that serves the call -- the member a group selected, not
+                # the group -- so a pin bound to another upstream does not hold (#1802).
+                upstream=_upstream_of(p.mcp_server_obj) if pin.upstream is not None else None,
+            )
             blocked = digest_result.blocked
             event = digest_result.event
         except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
@@ -2403,6 +2420,7 @@ class BatchExecutor:
             # a tool or tightening a policy while a decision is pending left the
             # held call to dispatch on the superseded decision.
             granted_id = getattr(_approval_loop_local, "approval_id", None)
+            p.granted_approval_id = granted_id
             if granted_id is not None:
                 # Any pin stands for "there is something to re-verify". The
                 # callback re-verifies all of them, the group pins of a member
@@ -2533,7 +2551,30 @@ class BatchExecutor:
     def _gate_cancelled_after_cold_start(self, p: "_CallPipeline") -> CallResult | None:
         if not p.cancel_event.is_set():
             return None
+        self._cancel_granted_approval(p)
         return p.refuse("Cancelled after cold start", "CancellationError")
+
+    @staticmethod
+    def _cancel_granted_approval(p: "_CallPipeline") -> None:
+        """Record a granted approval as cancelled when its call is cancelled before dispatch (#1730).
+
+        The grant was published when the hold ended; a call refused after that
+        did not run, and the trail must not read as a grant that took effect.
+        A failure to record it is logged and does not change the refusal.
+        """
+        if p.granted_approval_id is None:
+            return
+        gate_service = getattr(p.ctx, "approval_gate", None)
+        if gate_service is None or not hasattr(gate_service, "cancel_after_grant"):
+            return
+        try:
+            _run_approval_coroutine(gate_service.cancel_after_grant(p.granted_approval_id))
+        except Exception as exc:  # noqa: BLE001 -- the call is already refused; this only annotates the trail
+            logger.warning(
+                "approval_cancel_after_grant_failed",
+                approval_id=p.granted_approval_id,
+                error_type=bounded_error_type(type(exc).__name__),
+            )
 
     def _relay_upstream_task(self, p: "_CallPipeline", result: CallResult) -> CallResult | None:
         """Upstream MCP task handle (ADR-014 P3).

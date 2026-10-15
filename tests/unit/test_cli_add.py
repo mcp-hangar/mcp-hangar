@@ -6,7 +6,26 @@ Tests cover provider search, config updates, and installation logic.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from mcp_hangar.server.cli.services import ConfigFileManager, get_all_providers, get_provider, search_providers
+from mcp_hangar.server.cli.services import (
+    ConfigFileManager,
+    McpServerDefinition,
+    get_all_providers,
+    get_provider,
+    search_providers,
+)
+
+
+def _server_needing_a_token() -> McpServerDefinition:
+    """The registry has no entry that takes a secret today; the env-var path still has to work."""
+    return McpServerDefinition(
+        name="tokened",
+        description="needs a token",
+        package="@scope/server-tokened",
+        category="Test",
+        requires_config=True,
+        config_type="secret",
+        env_var="GITHUB_TOKEN",
+    )
 
 
 class TestProviderRegistry:
@@ -18,8 +37,7 @@ class TestProviderRegistry:
         assert "filesystem" in providers
         assert "fetch" in providers
         assert "memory" in providers
-        assert "github" in providers
-        assert "sqlite" in providers
+        assert "git" in providers
 
     def test_provider_has_required_fields(self):
         """Each provider should have essential fields."""
@@ -46,8 +64,8 @@ class TestSearchRegistry:
 
     def test_search_by_description(self):
         """Searching should match description text."""
-        results = search_providers("database")
-        assert len(results) > 0
+        results = search_providers("web content")
+        assert [p.name for p in results] == ["fetch"]
 
     def test_search_no_results(self):
         """Searching for nonexistent returns empty list."""
@@ -143,8 +161,7 @@ mcp_servers:
             config_path = Path(tmpdir) / "config.yaml"
             manager = ConfigFileManager(config_path)
 
-            provider = get_provider("github")
-            assert provider is not None
+            provider = _server_needing_a_token()
             manager.add_mcp_server(provider, use_env="GITHUB_TOKEN")
 
             content = config_path.read_text()

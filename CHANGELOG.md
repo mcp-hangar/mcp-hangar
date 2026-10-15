@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.4...v2.27.5) (2026-10-14)
+
+### Changed
+
+- **deps:** `mcp` and `mcp-types` move from 2.0.0 to 2.3.0, still pinned exactly.
+  The SDK's own defaults come with it: a 4 MiB request-body limit, a 30-minute idle
+  expiry and a 10,000-session cap on stateful sessions. Hangar sets none of them
+  itself. The pin comment now states what the exactness protects against and how
+  to move it ([#1819](https://github.com/mcp-hangar/mcp-hangar/pull/1819))
+
+### Fixed
+
+- The release workflow's registry check now asks the MCP Registry for the exact version instead of searching one page of a list capped at 30 entries, so it no longer fails once the registry holds more than 30 versions (#1824). ([#1825](https://github.com/mcp-hangar/mcp-hangar/pull/1825))
+- `mcp-hangar init` now writes an entry a client can start from any directory: the command is an absolute path to the installed launcher, and the generated config names an absolute `event_store.path` (under `$XDG_STATE_HOME` or `~/.local/state/mcp-hangar`). The saga state and approvals databases follow it, so starting Hangar no longer creates `data/` in whatever directory the client spawned it from (#1772). ([#1821](https://github.com/mcp-hangar/mcp-hangar/pull/1821))
+
+## [2.27.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.3...v2.27.4) (2026-10-14)
+
+### Fixed
+
+- **security:** every state change of an approval request is now a conditional
+  update from `pending` with a row-count check, in both the SQLite and the
+  PostgreSQL repository. A resolve on one replica, an expiry on another and a
+  cancel from a batch deadline used to overwrite each other, so the record and the
+  event could disagree with what the held call did. Now one of them wins and the
+  rest are told so: a lost resolve answers `409` with the winning `state`, and a
+  decision that lands as the hold's deadline passes is honoured instead of being
+  overwritten as `expired`. Held calls publish exactly one terminal event ([#1817](https://github.com/mcp-hangar/mcp-hangar/pull/1817))
+- **security:** `Mcp-Param-*` headers of a call to a front-door tool are compared
+  with its body under mcp 2.3.0, as they are under 2.0.0. 2.3.0 asks
+  `Server.get_tool_input_schema` for the schema instead of running `tools/list`,
+  and that hook only knows the SDK's own tools, so the check was skipped for every
+  projected upstream tool and a call an L7 header rule denies reached its upstream.
+  Hangar now answers the hook from its projection, and runs the pre-dispatch
+  listing itself where the SDK no longer does. Nothing changes on 2.0.0, the pinned
+  version; this lets the pin move ([#1816](https://github.com/mcp-hangar/mcp-hangar/pull/1816))
+
+### Security
+
+- **security:** a key an access policy does not read now refuses the boot and the
+  reload, naming its path, and `mcp-hangar config check` reports it. `tools: {allow:
+  [read], deny: [add]}` -- the shape the README showed -- parsed as a block with no
+  lists, which is no policy: the gateway booted, listed `add` and ran it. The
+  refusal covers every place a policy is written (a server's `tools`, a group's, a
+  group member's, `access.<kind>` and each `tool_access.member.<tenant>` entry),
+  suggests `allow_list` / `deny_list` / `approval_list` for the spellings people
+  reach for, and a refused reload keeps the previous policy. The README example is
+  corrected ([#1820](https://github.com/mcp-hangar/mcp-hangar/pull/1820))
+
+## [2.27.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.2...v2.27.3) (2026-10-13)
+
+### Fixed
+
+- **core:** CEF and LEEF records name the running release as the device version
+  instead of the `0.15.0` they carried since that release, and a CEF state-change
+  record carries its transition (`msg=cold -> initializing`). Two transitions of
+  one server used to be byte-identical CEF lines ([#1810](https://github.com/mcp-hangar/mcp-hangar/pull/1810))
+
+## [2.27.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.1...v2.27.2) (2026-10-13)
+
+### Fixed
+
+- **core:** a server added through `POST /api/mcp_servers` now gets a log buffer,
+  so `GET /api/mcp_servers/{id}/logs` returns its output. Servers added by a
+  reload or by hot-loading already got one; this was the third way a server joins.
+  Deleting it releases the buffer ([#1760](https://github.com/mcp-hangar/mcp-hangar/pull/1760))
+
+## [2.27.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.0...v2.27.1) (2026-10-13)
+
+### Fixed
+
+- **core:** discovery no longer quarantines a server only because it has no
+  health endpoint. When the health path (`mcp-hangar.io/health-path`, default
+  `/health`) answers 404, the security check sends an MCP `initialize` to the
+  server's MCP path (`mcp-hangar.io/path`, default `/mcp`) and passes it on a
+  JSON-RPC result, JSON or SSE. A 5xx or a timeout on the health path still fails
+  the check, and a failed fallback names both probes. Servers that serve only MCP,
+  including the Kubernetes operator's container-mode servers, no longer need
+  `discovery.security.require_health_check: false`. ([#1757](https://github.com/mcp-hangar/mcp-hangar/pull/1757))
+
+## [2.27.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.26.0...v2.27.0) (2026-10-13)
+
+### Added
+
+- **core:** `ssrf.trusted_networks` in `config.yaml` lists the private networks
+  that a remote endpoint registered through `POST /api/mcp_servers` may resolve
+  into, such as a Kubernetes cluster's Service range for the operator. The
+  registration check and the per-request connect-time check both read the list.
+  A reload that narrows the list refuses the next connection. Loopback,
+  link-local and the unspecified ranges can never be trusted. The list applies to
+  every caller with `mcp_servers:write`. ([#1753](https://github.com/mcp-hangar/mcp-hangar/pull/1753))
+
+## [2.26.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.25.0...v2.26.0) (2026-10-12)
+
+### Changed
+
+- **core:** `DELETE /api/mcp_servers/{id}` refuses a server the gateway configuration declares with `409` and `{"error": "declared_in_config"}`, and leaves it running. The delete used to stop and remove it until the next reload or restart brought it back. Servers added over the API or by discovery are deleted as before. A discovery source whose name collides with a declared server can no longer remove it either. ([#1748](https://github.com/mcp-hangar/mcp-hangar/pull/1748))
+
 ## [2.25.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.24.0...v2.25.0) (2026-10-06)
 
 ### Removed

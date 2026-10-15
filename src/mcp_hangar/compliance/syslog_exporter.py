@@ -15,6 +15,7 @@ from .refusal import (
     CALLER_ROLES,
     ROUTE_BACKEND,
     TOOL_INVOCATION_DENIED,
+    caller_cost_data,
     event_type_for_status,
     refusal_data,
     refusal_wire_fields,
@@ -63,6 +64,8 @@ def _format_structured_data(record: AuditRecord) -> str:
         "fromState": data.get("from_state"),
         "toState": data.get("to_state"),
         **dict(refusal_wire_fields(data)),
+        # SD-PARAMs beside the others, camelCase (#1705). A zero cost is a value.
+        **{wire: value for _key, wire, value in caller_cost_data(data)},
     }
     params = " ".join(f'{key}="{_escape_sd_value(str(value))}"' for key, value in fields.items() if value is not None)
     return f"[{SD_ID}{(' ' + params) if params else ''}]"

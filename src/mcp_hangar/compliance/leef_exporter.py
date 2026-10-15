@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mcp_hangar import __version__
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 from mcp_hangar.observability.health import ComplianceExportStatus
 
@@ -13,6 +14,7 @@ from .refusal import (
     CALLER_ROLES,
     ROUTE_BACKEND,
     TOOL_INVOCATION_DENIED,
+    caller_cost_data,
     event_type_for_status,
     refusal_data,
     refusal_wire_fields,
@@ -21,7 +23,10 @@ from .refusal import (
 LEEF_VERSION = "2.0"
 DEVICE_VENDOR = "MCP Hangar"
 DEVICE_PRODUCT = "MCP Hangar"
-DEVICE_VERSION = "0.15.0"
+# The running release, not a literal: a literal stayed 0.15.0 from that
+# release on, and a SIEM correlating by device version was told every gateway
+# was a year old (#1705).
+DEVICE_VERSION = __version__
 
 _EVENT_ID_MAP: dict[str, str] = {
     "ToolInvocationRequested": "100",
@@ -75,6 +80,8 @@ def _format_record(record: AuditRecord) -> str:
     if to_state is not None:
         extensions.append(f"newState={_escape_value(str(to_state))}")
     extensions.extend(f"{key}={_escape_value(value)}" for key, value in refusal_wire_fields(data))
+    # LEEF 2.0 predefines none of these: custom keys, camelCase as the others (#1705).
+    extensions.extend(f"{wire}={_escape_value(str(value))}" for _key, wire, value in caller_cost_data(data))
     if record.provider_id:
         extensions.append(f"src={_escape_value(record.provider_id)}")
     route_backend = data.get(ROUTE_BACKEND)

@@ -9,10 +9,8 @@ the MCP Hangar operator and provider runtime.
 security/
 ├── seccomp/
 │   └── mcp-server-default.json   # Default seccomp profile for MCP provider containers
-├── networkpolicy/
-│   └── mcp-provider-deny-all.yaml  # Default deny-all NetworkPolicy template
-└── apparmor/
-    └── (coming in v0.13.0)         # AppArmor profiles for MCP providers
+└── networkpolicy/
+    └── mcp-provider-deny-all.yaml  # Default deny-all NetworkPolicy template
 ```
 
 ## Usage

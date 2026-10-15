@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.25.0"
+version = "2.27.5"
 description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
@@ -21,23 +21,32 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    # Pinned EXACTLY, not merely bounded, and now on the stable 2.0.0.
+    # Pinned EXACTLY, not merely bounded. This pin is a contract with the SDK, and
+    # what it protects against is a wrong wire, not an ImportError.
     #
-    # The exactness is no longer about beta drift -- it is that `_sdk_compat`
-    # shims specific SDK internals (`_lowlevel_server`, `add_request_handler`,
-    # `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`) and the relay registers custom
-    # `tasks/*` methods that the SDK deliberately does not carry in
-    # `SPEC_CLIENT_METHODS`. A floating pin lets any of that move under us
-    # silently, and the failure mode is a wrong wire rather than an ImportError.
-    # Bump deliberately, with the relay smoke harness run against the candidate.
+    # Why exact: `_sdk_compat` shims SDK internals (`_lowlevel_server`,
+    # `add_request_handler`, `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`), the front
+    # door installs its own `tools/list` and `tools/call` handlers, and the relay
+    # registers `tasks/*` methods the SDK deliberately does not carry in
+    # `SPEC_CLIENT_METHODS`. Any of those can change between two SDK releases
+    # without a failing import, and 2.3.0 proved it: it stopped running the
+    # `tools/list` handler before dispatch and asked `get_tool_input_schema`
+    # instead, so every `Mcp-Param-*` check on a projected tool was silently
+    # skipped (#1791) -- a deny that did not deny.
+    #
+    # How to move it: run the weekly canary against the candidate (#1793), then
+    # the full integration tier, the relay smoke (`task-relay-smoke.yml`, by
+    # dispatch) and the conformance workflow. A failure there is the pin doing its
+    # job. Move `mcp` and `mcp-types` together to the same version, and raise the
+    # floors in `scripts/check_dependency_floors.py` that the move implies.
     #
     # The v1 line on `main` solves the same class of problem with `>=1.28.1,<2`
     # (#561): both branches must be unable to follow the SDK somewhere their
     # code does not run. Do not widen either to match the other.
-    "mcp==2.0.0",
-    "mcp-types==2.0.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
+    "mcp==2.3.0",
+    "mcp-types==2.3.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
-    # Mirrors the floor `mcp==2.0.0` declares; we inherit it rather than choose it.
+    # Mirrors the floor `mcp==2.3.0` declares; we inherit it rather than choose it.
     # Declared at the same value so the metadata cannot claim an install that the
     # resolver can never produce (see scripts/check_dependency_floors.py).
     "pydantic>=2.12.0",
@@ -99,6 +108,11 @@ dev = [
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
     "jsonschema>=4.20.0",
+    # The discovery security check's HTTP client (security_validator.py). In a
+    # deployment the kubernetes extra brings it; without it here the check is
+    # skipped in every test run and its tests can only skip (#1756). Security
+    # floor: the deps-floor-audit job refuses anything older than 3.14.3.
+    "aiohttp>=3.14.3",
 ]
 # The kubernetes discovery source imports this. Until now it was declared
 # nowhere -- not a dependency, not an extra, not in the image -- so the source
@@ -307,9 +321,10 @@ relative_files = true
 #     Pinning those branches with deterministic tests would let this rise again.
 #
 # Two entries are visible debt rather than a target:
-#   approvals/persistence/sqlite_approval_repository.py at 31.2 -- the store
+#   approvals/persistence/sqlite_approval_repository.py at 64.9 -- the store
 #     holding approval state, tenant scoping and the arguments hash. Unit tests
-#     use a fake repository, so the real SQL paths are barely exercised.
+#     use a fake repository; the real SQL of `transition` is exercised by the
+#     multi-process race test (#1794), the rest of the paths barely.
 #   domain/value_objects/tool_access_policy.py at 84.2 -- _CompositePolicy's
 #     merge and approval-list handling, i.e. the consent-preservation logic.
 #   server/tools/batch/executor.py at 85.3 -- the invoke path, including the
@@ -323,13 +338,13 @@ drift_allowance = 3.0
   "application/tasks/tool_pin_context.py" = 94.4
   "approvals/api/routes.py" = 90.0
   "approvals/bootstrap.py" = 98.3
-  "approvals/commands/resolve.py" = 92.5
+  "approvals/commands/resolve.py" = 96.7
   "approvals/delivery/event_stream.py" = 100.0
   "approvals/delivery/noop.py" = 100.0
   "approvals/hold_registry.py" = 100.0
   "approvals/models.py" = 97.9
   "approvals/pending.py" = 100.0
-  "approvals/persistence/sqlite_approval_repository.py" = 31.2
+  "approvals/persistence/sqlite_approval_repository.py" = 64.9
   "approvals/service.py" = 96.1
   "auth/commands/handlers.py" = 99.2
   "auth/infrastructure/middleware.py" = 96.9
@@ -435,9 +450,7 @@ exported_unreferenced = [
   "domain/exceptions.py::ClientNotConnectedError",
   "domain/exceptions.py::ClientTimeoutError",
   "domain/value_objects/common.py::ToolArguments",
-  "infrastructure/command_bus.py::reset_command_bus",
   "infrastructure/persistence/event_serializer.py::register_event_type",
-  "infrastructure/query_bus.py::reset_query_bus",
   "retry.py::get_retry_policy",
   "server/__init__.py::cli_main",
   "server/cli/errors.py::InvalidConfigError",

@@ -1,0 +1,1 @@
+A refused connection on a `tools/call`, a relay or a catalogue refresh counts as a failure of the server. The HTTP client raises `ClientError` for it and those paths caught only `OSError` and `TimeoutError`, so the server's own failure count never moved and the relay surfaced a raw `ClientError` instead of `ToolInvocationError`.

@@ -83,6 +83,13 @@ class _Store:
     async def get(self, approval_id: str) -> ApprovalRequest | None:
         return self._rows.get(approval_id)
 
+    async def transition(self, approval_id, from_states, state, decided_by, decided_at, reason):
+        current = await self.get(approval_id)
+        if current is None or current.state not in from_states:
+            return False
+        await self.update_state(approval_id, state, decided_by, decided_at, reason)
+        return True
+
     async def update_state(self, approval_id, state, decided_by, decided_at, reason) -> None:
         row = self._rows[approval_id]
         row.state, row.decided_by, row.decided_at, row.reason = state, decided_by, decided_at, reason

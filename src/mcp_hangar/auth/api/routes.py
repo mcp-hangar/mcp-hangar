@@ -33,12 +33,12 @@ from mcp_hangar.auth.queries.queries import (
     ListPrincipalsQuery,
 )
 from mcp_hangar.domain.exceptions import ValidationError
-from mcp_hangar.domain.value_objects.security import Principal
+from mcp_hangar.server.api.actor import request_actor
 from mcp_hangar.server.api.middleware import dispatch_command, dispatch_query
 from mcp_hangar.server.api.serializers import HangarJSONResponse
 
 #: Body fields that once named the actor of an auth mutation (#1649).
-_ACTOR_FIELDS = ("created_by", "revoked_by", "assigned_by", "updated_by")
+_ACTOR_FIELDS = ("created_by", "revoked_by", "assigned_by", "updated_by", "set_by", "cleared_by")
 
 
 def _actor(request: Request, body: Any = None) -> str:
@@ -67,10 +67,7 @@ def _actor(request: Request, body: Any = None) -> str:
                     f"'{field}' is not accepted: the actor is the authenticated principal",
                     field=field,
                 )
-    state = request.scope.get("state")
-    auth_context = state.get("auth") if isinstance(state, dict) else getattr(state, "auth", None)
-    principal_id = getattr(getattr(auth_context, "principal", None), "id", None)
-    return str(principal_id) if principal_id is not None else Principal.anonymous().id.value
+    return request_actor(request)
 
 
 async def create_api_key(request: Request) -> HangarJSONResponse:
@@ -148,7 +145,14 @@ async def list_api_keys(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"principal_id": ..., "keys": [...], "total": int, "active": int}.
     """
-    principal_id = request.query_params.get("principal_id", "")
+    principal_id = request.query_params.get("principal_id", "").strip()
+    if not principal_id:
+        # Documented as required; it answered 200 and an empty list, which reads as
+        # "this principal has no keys" (#1697).
+        return HangarJSONResponse(
+            {"error": {"code": "ValidationError", "message": "principal_id is required"}},
+            status_code=400,
+        )
     include_revoked = request.query_params.get("include_revoked", "true").lower() != "false"
     result = await dispatch_query(
         GetApiKeysByPrincipalQuery(
@@ -362,32 +366,28 @@ async def list_principals(request: Request) -> HangarJSONResponse:
 
 
 async def list_permissions(request: Request) -> HangarJSONResponse:
-    """List all available permission actions/resource types.
+    """List every permission the system grants, grouped by resource type.
 
-    Returns a static manifest of all permission strings supported by the system.
-    No query needed -- this is read from domain constants.
+    Built from the permission registry the built-in roles are made of
+    (``auth.roles.PERMISSIONS``), so it is the set an authorizer can be asked
+    about. It used to import two constants that no longer exist and always
+    answered a hard-coded list that named neither ``mcp_servers``, ``policy``,
+    ``approval`` nor ``discovery`` (#1673).
 
     Returns:
         JSON with {"permissions": [{"resource_type": ..., "actions": [...]}]}.
     """
-    # Graceful fallback: if constants don't exist, return known defaults
-    try:
-        from mcp_hangar.domain.value_objects.security import (  # type: ignore[attr-defined]  # optional constants, fallback handles missing
-            ACTIONS,
-            RESOURCE_TYPES,
-        )
+    return HangarJSONResponse({"permissions": permission_manifest()})
 
-        permissions = [{"resource_type": rt, "actions": list(ACTIONS)} for rt in RESOURCE_TYPES]
-    except Exception:  # noqa: BLE001
-        permissions = [
-            {"resource_type": "provider", "actions": ["read", "write", "invoke", "admin"]},
-            {"resource_type": "group", "actions": ["read", "write", "admin"]},
-            {"resource_type": "tool", "actions": ["invoke", "read"]},
-            {"resource_type": "config", "actions": ["read", "write"]},
-            {"resource_type": "*", "actions": ["*"]},
-        ]
 
-    return HangarJSONResponse({"permissions": permissions})
+def permission_manifest() -> list[dict[str, Any]]:
+    """The permission registry as ``[{"resource_type": ..., "actions": [...]}]``, sorted."""
+    from ..roles import PERMISSIONS
+
+    actions: dict[str, set[str]] = {}
+    for permission in PERMISSIONS.values():
+        actions.setdefault(permission.resource_type, set()).add(permission.action)
+    return [{"resource_type": rt, "actions": sorted(actions[rt])} for rt in sorted(actions)]
 
 
 async def check_permission(request: Request) -> HangarJSONResponse:
@@ -470,6 +470,7 @@ async def set_tool_access_policy(request: Request) -> HangarJSONResponse:
             target_id=target_id,
             allow_list=body.get("allow_list", []),
             deny_list=body.get("deny_list", []),
+            set_by=_actor(request, body),
         )
     )
     return HangarJSONResponse(result)
@@ -528,7 +529,7 @@ async def clear_tool_access_policy(request: Request) -> Response:
             status_code=400,
         )
 
-    await dispatch_command(ClearToolAccessPolicyCommand(scope=scope, target_id=target_id))
+    await dispatch_command(ClearToolAccessPolicyCommand(scope=scope, target_id=target_id, cleared_by=_actor(request)))
     return Response(status_code=204)
 
 

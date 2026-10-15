@@ -173,7 +173,7 @@ def _front_door(out: Path) -> dict[str, Any]:
                     DOWN: {
                         "mode": "subprocess",
                         "command": [sys.executable, "-c", "raise SystemExit(1)"],
-                        "max_consecutive_failures": 1000,
+                        "max_consecutive_failures": 100,
                     },
                 },
                 "tool_access": {

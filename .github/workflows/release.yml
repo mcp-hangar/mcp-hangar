@@ -367,8 +367,18 @@ jobs:
       - name: Verify the registry serves this version
         run: |
           V="${{ needs.validate.outputs.version }}"
-          curl -sf "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.mcp-hangar/hangar" \
-            | tee /dev/stderr | grep -q "\"version\":\"$V\""
+          # Ask for the exact version: the search list is paged at 30 entries,
+          # ascending, so a newer version sits on a later page (#1824).
+          for attempt in 1 2 3 4 5; do
+            if curl -sf "https://registry.modelcontextprotocol.io/v0.1/servers/io.mcp-hangar%2Fhangar/versions/${V}" \
+              | tee /dev/stderr \
+              | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["server"]["version"] == sys.argv[1] else 1)' "$V" 2>/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "registry does not serve $V" >&2
+          exit 1
 
   # Build and publish Docker images
   publish-docker:

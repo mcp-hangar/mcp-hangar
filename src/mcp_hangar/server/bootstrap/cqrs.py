@@ -10,10 +10,10 @@ from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
-from ..config import ServerConfigLoader
+from ..config import ServerConfigLoader, declared_in_config
 from ..context import get_context
 from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_saga
-from .components import register_auth_cqrs
+from .components import absolute_state_dir, register_auth_cqrs
 from .composition import close_at_shutdown
 from .logs import LogBuffers
 from .persistence import fleet_restore_gap
@@ -22,6 +22,13 @@ if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
 
 logger = get_logger(__name__)
+
+
+def _drain_in_flight_calls(mcp_server_id: str, timeout_s: float) -> bool:
+    """Wait for the calls in flight to *mcp_server_id*; what a graceful reload waits on (#1662)."""
+    from ..tools.batch.concurrency import get_concurrency_manager
+
+    return get_concurrency_manager().wait_idle(mcp_server_id, timeout_s)
 
 
 def _current_lease() -> Any:
@@ -102,6 +109,7 @@ def init_cqrs(
         config_loader=ServerConfigLoader(),
         groups=GROUPS,
         runtime_store=RUNTIME_PROVIDERS,
+        drain=_drain_in_flight_calls,
     )
     register_query_handlers(
         runtime.query_bus,
@@ -120,12 +128,16 @@ def init_cqrs(
         # rather than leaving it registered under an id that is free (#1506).
         log_buffers=LogBuffers(),
         restore_gap=fleet_restore_gap(runtime),
+        # A delete of a server the configuration declares would last until the
+        # next reload; it is refused instead (#1744).
+        declared_in_config=declared_in_config,
     )
 
     if discovery_registry is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
+        from ...infrastructure.discovery.registry import create_source
 
-        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        register_discovery_handlers(runtime.command_bus, discovery_registry, source_factory=create_source)
         logger.info("discovery_cqrs_handlers_registered")
 
     logger.info("cqrs_handlers_registered")
@@ -188,7 +200,12 @@ def _create_saga_state_store(
 
     from ...infrastructure.persistence.database_common import SQLiteConfig, SQLiteConnectionFactory
 
-    saga_db_path = "data/saga_state.db"
+    # Beside the event store when the configuration gives it an absolute path, as
+    # the one `init` writes does: a database left at `data/` relative to wherever
+    # the client spawned Hangar was a file it still wrote there (#1772). Any other
+    # configuration keeps the `data/saga_state.db` it has always had.
+    state_dir = absolute_state_dir(full_config)
+    saga_db_path = str(state_dir / "saga_state.db") if state_dir else "data/saga_state.db"
     try:
         factory = SQLiteConnectionFactory(SQLiteConfig(path=saga_db_path))
         store = SagaStateStore(factory)

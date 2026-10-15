@@ -16,7 +16,7 @@ Label Reference:
     mcp.hangar.name: "my-mcp_server"       # Optional - defaults to container name
     mcp.hangar.mode: "container"         # Optional - container|http (default: container)
     mcp.hangar.port: "8080"              # For http mode only
-    mcp.hangar.group: "tools"            # Optional - group membership
+    mcp.hangar.path: "/mcp"              # For http mode only - the MCP endpoint's path (default /mcp)
     mcp.hangar.command: "python app.py"  # Optional - override container command
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
 """
@@ -403,10 +403,17 @@ class DockerDiscoverySource(DiscoverySource):
                 return None
 
             host, resolved_port = resolved
+            # The MCP endpoint's path. Without it the endpoint was `http://host:port`
+            # and a server mounted at `/mcp` answered its first call with 404, as
+            # Kubernetes did before `mcp-hangar.io/path` (#1208). Same default (#1689).
+            path = labels.get(f"{self.LABEL_PREFIX}path", "/mcp").strip() or "/mcp"
+            if not path.startswith("/"):
+                path = f"/{path}"
             connection_info = {
                 "host": host,
                 "port": resolved_port,
-                "endpoint": f"http://{host}:{resolved_port}",
+                "path": path,
+                "endpoint": f"http://{host}:{resolved_port}{path}",
             }
         else:
             logger.warning(f"Unknown mode '{mode}' for container {name}")
@@ -418,7 +425,6 @@ class DockerDiscoverySource(DiscoverySource):
             "container_name": container.name,
             "image": image,
             "status": container.status,
-            "group": labels.get(f"{self.LABEL_PREFIX}group"),
             # Addresses the runtime itself reports for this container: the host
             # side of its published binding, and its network IP. Registration
             # refuses an endpoint resolving anywhere else, so a label cannot

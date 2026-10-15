@@ -190,7 +190,19 @@ class ResolveApprovalHandler(CommandHandler):
             # that never ran, which is an audit trail asserting something
             # false. Mark it expired and refuse the decision.
             existing.expire()
-            await repository.update_state(command.approval_id, existing.state, None, existing.decided_at, None)
+            if not await repository.transition(
+                command.approval_id, (ApprovalState.PENDING,), existing.state, None, existing.decided_at, None
+            ):
+                # Decided, cancelled or expired by someone else since the read:
+                # report what now exists, not an expiry that did not happen (#1794).
+                current = await repository.get(command.approval_id)
+                if current is None:
+                    return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+                if current.state is ApprovalState.CANCELLED:
+                    return ResolveApprovalResult(ResolveOutcome.CANCELLED, state=current.state.value)
+                if current.state is ApprovalState.EXPIRED:
+                    return ResolveApprovalResult(ResolveOutcome.EXPIRED, state=current.state.value)
+                return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=current.state.value)
             return ResolveApprovalResult(ResolveOutcome.EXPIRED, state=existing.state.value)
 
         decided_by = str(command.principal.id)

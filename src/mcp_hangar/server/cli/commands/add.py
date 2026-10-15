@@ -18,7 +18,14 @@ from rich.table import Table
 from ..config_path import resolve_config_path
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
-from ..services import ConfigFileManager, McpServerDefinition, get_all_mcp_servers, get_mcp_server, search_mcp_servers
+from ..services import (
+    ConfigFileManager,
+    McpServerDefinition,
+    gateway_api,
+    get_all_mcp_servers,
+    get_mcp_server,
+    search_mcp_servers,
+)
 
 console = Console()
 
@@ -106,21 +113,21 @@ def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
     return {"value": value, "env_var": mcp_server.env_var, "config_type": mcp_server.config_type}
 
 
-def _try_hot_reload() -> bool:
-    """Try to trigger hot-reload of the running server."""
-    try:
-        import httpx
+def _try_hot_reload() -> gateway_api.GatewayReply:
+    """Ask the running gateway to reload its configuration."""
+    return gateway_api.call("POST", "/api/config/reload")
 
-        for port in [8000, 8080]:
-            try:
-                response = httpx.post(f"http://localhost:{port}/reload", timeout=5.0)
-                if response.status_code == 200:
-                    return True
-            except httpx.ConnectError:
-                continue
-    except Exception:  # noqa: BLE001 -- fault-barrier: reload attempt must not crash add command
-        pass
-    return False
+
+def _report_hot_reload(reply: gateway_api.GatewayReply) -> None:
+    """Say what the reload did, and why when it did not."""
+    if reply.ok:
+        console.print("[green]Server reloaded - MCP server is now available[/green]")
+    elif reply.problem():
+        console.print(f"[yellow]Not reloaded: {reply.problem()}[/yellow]")
+        console.print("Reload the gateway yourself, or restart it, to use the new MCP server")
+    else:
+        console.print("[dim]No gateway answered, so there is nothing to reload[/dim]")
+        console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new MCP server")
 
 
 def add_command(
@@ -145,8 +152,8 @@ def add_command(
     to your MCP Hangar config file.
 
     Examples:
-        mcp-hangar add github
-        mcp-hangar add --search database
+        mcp-hangar add git
+        mcp-hangar add --search fetch
         mcp-hangar add filesystem -y
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
@@ -214,11 +221,7 @@ def add_command(
 
     # Try hot reload
     if not no_reload:
-        if _try_hot_reload():
-            console.print("[green]Server reloaded - MCP server is now available[/green]")
-        else:
-            console.print("[dim]Server not running or reload not available[/dim]")
-            console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new MCP server")
+        _report_hot_reload(_try_hot_reload())
 
     # JSON output
     if global_opts.json_output:

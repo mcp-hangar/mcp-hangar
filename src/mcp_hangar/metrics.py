@@ -126,6 +126,15 @@ class Gauge:
                 if all(current.get(name) == value for name, value in labels.items()):
                     del self._values[key]
 
+    def has_series(self, **labels) -> bool:
+        """Whether any series has labels that include ``labels``."""
+        with self._lock:
+            for key in self._values:
+                current = dict(zip(self.label_names, key, strict=False))
+                if all(current.get(name) == value for name, value in labels.items()):
+                    return True
+        return False
+
     def _make_key(self, labels: dict) -> tuple:
         return tuple(labels.get(label_name, "") for label_name in self.label_names)
 
@@ -1615,7 +1624,7 @@ def observe_health_check(
     HEALTH_CHECK_CONSECUTIVE_FAILURES.set(consecutive_failures, mcp_server=mcp_server)
 
 
-def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess", *, record_change: bool = True):
+def update_mcp_server_state(mcp_server: str, state: str, mode: str | None = None, *, record_change: bool = True):
     """Update mcp_server state metrics.
 
     ``record_change=False`` sets the state without claiming it changed now: a
@@ -1625,7 +1634,16 @@ def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess
     PROVIDER_STATE_CURRENT.set(state_map.get(state, 0), mcp_server=mcp_server)
     PROVIDER_UP.set(1 if state == "ready" else 0, mcp_server=mcp_server)
     PROVIDER_INITIALIZED.set(0 if state == "cold" else 1, mcp_server=mcp_server)
-    PROVIDER_INFO.set(1, mcp_server=mcp_server, mode=mode)
+    # One info series per server (#1700). Most callers know only the state, and
+    # defaulting their mode to "subprocess" wrote a second series next to the real
+    # one for every remote server. A caller that knows the mode replaces the
+    # series; one that does not leaves it, and only writes the default when
+    # there is nothing yet.
+    if mode is not None:
+        PROVIDER_INFO.remove(mcp_server=mcp_server)
+        PROVIDER_INFO.set(1, mcp_server=mcp_server, mode=mode)
+    elif not PROVIDER_INFO.has_series(mcp_server=mcp_server):
+        PROVIDER_INFO.set(1, mcp_server=mcp_server, mode="subprocess")
     if record_change:
         PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
 

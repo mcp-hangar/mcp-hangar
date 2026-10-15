@@ -222,7 +222,14 @@ def _guard_the_call(
     _authorize_tool_call(tool_name, mcp_ctx)
 
     if validate is not None:
-        validate(*args, **kwargs)
+        try:
+            validate(*args, **kwargs)
+        except ValueError as invalid:
+            from ..._sdk_compat import InvalidArgument
+
+            # Shown to the client with its text: the SDK reports any other exception
+            # a tool raises as "Error executing tool X" and nothing more (mcp 2.3.0).
+            raise InvalidArgument(str(invalid)) from invalid
     return key, None
 
 

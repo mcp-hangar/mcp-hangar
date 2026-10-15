@@ -174,8 +174,16 @@ class RetryResult:
 
     @property
     def attempt_count(self) -> int:
-        """Total number of attempts made."""
-        return len(self.attempts) + (1 if self.success else 0)
+        """Total number of attempts made.
+
+        `attempts` holds the failed attempts that were followed by a retry. The
+        last attempt is not in it -- it either succeeded or failed for good, and
+        `final_error` is set in the second case. It counts either way: three real
+        attempts reported 2, and a first failure that was not retried reported 0
+        (#1677).
+        """
+        made_a_last_attempt = self.success or self.final_error is not None
+        return len(self.attempts) + (1 if made_a_last_attempt else 0)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for logging/reporting."""

@@ -63,11 +63,16 @@ class ToolDigest:
         tool_name: Fully qualified tool name.
         sha256: 64-character lowercase hex SHA-256 digest.
         algorithm: Hash algorithm identifier (forward-compat for spec changes).
+        upstream: The upstream identity (``McpServer.upstream_identity()``) the pin
+            was taken from, when it was bound to one (#1802). A server whose
+            upstream differs does not match the pin, whatever its tool says. None
+            for a pin that never named one, which checks the definition only.
     """
 
     tool_name: str
     sha256: str
     algorithm: str = "sha256"
+    upstream: str | None = None
 
     def __post_init__(self):
         if not self.tool_name:

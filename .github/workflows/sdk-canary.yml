@@ -1,0 +1,89 @@
+# Runs the unit and integration tiers against the NEWEST `mcp` and `mcp-types`,
+# laid over the locked environment (#1793).
+#
+# The SDK is pinned exactly on purpose, so a new release gives no signal until
+# someone moves the pin; detection latency, not the pin, is the risk. This
+# closes that gap weekly: one issue titled `sdk canary: mcp <version>` lists the
+# failures, grouped by their first frame in Hangar's code, while the newest SDK
+# breaks main, and closes itself when it stops.
+name: sdk-canary
+
+on:
+  schedule:
+    - cron: "43 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: "Install this mcp/mcp-types version instead of the newest (for a controlled run)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Newest SDK against main
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      sdk_version: ${{ steps.sdk.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+      - name: Install the locked environment
+        run: pip install -e ".[dev,opentelemetry]"
+      - name: Install the newest SDK over it
+        id: sdk
+        env:
+          PINNED: ${{ inputs.sdk_version }}
+        run: |
+          if [ -n "$PINNED" ]; then
+            pip install --upgrade "mcp==$PINNED" "mcp-types==$PINNED"
+          else
+            pip install --upgrade mcp mcp-types
+          fi
+          version=$(python -c "import importlib.metadata as m; print(m.version('mcp'))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Testing against mcp $version (pinned: $(grep -o 'mcp==[0-9.]*' pyproject.toml | head -1))"
+      - name: Unit and integration tiers
+        # The same selection `test` and `integration` run, without coverage; the
+        # result is read from the JUnit file, so a failing run still uploads it.
+        continue-on-error: true
+        run: |
+          pytest tests/unit tests/integration -n auto --dist loadfile --timeout=60 --tb=short \
+            -m "not benchmark and not live" --junitxml=junit.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sdk-canary-junit
+          path: junit.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  report:
+    name: Open, update or close the canary issue
+    needs: canary
+    if: ${{ !cancelled() && needs.canary.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: sdk-canary-junit
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/sdk_canary_report.py --junit junit.xml \
+            --sdk-version "${{ needs.canary.outputs.sdk_version }}" \
+            --repo "${{ github.repository }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

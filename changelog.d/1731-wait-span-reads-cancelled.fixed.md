@@ -1,0 +1,1 @@
+The `approval_gate.wait_for_decision` span now reads `approval.decision="cancelled"` when a late approval for an abandoned call was refused, matching the gate span's `approval.result="cancelled"`. It read `denied`, so the trace contradicted itself; a real denial still reads `denied`.

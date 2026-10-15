@@ -28,7 +28,7 @@ from ...application.queries.queries import (
     ListMcpServersQuery,
 )
 from ...application.read_models.tool_projection import get_tool_projection_registry
-from ...domain.exceptions import MissingCredentialsError
+from ...domain.exceptions import McpServerDeclaredInConfigError, MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
 from ...infrastructure.persistence.log_buffer import get_log_buffer
@@ -376,15 +376,26 @@ async def delete_mcp_server(request: Request) -> HangarJSONResponse:
 
     Raises:
         McpServerNotFoundError: If mcp_server does not exist (-> 404).
+
+    A server the configuration declares is refused with 409
+    ``declared_in_config`` (#1744).
     """
     _check_permission(request, resource_type="mcp_servers", action="lifecycle")
     mcp_server_id = request.path_params["mcp_server_id"]
-    result = await dispatch_command(
-        DeleteMcpServerCommand(
-            mcp_server_id=mcp_server_id,
-            source="api",
+    try:
+        result = await dispatch_command(
+            DeleteMcpServerCommand(
+                mcp_server_id=mcp_server_id,
+                source="api",
+            )
         )
-    )
+    except McpServerDeclaredInConfigError as exc:
+        # A refusal the caller can act on, not a fault: the server is there and
+        # stays there (#1744).
+        return HangarJSONResponse(
+            {"error": "declared_in_config", "mcp_server_id": mcp_server_id, "detail": exc.message},
+            status_code=409,
+        )
     return HangarJSONResponse(result)
 
 

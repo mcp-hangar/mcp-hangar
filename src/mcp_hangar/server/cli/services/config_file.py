@@ -1,5 +1,7 @@
 """Config file manager - handles MCP Hangar config file operations."""
 
+import json
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +10,20 @@ import yaml
 
 from .dependency_detector import DependencyStatus, detect_dependencies
 from .mcp_server_registry import McpServerDefinition
+
+
+def default_event_store_path() -> Path:
+    """Where the generated config keeps the event store: the user's state directory (#1772).
+
+    ``$XDG_STATE_HOME/mcp-hangar/events.db``, else ``~/.local/state/mcp-hangar/``.
+    The event store used to default to ``data/events.db`` relative to the
+    working directory, so a client that spawned Hangar from ``/`` or a read-only
+    directory had it refuse to start, with the client reporting only that the
+    connection closed.
+    """
+    state_home = os.environ.get("XDG_STATE_HOME")
+    base = Path(state_home) if state_home and Path(state_home).is_absolute() else Path.home() / ".local" / "state"
+    return base / "mcp-hangar" / "events.db"
 
 
 class ConfigFileManager:
@@ -260,7 +276,9 @@ class ConfigFileManager:
             "#",
             "# Documentation: https://mcp-hangar.io/docs/reference/configuration",
             "",
-            "mcp_servers:",
+            # An empty mapping when nothing was selected: a bare `mcp_servers:` is
+            # a null, which the loader does not take for "none".
+            "mcp_servers:" if mcp_servers else "mcp_servers: {}",
         ]
 
         for mcp_server in mcp_servers:
@@ -320,6 +338,12 @@ class ConfigFileManager:
                 "      id: local-user",
                 "      tenant_id: local",
                 "      roles: [viewer]",
+                "",
+                "# Where the audit trail is kept. Absolute, because the client starts",
+                "# Hangar in whatever directory it likes, possibly one nobody can write.",
+                "event_store:",
+                "  driver: sqlite",
+                f"  path: {json.dumps(str(default_event_store_path()))}",
                 "",
                 "# Logging",
                 "logging:",

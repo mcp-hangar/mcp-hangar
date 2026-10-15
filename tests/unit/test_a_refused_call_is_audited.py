@@ -131,6 +131,7 @@ class TestEveryGate:
             cancel_event=cancelled,
             refuse=refuse,
             gate_note=None,
+            granted_approval_id=None,
             caller_tenant_id=_TENANT,
             global_timeout=60.0,
             batch_start_time=time.perf_counter(),

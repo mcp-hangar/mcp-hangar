@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 from mcp_hangar.server.cli.services import (
     ConfigFileManager,
+    McpServerDefinition,
     get_provider,
     get_providers_by_category,
 )
@@ -74,12 +75,19 @@ class TestConfigFileManager:
     def test_generate_initial_config_with_env_var(self):
         """Config should include env var references."""
         manager = ConfigFileManager()
-        provider = get_provider("github")
-        assert provider is not None
+        provider = McpServerDefinition(
+            name="tokened",
+            description="needs a token",
+            package="@scope/server-tokened",
+            category="Test",
+            requires_config=True,
+            config_type="secret",
+            env_var="GITHUB_TOKEN",
+        )
 
         config_str = manager.generate_initial_config(
             mcp_servers=[provider],
-            configs={"github": {"use_env": "GITHUB_TOKEN"}},
+            configs={"tokened": {"use_env": "GITHUB_TOKEN"}},
         )
 
         assert "env:" in config_str

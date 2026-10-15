@@ -46,6 +46,38 @@ ROUTE_BACKEND = "route_backend"
 CALLER_ROLES = "caller_roles"
 
 
+#: The caller and cost fields of a tool-call record (#1705): the
+#: ``AuditRecord.data`` key and its camelCase wire key in LEEF and syslog. They
+#: mirror ``mcp.caller.type``, ``mcp.caller.id`` and the ``mcp.cost.*`` span
+#: attributes; a JSON-lines record keeps the data key as it is. Present only
+#: when the call has them -- a zero cost is a value and is kept, an absent one
+#: is left out. CEF writes them with its dictionary's names instead
+#: (``cef_formatter``).
+CALLER_COST_FIELDS: tuple[tuple[str, str], ...] = (
+    ("caller_type", "callerType"),
+    ("caller_id", "callerId"),
+    ("cost_cents", "costCents"),
+    ("cost_model", "costModel"),
+    ("cost_input_tokens", "costInputTokens"),
+    ("cost_output_tokens", "costOutputTokens"),
+)
+
+#: What ``error_type`` holds in every format (#1705). It is the bounded
+#: classifier of ``ToolInvocationFailed.error_type`` and is written exactly as
+#: the event carries it, never mapped to another vocabulary: the exception class
+#: name of a failure on this side (``TimeoutError``), the upstream's JSON-RPC
+#: error code as a string (``-32601``), ``tool_error`` for a result the tool
+#: marked as an error, or ``other`` for an upstream error with no usable code.
+#: The upstream's message is never part of it. JSON lines write it as
+#: ``error_type``, CEF and LEEF as ``reason``, syslog as ``error``.
+ERROR_TYPE_CONTRACT = "the event's error_type, written as given"
+
+
+def caller_cost_data(data: Mapping[str, object]) -> list[tuple[str, str, object]]:
+    """The caller and cost fields held in *data*, as (data key, wire key, value), zero kept."""
+    return [(key, wire, data[key]) for key, wire in CALLER_COST_FIELDS if data.get(key) is not None]
+
+
 def event_type_for_status(status: str) -> str:
     """The audit event type a tool call's *status* is written as."""
     if status in ("success", "completed"):

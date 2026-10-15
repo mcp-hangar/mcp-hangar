@@ -22,9 +22,11 @@ from __future__ import annotations
 import json
 import platform
 import shutil
+import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
+
+from .init_manifest import record_written, remember_original
 
 HANGAR_ENTRY_NAME = "mcp-hangar"
 
@@ -77,28 +79,65 @@ def client_by_key(key: str, cwd: Path | None = None) -> McpClient | None:
     return None
 
 
+#: Starts Hangar from the interpreter alone, for an install whose console script
+#: cannot be found. `python -m mcp_hangar` is not a module entry; the console
+#: script is a call to this function.
+_MODULE_LAUNCH = ("-c", "from mcp_hangar.server.cli import cli_main; cli_main()")
+
+
+def hangar_launcher() -> tuple[str, list[str]]:
+    """The command and leading arguments that start this Hangar from any directory (#1772).
+
+    The entry used to be the bare name ``mcp-hangar``. A GUI client spawns it with
+    the PATH the desktop session has -- no virtualenv, no pipx or uv tool bin
+    directory -- and where PEP 668 forces one of those installs, that is exactly
+    the PATH that does not contain it. The client then reports "Connection
+    closed" and nothing else.
+
+    So the entry names the file. The console script that sits beside the
+    interpreter running ``init`` comes first, since pip, pipx and uv all put it
+    in that environment; then whatever is on PATH now; then the interpreter
+    itself, which needs no script at all.
+    """
+    bin_dir = Path(sys.executable).parent
+    for name in (HANGAR_ENTRY_NAME, f"{HANGAR_ENTRY_NAME}.exe"):
+        beside = bin_dir / name
+        if beside.is_file():
+            return str(beside), []
+    on_path = shutil.which(HANGAR_ENTRY_NAME)
+    if on_path:
+        return str(Path(on_path).absolute()), []
+    return sys.executable, list(_MODULE_LAUNCH)
+
+
 def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | None:
     """Point *client* at this Hangar, keeping everything else in its file.
 
-    Returns the backup path, or None when there was no file to back up (a user
-    who has Cursor installed but has never configured a server).
+    The file's pre-Hangar bytes are saved once, under the Hangar state directory
+    (`init_manifest`), so `init --undo` can restore them; a second run keeps that
+    first copy. Returns the backup path when this call made one, and None when
+    there was nothing to back up (a user who has Cursor installed but has never
+    configured a server) or the backup already existed.
     """
     document: dict = {}
-    backup: Path | None = None
+    before: bytes | None = None
 
     if client.path.is_file():
-        backup = _backup(client.path)
+        before = client.path.read_bytes()
         try:
-            document = json.loads(client.path.read_text(encoding="utf-8")) or {}
+            document = json.loads(before.decode("utf-8")) or {}
         except json.JSONDecodeError:
-            # A file we cannot parse is a file we must not rewrite: the backup
-            # would be the only copy of something the user still needs.
+            # A file we cannot parse is a file we must not rewrite: it may be
+            # the only copy of something the user still needs.
             raise
 
+    backup = remember_original(client.path)
+
     servers = dict(document.get("mcpServers") or {})
+    command, leading = hangar_launcher()
     entry: dict[str, object] = {
-        "command": HANGAR_ENTRY_NAME,
-        "args": ["--config", str(hangar_config_path), "serve"],
+        "command": command,
+        "args": [*leading, "--config", str(hangar_config_path), "serve"],
     }
     if client.declares_type:
         entry = {"type": "stdio", **entry}
@@ -107,13 +146,7 @@ def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | No
 
     client.path.parent.mkdir(parents=True, exist_ok=True)
     client.path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    return backup
-
-
-def _backup(path: Path) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = path.with_suffix(f".backup.{stamp}{path.suffix}")
-    shutil.copy2(path, backup)
+    record_written(client.path, before)
     return backup
 
 

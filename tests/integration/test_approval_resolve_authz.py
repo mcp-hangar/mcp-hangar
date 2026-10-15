@@ -78,6 +78,13 @@ class _InMemoryRepository:
     async def list_by_state(self, state: Any, mcp_server_id: str | None = None) -> list[Any]:
         return [r for r in self._store.values() if r.state == state]
 
+    async def transition(self, approval_id, from_states, state, decided_by, decided_at, reason):
+        current = await self.get(approval_id)
+        if current is None or current.state not in from_states:
+            return False
+        await self.update_state(approval_id, state, decided_by, decided_at, reason)
+        return True
+
     async def update_state(self, approval_id: str, state: Any, decided_by: str, decided_at: Any, reason: Any) -> None:
         r = self._store.get(approval_id)
         if r:

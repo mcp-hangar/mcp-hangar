@@ -1,5 +1,79 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.27.5
+
+### `init` writes absolute paths; state follows a configured `event_store.path`
+
+When `event_store.path` is absolute, the saga state file (`saga_state.db`) and the approvals database (`mcp_hangar.db`) now live in the same directory as the event store instead of in `data/` under the working directory. Configurations without an absolute `event_store.path` are unchanged.
+
+Entries written by an earlier `mcp-hangar init` use a bare `mcp-hangar` command and a relative `data/` path, which fails when the client spawns Hangar with a minimal `PATH` or an unwritable working directory. Rerun `mcp-hangar init` to refresh them. If you move to the new location, copy any existing `data/*.db` files next to the new `event_store.path` first.
+
+### The MCP SDK is 2.3.0
+
+`mcp-hangar` now requires `mcp==2.3.0` and `mcp-types==2.3.0`; it was 2.0.0 for
+both. Both stay pinned exactly. Nothing in the configuration changes.
+
+- A project that pins `mcp` itself, or installs `mcp-hangar` beside a package
+  that does, needs `mcp==2.3.0`.
+- The SDK's own defaults changed with it: a 4 MiB request-body limit, a
+  30-minute idle expiry and a cap of 10,000 stateful sessions. Hangar does not
+  override them.
+- `Mcp-Param-*` headers of projected tools are still checked against a call's
+  arguments. 2.3.0 stopped checking them for any tool the SDK had not registered
+  itself. Hangar answers for its own tools since 2.27.4, which this release
+  includes.
+
+## Upgrade to 2.27.4
+
+### An access policy with a key nothing reads refuses the configuration
+
+A policy block may carry only `allow_list`, `deny_list`, `approval_list`,
+`approval_timeout_seconds` and `approval_channel` (and `access` in a
+`tool_access.member.<tenant>` entry). Any other key now refuses startup and a
+reload, naming the path and the key. Before, such a block was read as no policy
+at all, so the tools it meant to restrict were served.
+
+- **If you wrote `tools: {allow: [...], deny: [...]}`**, as the README did: you
+  have had no restriction. Rename the keys to `allow_list` and `deny_list`, and
+  check what the gateway served in the meantime.
+- Run `mcp-hangar config check <file>` before upgrading: it reports the same
+  keys and exits 1.
+- A reload that hits this keeps the policy that was in force.
+
+## Upgrade to 2.27.0
+
+### Trusting private networks for servers registered over the API
+
+`POST /api/mcp_servers` still refuses every private endpoint by default. To let
+the Kubernetes operator register a server it runs in the cluster, list the
+cluster's Service range in `config.yaml`:
+
+```yaml
+ssrf:
+  trusted_networks: ["10.96.0.0/12"]
+```
+
+- The list applies to every caller allowed to register a server, not only the
+  operator. Keep it as narrow as the servers need.
+- The Service range also holds the kube-apiserver's ClusterIP and every other
+  Service in the cluster. Add the pod range only for headless Services.
+- Loopback, link-local (including the cloud metadata endpoint) and the
+  unspecified ranges are refused at startup and on reload. So is a CIDR with
+  host bits set.
+
+## Upgrade to 2.26.0
+
+### deleting a configured server over the API is refused
+
+`DELETE /api/mcp_servers/{id}` on a server that the configuration file declares now answers `409` with `"error": "declared_in_config"`. The server keeps running. Before, the delete stopped it and removed it from the pool, and the next reload or restart brought it back.
+
+- To remove a configured server, delete it from the configuration and reload.
+- To take it out of service for a while, stop it instead of deleting it.
+
+Servers added with `POST /api/mcp_servers`, and servers that discovery registers, are deleted as before.
+
+The Kubernetes operator sent this delete whenever an MCPServer CR was deleted, including a CR that mirrored a configured server. Operator versions that include mcp-hangar/mcp-hangar-operator#202 no longer do.
+
 ## Upgrade to 2.25.0
 
 ### An invalid access policy refuses the configuration

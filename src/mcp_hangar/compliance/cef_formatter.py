@@ -10,8 +10,10 @@ Reference: ArcSight Common Event Format (CEF) Rev 25.
 This module is part of the compliance layer.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
+from mcp_hangar import __version__
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
 from .refusal import CALLER_ROLES, ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusal_wire_fields
@@ -20,7 +22,10 @@ from .refusal import CALLER_ROLES, ROUTE_BACKEND, TOOL_INVOCATION_DENIED, refusa
 CEF_VERSION = "0"
 DEVICE_VENDOR = "MCP Hangar"
 DEVICE_PRODUCT = "MCP Hangar"
-DEVICE_VERSION = "0.15.0"
+# The running release, not a literal: a literal stayed 0.15.0 from that
+# release on, and a SIEM correlating by device version was told every gateway
+# was a year old (#1705).
+DEVICE_VERSION = __version__
 
 # Map event types to CEF signature IDs and human-readable names.
 # Signature IDs follow a numbering scheme:
@@ -112,6 +117,33 @@ def _format_cef_timestamp(dt: datetime) -> str:
     return str(int(dt.timestamp() * 1000))
 
 
+def _caller_cost_extensions(data: Mapping[str, object]) -> list[str]:
+    """The caller and cost fields (#1705), in the dictionary's names where it has one.
+
+    The caller id is `suid`, the source user id; the type is the labelled
+    `flexString2`; the cost in hundredths of a cent and the input tokens are
+    `cn2` and `cn3`, the output tokens the labelled `flexNumber1`. Every
+    labelled string slot is taken (`cs1`-`cs6`, `flexString1`, `flexString2`),
+    so the pricing model has no CEF field and is carried by the other three
+    formats only. A zero cost is a value, not an absence.
+    """
+    extensions: list[str] = []
+    if data.get("caller_id"):
+        extensions.append(f"suid={_escape_extension_value(str(data['caller_id']))}")
+    if data.get("caller_type"):
+        extensions.append(f"flexString2={_escape_extension_value(str(data['caller_type']))}")
+        extensions.append("flexString2Label=CallerType")
+    for key, slot, label in (
+        ("cost_cents", "cn2", "CostCents"),
+        ("cost_input_tokens", "cn3", "CostInputTokens"),
+        ("cost_output_tokens", "flexNumber1", "CostOutputTokens"),
+    ):
+        if data.get(key) is not None:
+            extensions.append(f"{slot}={data[key]}")
+            extensions.append(f"{slot}Label={label}")
+    return extensions
+
+
 def format_audit_record(record: AuditRecord) -> str:
     """Format an AuditRecord as a CEF string.
 
@@ -191,6 +223,8 @@ def format_audit_record(record: AuditRecord) -> str:
         extensions.append(f"flexString1={_escape_extension_value(str(route_backend))}")
         extensions.append("flexString1Label=RouteBackend")
 
+    extensions.extend(_caller_cost_extensions(data))
+
     # Tool name from data (common in tool invocation events)
     tool_name = data.get("tool_name")
     if tool_name:
@@ -207,6 +241,13 @@ def format_audit_record(record: AuditRecord) -> str:
     error_type = data.get("error_type")
     if error_type:
         extensions.append(f"reason={_escape_extension_value(str(error_type))}")
+
+    # A state change's transition (#1705). Every custom-string slot is taken,
+    # so it goes in `msg`, CEF's free-text message; without it two transitions
+    # of one server were byte-identical lines.
+    from_state, to_state = data.get("from_state"), data.get("to_state")
+    if from_state is not None and to_state is not None:
+        extensions.append(f"msg={_escape_extension_value(f'{from_state} -> {to_state}')}")
 
     # A refused call's bounded gate or L7 fields (#1582).
     extensions.extend(f"{key}={_escape_extension_value(value)}" for key, value in refusal_wire_fields(data))
