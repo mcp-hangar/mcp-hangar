@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from .application.commands.commands import StartMcpServerCommand
 from .domain.exceptions import ConfigurationError, McpServerNotFoundError, ToolCallFailedError, ToolNotFoundError
 from .domain.value_objects import McpServerMode, McpServerState, Principal
 from .logging_config import get_logger
@@ -776,9 +777,13 @@ class Hangar:
         Example:
             await hangar.start_mcp_server("math")
         """
-        mcp_server = self._get_mcp_server(name)
+        self._get_mcp_server(name)  # raises McpServerNotFoundError before anything is sent
+        assert self._context is not None
+        # The path `hangar_start` and the REST start take: `McpServer` has no `start`
+        # of its own, so this raised AttributeError on every call (#1685).
+        command = StartMcpServerCommand(mcp_server_id=name)
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self._executor, mcp_server.start)  # type: ignore[attr-defined]  # start is handled by the execution layer
+        await loop.run_in_executor(self._executor, self._context.runtime.command_bus.send, command)
 
     async def stop_mcp_server(self, name: str) -> None:
         """Stop a mcp_server.
