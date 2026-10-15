@@ -67,7 +67,9 @@ class ToolApprovalCancelled(DomainEvent):
     """Published when an approval arrives for a held call its caller already abandoned (#1702).
 
     The batch was cancelled while the call was held, so the call does not run.
-    Not a grant: ``attempted_by`` is who tried to approve it, deliberately not
+    Also published after a ``ToolApprovalGranted`` when the cancel landed after
+    the hold, before the call was dispatched (#1730); the grant is then not an
+    effective one. Not a grant: ``attempted_by`` is who tried to approve it, deliberately not
     named ``decided_by``, which on ``ToolApprovalGranted`` means a call was let
     through.
     """
