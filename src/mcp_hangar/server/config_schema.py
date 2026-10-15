@@ -86,6 +86,8 @@ SERVER_SPEC_KEYS = frozenset(
         "min_healthy",
         "mode",
         "network",
+        # The older spelling of `network`, read as its fallback (#1664).
+        "network_mode",
         "read_only",
         "resources",
         "strategy",
@@ -94,6 +96,8 @@ SERVER_SPEC_KEYS = frozenset(
         "tool_projection",
         "tools",
         "transport",
+        # `current` runs the container as the gateway's own uid:gid (#1664).
+        "user",
         "volumes",
     }
 )
@@ -123,7 +127,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     ),
     "config_reload": frozenset({"enabled", "interval_s", "use_watchdog"}),
     "coordination": frozenset({"lease_ttl_s", "renew_deadline_s", "renew_interval_s"}),
-    "discovery": frozenset({"auto_register", "enabled", "refresh_interval_s", "security", "sources"}),
+    # `lifecycle` holds default_ttl_s, check_interval_s and drain_timeout_s, read by
+    # `DiscoveryConfig.from_dict` (#1664).
+    "discovery": frozenset({"auto_register", "enabled", "lifecycle", "refresh_interval_s", "security", "sources"}),
     "event_store": frozenset({"allow_memory_fallback", "driver", "enabled", "path"}),
     # `tenant_limits` (#1445), read by `config._init_tenant_limits_from_config`,
     # which checks the keys of each entry itself. `max_response_bytes` (#1613),
@@ -235,6 +241,19 @@ _REMOVED_SECTION_KEYS: dict[str, dict[str, str]] = {
 }
 
 
+def _section_extras(name: str, section: Any) -> frozenset[str]:
+    """Keys a section accepts because of what else it says.
+
+    ``approvals.channel`` names the delivery channel and the channel reads its
+    settings from ``approvals.<channel>``. Core knows two channels; the rest are
+    installed entry points, so their names cannot be listed here, but the one
+    the config selects is right there in the config (#1664).
+    """
+    if name == "approvals" and isinstance(section, dict) and isinstance(section.get("channel"), str):
+        return frozenset({section["channel"]})
+    return frozenset()
+
+
 def _section_problems(name: str, section: Any, allowed: frozenset[str]) -> list[str]:
     removed = _REMOVED_SECTION_KEYS.get(name, {})
     if not isinstance(section, dict):
@@ -337,7 +356,7 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     for name, allowed in SECTIONS.items():
         if allowed is None or name not in config:
             continue
-        problems += _section_problems(name, config[name], allowed)
+        problems += _section_problems(name, config[name], allowed | _section_extras(name, config[name]))
 
     servers = config.get("mcp_servers")
     if isinstance(servers, dict):
