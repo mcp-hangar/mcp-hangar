@@ -20,148 +20,72 @@ from .replica_view import observe_replica
 logger = get_logger(__name__)
 
 # =============================================================================
-# Metrics Processing Helpers
+# Metrics aggregation
 # =============================================================================
+#
+# Read from the named collectors, not by matching substrings of their names. The
+# substring rules this replaced never matched what they were written for: no
+# metric is called "invocations", so per-server `invocations`, `errors` and
+# `avg_latency_ms` stayed 0; `mcp_hangar_tool_call_errors` does not contain
+# "tool_calls", so `tool_calls.*.errors` stayed 0; a histogram's bucket, sum and
+# count samples were indistinguishable, so `count` took whichever came last; and
+# "cycle" matched `discovery_last_cycle_timestamp_seconds`, putting a Unix time in
+# `discovery.*.cycles` (#1668).
 
 
-def _collect_samples_from_collector(collector: Any) -> list[Any]:
-    """Extract metric samples from a Prometheus collector.
+def _aggregate_tool_calls(result: dict[str, Any]) -> None:
+    """Per-tool and per-server call and error counts, and per-server mean latency.
 
-    Args:
-        collector: Prometheus metric collector instance.
-
-    Returns:
-        List of metric samples extracted from the collector.
+    `mcp_hangar_tool_calls` counts every call with a `status` of success or
+    error. Its error samples are the errors; `mcp_hangar_tool_call_errors` breaks
+    the same failures down by type and is not added again.
     """
-    if not hasattr(collector, "collect"):
-        return []
+    for sample in m.TOOL_CALLS_TOTAL.collect():
+        server = sample.labels.get("mcp_server", "unknown")
+        tool = sample.labels.get("tool", "unknown")
+        failed = sample.labels.get("status") == "error"
+        calls = result["tool_calls"].setdefault(f"{server}.{tool}", {"count": 0, "errors": 0})
+        calls["count"] += int(sample.value)
+        if failed:
+            calls["errors"] += int(sample.value)
+        stats = result["mcp_servers"].get(server)
+        if stats is not None:
+            stats["invocations"] += int(sample.value)
+            if failed:
+                stats["errors"] += int(sample.value)
 
-    collected = collector.collect()
-    if isinstance(collected, list):
-        return collected
-
-    if isinstance(collected, tuple):
-        samples = []
-        for item in collected:
-            if isinstance(item, list):
-                samples.extend(item)
-            elif hasattr(item, "labels"):
-                samples.append(item)
-        return samples
-
-    return []
-
-
-def _process_tool_calls_metric(
-    name: str, labels: dict[str, str], value: float, tool_calls: dict[str, dict[str, int]]
-) -> None:
-    """Process tool_calls metric sample and update aggregation dict.
-
-    Args:
-        name: Metric name.
-        labels: Metric labels dict.
-        value: Metric value.
-        tool_calls: Dict to accumulate tool call counts.
-    """
-    if "tool_calls" not in name:
-        return
-
-    mcp_server = labels.get("mcp_server", "unknown")
-    tool = labels.get("tool", "unknown")
-    key = f"{mcp_server}.{tool}"
-
-    if key not in tool_calls:
-        tool_calls[key] = {"count": 0, "errors": 0}
-
-    if "error" in name:
-        tool_calls[key]["errors"] = int(value)
-    else:
-        tool_calls[key]["count"] = int(value)
+    _, sums, counts = m.TOOL_CALL_DURATION_SECONDS.collect()
+    total_s: dict[str, float] = {}
+    total_n: dict[str, int] = {}
+    for sample in sums:
+        server = sample.labels.get("mcp_server", "unknown")
+        total_s[server] = total_s.get(server, 0.0) + sample.value
+    for sample in counts:
+        server = sample.labels.get("mcp_server", "unknown")
+        total_n[server] = total_n.get(server, 0) + int(sample.value)
+    for server, n in total_n.items():
+        stats = result["mcp_servers"].get(server)
+        if stats is not None and n:
+            stats["avg_latency_ms"] = round(total_s.get(server, 0.0) / n * 1000, 3)
 
 
-def _process_invocations_metric(
-    name: str, labels: dict[str, str], value: float, mcp_servers: dict[str, dict[str, Any]]
-) -> None:
-    """Process invocations metric sample and update mcp_server stats.
-
-    Args:
-        name: Metric name.
-        labels: Metric labels dict.
-        value: Metric value.
-        mcp_servers: Dict to accumulate mcp_server invocation counts.
-    """
-    if "invocations" not in name or "mcp_server" not in labels:
-        return
-
-    mcp_server = labels.get("mcp_server")
-    if mcp_server and mcp_server in mcp_servers:
-        mcp_servers[mcp_server]["invocations"] = int(value)
+def _aggregate_discovery(result: dict[str, Any]) -> None:
+    """Discovery cycles by source, and the servers it holds by status."""
+    for sample in m.DISCOVERY_CYCLES_TOTAL.collect():
+        source = sample.labels.get("source_type") or "unknown"
+        entry = result["discovery"].setdefault(source, {})
+        entry["cycles"] = entry.get("cycles", 0) + int(sample.value)
+    for sample in m.DISCOVERY_PROVIDERS_TOTAL.collect():
+        source = sample.labels.get("source_type") or "unknown"
+        entry = result["discovery"].setdefault(source, {})
+        entry[f"mcp_servers_{sample.labels.get('status', 'total')}"] = int(sample.value)
 
 
-def _process_discovery_metric(
-    name: str, labels: dict[str, str], value: float, discovery: dict[str, dict[str, Any]]
-) -> None:
-    """Process discovery metric sample and update discovery stats.
-
-    Args:
-        name: Metric name.
-        labels: Metric labels dict.
-        value: Metric value.
-        discovery: Dict to accumulate discovery statistics.
-    """
-    if "discovery" not in name:
-        return
-
-    source = labels.get("source_type", labels.get("source", "unknown"))
-    if not source:
-        return
-
-    if source not in discovery:
-        discovery[source] = {}
-
-    if "cycle" in name:
-        discovery[source]["cycles"] = int(value)
-    elif "mcp_servers" in name:
-        status = labels.get("status", "total")
-        discovery[source][f"mcp_servers_{status}"] = int(value)
-
-
-def _process_error_metric(name: str, labels: dict[str, str], value: float, errors: dict[str, int]) -> None:
-    """Process error metric sample and update error counts.
-
-    Args:
-        name: Metric name.
-        labels: Metric labels dict.
-        value: Metric value.
-        errors: Dict to accumulate error counts by type.
-    """
-    if "error" not in name.lower():
-        return
-
-    error_type = labels.get("error_type", labels.get("type", name))
-    errors[error_type] = errors.get(error_type, 0) + int(value)
-
-
-def _process_metric_sample(sample: Any, result: dict[str, Any]) -> None:
-    """Process a single metric sample and update result dict.
-
-    Routes the sample to appropriate processor based on metric name.
-
-    Args:
-        sample: Metric sample with labels and value attributes.
-        result: Result dict to update with processed metrics.
-    """
-    if not hasattr(sample, "labels") or not hasattr(sample, "value"):
-        return
-
-    labels = sample.labels or {}
-    value = sample.value
-    name = getattr(sample, "name", "")
-
-    _process_tool_calls_metric(name, labels, value, result["tool_calls"])
-    _process_invocations_metric(name, labels, value, result["mcp_servers"])
-    _process_discovery_metric(name, labels, value, result["discovery"])
-    _process_error_metric(name, labels, value, result["errors"])
+def _aggregate_errors(result: dict[str, Any]) -> None:
+    """Component errors by type, from `mcp_hangar_errors`."""
+    for sample in m.ERRORS_TOTAL.collect():
+        error_type = sample.labels.get("error_type") or "unknown"
+        result["errors"][error_type] = result["errors"].get(error_type, 0) + int(sample.value)
 
 
 def hangar_health() -> dict:
@@ -343,19 +267,9 @@ def register_health_tools(mcp: FastMCP) -> None:
                 "avg_latency_ms": 0,
             }
 
-        # Collect metrics from registry
-        for name, collector in m.REGISTRY._collectors.items():
-            try:
-                samples = _collect_samples_from_collector(collector)
-                for sample in samples:
-                    # Add collector name to sample for processing
-                    if not hasattr(sample, "name"):
-                        sample.name = name
-                    _process_metric_sample(sample, result)
-            except (AttributeError, TypeError, ValueError) as e:
-                # Skip malformed collectors gracefully
-                logger.debug("metrics_collector_error", collector=name, error=str(e))
-                continue
+        _aggregate_tool_calls(result)
+        _aggregate_discovery(result)
+        _aggregate_errors(result)
 
         # Group metrics
         for group in ctx.groups.values():
