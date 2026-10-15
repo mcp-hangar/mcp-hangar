@@ -470,6 +470,12 @@ def _approval_policy(
     return None
 
 
+def _upstream_of(server: Any) -> str | None:
+    """The identity of the upstream *server* fronts, or None when it cannot say (#1802)."""
+    identity = getattr(server, "upstream_identity", None)
+    return identity() if callable(identity) else None
+
+
 @dataclass(frozen=True)
 class _Governance:
     """What governs one call, decided against one configuration's overlays (#1431).
@@ -2165,7 +2171,15 @@ class BatchExecutor:
                     unknown=DigestUnknownPolicy.BLOCK,
                     allowlist=frozenset({pin}),
                 )
-            ).validate_tool(projection.schema, p.call.mcp_server, p.call.call_id, tenant_id=p.caller_tenant_id)
+            ).validate_tool(
+                projection.schema,
+                p.call.mcp_server,
+                p.call.call_id,
+                tenant_id=p.caller_tenant_id,
+                # The upstream that serves the call -- the member a group selected, not
+                # the group -- so a pin bound to another upstream does not hold (#1802).
+                upstream=_upstream_of(p.mcp_server_obj) if pin.upstream is not None else None,
+            )
             blocked = digest_result.blocked
             event = digest_result.event
         except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path

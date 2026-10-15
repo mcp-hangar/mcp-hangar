@@ -308,6 +308,9 @@ class DigestMismatchEvent(DomainEvent):
         tenant_id: Tenant whose pin was evaluated (per-tenant pinning, #278); None
             for non-tenant-scoped digest checks.
         schema_version: Event schema version.
+        expected_upstream: The upstream identity the pin was bound to, when the
+            mismatch is the upstream having changed (#1802); None otherwise.
+        observed_upstream: The upstream identity that served the tool then.
     """
 
     mcp_server_id: str
@@ -318,6 +321,8 @@ class DigestMismatchEvent(DomainEvent):
     correlation_id: str
     tenant_id: str | None = None
     schema_version: int = 1
+    expected_upstream: str | None = None
+    observed_upstream: str | None = None
 
 
 # ---------------------------------------------------------------------------
