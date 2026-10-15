@@ -148,7 +148,14 @@ async def list_api_keys(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"principal_id": ..., "keys": [...], "total": int, "active": int}.
     """
-    principal_id = request.query_params.get("principal_id", "")
+    principal_id = request.query_params.get("principal_id", "").strip()
+    if not principal_id:
+        # Documented as required; it answered 200 and an empty list, which reads as
+        # "this principal has no keys" (#1697).
+        return HangarJSONResponse(
+            {"error": {"code": "ValidationError", "message": "principal_id is required"}},
+            status_code=400,
+        )
     include_revoked = request.query_params.get("include_revoked", "true").lower() != "false"
     result = await dispatch_query(
         GetApiKeysByPrincipalQuery(
