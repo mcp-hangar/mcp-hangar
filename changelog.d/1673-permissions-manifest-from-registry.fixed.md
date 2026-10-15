@@ -1,0 +1,1 @@
+`GET /api/auth/permissions` lists the real permission set. It imported two constants that no longer exist and always answered a hard-coded list that omitted `mcp_servers`, `policy`, `approval` and `discovery`; it is now built from the permission registry the built-in roles use, one row per resource type with its actions.
