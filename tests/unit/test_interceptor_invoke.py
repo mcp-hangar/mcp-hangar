@@ -61,12 +61,38 @@ class TestPinnedRevision:
         assert INTERCEPTOR_EXT_VALUE == "io.modelcontextprotocol/interceptors"
 
 
+class TestBothListShapesNameOneInterceptorOneWay:
+    """The default and the negotiated `interceptors/list` shapes answered different ids (#1690)."""
+
+    def test_the_ids_are_the_same_in_both_shapes(self):
+        from mcp_hangar.fastmcp_server.interceptors_list import interceptors_list_response
+
+        legacy = [i["name"] for i in interceptors_list_response()["interceptors"]]
+        negotiated = [i["name"] for i in interceptors_list_response_v2()["interceptors"]]
+        assert legacy == negotiated == ["io.mcp-hangar.validator", "io.mcp-hangar.mutator"]
+
+    def test_every_listed_id_can_be_invoked(self, bus_recorder):
+        for entry in interceptors_list_response_v2()["interceptors"]:
+            event = entry["hooks"][0]["events"][0]
+            result = interceptor_invoke_result({"name": entry["name"], "event": event, "phase": "request"})
+            assert result["interceptor"] == entry["name"]
+
+    def test_the_names_before_the_rename_still_invoke(self, bus_recorder):
+        for old, new in (
+            ("mcp-hangar-validator", "io.mcp-hangar.validator"),
+            ("mcp-hangar-mutator", "io.mcp-hangar.mutator"),
+        ):
+            result = interceptor_invoke_result({"name": old, "event": "tools/call", "phase": "request"})
+            assert result["interceptor"] == new
+
+
 class TestInterceptorInvokeResult:
     def test_validation_result_shape(self, bus_recorder):
         result = interceptor_invoke_result(
             {"name": "mcp-hangar-validator", "event": "tools/call", "phase": "request", "payload": {}}
         )
-        assert result["interceptor"] == "mcp-hangar-validator"
+        # The name before the rename is accepted; the answer is the reverse-DNS id (#1690).
+        assert result["interceptor"] == "io.mcp-hangar.validator"
         assert result["type"] == "validation"
         assert result["phase"] == "request"
         assert result["valid"] is True
@@ -128,7 +154,7 @@ class TestListV2Shape:
 
     def test_v2_validator_hooks(self):
         validator = interceptors_list_response_v2()["interceptors"][0]
-        assert validator["name"] == "mcp-hangar-validator"
+        assert validator["name"] == "io.mcp-hangar.validator"
         assert validator["hooks"] == [{"events": ["tools/call", "tools/list"], "phase": "request"}]
 
 
