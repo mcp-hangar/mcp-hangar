@@ -8,7 +8,7 @@
 |----------|-------|
 | Language | Python 3.11+ |
 | Package manager | uv |
-| Architecture | DDD + CQRS + Event Sourcing |
+| Architecture | DDD + CQRS; event sourcing for the auth stores |
 | License | MIT |
 | Entry point | `mcp-hangar serve` or `python -m mcp_hangar.server` |
 
@@ -50,10 +50,11 @@ mcp-hangar/
 │   │   ├── model/                 # Aggregates: McpServer (1383 LOC), McpServerGroup, Tenant
 │   │   │   ├── aggregate.py       # Base AggregateRoot with event collection
 │   │   │   ├── mcp_server.py      # Main aggregate: state machine, health, circuit breaker
-│   │   │   ├── event_sourced_mcp_server.py  # Rebuilds from event stream + snapshots
+│   │   │   ├── event_sourced_api_key.py       # Auth aggregates rebuilt from an event stream
+│   │   │   ├── event_sourced_role_assignment.py
 │   │   │   ├── mcp_server_group.py  # Load balancing, failover
 │   │   │   └── circuit_breaker.py # Circuit breaker state machine
-│   │   ├── contracts/             # 32 interfaces (Dependency Inversion Principle)
+│   │   ├── contracts/             # 30 interfaces (Dependency Inversion Principle)
 │   │   │   ├── command.py         # CommandHandler ABC
 │   │   │   ├── event_bus.py       # IEventBus
 │   │   │   ├── event_store.py     # IEventStore
@@ -65,10 +66,10 @@ mcp-hangar/
 │   │   │   ├── config.py          # CommandLine, DockerImage, Endpoint
 │   │   │   ├── security.py        # Principal, Role, Permission
 │   │   │   └── capabilities.py    # McpServerCapabilities, ViolationType
-│   │   ├── events.py              # 75+ domain events (1872 LOC)
+│   │   ├── events/                # Domain events by area (lifecycle, invocation, approvals, auth, ...)
 │   │   ├── exceptions.py          # Domain-specific errors
 │   │   ├── services/              # Domain services (stateless logic)
-│   │   │   └── mcp_server_launcher/ # Subprocess/Docker launcher (shell=False enforced)
+│   │   ├── policies/              # Policy DSL, L7 egress, header exposure, health policy
 │   │   ├── security/              # Input validation, rate limiting
 │   │   ├── discovery/             # Conflict resolution (static always wins)
 │   │   └── repository.py          # IMcpServerRepository + InMemoryMcpServerRepository
@@ -82,7 +83,7 @@ mcp-hangar/
 │   │   ├── queries/               # Read-side queries + handlers
 │   │   │   ├── queries.py         # ListMcpServersQuery, GetMcpServerQuery, etc.
 │   │   │   └── handlers.py        # Return read models (flattened projections)
-│   │   ├── event_handlers/        # 8 subscribers: logging, metrics, audit, security
+│   │   ├── event_handlers/        # Subscribers: logging, audit, cost, security, projections, detection
 │   │   ├── sagas/                 # Long-running transactions
 │   │   │   ├── mcp_server_failover_saga.py   # 3-step failover with compensation
 │   │   │   ├── mcp_server_recovery_saga.py   # Auto-restart degraded providers
@@ -95,13 +96,11 @@ mcp-hangar/
 │   │   ├── command_bus.py         # CommandBus with middleware pipeline
 │   │   ├── query_bus.py           # QueryBus (1:1 handler mapping)
 │   │   ├── event_bus.py           # In-process pub/sub
-│   │   ├── event_store.py         # Event store abstraction
-│   │   ├── event_sourced_repository.py  # Event sourcing with snapshots (every 50 events)
 │   │   ├── saga_manager.py        # Saga orchestration + state persistence
-│   │   ├── lock_hierarchy.py      # Deadlock prevention (lock ordering)
 │   │   ├── single_flight.py       # Cold start deduplication
-│   │   ├── persistence/           # SQLite/Postgres repositories, UoW, event upcasting
+│   │   ├── persistence/           # SQLite/Postgres repositories, event stores, UoW, event upcasting
 │   │   ├── discovery/             # 4 adapters: Kubernetes, Docker, filesystem, entrypoint
+│   │   ├── launchers/             # Subprocess/Docker/HTTP launchers (shell=False enforced)
 │   │   ├── identity/              # JWT/header identity extraction
 │   │   ├── observability/         # OTLP audit export
 │   │   └── truncation/            # Response truncation caching (memory/Redis)
@@ -111,13 +110,13 @@ mcp-hangar/
 │   │   │   ├── router.py          # Route registration
 │   │   │   ├── mcp_servers.py     # /api/mcp_servers CRUD
 │   │   │   ├── tools.py           # Tool invocation
-│   │   │   ├── middleware.py      # Auth, error handling, CORS
+│   │   │   ├── middleware.py      # Auth context, error handling, CORS
 │   │   │   └── ws/                # WebSocket real-time events
-│   │   ├── cli/                   # Typer CLI (init, serve, add, status)
-│   │   ├── bootstrap/             # Composition root (10 modules)
+│   │   ├── cli/                   # Typer CLI (serve, init, add, remove, status, pin, auth, config, completion)
+│   │   ├── bootstrap/             # Composition root (one module per concern)
 │   │   │   ├── cqrs.py            # Register all command/query handlers
 │   │   │   ├── event_handlers.py  # Wire event subscribers
-│   │   │   ├── enterprise.py      # Conditional auth bootstrap
+│   │   │   ├── composition.py     # Shared composition state and runtime accessors
 │   │   │   └── workers.py         # Background task workers
 │   │   └── tools/                 # MCP tool implementations
 │   │       └── batch/             # Batch executor with concurrency control
@@ -138,6 +137,7 @@ mcp-hangar/
 │   ├── approvals/                 # Approval gate workflow
 │   ├── compliance/                # Compliance reporting
 │   ├── bootstrap/runtime.py       # Composition root (protocols + config)
+│   ├── lock_hierarchy.py          # Deadlock prevention (lock ordering)
 │   └── facade.py                  # High-level API hiding complexity
 │
 ├── tests/
@@ -151,7 +151,8 @@ mcp-hangar/
 │
 ├── docs/                          # Internal docs (synced to website at build)
 │   ├── internal/PRODUCT_ARCHITECTURE.md  # Feature boundaries, cut list
-│   └── cookbook/                   # 13 numbered recipes
+│   ├── internal/LIVE_VERIFICATION.md     # What must be verified over a real transport
+│   └── internal/ADR_AGENTS.md            # How agents work with ADRs
 │
 ├── pyproject.toml                 # Package config, pytest, ruff, mypy settings
 ├── Makefile                       # Python-specific targets
@@ -195,7 +196,7 @@ Middleware pipeline              McpServer aggregate mutates
 
 ### Event Sourcing
 
-Aggregates rebuilt from event streams. Snapshots every 50 events for performance. Event upcasting handles schema evolution without migration scripts.
+The `McpServer` aggregate is not event-sourced: its state lives in memory and its events go to the event bus and, when an event store is configured, to it. Event sourcing is used where state is rebuilt from a stream: the auth stores (`auth/infrastructure/event_sourced_store.py`, snapshot every 50 events) and the `event_sourced_api_key` / `event_sourced_role_assignment` aggregates. Event upcasting (`infrastructure/persistence/event_upcaster.py` and `upcasters/`) handles schema evolution without migration scripts.
 
 ### Lock Hierarchy (Deadlock Prevention)
 
@@ -223,12 +224,12 @@ Read `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` for 
 - **One PR, one goal, one Conventional Commit scope.** No mixed-scope changes.
 - **Branch:** `<type>/<scope>-<slug>` where `<type>` is one of `feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security`. Agent prefix `copilot/<task>-<slug>` is also valid.
 - **PR title** is the Conventional Commit subject (squash-merge propagates it). Example: `feat(core): add capability validation cache`.
-- **CC scopes** (enforced by CI): `core`, `enterprise`, `cli`, `operator`, `helm`, `ui`, `observability`, `security`, `docs`, `deps`, `release`, `infra`, `tests`, `repo`.
+- **CC scopes** (enforced by CI; the list is in `.github/workflows/pr-title.yml`): `core`, `cli`, `ci`, `operator`, `helm`, `ui`, `observability`, `security`, `docs`, `deps`, `deps-dev`, `release`, `infra`, `tests`, `repo`.
 - **PR body** follows `.github/PULL_REQUEST_TEMPLATE.md` — fill every section including Agent metadata.
 - **Soft LOC limit:** ≤400 lines changed (excluding tests). Larger changes require decomposition; open a parent issue first.
 - **Issue first:** open or claim an `agent_task` issue before pushing the first commit. Link via `Closes #N` (or `Refs #N` for child PRs of an epic).
 - **Forbidden paths for agent-authored PRs** (must be human-authored — see CODEOWNERS):
-  - `src/mcp_hangar/server/security/`, `src/mcp_hangar/server/api/middleware*`
+  - `src/mcp_hangar/server/api/middleware*`
   - `https://github.com/mcp-hangar/docs/blob/main/adr/` (ADRs are human-authored; agents may draft content in issue comments)
   - `.github/workflows/release.yml`, `pyproject.toml` version field
 - **CHANGELOG:** every non-trivial PR adds **one new file** `changelog.d/<id>-<slug>.<kind>.md`, where `<kind>` is `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`. Never edit `CHANGELOG.md` — it is assembled from the fragments at release time, and an entry written there directly is overwritten. See `changelog.d/README.md`. Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
@@ -236,7 +237,7 @@ Read `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` for 
 - **No emoji** anywhere in code, comments, commit messages, or docs.
 - **Never `!` or `BREAKING CHANGE:` in a commit.** `3.x` is reserved for a business milestone, so release-please must never compute a major. A change that breaks callers ships as a **minor** with an upgrade note in `upgrade.d/` naming the old and new form -- which is what 2.2.0 and 2.3.0 did. If a major is genuinely wanted, that is a human decision, not a commit footer.
 - **Squash-merge default.** Do not request merge commits.
-- **Required status checks** (must pass before merge): `pr-validation / required-check`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
+- **Required status checks** (must pass before merge; the repository ruleset is the source): `required-check` (PR Validation), `check` (changelog), `pr-title / validate`, `branch-name / validate`, `pr-body / validate`, `lint`, `test (3.11)`, `test (3.12)`, `test (3.13)`, `test (3.14)`, `decision-coverage`, `integration`, `integration-newest`, `build`.
 
 For ADR work specifically, see `docs/internal/ADR_AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
 
@@ -253,6 +254,7 @@ Auth, compliance, and approvals live under `src/mcp_hangar/` as first-class pack
 - **No opt-in flags**: a test that only runs behind a flag nobody passes does not run. The
   `--run-containers` / `--run-slow` tiers and their testcontainers fixtures were deleted for
   exactly that reason; anything needing a real runtime belongs in `tests/live` (nightly) or the lab.
+- **A control is tested through the path production takes.** A test that asserts a security or governance control fires (a gate, a policy, a scope check, a suspension, an approval) must reach it through `bootstrap()` or the served ASGI/stdio app, not by constructing the component. Direct construction is fine for a pure unit test of the component's own logic, and such a test does not count as coverage of the control. The recurring defect family "mechanism present, path absent" is a test that built the object through a path production never takes. The pattern is `tests/unit/test_security_predicates_are_reachable.py`: a real request down each served path, with a spy that fails when a registered predicate does not run.
 - **Mock provider**: `tests/mock_provider.py` implements JSON-RPC MCP protocol
 - **Acceptance**: `tests/acceptance/ha_two_gateways.sh` is run by hand against a cluster you own
   (it kills a pod). Not pytest on purpose -- it tests the deployment, which is how it found that
@@ -262,13 +264,16 @@ Auth, compliance, and approvals live under `src/mcp_hangar/` as first-class pack
 
 ## Complexity Hotspots
 
+Line counts are approximate (`wc -l`); they drift, the files do not move often.
+
 | File | Lines | Why it matters |
 |------|-------|----------------|
-| `domain/model/mcp_server.py` | 1383 | Main aggregate: 51 methods, state machine + circuit breaker |
-| `domain/events.py` | 1872 | 75+ event definitions (low complexity, good reference) |
-| `errors.py` | 1248 | 30+ exception types, 150 conditional branches |
-| `server/tools/batch/executor.py` | 925 | Batch execution, 8 methods averaging 90 lines each |
-| `auth/infrastructure/sqlite_store.py` | 857 | Event-sourced auth storage |
+| `server/tools/batch/executor.py` | ~3000 | Batch execution: gates, concurrency, approvals, cancellation |
+| `domain/model/mcp_server.py` | ~2700 | Main aggregate: state machine, health, circuit breaker |
+| `metrics.py` | ~2100 | Every Prometheus metric and its recording helper |
+| `server/config.py` | ~2100 | Config loading: servers, groups, policies, pins |
+| `domain/exceptions.py` | ~1000 | The exception hierarchy (~50 types) |
+| `domain/events/` | ~2400 in all | ~90 event definitions, one module per area (low complexity, good reference) |
 
 ## What NOT to Do
 
