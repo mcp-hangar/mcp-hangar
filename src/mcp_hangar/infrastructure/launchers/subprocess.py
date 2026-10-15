@@ -216,6 +216,9 @@ class SubprocessLauncher(McpServerLauncher):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,  # Capture stderr for error diagnostics
                 text=True,
+                # MCP stdio is UTF-8; a locale codec ended capture on the first byte it rejected (#1688).
+                encoding="utf-8",
+                errors="replace",
                 env=process_env,
                 bufsize=1,  # Line buffered
                 # Security: Don't use shell
