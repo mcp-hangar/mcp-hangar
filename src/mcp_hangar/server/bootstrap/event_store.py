@@ -1,5 +1,6 @@
 """Event store initialization."""
 
+import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -118,8 +119,11 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
                     detail=f"sqlite at {db_path}",
                 )
             )
-        except OSError as e:
-            # Path/dir is not writable (e.g. a read-only deploy). Do NOT silently
+        except (OSError, sqlite3.OperationalError) as e:
+            # Path/dir is not writable (e.g. a read-only deploy). SQLite reports
+            # an existing directory it cannot write into as OperationalError
+            # ("unable to open database file"), not OSError, so that escaped both
+            # the fallback and the clear message (#1694). Do NOT silently
             # drop durability -- fail fast unless an in-memory fallback was
             # explicitly opted into.
             if not allow_memory_fallback:
