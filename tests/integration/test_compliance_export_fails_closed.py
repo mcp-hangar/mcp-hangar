@@ -51,6 +51,15 @@ def test_an_unknown_format_refuses_boot(tmp_path):
     assert "cef, json-lines, jsonlines, leef, syslog" in stderr
 
 
+@pytest.mark.parametrize("fmt", ["", "   "])
+def test_an_output_with_no_format_refuses_boot(tmp_path, fmt):
+    """`MCP_COMPLIANCE_OUTPUT` alone used to start the gateway with no export and no log line (#1723)."""
+    stderr = _refused(*_run("boot", tmp_path, fmt, tmp_path / "feed.log"))
+
+    assert "MCP_COMPLIANCE_OUTPUT is set but MCP_COMPLIANCE_FORMAT is not" in stderr
+    assert "cef, json-lines, jsonlines, leef, syslog" in stderr
+
+
 def test_an_output_in_a_missing_directory_refuses_boot(tmp_path):
     output = tmp_path / "missing" / "feed.log"
     stderr = _refused(*_run("boot", tmp_path, "cef", output))
