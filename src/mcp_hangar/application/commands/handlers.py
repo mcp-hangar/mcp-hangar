@@ -1,5 +1,6 @@
 """Command handlers implementation."""
 
+from collections.abc import Callable
 from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
@@ -240,6 +241,7 @@ def register_all_handlers(
     config_loader: IConfigLoader,
     groups: dict | None = None,
     runtime_store: IRuntimeMcpServerStore | None = None,
+    drain: Callable[[str, float], bool] | None = None,
 ) -> None:
     """
     Register all command handlers with the command bus.
@@ -252,6 +254,7 @@ def register_all_handlers(
         config_loader: IConfigLoader implementation for reload handler
         groups: Groups dict for reload handler
         runtime_store: Optional runtime mcp_server store for hot-loaded mcp_server lookup
+        drain: Waits for the calls in flight to one server; a graceful reload uses it
     """
     from .commands import ReloadConfigurationCommand
     from .reload_handler import ReloadConfigurationHandler
@@ -273,6 +276,7 @@ def register_all_handlers(
             current_config_path,
             config_loader=config_loader,
             groups=groups,
+            drain=drain,
         ),
     )
 

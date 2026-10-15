@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _drain_in_flight_calls(mcp_server_id: str, timeout_s: float) -> bool:
+    """Wait for the calls in flight to *mcp_server_id*; what a graceful reload waits on (#1662)."""
+    from ..tools.batch.concurrency import get_concurrency_manager
+
+    return get_concurrency_manager().wait_idle(mcp_server_id, timeout_s)
+
+
 def _current_lease() -> Any:
     """The tenure this instance believes it holds, or None if it holds nothing.
 
@@ -102,6 +109,7 @@ def init_cqrs(
         config_loader=ServerConfigLoader(),
         groups=GROUPS,
         runtime_store=RUNTIME_PROVIDERS,
+        drain=_drain_in_flight_calls,
     )
     register_query_handlers(
         runtime.query_bus,
