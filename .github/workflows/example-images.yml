@@ -1,0 +1,31 @@
+# Checks that every image the examples reference can be pulled. The Kubernetes
+# examples named three images that do not exist and nothing noticed (#1681).
+# Images that are placeholders are listed, with the reason, in
+# scripts/check_example_images.py.
+name: example-images
+
+on:
+  pull_request:
+    paths:
+      - examples/**
+      - scripts/check_example_images.py
+      - .github/workflows/example-images.yml
+  schedule:
+    - cron: "47 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Example images resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Resolve every image under examples/
+        run: python scripts/check_example_images.py
