@@ -39,7 +39,7 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
                         "mcp_server_id": p.mcp_server_id,
                         "tool_name": td.get("name", ""),
                         "description": td.get("description", ""),
-                        "input_schema": str(td.get("inputSchema", "")),
+                        "input_schema": td.get("inputSchema") or {},
                         **registry.digest_fields(td, named=p.mcp_server_id),
                     }
                 )
