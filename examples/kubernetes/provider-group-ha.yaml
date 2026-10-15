@@ -34,27 +34,18 @@ spec:
 apiVersion: mcp-hangar.io/v1alpha2
 kind: MCPServer
 metadata:
-  name: postgres-tools
+  name: sqlite-tools-primary
   namespace: mcp-servers
   labels:
     mcp-hangar.io/category: database
 spec:
   mode: container
-  image: ghcr.io/modelcontextprotocol/mcp-postgres:latest
+  image: docker.io/mcp/sqlite:latest
   replicas: 2
-  env:
-    - name: POSTGRES_URL
-      valueFrom:
-        secretKeyRef:
-          name: postgres-credentials
-          key: url
   capabilities:
     network:
-      egress:
-        - host: postgres.databases.svc.cluster.local
-          port: 5432
-          protocol: tcp
-      dnsAllowed: true
+      egress: []
+      dnsAllowed: false
     enforcementMode: alert
 
 ---
@@ -67,7 +58,7 @@ metadata:
     mcp-hangar.io/category: database
 spec:
   mode: container
-  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+  image: docker.io/mcp/sqlite:latest
   replicas: 1
   capabilities:
     network:

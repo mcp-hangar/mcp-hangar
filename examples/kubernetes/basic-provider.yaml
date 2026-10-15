@@ -17,7 +17,7 @@ metadata:
     mcp-hangar.io/category: database
 spec:
   mode: container
-  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+  image: docker.io/mcp/sqlite:latest
 
   replicas: 1
 
