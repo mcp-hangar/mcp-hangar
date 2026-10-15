@@ -10,6 +10,7 @@ Reference: ArcSight Common Event Format (CEF) Rev 25.
 This module is part of the compliance layer.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from mcp_hangar import __version__
@@ -116,6 +117,33 @@ def _format_cef_timestamp(dt: datetime) -> str:
     return str(int(dt.timestamp() * 1000))
 
 
+def _caller_cost_extensions(data: Mapping[str, object]) -> list[str]:
+    """The caller and cost fields (#1705), in the dictionary's names where it has one.
+
+    The caller id is `suid`, the source user id; the type is the labelled
+    `flexString2`; the cost in hundredths of a cent and the input tokens are
+    `cn2` and `cn3`, the output tokens the labelled `flexNumber1`. Every
+    labelled string slot is taken (`cs1`-`cs6`, `flexString1`, `flexString2`),
+    so the pricing model has no CEF field and is carried by the other three
+    formats only. A zero cost is a value, not an absence.
+    """
+    extensions: list[str] = []
+    if data.get("caller_id"):
+        extensions.append(f"suid={_escape_extension_value(str(data['caller_id']))}")
+    if data.get("caller_type"):
+        extensions.append(f"flexString2={_escape_extension_value(str(data['caller_type']))}")
+        extensions.append("flexString2Label=CallerType")
+    for key, slot, label in (
+        ("cost_cents", "cn2", "CostCents"),
+        ("cost_input_tokens", "cn3", "CostInputTokens"),
+        ("cost_output_tokens", "flexNumber1", "CostOutputTokens"),
+    ):
+        if data.get(key) is not None:
+            extensions.append(f"{slot}={data[key]}")
+            extensions.append(f"{slot}Label={label}")
+    return extensions
+
+
 def format_audit_record(record: AuditRecord) -> str:
     """Format an AuditRecord as a CEF string.
 
@@ -194,6 +222,8 @@ def format_audit_record(record: AuditRecord) -> str:
     if route_backend:
         extensions.append(f"flexString1={_escape_extension_value(str(route_backend))}")
         extensions.append("flexString1Label=RouteBackend")
+
+    extensions.extend(_caller_cost_extensions(data))
 
     # Tool name from data (common in tool invocation events)
     tool_name = data.get("tool_name")
