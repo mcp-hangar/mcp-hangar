@@ -1168,11 +1168,14 @@ class TestHangarWithMockedContext:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_start_mcp_server(self, hangar_with_context, mock_provider):
-        """Should start provider."""
+    async def test_start_mcp_server(self, hangar_with_context, mock_context, mock_provider):
+        """Starts through the command bus, as `hangar_start` does; `McpServer` has no `start` (#1685)."""
         await hangar_with_context.start_mcp_server("math")
 
-        mock_provider.start.assert_called_once()
+        (command,) = [c.args[0] for c in mock_context.runtime.command_bus.send.call_args_list]
+        assert type(command).__name__ == "StartMcpServerCommand"
+        assert command.mcp_server_id == "math"
+        assert command.deliberate is True
 
     @pytest.mark.asyncio
     async def test_stop_mcp_server(self, hangar_with_context, mock_provider):
