@@ -1,0 +1,1 @@
+The docstrings MCP clients read now name the keys the tools return: `hangar_list` and `hangar_details` document `mcp_server_id` (they documented `mcp_server`), `hangar_details` lists `tools_policy`, `hangar_load` documents `tools: [{name}]`, its `mcp_server_id` and the `already_loaded` result, and `hangar_start` no longer names an `unknown_group` error it never raises.
