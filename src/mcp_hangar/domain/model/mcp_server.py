@@ -63,6 +63,9 @@ from .tool_catalog import ToolCatalog, ToolSchema
 
 logger = get_logger(__name__)
 
+#: The health-check interval a server has when its config says nothing about it.
+_DEFAULT_HEALTH_CHECK_INTERVAL_S = 60
+
 
 # SUPPORTED_PROTOCOL_VERSION / HANGAR_CLIENT_INFO live in the leaf `protocol`
 # module (re-exported above) so the transport clients can share them without a
@@ -238,7 +241,9 @@ class McpServer(AggregateRoot):
         endpoint: str | None = None,
         env: dict[str, str] | None = None,
         idle_ttl_s: int | IdleTTL = 300,  # Accept both int and value object
-        health_check_interval_s: int | HealthCheckInterval = 60,  # Accept both int and value object
+        health_check_interval_s: int
+        | HealthCheckInterval
+        | None = None,  # None: not declared, 60 s and the worker's pace
         max_consecutive_failures: int = 3,
         # This server's own read limit on one upstream response (#1613); None
         # reads with the process-wide `execution.max_response_bytes`.
@@ -299,10 +304,15 @@ class McpServer(AggregateRoot):
             self._idle_ttl = IdleTTL(idle_ttl_s)
 
         # Health check interval - normalize to value object
+        # Whether the config declared one. A server that did not is checked at the
+        # health-check worker's own pace; one that did is checked at its own (#1686).
+        self._health_check_interval_declared = health_check_interval_s is not None
         if isinstance(health_check_interval_s, HealthCheckInterval):
             self._health_check_interval = health_check_interval_s
         else:
-            self._health_check_interval = HealthCheckInterval(health_check_interval_s)
+            self._health_check_interval = HealthCheckInterval(
+                60 if health_check_interval_s is None else health_check_interval_s
+            )
 
         # Container-specific configuration
         self._volumes = volumes or []
@@ -1143,6 +1153,18 @@ class McpServer(AggregateRoot):
                 "Container mode requires 'image' or 'build.dockerfile'",
             )
         return self._image
+
+    @property
+    def declared_health_check_interval_s(self) -> int | None:
+        """Seconds between this server's health checks when they differ from the default, else None (#1686).
+
+        60 s is the default and is also what a config spells out to say "the
+        default" -- a reload treats the two as the same server -- so it does not
+        count as declaring one: such a server follows the health-check worker's
+        own pace, as every server did.
+        """
+        seconds = self._health_check_interval.seconds
+        return seconds if seconds != _DEFAULT_HEALTH_CHECK_INTERVAL_S else None
 
     def _is_session_terminated(self, response: Any) -> bool:
         """Did the upstream reject our transport session?
