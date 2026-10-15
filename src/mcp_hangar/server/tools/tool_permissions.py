@@ -60,6 +60,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..._sdk_compat import SdkToolError
 from ...domain.contracts.authorization import GrantScope
 from ...logging_config import get_logger
 from ..session_guard import refuse_if_session_suspended
@@ -267,11 +268,13 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
     return frozenset(permitted)
 
 
-class ToolAccessNotAuthorizedError(PermissionError):
+class ToolAccessNotAuthorizedError(PermissionError, SdkToolError):
     """The caller may not invoke this tool.
 
     ``PermissionError`` so it is distinguishable from the tool's own failures and
-    is not swallowed by the value-error handling in the tool bodies.
+    is not swallowed by the value-error handling in the tool bodies, and the SDK's
+    ``ToolError`` so the client is shown why (mcp 2.3.0 reports any other
+    exception as ``Error executing tool <name>`` and nothing more).
     """
 
 
