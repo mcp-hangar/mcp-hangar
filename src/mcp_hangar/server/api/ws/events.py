@@ -15,7 +15,7 @@ from ....logging_config import get_logger
 from ..middleware import get_cors_config
 from ..serializers import HangarJSONEncoder
 from ..tenant_scope import confined_tenant
-from .filters import matches_filters, parse_subscription_filters, visible_to_tenant
+from .filters import matches_filters, parse_subscription_filters, rejected_event_patterns, visible_to_tenant
 from .manager import EventStreamQueue, connection_manager
 
 logger = get_logger(__name__)
@@ -94,35 +94,18 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
         if typed_msg.get("type") == "subscribe" or "event_types" in typed_msg or "mcp_server_ids" in typed_msg:
             filters = parse_subscription_filters(typed_msg)
             if acknowledge_subscribe and typed_msg.get("type") == "subscribe":
+                requested = filters.get("event_types", [])
+                rejected = rejected_event_patterns(requested)
+                # The ack says what is subscribed: a pattern the matcher does not
+                # support matches nothing, so it is reported, not echoed (#1704).
                 await websocket.send_json(
                     {
                         "type": "subscribed",
-                        "event_types": filters.get("event_types", []),
+                        "event_types": [p for p in requested if p not in rejected],
+                        "rejected_event_types": rejected,
                         "mcp_server_ids": filters.get("mcp_server_ids", []),
                     }
                 )
-
-    try:
-        initial_msg = cast(object, await asyncio.wait_for(websocket.receive_json(), timeout=_SUBSCRIBE_TIMEOUT_S))
-    except TimeoutError:
-        initial_msg = None
-    except (RuntimeError, WebSocketDisconnect):
-        return
-    else:
-        await _handle_client_message(initial_msg, acknowledge_subscribe=True)
-
-    async def _reader() -> None:
-        """Read incoming client messages (pong responses, filters)."""
-        try:
-            while True:
-                msg = cast(object, await websocket.receive_json())
-                await _handle_client_message(msg)
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            client_gone.set()
-
-    reader_task = asyncio.create_task(_reader())
 
     # Per-connection async queue and event loop capture for thread-safe delivery.
     def _on_drop(dropped_event: object, new_event: object) -> None:
@@ -150,10 +133,41 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
     connection_manager.register(connection_id, {"endpoint": "events"})
     logger.info("ws_events_connected", connection_id=connection_id, tenant_scope=tenant_id)
 
+    # Events published while the client has not yet said what it wants are held in
+    # the queue and filtered when they are sent, not dropped: the handler above is
+    # live from accept, so nothing in the subscribe window is lost (#1704).
+    try:
+        initial_msg = cast(object, await asyncio.wait_for(websocket.receive_json(), timeout=_SUBSCRIBE_TIMEOUT_S))
+    except TimeoutError:
+        initial_msg = None
+    except (RuntimeError, WebSocketDisconnect):
+        event_bus.unsubscribe_from_all(event_handler)
+        connection_manager.unregister(connection_id)
+        return
+    else:
+        await _handle_client_message(initial_msg, acknowledge_subscribe=True)
+
+    async def _reader() -> None:
+        """Read incoming client messages (pong responses, filters)."""
+        try:
+            while True:
+                msg = cast(object, await websocket.receive_json())
+                await _handle_client_message(msg)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            client_gone.set()
+
+    reader_task = asyncio.create_task(_reader())
+
     try:
         while not client_gone.is_set():
             try:
                 event = cast(DomainEvent, await asyncio.wait_for(event_queue.queue.get(), timeout=_IDLE_TIMEOUT_S))
+                # Filters can change after an event was queued (the subscribe message,
+                # or a later one), so the client's choice is applied at delivery too.
+                if not matches_filters(event, filters):
+                    continue
                 payload = json.dumps(event.to_dict(), cls=HangarJSONEncoder)
                 await websocket.send_text(payload)
             except TimeoutError:

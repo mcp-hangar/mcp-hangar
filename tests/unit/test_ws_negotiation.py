@@ -74,7 +74,12 @@ async def test_ws_events_negotiates_subscription_before_streaming() -> None:
                     await ws_events_endpoint(ws)
 
         ws.send_json.assert_awaited_once_with(
-            {"type": "subscribed", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
+            {
+                "type": "subscribed",
+                "event_types": ["McpServerStarted"],
+                "rejected_event_types": [],
+                "mcp_server_ids": ["math"],
+            }
         )
 
     await run()
