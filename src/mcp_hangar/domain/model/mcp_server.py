@@ -2182,7 +2182,7 @@ class McpServer(AggregateRoot):
                 return False
             client = self._client
         try:
-            response = client.call("tools/list", {}, timeout=5.0)
+            response = self._call_with_session_recovery(client, "tools/list", {}, timeout=5.0)
         except (OSError, TimeoutError) as exc:
             logger.warning(
                 "tool_catalogue_recheck_failed",
@@ -2219,7 +2219,7 @@ class McpServer(AggregateRoot):
             return False
 
         try:
-            tools_resp = self._client.call("tools/list", {}, timeout=5.0)
+            tools_resp = self._call_with_session_recovery(self._client, "tools/list", {}, timeout=5.0)
             if "result" in tools_resp:
                 tool_list = tools_resp.get("result", {}).get("tools", [])
                 self._tools.update_from_list(tool_list)
@@ -2256,7 +2256,11 @@ class McpServer(AggregateRoot):
         response = None
 
         try:
-            response = client.call("tools/list", {}, timeout=5.0)
+            # Through the same recovery a call gets: after an upstream restart the
+            # probe hit the stale session, failed, and counted against the server
+            # until three failures degraded it and a restart reconnected it, minutes
+            # after the upstream was back (#1699).
+            response = self._call_with_session_recovery(client, "tools/list", {}, timeout=5.0)
             if "error" in response:
                 check_error = Exception(response["error"].get("message", "unknown"))
                 check_error_type = _rpc_error_type(response["error"])
