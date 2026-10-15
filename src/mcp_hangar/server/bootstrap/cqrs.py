@@ -135,8 +135,9 @@ def init_cqrs(
 
     if discovery_registry is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
+        from ...infrastructure.discovery.registry import create_source
 
-        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        register_discovery_handlers(runtime.command_bus, discovery_registry, source_factory=create_source)
         logger.info("discovery_cqrs_handlers_registered")
 
     logger.info("cqrs_handlers_registered")

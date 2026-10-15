@@ -599,6 +599,33 @@ class TestActorIsTheCaller:
         assert mock_dispatch.call_args[0][0].assigned_by == "anonymous"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(("caller", "expected"), [(CALLER, CALLER), (None, "anonymous")])
+    async def test_set_and_clear_tool_access_policy_carry_the_caller(self, caller, expected):
+        from mcp_hangar.auth.api.routes import clear_tool_access_policy, set_tool_access_policy
+
+        path_params = {"scope": "provider", "target_id": "math"}
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = {}
+            await set_tool_access_policy(self._request({"allow_list": ["add"]}, path_params, caller=caller))
+            await clear_tool_access_policy(self._request({}, path_params, caller=caller))
+
+        set_command, clear_command = (call.args[0] for call in mock_dispatch.call_args_list)
+        assert set_command.set_by == expected
+        assert clear_command.cleared_by == expected
+
+    @pytest.mark.asyncio
+    async def test_a_body_cannot_name_who_set_a_tool_access_policy(self):
+        from mcp_hangar.auth.api.routes import set_tool_access_policy
+
+        request = self._request({"set_by": "user:someone-else"}, {"scope": "provider", "target_id": "math"})
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            with pytest.raises(ValidationError) as refused:
+                await set_tool_access_policy(request)
+
+        assert refused.value.field == "set_by"
+        mock_dispatch.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_the_router_dict_state_shape_is_read_too(self):
         from mcp_hangar.auth.api.routes import assign_role
 

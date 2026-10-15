@@ -1,0 +1,1 @@
+A discovery source registered over `POST /api/discovery/sources` is now built from its specification and added to the running orchestrator, so `GET /api/discovery/sources` lists it, scans use it, a disabled one is listed disabled and `DELETE` stops and removes it. It was stored in the registry only. The source takes the id the listing shows for its type.

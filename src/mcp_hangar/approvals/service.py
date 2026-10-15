@@ -53,6 +53,10 @@ SHARED_POLL_INTERVAL_S = 2.0
 #: Why an approval was recorded `cancelled` rather than `approved` (#1702).
 CANCELLED_REASON = "approved after the held call was cancelled; the call did not run"
 
+#: Why a granted approval was recorded `cancelled` afterwards (#1730): the human
+#: approved in time and the batch was cancelled before the call was dispatched.
+CANCELLED_AFTER_GRANT_REASON = "approved, then the call was cancelled before it ran; the call did not run"
+
 # Dedicated thread pool for _publish() to avoid deadlock with the default
 # executor.  The batch executor's worker threads block on future.result() via
 # run_coroutine_threadsafe; if _publish() used asyncio.to_thread (default
@@ -88,6 +92,42 @@ class ApprovalGateService:
             # the approved one with nothing to notice.
             return "arguments changed after approval"
         return None
+
+    async def cancel_after_grant(self, approval_id: str) -> bool:
+        """Record that a call the gate granted did not run because its batch was cancelled (#1730).
+
+        The grant is published when the hold ends. If the cancel lands after
+        that -- during the re-checks that follow the hold, or the cold start --
+        the call is refused and never dispatched, yet the trail already says
+        granted. This moves the record from approved to cancelled and publishes
+        ``ToolApprovalCancelled``, so a grant followed by this event reads as no
+        effective grant. Returns False when there was nothing to move: the
+        record is missing, or is not approved.
+        """
+        request = await self._repository.get(approval_id)
+        if request is None or request.state is not ApprovalState.APPROVED:
+            return False
+        cancelled_at = datetime.now(UTC)
+        if not await self._repository.transition(
+            approval_id,
+            (ApprovalState.APPROVED,),
+            ApprovalState.CANCELLED,
+            request.decided_by,
+            cancelled_at,
+            CANCELLED_AFTER_GRANT_REASON,
+        ):
+            return False
+        await self._publish(
+            ToolApprovalCancelled(
+                approval_id=approval_id,
+                mcp_server_id=request.provider_id,
+                tool_name=request.tool_name,
+                attempted_by=request.decided_by or "",
+                cancelled_at=cancelled_at.isoformat(),
+                reason=CANCELLED_AFTER_GRANT_REASON,
+            )
+        )
+        return True
 
     def __init__(
         self,
@@ -202,7 +242,12 @@ class ApprovalGateService:
                 if decision is True:
                     wait_span.set_attribute("approval.decision", "approved")
                 elif decision is False:
-                    wait_span.set_attribute("approval.decision", "denied")
+                    # A refused late approval wakes the hold with False too, and
+                    # the gate span reads cancelled for it (#1731): the record
+                    # says which of the two this was.
+                    woken_by = await self._repository.get(approval_id)
+                    cancelled = woken_by is not None and woken_by.state is ApprovalState.CANCELLED
+                    wait_span.set_attribute("approval.decision", "cancelled" if cancelled else "denied")
                 else:
                     wait_span.set_attribute("approval.decision", "expired")
 

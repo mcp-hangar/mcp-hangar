@@ -95,6 +95,8 @@ class ToolAccessPolicySet(DomainEvent):
     allow_list: list[str]
     deny_list: list[str]
     schema_version: int = 1
+    # Who set it (#1719). Empty on an event recorded before the field existed.
+    set_by: str = ""
 
 
 @dataclass
@@ -104,6 +106,8 @@ class ToolAccessPolicyCleared(DomainEvent):
     scope: str
     target_id: str
     schema_version: int = 1
+    # Who cleared it (#1719). Empty on an event recorded before the field existed.
+    cleared_by: str = ""
 
 
 # ---------------------------------------------------------------------------

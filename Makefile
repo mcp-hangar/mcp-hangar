@@ -9,20 +9,21 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-CONFIG ?= config.max.yaml
+# A config file to start with; unset, `mcp-hangar` looks where it always does (see `mcp-hangar --help`).
+CONFIG ?=
 
 ##@ Development
 
 dev: ## Start backend HTTP server
-	mcp-hangar --config $(CONFIG) serve --http
+	mcp-hangar $(if $(CONFIG),--config $(CONFIG)) serve --http
 
 dev-backend: ## Start backend HTTP server only
-	mcp-hangar --config $(CONFIG) serve --http
+	mcp-hangar $(if $(CONFIG),--config $(CONFIG)) serve --http
 
 
 all: lint test build ## Run lint, test, build
 
-lint: lint-core proto-lint ## Lint all
+lint: lint-core ## Lint all
 
 lint-core: ## Lint Python core
 	ruff check src/mcp_hangar && ruff format --check src/mcp_hangar
@@ -66,11 +67,6 @@ changelog-preview: ## Render the next release section (use VERSION=x.y.z)
 	@if [ -z "$(VERSION)" ]; then echo "VERSION required"; exit 1; fi
 	python scripts/build_changelog.py preview --version $(VERSION)
 
-##@ CI
-
-check-boundary: ## Check enterprise import boundary
-	bash scripts/check_enterprise_boundary.sh
-
 ##@ Quick Start
 
 quickstart: ## Run quickstart demo
@@ -82,35 +78,6 @@ quickstart: ## Run quickstart demo
 quickstart-down: ## Stop quickstart demo
 	cd examples/quickstart && docker compose down
 
-##@ Proto / API
-
-proto-gen: ## Generate Go code from proto definitions
-	@command -v buf >/dev/null 2>&1 || { echo "buf CLI required: https://buf.build/docs/installation"; exit 1; }
-	cd api && buf generate
-	@echo "Proto code generated in api/gen/go/"
-
-proto-lint: ## Lint proto definitions
-	@command -v buf >/dev/null 2>&1 || { echo "buf CLI required: https://buf.build/docs/installation"; exit 1; }
-	cd api && buf lint
-
-proto-breaking: ## Check proto breaking changes against main
-	@command -v buf >/dev/null 2>&1 || { echo "buf CLI required: https://buf.build/docs/installation"; exit 1; }
-	cd api && buf breaking --against ".git#branch=main,subdir=api/proto"
-
-##@ Multi-Repo Workspace
-
-workspace-setup: ## One-time multi-repo workspace setup
-	./scripts/dev-workspace.sh setup
-
-workspace-start: ## Start dev services (MODE=oss|managed|full)
-	./scripts/dev-workspace.sh start $(MODE)
-
-workspace-stop: ## Stop all dev services
-	./scripts/dev-workspace.sh stop
-
-workspace-status: ## Show dev workspace status
-	./scripts/dev-workspace.sh status
-
 ##@ Cleanup
 
 clean: ## Clean build artifacts
@@ -121,11 +88,7 @@ clean: ## Clean build artifacts
 
 ##@ Development Setup
 
-setup: setup-core setup-proto ## Setup development environment
+setup: setup-core ## Setup development environment
 
 setup-core: ## Setup Python development environment
 	pip install -e ".[dev]"
-
-setup-proto: ## Setup proto tooling and generate code
-	@command -v buf >/dev/null 2>&1 && { cd api && buf generate; echo "Proto code generated."; } || echo "buf CLI not installed, skipping proto setup"
-

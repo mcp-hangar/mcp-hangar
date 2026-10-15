@@ -2,6 +2,7 @@
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -218,6 +219,52 @@ def _start_refusal(reason: str, time_left: float) -> str:
     if reason == "not_revived_by_calls":
         return START_REFUSED_NOT_REVIVED_BY_CALLS
     return f"{START_REFUSED_IN_BACKOFF}, retry in {time_left:.1f}s"
+
+
+#: How many `tools/list` pages are followed before the rest is left unlisted (#1804).
+MAX_TOOLS_LIST_PAGES = 50
+
+
+def _list_all_tools(call_page: Callable[[dict[str, Any]], dict[str, Any]], mcp_server_id: str) -> dict[str, Any]:
+    """Run an upstream's `tools/list` to its last page and return it as one response (#1804).
+
+    `call_page(params)` makes one `tools/list` call. An upstream that paginates
+    returns a `nextCursor`; only the first page used to be read, so a tool on
+    page two was neither listed, nor pinned, nor checked for drift. The pages
+    are joined into the first response's `tools`, `nextCursor` removed. An
+    error on any page is returned as that page's response, so the caller fails
+    as it does for a failed single call. A repeated cursor, or more than
+    `MAX_TOOLS_LIST_PAGES` pages, ends the walk with a warning: a tool left
+    unlisted is not served, which is the safe side.
+    """
+    response = call_page({})
+    tools: list[Any] = []
+    seen: set[str] = set()
+    pages = 0
+    while True:
+        result = response.get("result")
+        if not isinstance(result, dict):
+            return response
+        tools.extend(result.get("tools") or [])
+        cursor = result.get("nextCursor")
+        pages += 1
+        if not isinstance(cursor, str) or not cursor:
+            break
+        if cursor in seen or pages >= MAX_TOOLS_LIST_PAGES:
+            logger.warning(
+                "tools_list_pagination_stopped",
+                mcp_server_id=mcp_server_id,
+                pages=pages,
+                reason="repeated_cursor" if cursor in seen else "page_limit",
+            )
+            break
+        seen.add(cursor)
+        response = call_page({"cursor": cursor})
+        if "result" not in response:
+            return response
+    joined: dict[str, Any] = dict(response)
+    joined["result"] = {k: v for k, v in response["result"].items() if k != "nextCursor"} | {"tools": tools}
+    return joined
 
 
 class McpServer(AggregateRoot):
@@ -522,6 +569,32 @@ class McpServer(AggregateRoot):
     def mcp_server_id(self) -> str:
         """McpServer identifier as string (for backward compatibility)."""
         return str(self._id)
+
+    def upstream_identity(self) -> str:
+        """What this server's upstream is, as a stable string a pin can be bound to (#1802).
+
+        The server's id is the operator's name for it and says nothing about what
+        answers behind it. This is derived from where the tools come from: the
+        origin of a remote endpoint (no credentials, path or query), the image of
+        a container, or the executable and a hash of the whole command line of a
+        subprocess (the hash keeps secrets in arguments out of config and logs).
+        A pin bound to it is not honoured by a server that points somewhere else.
+        """
+        if self._mode == McpServerMode.REMOTE:
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(self._endpoint or "")
+            host = (parts.hostname or "").lower()
+            port = f":{parts.port}" if parts.port else ""
+            return f"remote:{parts.scheme.lower()}://{host}{port}"
+        if self._mode == McpServerMode.SUBPROCESS:
+            import hashlib
+            from pathlib import PurePath
+
+            argv = [str(part) for part in (self._command or [])]
+            digest = hashlib.sha256("\0".join(argv).encode("utf-8")).hexdigest()[:16]
+            return f"stdio:{PurePath(argv[0]).name if argv else ''}:{digest}"
+        return f"image:{self._image or ''}"
 
     @property
     def mode(self) -> McpServerMode:
@@ -1301,7 +1374,7 @@ class McpServer(AggregateRoot):
             self._notify_initialized(client)
 
         # Discover tools
-        tools_resp = client.call("tools/list", {})
+        tools_resp = _list_all_tools(lambda params: client.call("tools/list", params), self.mcp_server_id)
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
             diagnostics = self._startup_diagnostics(client)
@@ -1912,7 +1985,9 @@ class McpServer(AggregateRoot):
                 raise ToolInvocationError(self.mcp_server_id, "mcp_server client is None")
 
             try:
-                refresh_result = refresh_client.call("tools/list", {}, timeout=5.0)
+                refresh_result = _list_all_tools(
+                    lambda params: refresh_client.call("tools/list", params, timeout=5.0), self.mcp_server_id
+                )
             except (OSError, TimeoutError, ClientError) as e:
                 refresh_error = e
                 logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
@@ -2211,7 +2286,10 @@ class McpServer(AggregateRoot):
                 return False
             client = self._client
         try:
-            response = self._call_with_session_recovery(client, "tools/list", {}, timeout=5.0)
+            response = _list_all_tools(
+                lambda params: self._call_with_session_recovery(client, "tools/list", params, timeout=5.0),
+                self.mcp_server_id,
+            )
         except (OSError, TimeoutError, ClientError) as exc:
             logger.warning(
                 "tool_catalogue_recheck_failed",
@@ -2248,7 +2326,11 @@ class McpServer(AggregateRoot):
             return False
 
         try:
-            tools_resp = self._call_with_session_recovery(self._client, "tools/list", {}, timeout=5.0)
+            upstream = self._client
+            tools_resp = _list_all_tools(
+                lambda params: self._call_with_session_recovery(upstream, "tools/list", params, timeout=5.0),
+                self.mcp_server_id,
+            )
             if "result" in tools_resp:
                 tool_list = tools_resp.get("result", {}).get("tools", [])
                 self._tools.update_from_list(tool_list)

@@ -17,7 +17,6 @@ Label Reference:
     mcp.hangar.mode: "container"         # Optional - container|http (default: container)
     mcp.hangar.port: "8080"              # For http mode only
     mcp.hangar.path: "/mcp"              # For http mode only - the MCP endpoint's path (default /mcp)
-    mcp.hangar.group: "tools"            # Optional - group membership
     mcp.hangar.command: "python app.py"  # Optional - override container command
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
 """
@@ -426,7 +425,6 @@ class DockerDiscoverySource(DiscoverySource):
             "container_name": container.name,
             "image": image,
             "status": container.status,
-            "group": labels.get(f"{self.LABEL_PREFIX}group"),
             # Addresses the runtime itself reports for this container: the host
             # side of its published binding, and its network IP. Registration
             # refuses an endpoint resolving anywhere else, so a label cannot

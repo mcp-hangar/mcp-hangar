@@ -204,7 +204,6 @@ async def test_custom_labels(runner: ContainerTestRunner):
             "mcp.hangar.enabled": "true",
             "mcp.hangar.name": "test-custom-provider",
             "mcp.hangar.mode": "container",
-            "mcp.hangar.group": "test-group",
             "mcp.hangar.command": "python -m myapp",
             "mcp.hangar.volumes": "/data:/data,/config:/config",
             "mcp.hangar.ttl": "120",
@@ -225,14 +224,12 @@ async def test_custom_labels(runner: ContainerTestRunner):
     if found:
         p = found[0]
         print(f"   ✅ Found provider: {p.name}")
-        print(f"      Group: {p.metadata.get('group')}")
         print(f"      Command: {p.connection_info.get('command')}")
         print(f"      Volumes: {p.connection_info.get('volumes')}")
         print(f"      TTL: {p.ttl_seconds}s")
 
         return (
-            p.metadata.get("group") == "test-group"
-            and p.connection_info.get("command") == ["python", "-m", "myapp"]
+            p.connection_info.get("command") == ["python", "-m", "myapp"]
             and p.connection_info.get("volumes") == ["/data:/data", "/config:/config"]
             and p.ttl_seconds == 120
         )
