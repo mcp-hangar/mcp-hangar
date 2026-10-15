@@ -32,6 +32,9 @@ _SUMMARY_SOURCES = {
     "error_type": ("error_type",),
     "tenant_id": ("identity_context", "tenant_id"),
     "correlation_id": ("correlation_id",),
+    # Hashes of a tool's schema: identifiers, and what an operator copies into a pin (#1696).
+    "expected_digest": ("expected_digest",),
+    "observed_digest": ("observed_digest",),
 }
 
 
