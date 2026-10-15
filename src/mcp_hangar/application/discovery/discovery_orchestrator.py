@@ -258,6 +258,39 @@ class DiscoveryOrchestrator:
         """
         return self._discovery_service.unregister_source(source_type)
 
+    def add_source_live(self, source: DiscoverySource) -> None:
+        """Add a source to a running orchestrator and start it, from a synchronous caller (#1674).
+
+        A source added after `start()` is not started by it. When discovery runs
+        on its own loop, the add and the start are scheduled onto that loop, so
+        the source map is changed where the cycle reads it and not from the
+        command bus's worker thread; before `start()` it is a plain add.
+        """
+        loop = self._loop
+        if loop is not None and loop.is_running():
+
+            async def _add_and_start() -> None:
+                self.add_source(source)
+                await source.start()
+
+            asyncio.run_coroutine_threadsafe(_add_and_start(), loop).result(timeout=30)
+            return
+        self.add_source(source)
+
+    def remove_source_live(self, source_type: str) -> DiscoverySource | None:
+        """Remove a source from a running orchestrator and stop it, from a synchronous caller (#1674)."""
+        loop = self._loop
+        if loop is not None and loop.is_running():
+
+            async def _remove_and_stop() -> DiscoverySource | None:
+                removed = self.remove_source(source_type)
+                if removed is not None:
+                    await removed.stop()
+                return removed
+
+            return asyncio.run_coroutine_threadsafe(_remove_and_stop(), loop).result(timeout=30)
+        return self.remove_source(source_type)
+
     def set_static_mcp_servers(self, names: set[str]) -> None:
         """Set static mcp_server names (from config).
 
