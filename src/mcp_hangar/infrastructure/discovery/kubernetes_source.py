@@ -10,7 +10,6 @@ Example Pod Annotations:
     mcp-hangar.io/name: "my-mcp_server"
     mcp-hangar.io/mode: "http"
     mcp-hangar.io/port: "8080"
-    mcp-hangar.io/group: "data-team"
     mcp-hangar.io/health-path: "/health"
     mcp-hangar.io/path: "/mcp"
 """
@@ -204,7 +203,6 @@ class KubernetesDiscoverySource(DiscoverySource):
         name = annotations.get(f"{self.ANNOTATION_PREFIX}name", pod.metadata.name)
         mode = annotations.get(f"{self.ANNOTATION_PREFIX}mode", "http")
         port = annotations.get(f"{self.ANNOTATION_PREFIX}port", "8080")
-        group = annotations.get(f"{self.ANNOTATION_PREFIX}group")
         health_path = annotations.get(f"{self.ANNOTATION_PREFIX}health-path", "/health")
         # The MCP endpoint's path (#1208). Without this the built endpoint was
         # always `http://<host>:<port>` with nothing after it -- a 404 against
@@ -243,7 +241,6 @@ class KubernetesDiscoverySource(DiscoverySource):
             "namespace": namespace,
             "pod_name": pod.metadata.name,
             "pod_uid": pod.metadata.uid,
-            "group": group,
             "labels": pod.metadata.labels or {},
             "annotations": {k: v for k, v in annotations.items() if k.startswith(self.ANNOTATION_PREFIX)},
             "node_name": pod.spec.node_name if pod.spec else None,

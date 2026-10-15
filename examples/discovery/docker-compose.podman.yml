@@ -36,7 +36,6 @@ services:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "math-provider"
       mcp.hangar.mode: "container"
-      mcp.hangar.group: "math-tools"
     networks:
       - mcp-net
 

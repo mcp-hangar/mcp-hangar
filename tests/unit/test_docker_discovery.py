@@ -529,6 +529,17 @@ class TestParseContainerHttpMode:
             assert result.connection_info["path"] == expected
             assert result.connection_info["endpoint"] == f"http://127.0.0.1:18080{expected}"
 
+    def test_a_group_label_is_not_read(self, mock_docker):
+        """Nothing consumed it, so a discovered server never joined a group (#1691)."""
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(ports={"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]})
+        container.labels["mcp.hangar.group"] = "tools"
+
+        result = DockerDiscoverySource()._parse_container(container)
+
+        assert result is not None and "group" not in result.metadata
+
     def test_sse_mode_endpoint_uses_published_host_port(self, mock_docker):
         from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
