@@ -82,6 +82,27 @@ def close_what_bootstrap_started() -> None:
             logger.warning("bootstrap_resource_close_failed", error=str(e))
 
 
+def release_process_wiring() -> None:
+    """Forget the runtime and the three buses, so the next bootstrap builds its own.
+
+    They are process-wide singletons that bootstrap registers its handlers on.
+    Nothing took them down, so a second `Hangar` in one process -- after the
+    first was stopped -- failed with "Handler already registered for
+    StartMcpServerCommand" (#1687). Called as the last step of
+    `ApplicationContext.shutdown`, after every server and worker is stopped.
+    """
+    global _runtime
+    from ...infrastructure.command_bus import reset_command_bus
+    from ...infrastructure.event_bus import reset_event_bus
+    from ...infrastructure.query_bus import reset_query_bus
+
+    with _runtime_lock:
+        _runtime = None
+    reset_command_bus()
+    reset_query_bus()
+    reset_event_bus()
+
+
 def get_runtime(
     rate_limit: dict[str, Any] | None = None,
     persistence_backend: Any = None,

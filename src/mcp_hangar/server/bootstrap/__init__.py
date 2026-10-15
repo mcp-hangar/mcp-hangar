@@ -49,7 +49,7 @@ from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import GROUPS, get_runtime
 from .components import ServerComponents, get_auth_compat_exports, load_components
-from .composition import close_what_bootstrap_started
+from .composition import close_what_bootstrap_started, release_process_wiring
 from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_auth_cqrs, init_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
@@ -178,6 +178,7 @@ class ApplicationContext:
 
         # Last: the fleet writer's loop has to outlive every server's stop.
         close_what_bootstrap_started()
+        release_process_wiring()
 
         logger.info("application_context_shutdown_complete")
 
