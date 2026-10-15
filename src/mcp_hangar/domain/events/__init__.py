@@ -111,6 +111,7 @@ from .enforcement import (
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
     ResponseTruncated,
+    ToolAdmissionRequested,
     ToolPinRecorded,
     ToolPinRevoked,
 )
@@ -234,6 +235,7 @@ __all__ = [
     "DigestMismatchEvent",
     "ToolPinRecorded",
     "ToolPinRevoked",
+    "ToolAdmissionRequested",
     "DigestMismatchInTask",
     "DEGRADED_BY_HEALTH_CHECKS",
     "DELIBERATE_STOP_REASONS",

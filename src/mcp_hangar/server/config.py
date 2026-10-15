@@ -1058,6 +1058,15 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
     # The upstream the pins were taken from (#1802): the pins hold only for a server
     # that still points at it. A value that is not a string is refused by name, not
     # dropped, because dropping it would leave the pins unbound and unsaid.
+    # What happens to a tool that appears after the pins were taken (#1801).
+    new_tools = tool_projection_config.get("new_tools")
+    if new_tools is not None:
+        if new_tools not in ("withhold", "allow"):
+            raise ConfigurationError(
+                f"Invalid tool_projection.new_tools for '{scope_id}': expected 'withhold' or 'allow', got {new_tools!r}"
+            )
+        tp_registry.set_new_tools_policy(scope_id, new_tools)
+
     upstream = tool_projection_config.get("upstream")
     if upstream is not None and not (isinstance(upstream, str) and upstream):
         raise ConfigurationError(
