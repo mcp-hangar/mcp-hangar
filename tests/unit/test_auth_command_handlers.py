@@ -273,6 +273,31 @@ class TestUpdateCustomRoleHandler:
 class TestSetToolAccessPolicyHandler:
     """Tests for SetToolAccessPolicyHandler."""
 
+    def test_the_event_names_who_set_the_policy(self):
+        from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
+
+        event_bus = Mock()
+        resolver = Mock()
+        resolver.get_configured_policy.return_value = None
+        with patch("mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver", return_value=resolver):
+            SetToolAccessPolicyHandler(Mock(), event_bus=event_bus).handle(
+                SetToolAccessPolicyCommand(scope="provider", target_id="math", allow_list=["add"], set_by="user:admin")
+            )
+
+        assert event_bus.publish.call_args.args[0].set_by == "user:admin"
+
+    def test_the_cleared_event_names_who_cleared_the_policy(self):
+        from mcp_hangar.auth.commands.commands import ClearToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import ClearToolAccessPolicyHandler
+
+        event_bus = Mock()
+        ClearToolAccessPolicyHandler(Mock(), event_bus=event_bus).handle(
+            ClearToolAccessPolicyCommand(scope="provider", target_id="math", cleared_by="user:admin")
+        )
+
+        assert event_bus.publish.call_args.args[0].cleared_by == "user:admin"
+
     def test_handle_provider_scope(self):
         from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
         from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
