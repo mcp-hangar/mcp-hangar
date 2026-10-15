@@ -18,7 +18,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import structlog
 
@@ -796,6 +796,15 @@ class SQLiteRoleStore(IRoleStore):
             roles.append(Role(name=row["name"], description=row["description"] or "", permissions=permissions))
 
         return roles
+
+    def list_principals(self) -> list[dict[str, Any]]:
+        """List principals with at least one assignment."""
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT principal_id, role_name FROM role_assignments ORDER BY principal_id, role_name")
+        roles: dict[str, set[str]] = {}
+        for row in cursor.fetchall():
+            roles.setdefault(row["principal_id"], set()).add(row["role_name"])
+        return [{"principal_id": pid, "roles": sorted(names)} for pid, names in roles.items()]
 
     def assign_role(
         self,
