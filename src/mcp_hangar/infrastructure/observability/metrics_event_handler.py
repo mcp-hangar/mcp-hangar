@@ -264,7 +264,7 @@ class MetricsEventHandler:
         # Update Prometheus metrics
         prometheus_metrics.observe_health_check(
             mcp_server=event.mcp_server_id,
-            duration=0.0,  # Duration unknown for failures
+            duration=event.duration_ms / 1000.0,
             healthy=False,
             consecutive_failures=event.consecutive_failures,
         )
