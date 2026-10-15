@@ -111,6 +111,31 @@ class BackgroundWorker:
         """
         return _join_thread(self.thread, timeout_s)
 
+    @staticmethod
+    def _server_interval_s(mcp_server: Any, default: float) -> float:
+        """The health-check interval the server itself declares, else *default*."""
+        declared = getattr(mcp_server, "declared_health_check_interval_s", None)
+        if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
+            return float(declared)
+        return default
+
+    def _tick_s(self) -> float:
+        """How long to wait before the next sweep.
+
+        The garbage collector sweeps every `interval_s`. The health checker wakes
+        as often as its most frequent server needs, never less often than
+        `interval_s` and never faster than once a second: a server declaring
+        `health_check_interval_s: 5` was checked every 60 s because the sweep
+        itself only ran that often (#1686). With every server at the default the
+        tick is `interval_s`, as before.
+        """
+        if self.task != "health_check":
+            return float(self.interval_s)
+        tick = float(self.interval_s)
+        for _, mcp_server in list(self.mcp_servers.items()):
+            tick = min(tick, self._server_interval_s(mcp_server, float(self.interval_s)))
+        return max(1.0, tick)
+
     def _publish_events(self, mcp_server: McpServerRuntime) -> None:
         """Publish all collected events from a mcp_server.
 
@@ -160,10 +185,10 @@ class BackgroundWorker:
             health_tracker = getattr(mcp_server, "health", None)
             if health_tracker and hasattr(health_tracker, "get_health_check_interval"):
                 interval = health_tracker.get_health_check_interval(
-                    current_state, normal_interval=float(self.interval_s)
+                    current_state, normal_interval=self._server_interval_s(mcp_server, float(self.interval_s))
                 )
             else:
-                interval = float(self.interval_s)
+                interval = self._server_interval_s(mcp_server, float(self.interval_s))
 
             if interval > 0:
                 self._next_check_at[mcp_server_id] = now + interval
@@ -172,7 +197,7 @@ class BackgroundWorker:
 
     def _loop(self):
         """Main worker loop."""
-        while self.running and not self._stopped.wait(self.interval_s):
+        while self.running and not self._stopped.wait(self._tick_s()):
             start_time = time.perf_counter()
             gc_collected = {"idle": 0, "dead": 0}
 
