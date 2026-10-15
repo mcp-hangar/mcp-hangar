@@ -40,10 +40,10 @@ def serve_command(
         str,
         typer.Option(
             "--host",
-            help="HTTP server host",
+            help="HTTP server host (default: loopback; a non-loopback host needs auth)",
             envvar="MCP_HTTP_HOST",
         ),
-    ] = "0.0.0.0",
+    ] = "127.0.0.1",
     port: Annotated[
         int,
         typer.Option(

@@ -97,7 +97,7 @@ Examples:
 
 Environment Variables:
   MCP_MODE          Set to "http" to enable HTTP mode
-  MCP_HTTP_HOST     HTTP server host (default: 0.0.0.0)
+  MCP_HTTP_HOST     HTTP server host (default: 127.0.0.1)
   MCP_HTTP_PORT     HTTP server port (default: 8000)
   MCP_LOG_LEVEL     Log level (default: INFO)
   MCP_JSON_LOGS     Set to "true" for JSON formatted logs
@@ -119,7 +119,7 @@ Environment Variables:
         "--host",
         type=str,
         default=None,
-        help="HTTP server host (default: 0.0.0.0)",
+        help="HTTP server host (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",
@@ -162,7 +162,7 @@ Environment Variables:
     # Resolve values: defaults -> env -> CLI args
     # Environment variable defaults
     env_http_mode = os.getenv("MCP_MODE", "stdio") == "http"
-    env_http_host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
+    env_http_host = os.getenv("MCP_HTTP_HOST", "127.0.0.1")
     env_http_port = int(os.getenv("MCP_HTTP_PORT", "8000"))
     env_log_level = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
     env_json_logs = os.getenv("MCP_JSON_LOGS", "false").lower() == "true"

@@ -30,7 +30,7 @@ class TestParseArgs:
             default_config = str(resolve_config_path().path)
 
         assert config.http_mode is False
-        assert config.http_host == "0.0.0.0"
+        assert config.http_host == "127.0.0.1"
         assert config.http_port == 8000
         # Always a path, never None: bootstrap watches it for reload (#1657).
         assert config.config_path == default_config
