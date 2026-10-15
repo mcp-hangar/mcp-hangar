@@ -423,7 +423,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     Examples:
         mcp-hangar init
         mcp-hangar init --bundle starter
-        mcp-hangar init --MCP servers filesystem,github,sqlite
+        mcp-hangar init --servers filesystem,fetch,git
         mcp-hangar init --non-interactive --bundle developer
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
