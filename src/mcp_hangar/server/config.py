@@ -1066,6 +1066,24 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
             _register_config_pins(tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key)
 
 
+def _subprocess_command(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
+    """The command a subprocess server runs: its `command` followed by its `args` (#1658).
+
+    `args` was read for docker only, so a subprocess server started without the
+    paths `init` and `add` write there, and nothing said so.
+    """
+    command = spec_dict.get("command")
+    args = spec_dict.get("args")
+    if args is None or McpServerMode.normalize(spec_dict.get("mode", "subprocess")) != McpServerMode.SUBPROCESS:
+        return command
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise ConfigurationError(f"mcp_server '{mcp_server_id}': args must be a list of strings, got {args!r}")
+    if not isinstance(command, list):
+        # No command, or one the server refuses by its own check: leave it to that check.
+        return command
+    return [*command, *args]
+
+
 @_within_staging
 def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:  # noqa: C901 -- baseline CC=37; split before extending
     """Load a single mcp_server configuration.
@@ -1160,7 +1178,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # running server when these are unchanged (#1426).
     built_with: dict[str, Any] = {
         "mode": spec_dict.get("mode", "subprocess"),
-        "command": spec_dict.get("command"),
+        "command": _subprocess_command(mcp_server_id, spec_dict),
         "image": spec_dict.get("image"),
         "endpoint": spec_dict.get("endpoint"),
         "env": spec_dict.get("env", {}),
