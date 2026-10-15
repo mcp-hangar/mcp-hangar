@@ -443,6 +443,7 @@ class SetToolAccessPolicyHandler(CommandHandler):
                 target_id=command.target_id,
                 allow_list=command.allow_list,
                 deny_list=command.deny_list,
+                set_by=command.set_by,
             )
         )
 
@@ -478,7 +479,9 @@ class ClearToolAccessPolicyHandler(CommandHandler):
         )
 
         self._tap_store.clear_policy(scope=command.scope, target_id=command.target_id)
-        self._event_bus.publish(ToolAccessPolicyCleared(scope=command.scope, target_id=command.target_id))
+        self._event_bus.publish(
+            ToolAccessPolicyCleared(scope=command.scope, target_id=command.target_id, cleared_by=command.cleared_by)
+        )
 
         return {
             "scope": command.scope,

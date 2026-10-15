@@ -33,12 +33,12 @@ from mcp_hangar.auth.queries.queries import (
     ListPrincipalsQuery,
 )
 from mcp_hangar.domain.exceptions import ValidationError
-from mcp_hangar.domain.value_objects.security import Principal
+from mcp_hangar.server.api.actor import request_actor
 from mcp_hangar.server.api.middleware import dispatch_command, dispatch_query
 from mcp_hangar.server.api.serializers import HangarJSONResponse
 
 #: Body fields that once named the actor of an auth mutation (#1649).
-_ACTOR_FIELDS = ("created_by", "revoked_by", "assigned_by", "updated_by")
+_ACTOR_FIELDS = ("created_by", "revoked_by", "assigned_by", "updated_by", "set_by", "cleared_by")
 
 
 def _actor(request: Request, body: Any = None) -> str:
@@ -67,10 +67,7 @@ def _actor(request: Request, body: Any = None) -> str:
                     f"'{field}' is not accepted: the actor is the authenticated principal",
                     field=field,
                 )
-    state = request.scope.get("state")
-    auth_context = state.get("auth") if isinstance(state, dict) else getattr(state, "auth", None)
-    principal_id = getattr(getattr(auth_context, "principal", None), "id", None)
-    return str(principal_id) if principal_id is not None else Principal.anonymous().id.value
+    return request_actor(request)
 
 
 async def create_api_key(request: Request) -> HangarJSONResponse:
@@ -473,6 +470,7 @@ async def set_tool_access_policy(request: Request) -> HangarJSONResponse:
             target_id=target_id,
             allow_list=body.get("allow_list", []),
             deny_list=body.get("deny_list", []),
+            set_by=_actor(request, body),
         )
     )
     return HangarJSONResponse(result)
@@ -531,7 +529,7 @@ async def clear_tool_access_policy(request: Request) -> Response:
             status_code=400,
         )
 
-    await dispatch_command(ClearToolAccessPolicyCommand(scope=scope, target_id=target_id))
+    await dispatch_command(ClearToolAccessPolicyCommand(scope=scope, target_id=target_id, cleared_by=_actor(request)))
     return Response(status_code=204)
 
 

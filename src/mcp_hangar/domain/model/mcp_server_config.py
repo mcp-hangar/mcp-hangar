@@ -375,11 +375,25 @@ class McpServerConfig:
 
         if tools_data is not None:
             if isinstance(tools_data, list):
-                # List format: predefined tool schemas
+                # List format: predefined tool schemas. `tools: [add]` reads as
+                # an allow list and is not one, so the loader refuses it (#1728).
+                for entry in tools_data:
+                    if not isinstance(entry, dict):
+                        raise ValueError(
+                            f"Invalid tool schema in the tools list of mcp_server '{mcp_server_id}': "
+                            f"expected a mapping with a name, got {type(entry).__name__} {entry!r}"
+                        )
                 predefined_tools = tools_data
             elif isinstance(tools_data, dict):
                 # Dict format: access policy (allow/deny/approval)
                 tools_access_config = parse_tools_access_config(tools_data, where=f"mcp_servers.{mcp_server_id}.tools")
+            else:
+                # Refused, never skipped: a skipped block is no policy (#1728).
+                raise ValueError(
+                    f"Invalid tools access policy for mcp_server '{mcp_server_id}': "
+                    f"expected a mapping (an access policy) or a list (tool schemas), "
+                    f"got {type(tools_data).__name__} {tools_data!r}"
+                )
 
         # Parse capabilities declaration
         capabilities_data = data.get("capabilities")
