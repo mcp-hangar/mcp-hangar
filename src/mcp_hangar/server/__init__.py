@@ -18,6 +18,9 @@ Usage:
     run_server(cli_config)
 """
 
+import sys
+from pathlib import Path
+
 from mcp_hangar._sdk_compat import FastMCP
 
 # Public API imports
@@ -36,6 +39,7 @@ from .bootstrap import (
     bootstrap,
 )
 from .cli.cli_compat import CLIConfig, parse_args
+from .cli.config_path import ConfigPathSource, MissingConfigFileError, ResolvedConfigPath, require_config_file
 from .config import load_config, load_config_from_file, load_configuration
 from .lifecycle import ServerLifecycle, run_server
 from .state import GROUPS, get_runtime
@@ -60,6 +64,17 @@ def main():
     to server mode.
     """
     cli_config = parse_args()
+    if cli_config.config_path is not None:
+        # The check `serve` makes, for `python -m mcp_hangar.server`: a missing
+        # file is fatal, never a demo config (#1650). Stderr, as stdout is the
+        # MCP channel in stdio mode.
+        try:
+            require_config_file(
+                ResolvedConfigPath(Path(cli_config.config_path), cli_config.config_source or ConfigPathSource.ARGUMENT)
+            )
+        except MissingConfigFileError as e:
+            print(f"Error: {e.message}", file=sys.stderr)
+            sys.exit(1)
     run_server(cli_config)
 
 

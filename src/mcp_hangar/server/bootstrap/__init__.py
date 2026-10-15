@@ -49,7 +49,7 @@ from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import GROUPS, get_runtime
 from .components import ServerComponents, get_auth_compat_exports, load_components
-from .composition import close_what_bootstrap_started
+from .composition import close_what_bootstrap_started, release_process_wiring
 from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_auth_cqrs, init_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
@@ -178,6 +178,7 @@ class ApplicationContext:
 
         # Last: the fleet writer's loop has to outlive every server's stop.
         close_what_bootstrap_started()
+        release_process_wiring()
 
         logger.info("application_context_shutdown_complete")
 
@@ -434,9 +435,6 @@ def bootstrap(
     init_metrics_publisher()
     init_l7_verdict_observer()
 
-    # Ensure data directory exists
-    _ensure_data_dir()
-
     # Load configuration early (needed for runtime rate-limit and event store config)
     # Read the configuration, but do not build the servers it declares yet.
     # Building one reaches for the runtime singleton, and the runtime takes the
@@ -445,6 +443,14 @@ def bootstrap(
     # in-memory config repository for the rest of its life, and every durable
     # half of the fleet then quietly does nothing.
     full_config = _read_configuration(config_path, config_dict)
+
+    # The working directory's `data/`, for the relative defaults that still live
+    # there. Not when the configuration puts the event store at an absolute path,
+    # as the one `init` writes does: every client starts Hangar somewhere of its
+    # own choosing, and an empty `data/` left in it, or a refusal to start in a
+    # directory nobody can write, is what that path exists to avoid (#1772).
+    if not Path(str((full_config.get("event_store") or {}).get("path", "data/events.db"))).is_absolute():
+        _ensure_data_dir()
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.
@@ -657,9 +663,10 @@ def bootstrap(
     if discovery_orchestrator is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
         from ...application.discovery.discovery_registry import DiscoveryRegistry
+        from ...infrastructure.discovery.registry import create_source
 
         discovery_registry = DiscoveryRegistry(orchestrator=discovery_orchestrator)
-        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        register_discovery_handlers(runtime.command_bus, discovery_registry, source_factory=create_source)
         _register_configured_sources(discovery_registry, full_config)
         logger.info("discovery_registry_created")
 

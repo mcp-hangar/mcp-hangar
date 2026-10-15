@@ -41,7 +41,7 @@ Modes:
   gives it, so the give-up lands well inside the window. The retry starts
   neither, ends early as ``blocked``, and readiness holds until the window
   ends, then falls back.
-- ``shutdown``: ``svc-down`` stays down, with ``max_consecutive_failures: 1000``
+- ``shutdown``: ``svc-down`` stays down, with ``max_consecutive_failures: 100``
   and a backoff pinned to half a second. That keeps it dead for a failed start,
   which is the retry's to start, rather than degraded, which is the saga's: so
   the retry is attempting it, every couple of seconds, when shutdown comes.
@@ -106,7 +106,7 @@ def _servers(mode: str, work: Path) -> dict[str, Any]:
             GIVEN_UP: {**_upstream(work / f"{GIVEN_UP}.down"), "max_consecutive_failures": 1},
         }
     if mode == "shutdown":
-        return {DOWN: {**_upstream(work / f"{DOWN}.down"), "max_consecutive_failures": 1000}}
+        return {DOWN: {**_upstream(work / f"{DOWN}.down"), "max_consecutive_failures": 100}}
     if mode == "defaults":
         return {DEFAULT: _upstream(work / f"{DEFAULT}.down")}
     return {IDLE: {**_upstream(work / f"{IDLE}.down"), "idle_ttl_s": 1}, LATE: _upstream(work / f"{LATE}.down")}

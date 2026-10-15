@@ -34,19 +34,35 @@ try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists)
 except ImportError:  # SDK v1
     from mcp.shared.exceptions import McpError  # type: ignore[attr-defined,no-redef]
 
+try:  # SDK v2: the error whose text a client is shown.
+    from mcp.server.mcpserver.exceptions import ToolError as SdkToolError  # noqa: F401 -- re-exported
+except ImportError:  # SDK v1
+    from mcp.server.fastmcp.exceptions import ToolError as SdkToolError  # type: ignore[no-redef]  # noqa: F401
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Static typing follows the SDK v1 FastMCP surface until the pin flips to v2,
-    # so mypy keeps checking the server surface (the runtime resolution below
-    # would otherwise degrade FastMCP to Any under ignore_missing_imports).
-    from mcp.server.fastmcp import Context, FastMCP
+    # Static typing follows the pinned SDK's server surface, so mypy keeps checking
+    # it (the runtime resolution below would otherwise degrade FastMCP to Any under
+    # ignore_missing_imports). 2.3.0 turned `mcp.server.fastmcp` into a stub that
+    # raises on import, so the v2 names are the typed ones.
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver import MCPServer as FastMCP
 else:
     try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
         from mcp.server.mcpserver import Context
         from mcp.server.mcpserver import MCPServer as FastMCP
     except ImportError:  # SDK v1
         from mcp.server.fastmcp import Context, FastMCP
+
+
+class InvalidArgument(SdkToolError, ValueError):
+    """An argument that is not valid, which a client is shown the text of.
+
+    A ``ValueError`` still, for callers that catch one; also the SDK's ``ToolError``,
+    the one exception whose text a client sees (mcp 2.3.0 reports any other as
+    ``Error executing tool <name>``).
+    """
 
 
 # SDK v1 shipped a pluggable task store under ``mcp.shared.experimental.tasks``

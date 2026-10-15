@@ -186,6 +186,13 @@ class _Approvals:
     async def list_by_state(self, state: ApprovalState, provider_id: str | None = None) -> list[ApprovalRequest]:
         return [record for record in self._records.values() if record.state == state]
 
+    async def transition(self, approval_id, from_states, state, decided_by, decided_at, reason):
+        current = await self.get(approval_id)
+        if current is None or current.state not in from_states:
+            return False
+        await self.update_state(approval_id, state, decided_by, decided_at, reason)
+        return True
+
     async def update_state(
         self,
         approval_id: str,

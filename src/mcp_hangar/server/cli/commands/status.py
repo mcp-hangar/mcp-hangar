@@ -21,6 +21,7 @@ from rich.table import Table
 
 from ..config_path import resolve_config_path
 from ..main import GlobalOptions
+from ..services import gateway_api
 
 console = Console()
 
@@ -44,31 +45,35 @@ STATE_ICONS = {
 
 
 def _get_status_from_server() -> dict | None:
-    """Try to get status from running MCP Hangar server.
+    """Get status from the running gateway.
 
     Returns:
-        Status dictionary or None if server not reachable.
+        Status dictionary, or None when no gateway answered or it refused the
+        call (then why goes to stderr, so JSON on stdout stays parseable).
     """
-    # Try to connect to the server via IPC or HTTP
-    # For now, we'll try the HTTP endpoint if server is running
-    import httpx
-
-    try:
-        # Try common ports
-        for port in [8000, 8080]:
-            try:
-                response = httpx.get(
-                    f"http://localhost:{port}/health",
-                    timeout=2.0,
-                )
-                if response.status_code == 200:
-                    return cast(dict, response.json())
-            except httpx.ConnectError:
-                continue
-    except Exception:  # noqa: BLE001 -- fault-barrier: health probe must not crash status command
-        pass
-
-    return None
+    reply = gateway_api.call("GET", "/api/mcp_servers/", timeout=2.0)
+    if not reply.ok or not isinstance(reply.body, dict):
+        if reply.problem():
+            typer.echo(f"Showing configuration only: {reply.problem()}", err=True)
+        return None
+    return {
+        "server_running": True,
+        "gateway": reply.base_url,
+        "mcp_servers": [
+            {
+                "name": p.get("mcp_server_id"),
+                "state": str(p.get("state", "COLD")).upper(),
+                "mode": p.get("mode", "-"),
+                "health_pct": None,
+                "health_status": p.get("health_status"),
+                "tools_count": p.get("tools_count"),
+                "last_used": None,
+                "memory_mb": None,
+                "uptime_s": None,
+            }
+            for p in reply.body.get("mcp_servers", [])
+        ],
+    }
 
 
 def _get_status_from_config(config_path: Path | None) -> dict:
@@ -186,7 +191,7 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
         state_icon = STATE_ICONS.get(state, "??")
 
         health_pct = mcp_server.get("health_pct")
-        health_str = f"{health_pct}%" if health_pct is not None else "-"
+        health_str = f"{health_pct}%" if health_pct is not None else (mcp_server.get("health_status") or "-")
         if health_pct is not None:
             if health_pct >= 90:
                 health_str = f"[green]{health_str}[/green]"
@@ -367,7 +372,7 @@ def status_command(
     Examples:
         mcp-hangar status
         mcp-hangar status --watch
-        mcp-hangar status my-MCP server
+        mcp-hangar status my-mcp-server
         mcp-hangar status --details
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()

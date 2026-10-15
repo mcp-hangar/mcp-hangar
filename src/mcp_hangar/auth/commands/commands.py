@@ -157,12 +157,14 @@ class SetToolAccessPolicyCommand(Command):
         target_id: Identifier of the provider, group, or member.
         allow_list: Tool name patterns to allow (empty = no allow restriction).
         deny_list: Tool name patterns to deny (empty = no deny restriction).
+        set_by: Principal setting the policy; recorded on the event (#1719).
     """
 
     scope: str
     target_id: str
     allow_list: list[str] = field(default_factory=list)
     deny_list: list[str] = field(default_factory=list)
+    set_by: str = "system"
 
 
 @dataclass(frozen=True)
@@ -172,7 +174,9 @@ class ClearToolAccessPolicyCommand(Command):
     Attributes:
         scope: One of "provider", "group", or "member".
         target_id: Identifier of the provider, group, or member.
+        cleared_by: Principal clearing the policy; recorded on the event (#1719).
     """
 
     scope: str
     target_id: str
+    cleared_by: str = "system"

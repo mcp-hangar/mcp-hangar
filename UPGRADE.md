@@ -1,5 +1,431 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.27.5
+
+### `init` writes absolute paths; state follows a configured `event_store.path`
+
+When `event_store.path` is absolute, the saga state file (`saga_state.db`) and the approvals database (`mcp_hangar.db`) now live in the same directory as the event store instead of in `data/` under the working directory. Configurations without an absolute `event_store.path` are unchanged.
+
+Entries written by an earlier `mcp-hangar init` use a bare `mcp-hangar` command and a relative `data/` path, which fails when the client spawns Hangar with a minimal `PATH` or an unwritable working directory. Rerun `mcp-hangar init` to refresh them. If you move to the new location, copy any existing `data/*.db` files next to the new `event_store.path` first.
+
+### The MCP SDK is 2.3.0
+
+`mcp-hangar` now requires `mcp==2.3.0` and `mcp-types==2.3.0`; it was 2.0.0 for
+both. Both stay pinned exactly. Nothing in the configuration changes.
+
+- A project that pins `mcp` itself, or installs `mcp-hangar` beside a package
+  that does, needs `mcp==2.3.0`.
+- The SDK's own defaults changed with it: a 4 MiB request-body limit, a
+  30-minute idle expiry and a cap of 10,000 stateful sessions. Hangar does not
+  override them.
+- `Mcp-Param-*` headers of projected tools are still checked against a call's
+  arguments. 2.3.0 stopped checking them for any tool the SDK had not registered
+  itself. Hangar answers for its own tools since 2.27.4, which this release
+  includes.
+
+## Upgrade to 2.27.4
+
+### An access policy with a key nothing reads refuses the configuration
+
+A policy block may carry only `allow_list`, `deny_list`, `approval_list`,
+`approval_timeout_seconds` and `approval_channel` (and `access` in a
+`tool_access.member.<tenant>` entry). Any other key now refuses startup and a
+reload, naming the path and the key. Before, such a block was read as no policy
+at all, so the tools it meant to restrict were served.
+
+- **If you wrote `tools: {allow: [...], deny: [...]}`**, as the README did: you
+  have had no restriction. Rename the keys to `allow_list` and `deny_list`, and
+  check what the gateway served in the meantime.
+- Run `mcp-hangar config check <file>` before upgrading: it reports the same
+  keys and exits 1.
+- A reload that hits this keeps the policy that was in force.
+
+## Upgrade to 2.27.0
+
+### Trusting private networks for servers registered over the API
+
+`POST /api/mcp_servers` still refuses every private endpoint by default. To let
+the Kubernetes operator register a server it runs in the cluster, list the
+cluster's Service range in `config.yaml`:
+
+```yaml
+ssrf:
+  trusted_networks: ["10.96.0.0/12"]
+```
+
+- The list applies to every caller allowed to register a server, not only the
+  operator. Keep it as narrow as the servers need.
+- The Service range also holds the kube-apiserver's ClusterIP and every other
+  Service in the cluster. Add the pod range only for headless Services.
+- Loopback, link-local (including the cloud metadata endpoint) and the
+  unspecified ranges are refused at startup and on reload. So is a CIDR with
+  host bits set.
+
+## Upgrade to 2.26.0
+
+### deleting a configured server over the API is refused
+
+`DELETE /api/mcp_servers/{id}` on a server that the configuration file declares now answers `409` with `"error": "declared_in_config"`. The server keeps running. Before, the delete stopped it and removed it from the pool, and the next reload or restart brought it back.
+
+- To remove a configured server, delete it from the configuration and reload.
+- To take it out of service for a while, stop it instead of deleting it.
+
+Servers added with `POST /api/mcp_servers`, and servers that discovery registers, are deleted as before.
+
+The Kubernetes operator sent this delete whenever an MCPServer CR was deleted, including a CR that mirrored a configured server. Operator versions that include mcp-hangar/mcp-hangar-operator#202 no longer do.
+
+## Upgrade to 2.25.0
+
+### An invalid access policy refuses the configuration
+
+A `tools:` access policy (`allow_list` / `deny_list` / `approval_list`) on a
+server, a group, a group member or a `tool_access.member` tenant entry, and an
+`access:` block, is now refused when one of its fields is invalid: an
+`approval_timeout_seconds` that is not a positive integer, an empty or
+non-string pattern, a whitespace-only `approval_channel`, or a list given as a
+number.
+
+Before, the gateway logged `invalid_tools_access_config` (or the group, member,
+tenant or `access` variant) at warning and booted with **no policy** for that
+scope. Now the boot fails, and a reload is refused with the previous policy kept
+in force, with a `ConfigurationError` naming the scope and the field, for
+example:
+
+```text
+Invalid tools access policy for mcp_server 'calc': Invalid approval_timeout_seconds: 0
+```
+
+A configuration that booted with one of those warnings in its log will not boot
+on this release. Fix the field the error names. A policy you meant to have no
+effect is removed by deleting the block, not by leaving it invalid.
+
+### The actor of an auth mutation is the caller; `*_by` body fields are refused
+
+The auth REST routes used to accept the actor of a change in the request body:
+`created_by` on `POST /api/auth/keys` and `POST /api/auth/roles`, `revoked_by` on
+`DELETE /api/auth/keys/{key_id}` and `DELETE /api/auth/roles/revoke`,
+`assigned_by` on `POST /api/auth/roles/assign`, and `updated_by` on
+`PATCH /api/auth/roles/{role_name}`. Each was optional and defaulted to
+`"system"`, and whatever it said was recorded in the domain event, the log line
+and the response.
+
+The actor is now always the principal that authenticated the request. A body
+that still carries one of those fields -- whatever its value, including `null`
+or the caller's own id -- is refused with `422` and a `ValidationError` naming
+the field, and nothing is changed. `DELETE /api/auth/roles/{role_name}` records
+the caller as `deleted_by` instead of `"system"`, and `POST /api/auth/keys`
+returns `created_by` alongside the key.
+
+Old:
+
+```json
+{"principal_id": "user:bob", "role_name": "developer", "assigned_by": "user:alice"}
+```
+
+New -- drop the field; the assigner is whoever the key or token belongs to:
+
+```json
+{"principal_id": "user:bob", "role_name": "developer"}
+```
+
+A script or client that sent these fields must stop sending them. With auth
+disabled no principal is attached to a request, and the actor is recorded as
+`anonymous`, never `system`; in practice the key and role routes have no store
+to write to with auth off, so this only names the value should one be wired.
+
+### A missing configuration file stops the gateway
+
+There is no built-in demo configuration any more. Before, when the
+configuration file was not there, Hangar logged `config_not_found_using_default`
+at INFO and booted a `math_subprocess` backend with every `hangar_*` tool --
+stop, load and `reload_config` included -- and none of your pins, policies or
+auth. That happened for a mistyped `--config`, an `MCP_CONFIG` naming a missing
+file, a `config_path` given to `bootstrap()` or `Hangar.from_config()`, and a
+start with no configuration file anywhere.
+
+Now each of those refuses to start. `mcp-hangar serve`, a bare `mcp-hangar` and
+`python -m mcp_hangar.server` exit 1 with the path and where it came from on
+stderr, for example:
+
+```text
+Error: Configuration file /etc/hangar/confg.yaml (named on the command line) does not exist. Nothing is served without the configuration that was asked for.
+```
+
+`bootstrap()` and `Hangar.start()` raise `MissingConfigFileError` (a
+`ConfigurationError`). A path that is a directory or is not readable is refused
+the same way.
+
+With no flag, no `MCP_CONFIG`, no `./config.yaml` and no
+`~/.config/mcp-hangar/config.yaml`, the message says to run `mcp-hangar init`.
+
+What to do: if a deployment logged `config_not_found_using_default`, it was
+running the demo configuration. Fix the path, or create the file with
+`mcp-hangar init`. For a gateway with no servers, use a file holding
+`mcp_servers: {}`. From Python, a
+configuration with no file goes in `bootstrap(config_dict=...)` or `Hangar.from_builder(...)`.
+
+### Every command reads the configuration file by one rule
+
+`init`, `status`, `add`, `remove`, `pin`, `serve`, a bare `mcp-hangar`,
+`config check` and `python -m mcp_hangar.server` now resolve the configuration
+file the same way, highest first:
+
+1. a path on the command line -- the command's own flag or argument, then the
+   global `--config`;
+2. `$MCP_CONFIG`;
+3. `./config.yaml`, if the working directory has one;
+4. `~/.config/mcp-hangar/config.yaml`, the file `init` writes.
+
+What changes for you:
+
+- **`serve` with no flag, no `MCP_CONFIG` and no `./config.yaml`** used to boot
+  the built-in demo config. It now reads `~/.config/mcp-hangar/config.yaml` if
+  `init` wrote one, and refuses to start if there is none (see "A missing
+  configuration file stops the gateway"). A `./config.yaml` beside the process still wins, so a setup
+  that ran `serve` next to its file is unchanged, and so is the container image
+  (its working directory is `/app`).
+- **`init`, `add`, `remove` and `status` in a directory with a
+  `./config.yaml`** used to write or report `~/.config/mcp-hangar/config.yaml`.
+  They now use `./config.yaml`, the file `serve` there reads. `init -y` backs
+  that file up and replaces it, and `add` and `remove` edit it in place -- so
+  run them in a directory whose `config.yaml` is Hangar's, or pass
+  `--config ~/.config/mcp-hangar/config.yaml` (or `init --config-path`) to keep
+  the old target.
+- **`status` with a named file that does not exist** used to report whichever
+  default file it found next. It now reports that no configuration was found at
+  the named path.
+- **`MCP_CONFIG` no longer outranks a global `--config`.**
+  `MCP_CONFIG=a.yaml mcp-hangar --config b.yaml serve` used to run `a.yaml`,
+  because `serve`'s own `--config` read the variable. It now runs `b.yaml`.
+- **`pin` and `config check` honour the global `--config`.**
+  `mcp-hangar --config X pin --check` used to exit 2 looking for
+  `./config.yaml`; it now checks `X`.
+- **Reload works on a gateway started without `--config`.** The watcher,
+  SIGHUP, the reload tool and `POST /api/config/reload` used to fail with "No
+  configuration path specified"; they now reload the file the gateway booted
+  from.
+
+### The Langfuse adapter and its settings are removed: send spans to Langfuse over OTLP
+
+Nothing called the Langfuse adapter after 2.22.0, so these settings sent
+nothing to Langfuse. They are removed:
+
+- `observability.langfuse` in `config.yaml` (`enabled`, `public_key`,
+  `secret_key`, `host`, `sample_rate`, `scrub_inputs`, `scrub_outputs`)
+- `MCP_LANGFUSE_ENABLED`, `MCP_LANGFUSE_SAMPLE_RATE`,
+  `MCP_LANGFUSE_SCRUB_INPUTS`, `MCP_LANGFUSE_SCRUB_OUTPUTS`
+- `HANGAR_LANGFUSE_ENABLED`, `HANGAR_LANGFUSE_SAMPLE_RATE`,
+  `HANGAR_LANGFUSE_SCRUB_INPUTS`, `HANGAR_LANGFUSE_SCRUB_OUTPUTS`
+- the `langfuse` extra (`pip install mcp-hangar[langfuse]`)
+- in Python, `create_runtime(observability_config=...)`,
+  `Runtime.observability`, `Runtime.observability_config`,
+  `mcp_hangar.bootstrap.runtime.ObservabilityConfig`, the
+  `mcp_hangar.integrations` package, `ApplicationContext.observability_adapter`;
+  `init_observability()` now returns only the parsed config, and
+  `shutdown_observability()` takes no argument
+
+What happens to a configuration that still sets them:
+
+- A scrub setting (`MCP_LANGFUSE_SCRUB_*`, `HANGAR_LANGFUSE_SCRUB_*`, or
+  `observability.langfuse.scrub_*`), whatever its value, **refuses the boot**
+  with a `ConfigurationError` naming it. Before, it was accepted and did
+  nothing. Delete it. Hangar's spans carry no tool arguments or results; to
+  redact what they do carry, put an OpenTelemetry Collector with an
+  `attributes` or `redaction` processor in front of Langfuse.
+- The other environment variables are named in a `langfuse_settings_removed`
+  warning, and the boot continues.
+- The rest of an `observability.langfuse` block is named as removed by the
+  unknown-key check: a warning, or a refusal under `HANGAR_CONFIG_STRICT` and
+  in `mcp-hangar config check`.
+
+`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST` are the
+Langfuse SDK's own variables and are left alone.
+
+To send Hangar's spans to Langfuse, use the OTLP exporter (Langfuse accepts
+OTLP over HTTP, not gRPC):
+
+```sh
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Basic%20<base64 of public_key:secret_key>,x-langfuse-ingestion-version=4"
+```
+
+Use the `TRACES_` variables: the generic `OTEL_EXPORTER_OTLP_ENDPOINT` also
+turns on OTLP audit log export, which Langfuse does not accept. The full recipe
+is `examples/langfuse/README.md`.
+
+### A pinned server's catalogue is re-listed every 60 seconds
+
+Before, the catalogue a digest pin is checked against was refreshed only when a
+server started and when its upstream sent `tools/list_changed`. An upstream
+that changed a pinned tool's schema without announcing it was served under the
+old pin until the gateway restarted.
+
+Now every READY server that a pin covers -- a `tool_projection.pins` or
+`tenant_overrides.<tenant>.pins` entry on the server itself or on a group it is
+a member of -- is re-listed on an interval, set by a new top-level key:
+
+```yaml
+tool_projection:
+  pin_recheck_interval_s: 60   # the default; 0 turns the re-check off
+```
+
+A non-zero value must be between 5 and 3600; anything else, a string or a
+boolean included, refuses the boot. The value is read at start, so a reload
+does not change it. Servers that are `cold`, starting, degraded or DEAD are
+not listed and not started.
+
+What to expect:
+
+- A drifted pinned tool is refused (`ToolDigestMismatchError`, gate reason
+  `digest_mismatch`) at most one interval, plus the time the pass takes, after
+  the upstream changed it. The `tool_digest_pin_drift_detected` warning and one
+  `DigestMismatchEvent` are emitted when the pass first sees it.
+- One `tools/list` request per pinned server per interval reaches its
+  upstream, from every replica.
+- A re-list also refreshes the rest of the catalogue. A tool the upstream added
+  without announcing it is now seen within one interval as well. On a pinned
+  server whose `capabilities` enforcement blocks or quarantines a tool outside
+  `expected_tools`, that server is now blocked at its next call instead of
+  running on until a restart.
+
+### A SIEM export the gateway cannot perform refuses startup
+
+Before, an unknown `MCP_COMPLIANCE_FORMAT` logged `unknown_compliance_format`
+at warning and the gateway started with **no export**. An
+`MCP_COMPLIANCE_OUTPUT` whose directory did not exist, or could not be written,
+started too, and every record was logged as an error and dropped.
+
+Now each refuses the boot with a `ConfigurationError` naming the value:
+
+```text
+Unknown MCP_COMPLIANCE_FORMAT 'cefx'; expected one of: cef, json-lines, jsonlines, leef, syslog
+MCP_COMPLIANCE_OUTPUT '/var/log/hangar/audit.cef' cannot be appended to: [Errno 2] No such file or directory: ...
+```
+
+So does a set `MCP_COMPLIANCE_FORMAT` whose exporter cannot be imported, which
+used to log `compliance_exporter_unavailable` and start without export. The
+format is now matched after trimming whitespace, so `" cef"` is read as `cef`.
+
+A deployment that started with one of those in its log will not start on this
+release. Fix the format, create the output directory writable by the gateway's
+user, or unset `MCP_COMPLIANCE_OUTPUT` to export to stderr. To run with no SIEM
+export, unset `MCP_COMPLIANCE_FORMAT`.
+
+A write that fails after startup does not stop the gateway or refuse calls. It
+is counted in `mcp_hangar_compliance_export_failures_total` (labels `format`
+and `reason`), and `/health/ready` and `hangar_health` carry a
+`compliance_export` field whose `status` is `degraded` until a write succeeds
+again; `/health/ready` keeps answering 200. Alert on the counter.
+
+### Approving a held call whose batch was cancelled is refused with 409
+
+When a call is held for approval and its `hangar_call` batch deadline passes
+before anyone answers, the call will not run. Before, approving it afterwards
+answered `200` with `state: "approved"`, the record said `approved`, and
+`ToolApprovalGranted` was published naming the approver in `decided_by`.
+
+Now `POST /api/approvals/{id}/resolve` with `"decision": "approve"` answers
+`409`:
+
+```json
+{"error": "Approval refused: the held call was cancelled and did not run", "state": "cancelled"}
+```
+
+The approval record moves to a new terminal state, `cancelled`
+(`GET /api/approvals?state=cancelled` lists them), and the gate publishes
+`ToolApprovalCancelled`, whose `attempted_by` names the approver, instead of
+`ToolApprovalGranted`. The `mcp_hangar_approval_decisions` counter gains the
+`decision="cancelled"` value. On a `cancelled` record, `decided_by` names who
+tried to approve the call, not who let it through: nothing did.
+
+A denial after the deadline is still recorded as a denial, and an unanswered
+hold still expires. An approval tool or dashboard that treats every `409` from
+resolve as "already resolved" should read `state`; an audit consumer that
+enumerates approval events or states should add the new ones. An approval that
+lands on a different gateway instance than the held call still answers `200`
+there; the instance holding the call records it `cancelled` and publishes
+`ToolApprovalCancelled`, not a grant.
+
+### A tool access list written as a string or a mapping refuses the configuration
+
+`allow_list`, `deny_list` and `approval_list` in a `tools:` policy (on a
+server, a group, a group member or a `tool_access.member` tenant entry) and in
+an `access:` block must now be lists.
+
+Before, a string was split into its characters and a mapping was read as its
+keys, and the gateway booted. `deny_list: add` became the patterns `a`, `d`,
+`d`, so `add` was **allowed**. Now the boot fails, and a reload is refused with
+the previous policy kept in force, with a `ConfigurationError` naming the scope
+and the field, for example:
+
+```text
+Invalid tools access policy for mcp_server 'calc': Invalid deny_list: expected a list of patterns, got str 'add'
+```
+
+Old form:
+
+```yaml
+tools:
+  deny_list: add
+```
+
+New form:
+
+```yaml
+tools:
+  deny_list: [add]
+```
+
+A configuration that used the old form booted with a different policy from
+the one written; it will not boot on this release until the list is fixed.
+`hangar_load` now refuses a policy that fails to parse (an empty pattern in
+`allow_tools`, `deny_tools` or `approval_tools`, or a value that is not a list)
+before anything is installed. It used to install and start the server first,
+and leave it loaded with no policy.
+
+### A tool access policy block that is not a mapping refuses the configuration
+
+A policy block that is present must now be a mapping. This covers `tools:` on a
+server, a group or a group member, `access:` and each `access.<kind>`, and
+`tool_access:`, `tool_access.member` and each `tool_access.member.<tenant>`
+entry on a server. On a server, and on a group member that defines its server
+inline, `tools:` may still be a list of tool schemas, and each item must be a
+mapping.
+
+Before, a block of any other shape was skipped and the gateway booted with no
+policy for that scope: `tools: add` left every tool allowed. A key with no value
+(YAML null) was skipped the same way. Now the boot fails, and a reload is
+refused with the previous policy kept in force, with a `ConfigurationError`
+naming the scope, for example:
+
+```text
+Invalid tools access policy for group 'pool': expected a mapping, got str 'add'
+```
+
+Old form:
+
+```yaml
+tools: add
+access:
+  prompt:
+```
+
+New form:
+
+```yaml
+tools:
+  deny_list: [add]
+# or remove the key, or write `access: {}` / `prompt: {}` for no policy
+```
+
+`tools: [add]` on a server was read as a tool schema list and stopped the boot
+with an `AttributeError`; it is now a `ConfigurationError` that says a policy is
+a mapping. A list under `tools:` on a group, or on a member that names a server
+declared under `mcp_servers`, used to be ignored and is now refused.
+`hangar_load` takes no policy block, only the `allow_tools`, `deny_tools` and
+`approval_tools` lists, which #1718 already refuses when they are not lists.
+
 ## Upgrade to 2.24.0
 
 ### `mcp.server.id` names the group on every span of a group call; the member is `hangar.route.backend`

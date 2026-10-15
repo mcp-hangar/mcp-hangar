@@ -41,6 +41,7 @@ from ..services import (
     get_mcp_servers_by_category_filtered,
     run_smoke_test,
 )
+from ..services.init_manifest import restore
 from ..services.mcp_clients import McpClient, client_by_key, detect_clients, write_hangar_entry
 
 
@@ -312,6 +313,24 @@ def _show_completion_summary(
     console.print("\n[dim]Need help? Visit https://mcp-hangar.io/docs[/dim]")
 
 
+def _undo_init(*, force: bool) -> None:
+    """Restore the client configs `init` changed (#1771), or say why not."""
+    result = restore(force=force)
+    if result is None:
+        console.print("Nothing to undo: init has not changed a client config on this machine.")
+        return
+    if result.refused:
+        console.print("[red]Not restored.[/red] These files changed since init wrote them:\n")
+        for changed in result.refused:
+            console.print(f"  {changed.path}: {changed.summary}")
+        console.print("\nNothing was changed. Run `mcp-hangar init --undo --force` to restore them anyway.")
+        raise typer.Exit(1)
+    for path in result.restored:
+        console.print(f"  [green]Restored:[/green] {path}")
+    for path in result.removed:
+        console.print(f"  [green]Removed:[/green] {path} (init created it)")
+
+
 def _resolve_clients(
     client_keys: list[str] | None,
     claude_config_path: Path | None,
@@ -365,7 +384,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     ] = False,
     bundle: Annotated[
         str | None,
-        typer.Option("--bundle", "-b", help="MCP server bundle to install: starter, developer, data"),
+        typer.Option("--bundle", "-b", help="MCP server bundle to install: starter, developer"),
     ] = None,
     mcp_servers_opt: Annotated[
         str | None,
@@ -409,6 +428,18 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
         bool,
         typer.Option("--reset", help="Reset existing configuration"),
     ] = False,
+    undo: Annotated[
+        bool,
+        typer.Option(
+            "--undo",
+            help="Put every MCP client config back as it was before init first changed it, and stop. "
+            "Refuses if a file changed since init wrote it, unless --force.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="With --undo: restore even the files edited since init wrote them"),
+    ] = False,
 ):
     """Initialize MCP Hangar with interactive setup wizard.
 
@@ -423,10 +454,17 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     Examples:
         mcp-hangar init
         mcp-hangar init --bundle starter
-        mcp-hangar init --MCP servers filesystem,github,sqlite
+        mcp-hangar init --servers filesystem,fetch,git
         mcp-hangar init --non-interactive --bundle developer
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
+
+    if force and not undo:
+        console.print("[red]--force only goes with --undo.[/red]")
+        raise typer.Exit(2)
+    if undo:
+        _undo_init(force=force)
+        return
 
     # Initialize managers
     # The file every other command reads (#1657). Absolute, because it is
@@ -509,7 +547,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             raise CLIError(
                 message=f"Unknown bundle: {bundle}",
                 reason=f"Available bundles: {', '.join(PROVIDER_BUNDLES.keys())}",
-                suggestions=["Use --bundle=starter, --bundle=developer, or --bundle=data"],
+                suggestions=["Use --bundle=starter or --bundle=developer"],
             )
 
         available, unavailable = filter_bundle_by_availability(bundle.lower(), deps)
@@ -688,6 +726,8 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             console.print(f"  [green]Updated:[/green] {client.path}")
             if backup:
                 console.print(f"  [dim]Backed up to: {backup}[/dim]")
+        if written_clients:
+            console.print("  [dim]To put the client configs back as they were: mcp-hangar init --undo[/dim]")
 
     _show_completion_summary(
         mcp_servers=selected_mcp_servers,

@@ -266,10 +266,10 @@ class ListAllRolesHandler(QueryHandler):
 class ListPrincipalsHandler(QueryHandler):
     """Handler for ListPrincipalsQuery.
 
-    Returns all principals that have at least one role assignment.
-    Uses InMemoryRoleStore._assignments or SQLiteRoleStore role_assignments table
-    via a new list_principals() method. Falls back to scanning known assignments
-    if the store does not expose a dedicated method.
+    Returns all principals that have at least one role assignment, from the
+    store's own ``list_principals()``. It used to probe for that method or a
+    private ``_assignments`` and answered an empty list for any store that had
+    neither, which was every store but the in-memory one (#1672).
     """
 
     def __init__(self, role_store: IRoleStore):
@@ -281,21 +281,7 @@ class ListPrincipalsHandler(QueryHandler):
         Returns:
             Dict with "principals" list; each item has principal_id and roles.
         """
-        # Use list_principals() if available (SQLiteRoleStore); otherwise
-        # fall back to the _assignments dict (InMemoryRoleStore)
-        if hasattr(self._store, "list_principals"):
-            principals_data = self._store.list_principals()
-        elif hasattr(self._store, "_assignments"):
-            # InMemoryRoleStore: _assignments[principal_id][scope] = set[role_names]
-            principals_data = []
-            for principal_id, scope_map in self._store._assignments.items():
-                all_roles: list[str] = []
-                for role_set in scope_map.values():
-                    all_roles.extend(role_set)
-                if all_roles:
-                    principals_data.append({"principal_id": principal_id, "roles": sorted(set(all_roles))})
-        else:
-            principals_data = []
+        principals_data = self._store.list_principals()
 
         return {
             "principals": principals_data,

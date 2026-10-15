@@ -19,7 +19,7 @@ from ...domain.events import (
     McpServerDeregistered,
     McpServerRegistered,
 )
-from ...domain.exceptions import McpServerNotFoundError, ValidationError
+from ...domain.exceptions import McpServerDeclaredInConfigError, McpServerNotFoundError, ValidationError
 from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
@@ -78,6 +78,7 @@ class CreateMcpServerHandler(CommandHandler):
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
         coordinated: Callable[[], bool] | None = None,
+        log_buffers: ILogBuffers | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -93,11 +94,15 @@ class CreateMcpServerHandler(CommandHandler):
                 process of one gateway, so every replica that learned about the
                 server would start its own copy. Absent means standalone, where
                 every mode is available and always was.
+            log_buffers: Where a created server gets the log buffer its output
+                is read into (#1747), as a reloaded (#1502) and a hot-loaded
+                (#1506) one do. None means no buffer, as before.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
         self._coordinated = coordinated or (lambda: False)
+        self._log_buffers = log_buffers
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -157,6 +162,10 @@ class CreateMcpServerHandler(CommandHandler):
         if self._fleet_writer is not None:
             self._fleet_writer.save(snapshot_of(mcp_server))
 
+        # Before it joins the repository, so nothing can start it -- and write
+        # output -- with no buffer attached.
+        if self._log_buffers is not None and self._log_buffers.attach(command.mcp_server_id, mcp_server):
+            logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=command.mcp_server_id)
         self._repository.add(command.mcp_server_id, mcp_server)
 
         self._event_bus.publish(
@@ -386,6 +395,7 @@ class DeleteMcpServerHandler(CommandHandler):
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
         log_buffers: ILogBuffers | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -397,11 +407,14 @@ class DeleteMcpServerHandler(CommandHandler):
             log_buffers: Where the deleted server's log buffer is released.
                 Omitted means none is, and its output stays registered under an
                 id that is free again -- what deleting did before #1506.
+            declared_in_config: Whether the gateway configuration declares a
+                server; such a server is refused (#1744). Omitted means none is.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
         self._log_buffers = log_buffers
+        self._declared_in_config = declared_in_config
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -414,8 +427,16 @@ class DeleteMcpServerHandler(CommandHandler):
 
         Raises:
             McpServerNotFoundError: If mcp_server does not exist.
+            McpServerDeclaredInConfigError: If the configuration declares it.
         """
         mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
+
+        # Before anything is stopped: the next reload or restart would bring a
+        # declared server back, so the delete would only look like it worked
+        # (#1744). Whoever asked -- the API, the Kubernetes operator, a
+        # discovery source whose name collides with a declared one -- is told.
+        if self._declared_in_config is not None and self._declared_in_config(command.mcp_server_id):
+            raise McpServerDeclaredInConfigError(command.mcp_server_id)
 
         # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
         # may still hold its connection (#1361). I/O (shutdown) is done outside
@@ -738,6 +759,7 @@ def register_crud_handlers(
     coordinated: Callable[[], bool] | None = None,
     log_buffers: ILogBuffers | None = None,
     restore_gap: str | None = None,
+    declared_in_config: Callable[[str], bool] | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -750,15 +772,22 @@ def register_crud_handlers(
         fleet_writer: Where fleet changes are recorded so a restart can rebuild
             them. None leaves the fleet in memory only, as before.
         coordinated: Whether this gateway shares its state with peers.
-        log_buffers: Where a deleted server's log buffer is released (#1506).
+        log_buffers: Where a created server's log buffer is attached (#1747) and
+            a deleted server's is released (#1506).
         restore_gap: Why the next start will not read the fleet back, or None
             when it will; reported by the L7 policy push (#1306).
+        declared_in_config: Whether the configuration declares a server, which
+            the delete handler then refuses (#1744).
     """
     # McpServer handlers
     command_bus.register(
         CreateMcpServerCommand,
         CreateMcpServerHandler(
-            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, coordinated=coordinated
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            coordinated=coordinated,
+            log_buffers=log_buffers,
         ),
     )
     command_bus.register(
@@ -774,7 +803,11 @@ def register_crud_handlers(
     command_bus.register(
         DeleteMcpServerCommand,
         DeleteMcpServerHandler(
-            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, log_buffers=log_buffers
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            log_buffers=log_buffers,
+            declared_in_config=declared_in_config,
         ),
     )
 

@@ -4,6 +4,7 @@ Provides authorizer and in-memory role store for role-based access control.
 """
 
 import threading
+from typing import Any
 
 import structlog
 
@@ -246,6 +247,18 @@ class InMemoryRoleStore(IRoleStore):
 
             # Convert role names to Role objects
             return [self._roles[name] for name in role_names if name in self._roles]
+
+    def list_principals(self) -> list[dict[str, Any]]:
+        """List principals with at least one assignment."""
+        with self._lock:
+            out = []
+            for principal_id in sorted(self._assignments):
+                names = sorted(
+                    {name for scope_roles in self._assignments[principal_id].values() for name in scope_roles}
+                )
+                if names:
+                    out.append({"principal_id": principal_id, "roles": names})
+            return out
 
     def assign_role(
         self,

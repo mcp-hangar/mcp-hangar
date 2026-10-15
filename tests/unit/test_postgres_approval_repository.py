@@ -469,3 +469,56 @@ class TestUpdateState:
             await repo.update_state("appr-1", ApprovalState.APPROVED, decided_by=None, decided_at=None, reason=None)
 
         mock_conn.rollback.assert_called()
+
+
+class TestTransition:
+    """The conditional update every approval state change goes through (#1794)."""
+
+    @pytest.mark.asyncio
+    async def test_it_updates_only_from_the_named_states_and_commits(self):
+        repo, mock_conn, mock_cursor = _make_repo()
+        mock_cursor.rowcount = 1
+        decided_at = datetime(2026, 8, 1, 12, 4, 0, tzinfo=UTC)
+
+        moved = await repo.transition(
+            "appr-1", (ApprovalState.PENDING,), ApprovalState.APPROVED, "user:bob", decided_at, "ok"
+        )
+
+        assert moved is True
+        (call,) = [c for c in mock_cursor.execute.call_args_list if "UPDATE approval_requests" in c.args[0]]
+        sql, params = call.args
+        assert "WHERE approval_id = %s AND state = ANY(%s)" in sql
+        assert "?" not in sql
+        assert params == (ApprovalState.APPROVED.value, "user:bob", decided_at.isoformat(), "ok", "appr-1", ["pending"])
+        mock_conn.commit.assert_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("rowcount", [0, 2])
+    async def test_it_reports_a_lost_race_when_the_row_count_is_not_one(self, rowcount):
+        repo, _mock_conn, mock_cursor = _make_repo()
+        mock_cursor.rowcount = rowcount
+
+        moved = await repo.transition("appr-1", (ApprovalState.PENDING,), ApprovalState.EXPIRED, None, None, None)
+
+        assert moved is False
+
+    @pytest.mark.asyncio
+    async def test_no_source_states_moves_nothing_and_asks_the_database_nothing(self):
+        repo, _mock_conn, mock_cursor = _make_repo()
+
+        assert await repo.transition("appr-1", (), ApprovalState.EXPIRED, None, None, None) is False
+        assert not [c for c in mock_cursor.execute.call_args_list if "UPDATE approval_requests" in c.args[0]]
+
+    @pytest.mark.asyncio
+    async def test_it_rolls_back_and_reraises_on_failure(self):
+        repo, mock_conn, mock_cursor = _make_repo()
+
+        def fail_on_update(sql, *args, **kwargs):
+            if "UPDATE approval_requests" in sql:
+                raise RuntimeError("connection reset")
+
+        mock_cursor.execute.side_effect = fail_on_update
+
+        with pytest.raises(RuntimeError, match="connection reset"):
+            await repo.transition("appr-1", (ApprovalState.PENDING,), ApprovalState.DENIED, None, None, None)
+        mock_conn.rollback.assert_called()

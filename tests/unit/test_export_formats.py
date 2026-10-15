@@ -7,6 +7,7 @@ from typing import Protocol, cast
 
 import pytest
 
+from mcp_hangar import __version__
 from mcp_hangar.compliance.jsonlines_exporter import JSONLinesExporter
 from mcp_hangar.compliance.leef_exporter import LEEFExporter
 from mcp_hangar.compliance.syslog_exporter import SyslogExporter
@@ -157,7 +158,7 @@ def test_leef_tool_invocation_uses_leef_header_and_extensions() -> None:
     )
 
     line = lines[0]
-    assert line.startswith("LEEF:2.0|MCP Hangar|MCP Hangar|0.15.0|101|\t")
+    assert line.startswith(f"LEEF:2.0|MCP Hangar|MCP Hangar|{__version__}|101|\t")
     assert "\tproto=tool" in line
     assert "\taction=add" in line
     assert "\tduration=12.5" in line
@@ -173,7 +174,7 @@ def test_leef_provider_state_change_uses_state_change_event_id() -> None:
     exporter.export_provider_state_change("math", "READY", "DEGRADED")
 
     line = lines[0]
-    assert line.startswith("LEEF:2.0|MCP Hangar|MCP Hangar|0.15.0|202|\t")
+    assert line.startswith(f"LEEF:2.0|MCP Hangar|MCP Hangar|{__version__}|202|\t")
     assert "\toldState=READY" in line
     assert "\tnewState=DEGRADED" in line
     assert "\tsrc=math" in line
@@ -219,3 +220,34 @@ def test_syslog_provider_state_change_uses_warning_priority() -> None:
     assert 'fromState="READY"' in line
     assert 'toState="DEGRADED"' in line
     assert 'provider="math"' in line
+
+
+# The header names the running release (#1705); it said 0.15.0 for a year.
+def test_cef_and_leef_headers_name_the_running_release() -> None:
+    from mcp_hangar.compliance import cef_formatter, leef_exporter
+
+    assert cef_formatter.DEVICE_VERSION == leef_exporter.DEVICE_VERSION == __version__
+
+
+# Two transitions of one server were byte-identical CEF lines (#1705).
+def test_a_cef_state_change_carries_its_transition() -> None:
+    from datetime import UTC, datetime
+
+    from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
+    from mcp_hangar.compliance.cef_formatter import format_audit_record
+
+    def line(old: str, new: str) -> str:
+        return format_audit_record(
+            AuditRecord(
+                event_id="",
+                event_type="ProviderStateChanged",
+                occurred_at=datetime(2026, 10, 13, tzinfo=UTC),
+                mcp_server_id="demo",
+                data={"from_state": old, "to_state": new},
+            )
+        )
+
+    first, second = line("cold", "initializing"), line("initializing", "ready")
+    assert "msg=cold -> initializing" in first
+    assert "msg=initializing -> ready" in second
+    assert first != second

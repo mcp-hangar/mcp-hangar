@@ -18,6 +18,7 @@ import pytest
 from mcp_hangar.server.cli.services.provider_registry import get_provider
 
 from mcp_hangar.server.cli.services.dependency_detector import DependencyStatus, RuntimeInfo, clear_cache
+from mcp_hangar.server.cli.services.mcp_server_registry import McpServerDefinition
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +52,7 @@ class TestProviderUvxFallback:
         """A server with an official PyPI distribution runs on uvx alone."""
         deps = make_deps(npx=False, uvx=True)
         provider = get_provider("fetch")
-        assert provider.uvx_package is not None
+        assert provider.install_type == "uvx"
         assert provider.is_available(deps) is True
 
     def test_provider_unavailable_without_any_runtime(self):
@@ -63,7 +64,7 @@ class TestProviderUvxFallback:
     def test_provider_without_uvx_package_needs_npx(self):
         """A server with no official PyPI distribution needs npx."""
         deps = make_deps(npx=False, uvx=True)
-        provider = get_provider("puppeteer")  # No Python equivalent
+        provider = get_provider("memory")  # No official PyPI distribution
         assert provider.uvx_package is None
         assert provider.is_available(deps) is False
 
@@ -85,11 +86,12 @@ class TestProviderUvxFallback:
         provider = get_provider("fetch")
         assert provider.get_preferred_runtime(deps) == "uvx"
 
-    def test_preferred_runtime_is_npx_when_only_npx_available(self):
-        """Should use npx when only npx is available."""
+    def test_a_server_whose_npm_name_does_not_exist_is_not_run_by_npx(self):
+        """`@modelcontextprotocol/server-fetch` is a 404 on npm (#1663): npx alone cannot run fetch."""
         deps = make_deps(npx=True, uvx=False)
         provider = get_provider("fetch")
-        assert provider.get_preferred_runtime(deps) == "npx"
+        assert provider.get_preferred_runtime(deps) == "uvx"
+        assert provider.is_available(deps) is False
 
     def test_preferred_runtime_is_uvx_when_only_uvx_available(self):
         """Should use uvx when only uvx is available."""
@@ -110,17 +112,35 @@ class TestProviderUvxFallback:
         assert provider.get_command_package(deps) == "@modelcontextprotocol/server-filesystem"
 
     def test_unavailable_reason_shows_both_options(self):
-        """Should show both npx and uvx in unavailable reason."""
+        """A server with an npm package and a PyPI one names both runtimes."""
         deps = make_deps(npx=False, uvx=False)
-        provider = get_provider("fetch")
+        provider = McpServerDefinition(
+            name="both",
+            description="d",
+            package="@scope/server-both",
+            category="Starter",
+            uvx_package="mcp-server-both",
+        )
         reason = provider.get_unavailable_reason(deps)
         assert "npx" in reason
         assert "uvx" in reason
 
+    def test_a_server_with_both_runs_on_either(self):
+        provider = McpServerDefinition(
+            name="both",
+            description="d",
+            package="@scope/server-both",
+            category="Starter",
+            uvx_package="mcp-server-both",
+        )
+        assert provider.get_preferred_runtime(make_deps(npx=True, uvx=True)) == "uvx"
+        assert provider.get_preferred_runtime(make_deps(npx=True, uvx=False)) == "npx"
+        assert provider.is_available(make_deps(npx=False, uvx=True)) is True
+
     def test_unavailable_reason_for_npx_only_provider(self):
         """Provider without uvx_package should only show npx in reason."""
         deps = make_deps(npx=False, uvx=False)
-        provider = get_provider("puppeteer")
+        provider = get_provider("memory")
         reason = provider.get_unavailable_reason(deps)
         assert "npx" in reason
         # Should not mention uvx since there's no uvx alternative
@@ -141,7 +161,7 @@ class TestProviderDefinitionUvx:
         """
         from mcp_hangar.server.cli.services.mcp_server_registry import _PROVIDERS
 
-        with_uvx = sorted(p.name for p in _PROVIDERS if p.uvx_package)
+        with_uvx = sorted(p.name for p in _PROVIDERS if p.install_type == "uvx")
 
         assert with_uvx == ["fetch", "git"]
 
@@ -149,5 +169,4 @@ class TestProviderDefinitionUvx:
         """The names that remain still follow the mcp-server-* convention."""
         for name in ["fetch", "git"]:
             provider = get_provider(name)
-            assert provider.uvx_package is not None
-            assert provider.uvx_package.startswith("mcp-server-")
+            assert provider.package.startswith("mcp-server-")

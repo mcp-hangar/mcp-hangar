@@ -12,7 +12,7 @@ import secrets
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
@@ -720,6 +720,17 @@ class EventSourcedRoleStore(IRoleStore):
                 roles.append(role)
 
         return roles
+
+    def list_principals(self) -> list[dict[str, Any]]:
+        """List principals with at least one assignment, read from the role-assignment streams."""
+        prefix = f"{self.STREAM_PREFIX}:"
+        out = []
+        for stream_id in sorted(self._event_store.list_streams(prefix)):
+            principal_id = stream_id[len(prefix) :]
+            names = sorted(self._load_assignment(principal_id).get_role_names("*"))
+            if names:
+                out.append({"principal_id": principal_id, "roles": names})
+        return out
 
     def assign_role(
         self,

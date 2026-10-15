@@ -49,11 +49,15 @@ This project implements multiple security layers:
 
 ## Supported Versions
 
-| Version | Supported          |
+| Version | Supported |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| 0.12.x  | :white_check_mark: |
-| < 0.12  | :x:                |
+| 2.x (newest minor) | :white_check_mark: |
+| 1.6.x | :x: |
+| < 1.6 | :x: |
+
+Security fixes land on the 2.x line, in a new 2.x release; upgrade to the newest
+2.x minor to receive them. Older lines are closed and receive no backports. This
+is the same policy as the [security page of the documentation](https://github.com/mcp-hangar/docs/blob/main/security.md).
 
 ## Security Best Practices
 

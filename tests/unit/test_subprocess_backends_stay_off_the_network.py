@@ -22,7 +22,9 @@ explicitly, configuring its way around the broken default.
 
 The fix is in the launcher rather than only in the example, because the same
 mistake is available to anyone writing a subprocess provider against an SDK
-whose server defaults to HTTP. These tests hold all three layers.
+whose server defaults to HTTP. These tests hold the launcher and the examples.
+The third layer, the built-in default configuration, is gone: a missing
+`config.yaml` is now refused rather than replaced (#1650).
 """
 
 from __future__ import annotations
@@ -54,36 +56,6 @@ class TestTheLauncherDefaultsTheChildToStdio:
         """A default, not a rule -- a provider using HTTP deliberately is not broken."""
         env = SubprocessLauncher()._prepare_env({"MCP_TRANSPORT": "streamable-http"})
         assert env["MCP_TRANSPORT"] == "streamable-http"
-
-
-class TestTheBuiltInDefaultConfig:
-    """What runs on a fresh install with no config.yaml."""
-
-    def _default_config(self) -> dict:
-        import mcp_hangar.server.config as config_module
-
-        source = pathlib.Path(config_module.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "default_config" for t in node.targets
-            ):
-                return ast.literal_eval(node.value)
-        raise AssertionError("default_config not found in server/config.py")
-
-    def test_every_subprocess_entry_pins_the_transport(self):
-        """Read as a starting point by anyone copying it, so it must be explicit."""
-        for name, spec in self._default_config().items():
-            if spec.get("mode") != "subprocess":
-                continue
-            assert spec.get("env", {}).get("MCP_TRANSPORT") == "stdio", (
-                f"default config entry {name!r} runs a subprocess without pinning "
-                "MCP_TRANSPORT=stdio; an SDK server defaulting to HTTP would bind a port"
-            )
-
-    def test_it_still_defines_a_backend_to_run(self):
-        """Guards against the previous test passing because the config emptied out."""
-        assert self._default_config(), "the built-in default config is empty"
 
 
 def _example_transport_default(path: pathlib.Path) -> str | None:

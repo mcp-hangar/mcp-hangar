@@ -51,6 +51,16 @@ def compile_event_patterns(raw_patterns: list[str]) -> list[EventPattern]:
     return compiled
 
 
+def rejected_event_patterns(raw_patterns: list[str]) -> list[str]:
+    """The patterns :func:`compile_event_patterns` drops, so a client can be told (#1704).
+
+    A pattern with a partial wildcard (``ToolApproval*``) is not one of the
+    shapes the matcher supports, and it matches nothing. The ``subscribed`` ack
+    used to echo it as though it were active.
+    """
+    return [raw for raw in raw_patterns if not compile_event_patterns([raw])]
+
+
 def visible_to_tenant(event: DomainEvent, tenant_id: str | None) -> bool:
     """Whether a subscriber confined to *tenant_id* may receive *event*.
 

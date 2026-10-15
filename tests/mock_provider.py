@@ -20,8 +20,12 @@ def _record_trace_carrier(method, params):
         record.write(json.dumps({"method": method, "traceparent": (meta or {}).get("traceparent")}) + "\n")
 
 
-def _tools_list_response(request_id):
+def _tools_list_response(request_id, params=None):
     """Answer ``tools/list``: the tools, or an error while ``MOCK_TOOLS_LIST_FAILS_WHILE`` names a file that exists.
+
+    With ``MOCK_TOOLS_PAGE_SIZE`` set to N the tools come N at a time, each page
+    carrying a ``nextCursor`` until the last, as the MCP specification allows an
+    upstream to do (tests/integration/test_pin_follows_a_paginated_tools_list.py).
 
     A health check is a ``tools/list``, so a test fails and passes checks one
     at a time by creating and removing the file
@@ -30,87 +34,95 @@ def _tools_list_response(request_id):
     flag = os.environ.get("MOCK_TOOLS_LIST_FAILS_WHILE")
     if flag and os.path.exists(flag):
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "tools/list failing"}}
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": {
-            "tools": [
-                {
-                    "name": "add",
-                    # Env-driven so a test can change what this
-                    # server serves between two runs -- which is
-                    # what schema drift is (tests/integration
-                    # test_pin_writes_and_detects_drift.py).
-                    "description": os.environ.get("MOCK_ADD_DESCRIPTION", "Add two numbers"),
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "a": {"type": "number"},
-                            "b": {"type": "number"},
-                        },
-                        "required": ["a", "b"],
-                    },
+    tools = _tools()
+    page_size = int(os.environ.get("MOCK_TOOLS_PAGE_SIZE", "0") or 0)
+    if page_size > 0:
+        start = int((params or {}).get("cursor") or 0)
+        page = tools[start : start + page_size]
+        result: dict = {"tools": page}
+        if start + page_size < len(tools):
+            result["nextCursor"] = str(start + page_size)
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
+    return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": tools}}
+
+
+def _tools():
+    """The tools this server serves."""
+    return [
+        {
+            "name": "add",
+            # Env-driven so a test can change what this
+            # server serves between two runs -- which is
+            # what schema drift is (tests/integration
+            # test_pin_writes_and_detects_drift.py).
+            "description": os.environ.get("MOCK_ADD_DESCRIPTION", "Add two numbers"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
                 },
-                {
-                    "name": "subtract",
-                    "description": "Subtract two numbers",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "a": {"type": "number"},
-                            "b": {"type": "number"},
-                        },
-                        "required": ["a", "b"],
-                    },
-                },
-                {
-                    "name": "multiply",
-                    "description": "Multiply two numbers",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "a": {"type": "number"},
-                            "b": {"type": "number"},
-                        },
-                        "required": ["a", "b"],
-                    },
-                },
-                {
-                    "name": "divide",
-                    "description": "Divide two numbers",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "a": {"type": "number"},
-                            "b": {"type": "number"},
-                        },
-                        "required": ["a", "b"],
-                    },
-                },
-                {
-                    "name": "power",
-                    "description": "Raise to power",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "base": {"type": "number"},
-                            "exponent": {"type": "number"},
-                        },
-                        "required": ["base", "exponent"],
-                    },
-                },
-                {
-                    "name": "echo",
-                    "description": "Echo a message",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"message": {"type": "string"}},
-                        "required": ["message"],
-                    },
-                },
-            ]
+                "required": ["a", "b"],
+            },
         },
-    }
+        {
+            "name": "subtract",
+            "description": "Subtract two numbers",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
+                },
+                "required": ["a", "b"],
+            },
+        },
+        {
+            "name": "multiply",
+            "description": "Multiply two numbers",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
+                },
+                "required": ["a", "b"],
+            },
+        },
+        {
+            "name": "divide",
+            "description": "Divide two numbers",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
+                },
+                "required": ["a", "b"],
+            },
+        },
+        {
+            "name": "power",
+            "description": "Raise to power",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "base": {"type": "number"},
+                    "exponent": {"type": "number"},
+                },
+                "required": ["base", "exponent"],
+            },
+        },
+        {
+            "name": "echo",
+            "description": os.environ.get("MOCK_ECHO_DESCRIPTION", "Echo a message"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            },
+        },
+    ]
 
 
 def _result(request_id, result):
@@ -207,7 +219,7 @@ def main():
                     },
                 }
             elif method == "tools/list":
-                response = _tools_list_response(request_id)
+                response = _tools_list_response(request_id, params)
             elif method == "tools/call":
                 response = _tools_call_response(request_id, params)
             elif method == "shutdown":

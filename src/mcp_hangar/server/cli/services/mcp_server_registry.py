@@ -112,6 +112,15 @@ class McpServerDefinition:
 # `mcp-server-sqlite` is dropped for the same reason: it resolves, but with no
 # author and no repository link, so nothing ties it to the archived official
 # server it shares a name with.
+#
+# Every entry has to resolve to a package that is maintained today (#1663).
+# `fetch` and `git` are the official PyPI distributions (Anthropic, PBC.) and
+# their npm names do not exist, so they install with uvx. `github`, `postgres`,
+# `slack`, `puppeteer`, `brave-search` and `google-maps` were npm packages that
+# are now marked "no longer supported", and `sqlite` was never published to npm
+# under that name; they are removed, not pointed at a lookalike. Add one back
+# only with a package whose publisher you have checked, and run
+# `tests/unit/cli/test_every_registry_entry_has_a_maintained_source.py`.
 _PROVIDERS: list[McpServerDefinition] = [
     # Starter (recommended for everyone)
     McpServerDefinition(
@@ -127,8 +136,8 @@ _PROVIDERS: list[McpServerDefinition] = [
     McpServerDefinition(
         name="fetch",
         description="Make HTTP requests to fetch web content",
-        package="@modelcontextprotocol/server-fetch",
-        uvx_package="mcp-server-fetch",
+        package="mcp-server-fetch",
+        install_type="uvx",
         category="Starter",
     ),
     McpServerDefinition(
@@ -140,93 +149,18 @@ _PROVIDERS: list[McpServerDefinition] = [
     ),
     # Developer Tools
     McpServerDefinition(
-        name="github",
-        description="GitHub repos, issues, PRs",
-        package="@modelcontextprotocol/server-github",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Developer Tools",
-        requires_config=True,
-        config_prompt="GitHub personal access token",
-        config_type="secret",
-        env_var="GITHUB_TOKEN",
-    ),
-    McpServerDefinition(
         name="git",
         description="Local git operations",
-        package="@modelcontextprotocol/server-git",
-        uvx_package="mcp-server-git",
+        package="mcp-server-git",
+        install_type="uvx",
         category="Developer Tools",
-    ),
-    # Data & Databases
-    McpServerDefinition(
-        name="sqlite",
-        description="Query SQLite databases",
-        package="@modelcontextprotocol/server-sqlite",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Data & Databases",
-        requires_config=True,
-        config_prompt="Path to SQLite database file",
-        config_type="path",
-    ),
-    McpServerDefinition(
-        name="postgres",
-        description="Query PostgreSQL databases",
-        package="@modelcontextprotocol/server-postgres",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Data & Databases",
-        requires_config=True,
-        config_prompt="PostgreSQL connection string",
-        config_type="secret",
-        env_var="DATABASE_URL",
-    ),
-    # Integrations
-    McpServerDefinition(
-        name="slack",
-        description="Slack workspace integration",
-        package="@modelcontextprotocol/server-slack",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Integrations",
-        requires_config=True,
-        config_prompt="Slack bot token",
-        config_type="secret",
-        env_var="SLACK_BOT_TOKEN",
-    ),
-    McpServerDefinition(
-        name="puppeteer",
-        description="Browser automation",
-        package="@modelcontextprotocol/server-puppeteer",
-        uvx_package=None,  # No Python equivalent - requires Node.js
-        category="Integrations",
-    ),
-    McpServerDefinition(
-        name="brave-search",
-        description="Brave Search API",
-        package="@modelcontextprotocol/server-brave-search",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Integrations",
-        requires_config=True,
-        config_prompt="Brave Search API key",
-        config_type="secret",
-        env_var="BRAVE_API_KEY",
-    ),
-    McpServerDefinition(
-        name="google-maps",
-        description="Google Maps API",
-        package="@modelcontextprotocol/server-google-maps",
-        uvx_package=None,  # see the note above: not the official PyPI distribution
-        category="Integrations",
-        requires_config=True,
-        config_prompt="Google Maps API key",
-        config_type="secret",
-        env_var="GOOGLE_MAPS_API_KEY",
     ),
 ]
 
 # McpServer bundles for quick setup
 PROVIDER_BUNDLES: dict[str, list[str]] = {
     "starter": ["filesystem", "fetch", "memory"],
-    "developer": ["filesystem", "fetch", "memory", "github", "git"],
-    "data": ["filesystem", "fetch", "memory", "sqlite", "postgres"],
+    "developer": ["filesystem", "fetch", "memory", "git"],
 }
 
 # Build lookup dict for fast access

@@ -68,6 +68,29 @@ class McpServerNotFoundError(McpServerError):
         )
 
 
+class McpServerDeclaredInConfigError(McpServerError):
+    """The server to delete is declared in the gateway's configuration.
+
+    Deleting it through the API used to work until the next reload or restart,
+    which brought it back: a removal that said it succeeded and then undid
+    itself. The Kubernetes operator sent that delete for every MCPServer CR it
+    deleted, and a remote CR mirrors a server the configuration declares, so
+    deleting the mirror took the real server out of the pool (#1744). The
+    configuration is where such a server is removed; stopping it is how it is
+    taken out of service for now.
+    """
+
+    def __init__(self, mcp_server_id: str):
+        super().__init__(
+            message=(
+                f"McpServer {mcp_server_id} is declared in the gateway configuration; remove it from the "
+                "configuration and reload, or stop it to take it out of service"
+            ),
+            mcp_server_id=mcp_server_id,
+            operation="delete",
+        )
+
+
 class McpServerStartError(McpServerError):
     """Raised when a mcp_server fails to start.
 

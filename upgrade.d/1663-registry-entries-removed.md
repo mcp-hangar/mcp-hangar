@@ -1,0 +1,3 @@
+### `add` and `init` lose seven registry entries and the `data` bundle
+
+The registry no longer offers `github`, `postgres`, `slack`, `puppeteer`, `brave-search`, `google-maps` and `sqlite`: their npm packages are unsupported or do not exist, so the configuration they wrote could not start. `init --bundle data` is gone (it was `filesystem`, `fetch`, `memory`, `sqlite` and `postgres`); `developer` is now `filesystem`, `fetch`, `memory` and `git`. A `config.yaml` that already names one of these servers is not touched; to keep it, point its `command` at a maintained server of your choice. `fetch` and `git` now need `uvx`, since their npm names do not exist.

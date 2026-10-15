@@ -1,0 +1,1 @@
+`interceptors/list` names the validator and mutator `io.mcp-hangar.validator` and `io.mcp-hangar.mutator` in both of its shapes. The shape served to a client that negotiated the extension still answered `mcp-hangar-validator` and `mcp-hangar-mutator`. `interceptor/invoke` accepts either spelling and answers with the reverse-DNS id.

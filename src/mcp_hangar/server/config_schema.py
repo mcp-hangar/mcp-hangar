@@ -86,6 +86,8 @@ SERVER_SPEC_KEYS = frozenset(
         "min_healthy",
         "mode",
         "network",
+        # The older spelling of `network`, read as its fallback (#1664).
+        "network_mode",
         "read_only",
         "resources",
         "strategy",
@@ -94,6 +96,8 @@ SERVER_SPEC_KEYS = frozenset(
         "tool_projection",
         "tools",
         "transport",
+        # `current` runs the container as the gateway's own uid:gid (#1664).
+        "user",
         "volumes",
     }
 )
@@ -123,7 +127,9 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     ),
     "config_reload": frozenset({"enabled", "interval_s", "use_watchdog"}),
     "coordination": frozenset({"lease_ttl_s", "renew_deadline_s", "renew_interval_s"}),
-    "discovery": frozenset({"auto_register", "enabled", "refresh_interval_s", "security", "sources"}),
+    # `lifecycle` holds default_ttl_s, check_interval_s and drain_timeout_s, read by
+    # `DiscoveryConfig.from_dict` (#1664).
+    "discovery": frozenset({"auto_register", "enabled", "lifecycle", "refresh_interval_s", "security", "sources"}),
     "event_store": frozenset({"allow_memory_fallback", "driver", "enabled", "path"}),
     # `tenant_limits` (#1445), read by `config._init_tenant_limits_from_config`,
     # which checks the keys of each entry itself. `max_response_bytes` (#1613),
@@ -153,6 +159,8 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # `max_per_tenant` (#1146), read by `config._init_resource_links_from_config`.
     "resource_links": frozenset({"max_per_tenant"}),
     "retry": frozenset({"default_policy", "per_mcp_server"}),
+    # `trusted_networks` (#1752), read by `config._init_ssrf_from_config`.
+    "ssrf": frozenset({"trusted_networks"}),
     "startup_checks": frozenset({"enforce"}),
     # `mode`, read by `config._init_topology_mode_from_config`, and
     # `required_catalogue` (#1446), read by `catalogue_readiness.required_catalogue`,
@@ -233,6 +241,19 @@ _REMOVED_SECTION_KEYS: dict[str, dict[str, str]] = {
 }
 
 
+def _section_extras(name: str, section: Any) -> frozenset[str]:
+    """Keys a section accepts because of what else it says.
+
+    ``approvals.channel`` names the delivery channel and the channel reads its
+    settings from ``approvals.<channel>``. Core knows two channels; the rest are
+    installed entry points, so their names cannot be listed here, but the one
+    the config selects is right there in the config (#1664).
+    """
+    if name == "approvals" and isinstance(section, dict) and isinstance(section.get("channel"), str):
+        return frozenset({section["channel"]})
+    return frozenset()
+
+
 def _section_problems(name: str, section: Any, allowed: frozenset[str]) -> list[str]:
     removed = _REMOVED_SECTION_KEYS.get(name, {})
     if not isinstance(section, dict):
@@ -243,15 +264,138 @@ def _section_problems(name: str, section: Any, allowed: frozenset[str]) -> list[
     return named + _unknown(name, rest, allowed)
 
 
+#: The keys an access policy block reads, and the kinds of an ``access`` block.
+#: Copies of ``domain.model.mcp_server_config._POLICY_KEYS`` and
+#: ``server.config._ACCESS_KINDS``, because this module is loaded by path from a
+#: source checkout and imports nothing (the docs gate does that); a test holds
+#: the copies to the originals.
+POLICY_KEYS = frozenset({"allow_list", "deny_list", "approval_list", "approval_timeout_seconds", "approval_channel"})
+ACCESS_KINDS = ("prompt", "resource")
+
+_POLICY_HINTS = {
+    "allow": "allow_list",
+    "deny": "deny_list",
+    "approve": "approval_list",
+    "approval": "approval_list",
+    "approvals": "approval_list",
+}
+
+
+def _policy_block_problems(where: str, block: Any, extra: frozenset[str] = frozenset()) -> list[str]:
+    """The keys of one access policy block that no policy reads (#1773).
+
+    ``tools: {allow: [read], deny: [add]}`` booted with no policy at all: the
+    parser read the lists it knows and found none. The loader refuses it; this
+    is the same refusal for `config check`, which does not run the loader.
+    """
+    if not isinstance(block, dict):
+        return []
+    problems = []
+    for key in sorted((k for k in block if k not in POLICY_KEYS and k not in extra), key=str):
+        hint = _POLICY_HINTS.get(str(key).lower())
+        problems.append(
+            f"{where}.{key} is not a key an access policy reads"
+            + (f" (did you mean {hint}?)" if hint else "")
+            + f"; it reads {', '.join(sorted(POLICY_KEYS))}, and an unread key leaves the policy unenforced"
+        )
+    return problems
+
+
+def _access_problems(where: str, scope: Any) -> list[str]:
+    """The policy blocks under a scope's ``access:`` mapping."""
+    access = scope.get("access") if isinstance(scope, dict) else None
+    if not isinstance(access, dict):
+        return []
+    problems: list[str] = []
+    for kind in ACCESS_KINDS:
+        problems += _policy_block_problems(f"{where}.access.{kind}", access.get(kind))
+    return problems
+
+
+def _policy_problems(where: str, spec: Any) -> list[str]:
+    """Every access policy block of one server or group spec: its own, its tenants', its members'."""
+    if not isinstance(spec, dict):
+        return []
+    problems = _policy_block_problems(f"{where}.tools", spec.get("tools"))
+    problems += _access_problems(where, spec)
+
+    tool_access = spec.get("tool_access")
+    members_by_tenant = tool_access.get("member") if isinstance(tool_access, dict) else None
+    if isinstance(members_by_tenant, dict):
+        for tenant, member_spec in members_by_tenant.items():
+            tenant_where = f"{where}.tool_access.member.{tenant}"
+            problems += _policy_block_problems(tenant_where, member_spec, frozenset({"access"}))
+            problems += _access_problems(tenant_where, member_spec)
+
+    members = spec.get("members")
+    if isinstance(members, list):
+        for member in members:
+            if isinstance(member, dict):
+                problems += _policy_block_problems(f"{where}.members.{member.get('id')}.tools", member.get("tools"))
+    return problems
+
+
+#: The keys a server's or group's own ``tool_projection`` block reads, and the
+#: keys one ``tenant_overrides.<tenant>`` entry reads (#1733). A copy of what
+#: ``server.config._register_tool_projection_block`` looks up, for the reason
+#: ``POLICY_KEYS`` is a copy; a test holds it to the reader. The all-gateway
+#: ``tool_projection`` section is a different block with its own key, in SECTIONS.
+TOOL_PROJECTION_SCOPE_KEYS = frozenset(
+    {
+        "digest_enforcement",
+        "new_tools",
+        "pins",
+        "tenant_overrides",
+        "upstream",
+        "withdrawn",
+        "withdrawn_prompts",
+        "withdrawn_resources",
+    }
+)
+TOOL_PROJECTION_TENANT_KEYS = frozenset({"pins", "withdrawn", "withdrawn_prompts", "withdrawn_resources"})
+
+
+def _tool_projection_problems(where: str, spec: Any) -> list[str]:
+    """Keys of a scope's ``tool_projection`` block that the block's reader never looks at."""
+    block = spec.get("tool_projection") if isinstance(spec, dict) else None
+    if not isinstance(block, dict):
+        return []
+    block_where = f"{where}.tool_projection"
+    problems = []
+    for key in sorted((k for k in block if k not in TOOL_PROJECTION_SCOPE_KEYS), key=str):
+        hint = (
+            "; it is a gateway-wide setting, read from the top-level `tool_projection:` section, not per server"
+            if key == "pin_recheck_interval_s"
+            else ""
+        )
+        problems.append(
+            f"{block_where} has unknown key {key!r}{hint}; allowed keys: {sorted(TOOL_PROJECTION_SCOPE_KEYS)}"
+        )
+    overrides = block.get("tenant_overrides")
+    if isinstance(overrides, dict):
+        for tenant, entry in overrides.items():
+            problems += _unknown(f"{block_where}.tenant_overrides.{tenant}", entry, TOOL_PROJECTION_TENANT_KEYS)
+    return problems
+
+
 def _server_spec_problems(server_id: str, spec: Any) -> list[str]:
     where = f"mcp_servers.{server_id}"
     if not isinstance(spec, dict) or spec.get("mode") != "group":
-        return _unknown(where, spec, SERVER_SPEC_KEYS)
+        return (
+            _unknown(where, spec, SERVER_SPEC_KEYS)
+            + _policy_problems(where, spec)
+            + _tool_projection_problems(where, spec)
+        )
 
     message = _REMOVED_GROUP_RESET_TIMEOUT.format(group=server_id)
     problems = [f"{where}.{key} {message}" for key in _group_reset_timeouts(spec)]
     rest = {key: value for key, value in spec.items() if key != "circuit_reset_timeout_s"}
-    return problems + _unknown(where, rest, SERVER_SPEC_KEYS)
+    return (
+        problems
+        + _unknown(where, rest, SERVER_SPEC_KEYS)
+        + _policy_problems(where, spec)
+        + _tool_projection_problems(where, spec)
+    )
 
 
 def validate_config(config: dict[str, Any]) -> list[str]:
@@ -264,7 +408,7 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     for name, allowed in SECTIONS.items():
         if allowed is None or name not in config:
             continue
-        problems += _section_problems(name, config[name], allowed)
+        problems += _section_problems(name, config[name], allowed | _section_extras(name, config[name]))
 
     servers = config.get("mcp_servers")
     if isinstance(servers, dict):

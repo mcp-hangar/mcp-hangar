@@ -18,6 +18,12 @@ The order, highest first:
 Step 3 keeps every setup that ran ``serve`` beside its ``config.yaml`` working;
 step 4 is what a new user has after ``init``. The resolved path is always
 passed on, so bootstrap watches the file the command read.
+
+A file that is not there is fatal, whichever rule chose it (#1650). A missing
+file used to boot a built-in demo configuration with every ``hangar_*`` tool and
+none of the operator's pins, policies or auth, so a typo in ``--config`` gave an
+ungoverned gateway. ``require_config_file`` is the check, and it says where the
+path came from.
 """
 
 from __future__ import annotations
@@ -26,6 +32,8 @@ import enum
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from ...domain.exceptions import ConfigurationError
 
 CONFIG_ENV_VAR = "MCP_CONFIG"
 CWD_CONFIG_NAME = "config.yaml"
@@ -38,6 +46,8 @@ class ConfigPathSource(enum.Enum):
     ENV = "env"
     CWD = "cwd"
     USER = "user"
+    #: Handed to `bootstrap(config_path=...)` or `load_configuration` by a caller.
+    ARGUMENT = "argument"
 
 
 @dataclass(frozen=True)
@@ -50,7 +60,7 @@ class ResolvedConfigPath:
     @property
     def explicit(self) -> bool:
         """Whether someone named this file, rather than a default finding it."""
-        return self.source in (ConfigPathSource.FLAG, ConfigPathSource.ENV)
+        return self.source in (ConfigPathSource.FLAG, ConfigPathSource.ENV, ConfigPathSource.ARGUMENT)
 
 
 def user_config_path() -> Path:
@@ -83,13 +93,58 @@ def resolve_config_path(*explicit: Path | str | None) -> ResolvedConfigPath:
     return ResolvedConfigPath(user_config_path(), ConfigPathSource.USER)
 
 
+_NAMED_BY = {
+    ConfigPathSource.FLAG: "named on the command line",
+    ConfigPathSource.ENV: f"named by ${CONFIG_ENV_VAR}",
+    ConfigPathSource.ARGUMENT: "passed as config_path",
+    ConfigPathSource.CWD: "found as ./config.yaml",
+    ConfigPathSource.USER: "the default",
+}
+
+
+class MissingConfigFileError(ConfigurationError):
+    """The configuration file a boot would read is not a readable file (#1650)."""
+
+    def __init__(self, resolved: ResolvedConfigPath, problem: str):
+        if resolved.source is ConfigPathSource.USER:
+            message = (
+                f"No configuration file: there is no ./config.yaml and {resolved.path} {problem}. "
+                "Run 'mcp-hangar init' to create one, or name one with --config or $MCP_CONFIG."
+            )
+        else:
+            message = (
+                f"Configuration file {resolved.path} ({_NAMED_BY[resolved.source]}) {problem}. "
+                "Nothing is served without the configuration that was asked for."
+            )
+        super().__init__(message, details={"path": str(resolved.path), "source": resolved.source.value})
+        self.resolved = resolved
+
+
+def require_config_file(resolved: ResolvedConfigPath) -> Path:
+    """Return the path if it is a readable regular file, else raise `MissingConfigFileError`.
+
+    There is no fallback configuration: whichever rule chose the path, a gateway
+    started without the file would run with none of its policies.
+    """
+    target = resolved.path
+    if not target.exists():
+        raise MissingConfigFileError(resolved, "does not exist")
+    if not target.is_file():
+        raise MissingConfigFileError(resolved, "is not a regular file")
+    if not os.access(target, os.R_OK):
+        raise MissingConfigFileError(resolved, "is not readable")
+    return target
+
+
 DEFAULT_RULE_HELP = "Defaults to $MCP_CONFIG, else ./config.yaml if present, else ~/.config/mcp-hangar/config.yaml."
 
 __all__ = [
     "CONFIG_ENV_VAR",
     "DEFAULT_RULE_HELP",
     "ConfigPathSource",
+    "MissingConfigFileError",
     "ResolvedConfigPath",
+    "require_config_file",
     "resolve_config_path",
     "user_config_path",
 ]

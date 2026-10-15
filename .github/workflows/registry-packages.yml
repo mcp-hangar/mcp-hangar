@@ -1,0 +1,34 @@
+# Checks that every package `mcp-hangar init` and `add` can write still resolves
+# on npm or PyPI and is not deprecated. The registry was stale for months: one
+# entry 404 on npm and six marked "no longer supported" (#1663). The unit test
+# beside the registry makes adding an entry a conscious act; this is the part
+# that needs a network.
+name: registry-packages
+
+on:
+  pull_request:
+    paths:
+      - src/mcp_hangar/server/cli/services/mcp_server_registry.py
+      - scripts/check_registry_packages.py
+      - .github/workflows/registry-packages.yml
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    name: Registry packages resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Install the package
+        run: pip install .
+      - name: Resolve every registry entry
+        run: python scripts/check_registry_packages.py

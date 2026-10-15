@@ -10,6 +10,7 @@ Validation Pipeline:
     4. Schema Validation - Does it implement MCP correctly?
 """
 
+import json
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -18,6 +19,7 @@ from typing import Any
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 
+from ..._sdk_compat import LATEST_PROTOCOL_VERSION
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -341,13 +343,21 @@ class SecurityValidator:
         try:
             timeout = aiohttp.ClientTimeout(total=self.config.health_check_timeout_s)
 
-            async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as response:
-                if response.status != 200:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    status = response.status
+                if status == 404:
+                    # No health endpoint is not a sick server: many MCP servers
+                    # serve only their MCP path. Every MCP server answers
+                    # `initialize`, so ask that instead (#1756). 404 only -- a 5xx
+                    # or a timeout is a real failure and is not second-guessed.
+                    return await self._validate_initialize(session, mcp_server, url)
+                if status != 200:
                     return ValidationReport(
                         result=ValidationResult.FAILED_HEALTH,
                         mcp_server=mcp_server,
-                        reason=f"Health check returned status {response.status}",
-                        details={"url": url, "status": response.status},
+                        reason=f"Health check returned status {status}",
+                        details={"url": url, "status": status},
                     )
 
         except TimeoutError:
@@ -366,6 +376,47 @@ class SecurityValidator:
             )
 
         return None
+
+    async def _validate_initialize(
+        self, session: Any, mcp_server: DiscoveredMcpServer, health_url: str
+    ) -> ValidationReport | None:
+        """Pass a server whose health path is absent if its MCP path answers `initialize`.
+
+        Returns:
+            ValidationReport naming both probes if `initialize` got no JSON-RPC
+            result, None if it did.
+        """
+        host = mcp_server.connection_info.get("host")
+        port = mcp_server.connection_info.get("port")
+        path = mcp_server.connection_info.get("path") or "/mcp"
+        url = f"http://{host}:{port}{path}"
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "mcp-hangar-discovery", "version": "1"},
+            },
+        }
+        headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+        details: dict[str, Any] = {"health_url": health_url, "health_status": 404, "url": url}
+        async with session.post(url, json=request, headers=headers) as response:
+            details["status"] = response.status
+            body = await response.text()
+        if details["status"] == 200 and _has_jsonrpc_result(body):
+            logger.debug("discovery_health_passed_on_initialize", mcp_server=mcp_server.name, url=url)
+            return None
+        return ValidationReport(
+            result=ValidationResult.FAILED_HEALTH,
+            mcp_server=mcp_server,
+            reason=(
+                f"Health check returned status 404, and initialize at {path} returned "
+                f"status {details['status']} without a JSON-RPC result"
+            ),
+            details=details,
+        )
 
     async def _validate_schema(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
         """Validate MCP tools schema.
@@ -409,3 +460,17 @@ class SecurityValidator:
     def reset_mcp_server_counts(self) -> None:
         """Reset all mcp_server counts."""
         self._mcp_server_counts.clear()
+
+
+def _has_jsonrpc_result(body: str) -> bool:
+    """Whether an `initialize` answer carries a JSON-RPC result, as JSON or as SSE."""
+    candidates = [body]
+    candidates += [line[len("data:") :].strip() for line in body.splitlines() if line.startswith("data:")]
+    for candidate in candidates:
+        try:
+            message = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(message, dict) and isinstance(message.get("result"), dict):
+            return True
+    return False

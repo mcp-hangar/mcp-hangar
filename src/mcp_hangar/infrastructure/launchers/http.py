@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import cast
+from typing import Any, cast
 
 from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
@@ -90,6 +90,25 @@ class HttpLauncher(McpServerLauncher):
                 value=endpoint,
             )
 
+    @staticmethod
+    def _retry_status_codes(configured: object, current: Any) -> tuple[int, ...]:
+        """The status codes to retry: the configured ones, else the client's default (#1684).
+
+        `http.retry_status_codes` was documented and parsed nowhere, so a 500 was
+        never retried and only 502, 503 and 504 ever were.
+        """
+        if configured is None:
+            return cast(tuple[int, ...], current.retry_status_codes)
+        valid = isinstance(configured, (list, tuple)) and all(
+            isinstance(c, int) and not isinstance(c, bool) and 100 <= c <= 599 for c in configured
+        )
+        if not valid:
+            raise ValidationError(
+                message=f"http.retry_status_codes must be a list of HTTP status codes (100-599), got {configured!r}",
+                field="http.retry_status_codes",
+            )
+        return tuple(cast(list[int], configured))
+
     def _launch(
         self,
         endpoint: str,
@@ -168,6 +187,7 @@ class HttpLauncher(McpServerLauncher):
                 read_timeout=cast(float, http_config.get("read_timeout", http_cfg.read_timeout)),
                 max_retries=cast(int, http_config.get("max_retries", http_cfg.max_retries)),
                 retry_backoff_factor=cast(float, http_config.get("retry_backoff_factor", 0.5)),
+                retry_status_codes=self._retry_status_codes(http_config.get("retry_status_codes"), http_cfg),
                 verify_ssl=http_cfg.verify_ssl,
                 ca_cert_path=http_cfg.ca_cert_path,
                 extra_headers=cast(dict[str, str], http_config.get("headers", {})),

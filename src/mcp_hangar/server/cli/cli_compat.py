@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass
 from importlib.metadata import version
 
-from .config_path import resolve_config_path
+from .config_path import ConfigPathSource, resolve_config_path
 
 
 def _get_version() -> str:
@@ -59,6 +59,9 @@ class CLIConfig:
     unsafe_no_auth: bool = False
     """Allow non-loopback HTTP binding without authentication enabled."""
 
+    config_source: ConfigPathSource | None = None
+    """Which rule chose `config_path`, so a missing file is reported by where it was named (#1650)."""
+
 
 def parse_args(args: list[str] | None = None) -> CLIConfig:
     """Parse command line arguments.
@@ -94,7 +97,7 @@ Examples:
 
 Environment Variables:
   MCP_MODE          Set to "http" to enable HTTP mode
-  MCP_HTTP_HOST     HTTP server host (default: 0.0.0.0)
+  MCP_HTTP_HOST     HTTP server host (default: 127.0.0.1)
   MCP_HTTP_PORT     HTTP server port (default: 8000)
   MCP_LOG_LEVEL     Log level (default: INFO)
   MCP_JSON_LOGS     Set to "true" for JSON formatted logs
@@ -116,7 +119,7 @@ Environment Variables:
         "--host",
         type=str,
         default=None,
-        help="HTTP server host (default: 0.0.0.0)",
+        help="HTTP server host (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",
@@ -159,7 +162,7 @@ Environment Variables:
     # Resolve values: defaults -> env -> CLI args
     # Environment variable defaults
     env_http_mode = os.getenv("MCP_MODE", "stdio") == "http"
-    env_http_host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
+    env_http_host = os.getenv("MCP_HTTP_HOST", "127.0.0.1")
     env_http_port = int(os.getenv("MCP_HTTP_PORT", "8000"))
     env_log_level = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
     env_json_logs = os.getenv("MCP_JSON_LOGS", "false").lower() == "true"
@@ -170,17 +173,19 @@ Environment Variables:
     http_port = parsed.port if parsed.port is not None else env_http_port
     log_level = parsed.log_level if parsed.log_level is not None else env_log_level
     json_logs = parsed.json_logs or env_json_logs
+    resolved_config = resolve_config_path(parsed.config)
 
     return CLIConfig(
         http_mode=http_mode,
         http_host=http_host,
         http_port=http_port,
         # Always a path, as `serve` passes one: bootstrap watches it for reload (#1657).
-        config_path=str(resolve_config_path(parsed.config).path),
+        config_path=str(resolved_config.path),
         log_file=parsed.log_file,
         log_level=log_level,
         json_logs=json_logs,
         unsafe_no_auth=parsed.unsafe_no_auth,
+        config_source=resolved_config.source,
     )
 
 

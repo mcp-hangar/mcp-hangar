@@ -80,8 +80,29 @@ def test_unloading_releases_the_log(run: dict[str, Any]) -> None:
     assert unloaded["logs"] == 404
 
 
+def test_a_server_added_over_the_api_has_its_log(run: dict[str, Any]) -> None:
+    """The third way a server joins gets a buffer too (#1747), as reload and hot-load do."""
+    added = run["added"]
+
+    assert added["status"] == 201
+    assert added["logs"] == ["added is up"]
+    assert added["wired"], "the server writes into a buffer the logs API does not read"
+    assert added["registered"]
+
+
+def test_deleting_a_configured_server_is_refused_and_keeps_its_log(run: dict[str, Any]) -> None:
+    refused = run["refused"]
+
+    assert refused["status"] == 409
+    assert refused["in_repository"]
+    assert refused["wired"]
+
+
 def test_deleting_releases_the_log(run: dict[str, Any]) -> None:
     deleted = run["deleted"]
+    # Registered before the delete (test_a_server_added_over_the_api_has_its_log),
+    # so this is a release, not a buffer that was never there (#1747).
+    assert run["added"]["registered"]
 
     assert deleted["status"] in (200, 204)
     assert not deleted["in_repository"]

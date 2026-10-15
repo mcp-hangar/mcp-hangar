@@ -24,6 +24,14 @@ leave DNS rebinding open -- a name that resolved to a public address when it was
 registered, re-pointed at an internal one before the next call -- because httpx
 re-resolves the hostname itself on every connect. The connect-time check closes
 that on the HUMAN path as well as DISCOVERY.
+
+One relaxation of the HUMAN rule exists, and it is the deployment's, not the
+request's: `ssrf.trusted_networks` in `config.yaml` (#1752). An address in a
+refused private range passes when it lies in one of those networks -- the
+in-cluster Services the Kubernetes operator registers, say. It is set with the
+other process-wide sections at startup and on reload, read by both checks above,
+so narrowing it revokes the next connection; and it can never cover loopback or
+the always-refused ranges, which `parse_trusted_networks` refuses outright.
 """
 
 from __future__ import annotations
@@ -59,12 +67,67 @@ _ALWAYS_BLOCKED_NETWORKS = (
     ipaddress.ip_network("::/128"),
 )
 
+#: Never trustable through `ssrf.trusted_networks`: the always-refused ranges,
+#: and loopback, which from the gateway's side is the gateway itself.
+_NEVER_TRUSTED_NETWORKS = (
+    *_ALWAYS_BLOCKED_NETWORKS,
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
+
+TrustedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+#: The deployment's trusted networks, from `ssrf.trusted_networks`. Empty unless
+#: the config names some; replaced whole by `set_trusted_networks`.
+_trusted_networks: tuple[TrustedNetwork, ...] = ()
+
 #: Hostnames that reach a cloud metadata service without ever looking private.
 _METADATA_SUFFIXES = (".internal", ".metadata.google.internal", ".compute.internal")
 
 
 class SsrfBlocked(ValueError):
     """An endpoint was refused. Subclasses ValueError, which callers catch."""
+
+
+def parse_trusted_networks(values: object) -> tuple[TrustedNetwork, ...]:
+    """Check `ssrf.trusted_networks` and return it as networks, or refuse it.
+
+    Fails closed: a value that is not a list of CIDR strings, a CIDR with host
+    bits set (`10.96.0.1/12` -- probably not the network that was meant), or a
+    network that overlaps loopback or an always-refused range (which `/0` does)
+    is a ValueError naming the entry, not an entry skipped.
+    """
+    if values is None:
+        return ()
+    if not isinstance(values, list):
+        raise ValueError(f"ssrf.trusted_networks must be a list of CIDRs, got {type(values).__name__}")
+    networks: list[TrustedNetwork] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError(f"ssrf.trusted_networks entry {value!r} is not a CIDR string")
+        try:
+            network = ipaddress.ip_network(value.strip(), strict=True)
+        except ValueError as e:
+            raise ValueError(f"ssrf.trusted_networks entry {value!r} is not a network: {e}") from e
+        for never in _NEVER_TRUSTED_NETWORKS:
+            if network.version == never.version and network.overlaps(never):
+                raise ValueError(
+                    f"ssrf.trusted_networks entry {value!r} overlaps {never}, which is never trusted "
+                    f"(loopback, link-local and the cloud metadata endpoint, the unspecified address)"
+                )
+        networks.append(network)
+    return tuple(networks)
+
+
+def set_trusted_networks(networks: tuple[TrustedNetwork, ...]) -> None:
+    """Replace the trusted networks. Takes `parse_trusted_networks`'s result."""
+    global _trusted_networks
+    _trusted_networks = tuple(networks)
+
+
+def trusted_networks() -> tuple[TrustedNetwork, ...]:
+    """The trusted networks in force."""
+    return _trusted_networks
 
 
 def _resolved_addresses(hostname: str) -> list[str]:
@@ -135,8 +198,10 @@ def _resolve_and_validate(
 
     scoped = provenance is Provenance.DISCOVERY and bool(runtime_addresses)
     if not scoped:
+        # Read once, so every address of this endpoint is judged by one list.
+        trusted = _trusted_networks
         for address in addresses:
-            if _in_any(address, _BLOCKED_NETWORKS):
+            if _in_any(address, _BLOCKED_NETWORKS) and not _in_any(address, trusted):
                 raise SsrfBlocked("SSRF blocked: endpoint resolves to private address")
         return addresses
 

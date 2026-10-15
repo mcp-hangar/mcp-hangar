@@ -203,6 +203,19 @@ class IRoleStore(Protocol):
         ...
 
     @abstractmethod
+    def list_principals(self) -> list[dict[str, Any]]:
+        """List every principal that holds at least one role assignment.
+
+        Returns:
+            One ``{"principal_id": ..., "roles": [...]}`` per principal, ordered by
+            principal id; ``roles`` are the distinct role names across all scopes,
+            sorted. Backs ``GET /api/auth/principals``, which read a private
+            attribute only the in-memory store had and so answered ``[]`` for the
+            others (#1672).
+        """
+        ...
+
+    @abstractmethod
     def assign_role(
         self,
         principal_id: str,
@@ -488,6 +501,10 @@ class NullRoleStore:
 
     def add_role(self, role: Role) -> None:
         """No-op: role creation requires the RBAC module."""
+
+    def list_principals(self) -> list[dict[str, Any]]:
+        """Nobody holds a role."""
+        return []
 
     def get_role(self, role_name: str) -> Role | None:
         """No roles defined."""

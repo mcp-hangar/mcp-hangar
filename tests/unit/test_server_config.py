@@ -262,14 +262,16 @@ class TestLoadConfiguration:
 
         assert "mcp_servers" in result
 
-    def test_returns_empty_dict_when_no_config(self, tmp_path, monkeypatch):
-        """Should return empty dict when no config file exists."""
+    def test_refuses_when_no_config_file_exists(self, tmp_path, monkeypatch):
+        """No file anywhere is fatal, not a built-in demo config (#1650)."""
+        from mcp_hangar.server.cli.config_path import MissingConfigFileError
+
+        monkeypatch.delenv("MCP_CONFIG", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
-        # No config.yaml in tmp_path
 
-        result = load_configuration(None)
-
-        assert result == {} or "mcp_servers" in result
+        with pytest.raises(MissingConfigFileError, match="mcp-hangar init"):
+            load_configuration(None)
 
     def test_respects_mcp_config_env_var(self, tmp_path, monkeypatch):
         """Should respect MCP_CONFIG environment variable."""

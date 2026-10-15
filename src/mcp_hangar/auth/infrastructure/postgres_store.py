@@ -15,6 +15,7 @@ import json
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 
@@ -831,6 +832,19 @@ class PostgresRoleStore(IRoleStore):
                 roles.append(Role(name=name, description=description or "", permissions=permissions))
 
             return roles
+
+    def list_principals(self) -> list[dict[str, Any]]:
+        """List principals with at least one assignment."""
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT principal_id, role_name FROM {self._assignments_table} ORDER BY principal_id, role_name"
+            )
+            rows = cur.fetchall()
+            conn.commit()
+        roles: dict[str, set[str]] = {}
+        for principal_id, role_name in rows:
+            roles.setdefault(principal_id, set()).add(role_name)
+        return [{"principal_id": pid, "roles": sorted(names)} for pid, names in roles.items()]
 
     def assign_role(
         self,

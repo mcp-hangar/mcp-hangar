@@ -240,35 +240,6 @@ class TestListPrincipalsHandler:
 
         assert result["total"] == 2
 
-    def test_handle_with_assignments_dict_fallback(self):
-        from mcp_hangar.auth.queries.handlers import ListPrincipalsHandler
-        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
-
-        mock_store = Mock(spec=[])  # no list_principals
-        mock_store._assignments = {
-            "p1": {"global": {"admin", "viewer"}, "tenant:x": {"developer"}},
-            "p2": {"global": {"viewer"}},
-        }
-
-        handler = ListPrincipalsHandler(mock_store)
-        result = handler.handle(ListPrincipalsQuery())
-
-        assert result["total"] == 2
-        principals_ids = {p["principal_id"] for p in result["principals"]}
-        assert principals_ids == {"p1", "p2"}
-
-    def test_handle_no_method_no_assignments(self):
-        from mcp_hangar.auth.queries.handlers import ListPrincipalsHandler
-        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
-
-        mock_store = Mock(spec=[])  # no list_principals, no _assignments
-
-        handler = ListPrincipalsHandler(mock_store)
-        result = handler.handle(ListPrincipalsQuery())
-
-        assert result["total"] == 0
-        assert result["principals"] == []
-
 
 class TestGetToolAccessPolicyHandler:
     """Tests for GetToolAccessPolicyHandler."""
