@@ -360,6 +360,17 @@ class DiscoveryService:
             logger.info(f"Approved pending mcp_server: {name}")
         return mcp_server
 
+    def reject_pending(self, name: str) -> DiscoveredMcpServer | None:
+        """Drop a pending mcp_server without registering it.
+
+        Returns:
+            The rejected mcp_server, or None if it was not pending
+        """
+        mcp_server = self._pending.pop(name, None)
+        if mcp_server:
+            logger.info(f"Rejected pending mcp_server: {name}")
+        return mcp_server
+
     def quarantine(self, mcp_server: DiscoveredMcpServer, reason: str) -> None:
         """Move a mcp_server to quarantine.
 
