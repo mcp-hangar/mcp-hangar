@@ -48,6 +48,7 @@ from ..exceptions import (
     McpServerNotHereError,
     McpServerNotReadyError,
     McpServerStartError,
+    ResponseTooLarge,
     ToolInvocationError,
     ToolNotFoundError,
 )
@@ -1912,7 +1913,7 @@ class McpServer(AggregateRoot):
 
             try:
                 refresh_result = refresh_client.call("tools/list", {}, timeout=5.0)
-            except (OSError, TimeoutError) as e:
+            except (OSError, TimeoutError, ClientError) as e:
                 refresh_error = e
                 logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
 
@@ -1970,7 +1971,11 @@ class McpServer(AggregateRoot):
                 _tool_call_params(tool_name, arguments, progress_token),
                 timeout=timeout,
             )
-        except (OSError, TimeoutError) as e:
+        except ResponseTooLarge:
+            # A limit the gateway enforces, not a fault of the server: it keeps its
+            # own type for the caller and does not count against the server.
+            raise
+        except (OSError, TimeoutError, ClientError) as e:
             invocation_error = e
 
         # Lock cycle 3: Update state based on result
@@ -2157,7 +2162,9 @@ class McpServer(AggregateRoot):
         # Transport phase (outside lock): forward method + params verbatim.
         try:
             response = client.call(method, params, timeout=timeout)
-        except (OSError, TimeoutError) as e:
+        except ResponseTooLarge:
+            raise
+        except (OSError, TimeoutError, ClientError) as e:
             raise ToolInvocationError(
                 self.mcp_server_id,
                 str(e),
@@ -2205,7 +2212,7 @@ class McpServer(AggregateRoot):
             client = self._client
         try:
             response = self._call_with_session_recovery(client, "tools/list", {}, timeout=5.0)
-        except (OSError, TimeoutError) as exc:
+        except (OSError, TimeoutError, ClientError) as exc:
             logger.warning(
                 "tool_catalogue_recheck_failed",
                 mcp_server_id=self.mcp_server_id,
@@ -2246,7 +2253,7 @@ class McpServer(AggregateRoot):
                 tool_list = tools_resp.get("result", {}).get("tools", [])
                 self._tools.update_from_list(tool_list)
                 return True
-        except (OSError, TimeoutError) as e:
+        except (OSError, TimeoutError, ClientError) as e:
             logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
         return False
 
