@@ -17,8 +17,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
+from mcp_hangar.server.cli.commands import why as why_module
 from mcp_hangar.server.cli.main import app
 from mcp_hangar.server.cli.services.refusal_log import read_pin_history
 
@@ -90,20 +92,23 @@ def test_each_tool_has_its_own_history(db):
     assert _history(db, "never-pinned") == []
 
 
-def test_the_history_is_read_from_the_log_alone_by_the_command(db):
+def test_the_history_is_read_from_the_log_alone_by_the_command(db, monkeypatch):
     _boot(db, {"add": OLD})
     _boot(db, {"add": NEW})
+    # The table folds at the width of the terminal, which CI does not have.
+    monkeypatch.setattr(why_module, "console", Console(width=240))
 
-    result = CliRunner().invoke(app, ["why", "--db", str(db), "--tool", "add"], env={"COLUMNS": "220"})
+    result = CliRunner().invoke(app, ["why", "--db", str(db), "--tool", "add"])
 
     assert result.exit_code == 0, result.output
     assert OLD[:12] in result.output and NEW[:12] in result.output
     assert result.output.count("recorded") == 2 and "config" in result.output
 
 
-def test_a_tool_with_no_pin_says_so(db):
+def test_a_tool_with_no_pin_says_so(db, monkeypatch):
     _boot(db, {"add": OLD})
+    monkeypatch.setattr(why_module, "console", Console(width=240))
 
-    result = CliRunner().invoke(app, ["why", "--db", str(db), "--tool", "echo"], terminal_width=200)
+    result = CliRunner().invoke(app, ["why", "--db", str(db), "--tool", "echo"])
 
     assert result.exit_code == 0 and "No pin recorded" in " ".join(result.output.split())
