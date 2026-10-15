@@ -224,6 +224,22 @@ class ConcurrencyManager:
             limiter = self._limiters.get(mcp_server_id)
             return limiter.active if limiter is not None else 0
 
+    def wait_idle(self, mcp_server_id: str, timeout_s: float) -> bool:
+        """Wait until no call holds a slot on *mcp_server_id*, for at most *timeout_s*.
+
+        What a graceful reload waits on before it stops a server (#1662). New
+        calls are not held back: this watches the count, it does not close the door.
+
+        Returns:
+            True once the server is idle, False if the timeout passed first.
+        """
+        deadline = time.monotonic() + max(0.0, timeout_s)
+        while self.in_flight(mcp_server_id) > 0:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
+        return True
+
     def _limit_of(self, mcp_server_id: str) -> int:
         """Called with the lock held."""
         return self._mcp_server_limits.get(mcp_server_id, self._default_mcp_server_limit)
