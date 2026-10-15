@@ -24,8 +24,9 @@ import platform
 import shutil
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
+
+from .init_manifest import record_written, remember_original
 
 HANGAR_ENTRY_NAME = "mcp-hangar"
 
@@ -112,20 +113,25 @@ def hangar_launcher() -> tuple[str, list[str]]:
 def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | None:
     """Point *client* at this Hangar, keeping everything else in its file.
 
-    Returns the backup path, or None when there was no file to back up (a user
-    who has Cursor installed but has never configured a server).
+    The file's pre-Hangar bytes are saved once, under the Hangar state directory
+    (`init_manifest`), so `init --undo` can restore them; a second run keeps that
+    first copy. Returns the backup path when this call made one, and None when
+    there was nothing to back up (a user who has Cursor installed but has never
+    configured a server) or the backup already existed.
     """
     document: dict = {}
-    backup: Path | None = None
+    before: bytes | None = None
 
     if client.path.is_file():
-        backup = _backup(client.path)
+        before = client.path.read_bytes()
         try:
-            document = json.loads(client.path.read_text(encoding="utf-8")) or {}
+            document = json.loads(before.decode("utf-8")) or {}
         except json.JSONDecodeError:
-            # A file we cannot parse is a file we must not rewrite: the backup
-            # would be the only copy of something the user still needs.
+            # A file we cannot parse is a file we must not rewrite: it may be
+            # the only copy of something the user still needs.
             raise
+
+    backup = remember_original(client.path)
 
     servers = dict(document.get("mcpServers") or {})
     command, leading = hangar_launcher()
@@ -140,13 +146,7 @@ def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | No
 
     client.path.parent.mkdir(parents=True, exist_ok=True)
     client.path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    return backup
-
-
-def _backup(path: Path) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = path.with_suffix(f".backup.{stamp}{path.suffix}")
-    shutil.copy2(path, backup)
+    record_written(client.path, before)
     return backup
 
 
