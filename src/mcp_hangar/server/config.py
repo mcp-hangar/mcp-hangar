@@ -25,6 +25,7 @@ from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpS
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
+from ..domain.value_objects.config import MaxConsecutiveFailures
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 from ..metrics import remove_group_series
@@ -1066,6 +1067,25 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
             _register_config_pins(tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key)
 
 
+def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> int:
+    """The server's failure threshold, refused when outside 1-100 (#1665).
+
+    `MaxConsecutiveFailures` holds the range and nothing called it, so 0 and 500
+    both booted: 0 degrades a server on its first success-less tick, 500 never.
+    """
+    value = spec_dict.get("max_consecutive_failures", 3)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': max_consecutive_failures must be an integer, got {value!r}"
+        )
+    try:
+        return int(MaxConsecutiveFailures(value))
+    except ValueError as e:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': max_consecutive_failures {value}: {e} (allowed 1-100)"
+        ) from e
+
+
 def _subprocess_command(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
     """The command a subprocess server runs: its `command` followed by its `args` (#1658).
 
@@ -1184,7 +1204,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         "env": spec_dict.get("env", {}),
         "idle_ttl_s": spec_dict.get("idle_ttl_s", 300),
         "health_check_interval_s": spec_dict.get("health_check_interval_s", 60),
-        "max_consecutive_failures": spec_dict.get("max_consecutive_failures", 3),
+        "max_consecutive_failures": _max_consecutive_failures(mcp_server_id, spec_dict),
         "max_response_bytes": max_response_bytes,
         "volumes": spec_dict.get("volumes", []),
         "build": spec_dict.get("build"),
