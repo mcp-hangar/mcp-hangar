@@ -145,8 +145,8 @@ def add_command(
     to your MCP Hangar config file.
 
     Examples:
-        mcp-hangar add github
-        mcp-hangar add --search database
+        mcp-hangar add git
+        mcp-hangar add --search fetch
         mcp-hangar add filesystem -y
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()

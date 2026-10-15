@@ -49,7 +49,7 @@ _mcp_hangar_completion() {
             return 0
             ;;
         --bundle|-b)
-            COMPREPLY=($(compgen -W "starter developer data" -- "${cur}"))
+            COMPREPLY=($(compgen -W "starter developer" -- "${cur}"))
             return 0
             ;;
         status)
@@ -130,7 +130,7 @@ _mcp_hangar() {
                 init)
                     _arguments \\
                         '(-y --non-interactive)'{-y,--non-interactive}'[Run without prompts]' \\
-                        '(-b --bundle)'{-b,--bundle}'[McpServer bundle]:bundle:(starter developer data)' \\
+                        '(-b --bundle)'{-b,--bundle}'[McpServer bundle]:bundle:(starter developer)' \\
                         '--mcp_servers[Comma-separated mcp_servers]:mcp_servers:' \\
                         '--config-path[Custom config path]:path:_files' \\
                         '--claude-config[Claude Desktop config path]:path:_files' \\
@@ -208,7 +208,7 @@ complete -c mcp-hangar -n "__fish_use_subcommand" -a "completion" -d "Generate c
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -s y -l non-interactive \\
     -d "Run without prompts"
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -s b -l bundle \\
-    -d "MCP server bundle" -r -a "starter developer data"
+    -d "MCP server bundle" -r -a "starter developer"
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l MCP servers \\
     -d "Comma-separated MCP servers" -r
 complete -c mcp-hangar -n "__fish_seen_subcommand_from init" -l config-path \\

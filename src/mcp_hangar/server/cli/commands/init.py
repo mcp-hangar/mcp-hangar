@@ -365,7 +365,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     ] = False,
     bundle: Annotated[
         str | None,
-        typer.Option("--bundle", "-b", help="MCP server bundle to install: starter, developer, data"),
+        typer.Option("--bundle", "-b", help="MCP server bundle to install: starter, developer"),
     ] = None,
     mcp_servers_opt: Annotated[
         str | None,
@@ -509,7 +509,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             raise CLIError(
                 message=f"Unknown bundle: {bundle}",
                 reason=f"Available bundles: {', '.join(PROVIDER_BUNDLES.keys())}",
-                suggestions=["Use --bundle=starter, --bundle=developer, or --bundle=data"],
+                suggestions=["Use --bundle=starter or --bundle=developer"],
             )
 
         available, unavailable = filter_bundle_by_availability(bundle.lower(), deps)
