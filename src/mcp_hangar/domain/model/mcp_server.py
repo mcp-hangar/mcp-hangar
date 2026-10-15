@@ -2266,6 +2266,7 @@ class McpServer(AggregateRoot):
         except (OSError, TimeoutError, ClientError) as e:
             check_error = e
             check_error_type = bounded_error_type(type(e).__qualname__)
+        duration_ms = (time.time() - start_time) * 1000
 
         # Phase 3: Update state based on result under lock
         with self._lock:
@@ -2281,6 +2282,7 @@ class McpServer(AggregateRoot):
                         mcp_server_id=self.mcp_server_id,
                         consecutive_failures=self._health.consecutive_failures,
                         error_message=str(check_error),
+                        duration_ms=duration_ms,
                     )
                 )
 
@@ -2305,7 +2307,6 @@ class McpServer(AggregateRoot):
                 return False
 
             # Success
-            duration_ms = (time.time() - start_time) * 1000
             self._health.record_success()
 
             self._record_event(HealthCheckPassed(mcp_server_id=self.mcp_server_id, duration_ms=duration_ms))

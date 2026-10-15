@@ -27,6 +27,8 @@ class HealthCheckFailed(DomainEvent):
     mcp_server_id: str
     consecutive_failures: int = 0
     error_message: str = ""
+    #: How long the probe ran before it failed, in ms; 0.0 for an event written before this field.
+    duration_ms: float = 0.0
 
 
 # Resource Management Events
