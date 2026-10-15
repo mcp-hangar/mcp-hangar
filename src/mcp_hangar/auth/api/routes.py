@@ -362,32 +362,28 @@ async def list_principals(request: Request) -> HangarJSONResponse:
 
 
 async def list_permissions(request: Request) -> HangarJSONResponse:
-    """List all available permission actions/resource types.
+    """List every permission the system grants, grouped by resource type.
 
-    Returns a static manifest of all permission strings supported by the system.
-    No query needed -- this is read from domain constants.
+    Built from the permission registry the built-in roles are made of
+    (``auth.roles.PERMISSIONS``), so it is the set an authorizer can be asked
+    about. It used to import two constants that no longer exist and always
+    answered a hard-coded list that named neither ``mcp_servers``, ``policy``,
+    ``approval`` nor ``discovery`` (#1673).
 
     Returns:
         JSON with {"permissions": [{"resource_type": ..., "actions": [...]}]}.
     """
-    # Graceful fallback: if constants don't exist, return known defaults
-    try:
-        from mcp_hangar.domain.value_objects.security import (  # type: ignore[attr-defined]  # optional constants, fallback handles missing
-            ACTIONS,
-            RESOURCE_TYPES,
-        )
+    return HangarJSONResponse({"permissions": permission_manifest()})
 
-        permissions = [{"resource_type": rt, "actions": list(ACTIONS)} for rt in RESOURCE_TYPES]
-    except Exception:  # noqa: BLE001
-        permissions = [
-            {"resource_type": "provider", "actions": ["read", "write", "invoke", "admin"]},
-            {"resource_type": "group", "actions": ["read", "write", "admin"]},
-            {"resource_type": "tool", "actions": ["invoke", "read"]},
-            {"resource_type": "config", "actions": ["read", "write"]},
-            {"resource_type": "*", "actions": ["*"]},
-        ]
 
-    return HangarJSONResponse({"permissions": permissions})
+def permission_manifest() -> list[dict[str, Any]]:
+    """The permission registry as ``[{"resource_type": ..., "actions": [...]}]``, sorted."""
+    from ..roles import PERMISSIONS
+
+    actions: dict[str, set[str]] = {}
+    for permission in PERMISSIONS.values():
+        actions.setdefault(permission.resource_type, set()).add(permission.action)
+    return [{"resource_type": rt, "actions": sorted(actions[rt])} for rt in sorted(actions)]
 
 
 async def check_permission(request: Request) -> HangarJSONResponse:
