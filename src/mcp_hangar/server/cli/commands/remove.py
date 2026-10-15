@@ -7,6 +7,7 @@ stops the running MCP server instance.
 import json
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 import questionary
 import typer
@@ -15,6 +16,7 @@ from rich.console import Console
 from ..config_path import resolve_config_path
 from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
+from ..services import gateway_api
 
 console = Console()
 
@@ -70,32 +72,9 @@ def _remove_from_config(config_path: Path, mcp_server_name: str) -> bool:
     return True
 
 
-def _try_stop_mcp_server(mcp_server_name: str) -> bool:
-    """Try to stop a running MCP server instance.
-
-    Args:
-        mcp_server_name: Name of MCP server to stop
-
-    Returns:
-        True if MCP server was stopped, False otherwise
-    """
-    import httpx
-
-    try:
-        for port in [8000, 8080]:
-            try:
-                response = httpx.post(
-                    f"http://localhost:{port}/MCP servers/{mcp_server_name}/stop",
-                    timeout=5.0,
-                )
-                if response.status_code == 200:
-                    return True
-            except httpx.ConnectError:
-                continue
-    except Exception:  # noqa: BLE001 -- fault-barrier: stop attempt must not crash remove command
-        pass
-
-    return False
+def _try_stop_mcp_server(mcp_server_name: str) -> gateway_api.GatewayReply:
+    """Ask the running gateway to stop the server; a 404 means it was not running there."""
+    return gateway_api.call("POST", f"/api/mcp_servers/{quote(mcp_server_name, safe='')}/stop")
 
 
 def remove_command(
@@ -154,8 +133,11 @@ def remove_command(
 
     # Stop running instance first
     if not keep_running:
-        if _try_stop_mcp_server(name):
+        reply = _try_stop_mcp_server(name)
+        if reply.ok:
             console.print(f"[dim]Stopped running instance of {name}[/dim]")
+        elif reply.problem() and reply.status_code != 404:
+            console.print(f"[yellow]Could not stop {name}: {reply.problem()}[/yellow]")
 
     # Remove from config
     if _remove_from_config(config_path, name):
