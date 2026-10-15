@@ -9,7 +9,7 @@ from typing import Any, Literal
 from .domain.contracts.mcp_server_runtime import McpServerMapping, McpServerRuntime, normalize_state_to_str
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
-from .metrics import observe_health_check, record_error, record_gc_cycle
+from .metrics import record_error, record_gc_cycle
 from .observability.conventions import Health, HealthCheck, McpServer
 from .observability.tracing import get_tracer
 from .stream_ids import MCP_SERVER
@@ -137,9 +137,7 @@ class BackgroundWorker:
         with get_tracer(__name__).start_as_current_span("mcp_server.health_check") as span:
             span.set_attribute(McpServer.ID, mcp_server_id)
             try:
-                hc_start = time.perf_counter()
                 is_healthy = mcp_server.health_check()
-                hc_duration = time.perf_counter() - hc_start
             except Exception:
                 span.set_attribute(HealthCheck.OUTCOME, HealthCheck.ERROR)
                 raise
@@ -148,13 +146,10 @@ class BackgroundWorker:
             span.set_attribute(HealthCheck.OUTCOME, HealthCheck.HEALTHY if is_healthy else HealthCheck.UNHEALTHY)
             span.set_attribute(Health.CONSECUTIVE_FAILURES, consecutive)
 
-            observe_health_check(
-                mcp_server=mcp_server_id,
-                duration=hc_duration,
-                healthy=is_healthy,
-                is_cold=False,
-                consecutive_failures=consecutive,
-            )
+            # Not recorded here: the check records `HealthCheckPassed` or
+            # `HealthCheckFailed` with its measured duration and the metrics handler
+            # counts that event. This used to count it a second time, so
+            # `mcp_hangar_health_checks_total` rose by 2 per check (#1707).
 
             if not is_healthy:
                 logger.warning("health_check_unhealthy", mcp_server_id=mcp_server_id)
