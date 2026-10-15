@@ -42,6 +42,9 @@ def test_every_declared_placeholder_is_still_in_an_example():
 def test_variables_and_local_images_are_not_asked_for(tmp_path):
     (tmp_path / "examples").mkdir()
     (tmp_path / "examples" / "a.yaml").write_text(
-        "services:\n  a:\n    image: ${IMG:?set it}\n  b:\n    image: localhost/built:test\n  c:\n    image: busybox:1\n"
+        "services:\n"
+        "  a:\n    image: ${IMG:?set it}\n"
+        "  b:\n    image: localhost/built:test\n"
+        "  c:\n    image: busybox:1\n"
     )
     assert checker.referenced_images(tmp_path) == {"busybox:1": ["examples/a.yaml"]}
