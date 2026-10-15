@@ -255,3 +255,18 @@ class TestParseRefusesAPatternListThatIsNotAList:
         from mcp_hangar.domain.model.mcp_server_config import parse_tools_access_config
 
         assert parse_tools_access_config({field: None}) is None
+
+
+class TestFromDictRefusesWhatTheLoaderRefuses:
+    """`from_dict` and the config loader accept the same `tools` shapes (#1741)."""
+
+    @pytest.mark.parametrize("bad", ["add", 5, True, ["add"], [{"name": "a"}, "b"]])
+    def test_refuses_a_tools_value_that_is_not_a_policy_or_schemas(self, bad):
+        with pytest.raises(ValueError, match="tools"):
+            McpServerConfig.from_dict("p", {"mode": "subprocess", "command": ["x"], "tools": bad})
+
+    def test_accepts_a_policy_mapping_and_a_schema_list(self):
+        policy = McpServerConfig.from_dict("p", {"mode": "subprocess", "command": ["x"], "tools": {"deny_list": ["a"]}})
+        schemas = McpServerConfig.from_dict("p", {"mode": "subprocess", "command": ["x"], "tools": [{"name": "a"}]})
+        assert policy.tools_access is not None
+        assert schemas.tools == [{"name": "a"}]
