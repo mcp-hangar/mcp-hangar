@@ -54,7 +54,6 @@ start_containers() {
                 --label "mcp.hangar.name=$name-$i" \
                 --label mcp.hangar.mode=container \
                 --label mcp.hangar.read-only=false \
-                --label "mcp.hangar.group=$group" \
                 --label "mcp.hangar.volumes=$DATA_DIR/$name:/data:rw" \
                 "$image" >/dev/null; then
                 started=$((started + 1))

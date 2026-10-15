@@ -19,7 +19,6 @@ services:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "fetch-service"
       mcp.hangar.mode: "container"
-      mcp.hangar.group: "web-tools"
     networks:
       - mcp-network
 
@@ -30,7 +29,6 @@ services:
       mcp.hangar.enabled: "true"
       mcp.hangar.name: "memory-service"
       mcp.hangar.mode: "container"
-      mcp.hangar.group: "storage-tools"
     networks:
       - mcp-network
 

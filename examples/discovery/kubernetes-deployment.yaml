@@ -33,7 +33,6 @@ spec:
         mcp-hangar.io/name: "data-processor"
         mcp-hangar.io/mode: "http"
         mcp-hangar.io/port: "8080"
-        mcp-hangar.io/group: "data-team"
         mcp-hangar.io/health-path: "/health"
         mcp-hangar.io/ttl: "120"
     spec:
