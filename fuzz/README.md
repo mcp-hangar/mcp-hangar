@@ -13,6 +13,8 @@ should be X"; the verdict is the policy's business.
 | `fuzz_policy_evaluate.py` | `evaluate()` returns a `Decision`, in bounded time |
 | `fuzz_policy_parse.py` | a policy parser rejects or accepts, never crashes |
 | `fuzz_access_precedence.py` | deny wins, and keeps winning after a merge |
+| `fuzz_front_door_projection.py` | what the front door lists a caller is allowed and not withdrawn, and listed means routed |
+| `fuzz_config_document.py` | a configuration is checked or refused by name (`ConfigurationError`), never by a crash |
 | `corpus/parse/` | seed inputs for the parse target |
 
 The split is not decoration. `atheris` publishes manylinux x86_64 wheels for
@@ -34,6 +36,8 @@ uv sync --extra fuzz
 python fuzz/fuzz_policy_evaluate.py -runs=1000000
 python fuzz/fuzz_policy_parse.py -runs=1000000 fuzz/corpus/parse
 python fuzz/fuzz_access_precedence.py -runs=1000000
+python fuzz/fuzz_front_door_projection.py -runs=100000
+python fuzz/fuzz_config_document.py -runs=100000
 ```
 
 `-runs=0 <file>` replays one input. libFuzzer writes a failing input to
@@ -49,6 +53,16 @@ would be an opaque blob rather than something a reviewer can read. libFuzzer
 builds and keeps that corpus itself (and ClusterFuzzLite persists it between
 runs -- #1104). What a human should be able to read is the regression, and that
 lives in the replay test as a named case.
+
+The last two are structure-aware: their bytes drive a generator
+(`check_front_door_projection`, `build_config_document` in `invariants.py`)
+through `FuzzedDataProvider` instead of being decoded, so each byte is a real
+choice -- which server, which tool, which tenant, which block is the wrong kind
+of value -- and the same generator, seeded, is what
+`tests/unit/test_the_fuzz_invariants_hold.py` replays on every platform. The
+config target's first finding (#1787) was that a block of the wrong kind ended
+boot in an `AttributeError`, a `TypeError` or a bare `ValueError`; the loader now
+refuses it as a `ConfigurationError` naming the server.
 
 ## Turning a finding into a regression
 

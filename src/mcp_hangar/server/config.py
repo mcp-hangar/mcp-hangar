@@ -656,19 +656,42 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
                 logger.warning("skipping_invalid_mcp_server_id", mcp_server_id=mcp_server_id)
                 continue
 
-            mode = spec_dict.get("mode", "subprocess")
+            with _naming(mcp_server_id):
+                mode = spec_dict.get("mode", "subprocess")
 
-            if mode == "group":
-                groups.append((mcp_server_id, spec_dict))
-                # A call that names the group is limited under the group's id.
-                _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
-                continue
+                if mode == "group":
+                    groups.append((mcp_server_id, spec_dict))
+                    # A call that names the group is limited under the group's id.
+                    _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
+                    continue
 
-            _load_mcp_server_config(mcp_server_id, spec_dict)
+                _load_mcp_server_config(mcp_server_id, spec_dict)
 
         for group_id, spec_dict in groups:
-            _load_group_config(group_id, spec_dict)
+            with _naming(group_id):
+                _load_group_config(group_id, spec_dict)
     return staged
+
+
+@contextmanager
+def _naming(mcp_server_id: str) -> Iterator[None]:
+    """Turn a malformed block into a refusal that names the server (#1787).
+
+    A block of the wrong shape reached the loader's own reads as an
+    ``AttributeError`` (a ``.get`` on a string), a ``TypeError`` or a bare
+    ``ValueError``, and boot ended in a traceback that named none of the
+    config. The fuzz target found that a typo in about one spec in six did it.
+    A refusal the loader already raises as ``ConfigurationError`` is left as it is.
+    """
+    try:
+        yield
+    except ConfigurationError:
+        raise
+    except (ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise ConfigurationError(
+            f"Invalid configuration for '{mcp_server_id}': {type(exc).__name__}: {exc}. "
+            "Check that each block is the kind of value the reference documents (a mapping, a list or a string)."
+        ) from exc
 
 
 def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
