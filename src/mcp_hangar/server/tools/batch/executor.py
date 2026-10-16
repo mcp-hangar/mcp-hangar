@@ -874,7 +874,10 @@ def _retry_policy_for(call: Any) -> RetryPolicy | None:
     Two rules decide the result:
 
     * **Config is the ceiling.** An explicit `max_attempts` from the caller can
-      lower the attempt count and never raise it. The operator configures how
+      lower the attempt count and never raise it. An explicit 1 is exactly one
+      attempt, whatever is configured: a caller whose tool is not idempotent has
+      to be able to say so (#1678). Left unsaid (`None`), the configured count
+      applies. The operator configures how
       hard this gateway is willing to lean on an upstream; a caller asking for
       more attempts than that is asking to be someone else's load problem.
     * **No config means no change.** `RetryPolicy()` is three attempts, so
@@ -883,12 +886,14 @@ def _retry_policy_for(call: Any) -> RetryPolicy | None:
       `None` rather than a policy nobody asked for.
     """
     configured = configured_retry_policy(call.mcp_server)
-    caller_attempts = getattr(call, "max_retries", 1) or 1
+    caller_attempts: int | None = getattr(call, "max_retries", None)
 
     if configured is None:
-        return RetryPolicy(max_attempts=caller_attempts) if caller_attempts > 1 else None
+        if caller_attempts is None or caller_attempts <= 1:
+            return None
+        return RetryPolicy(max_attempts=caller_attempts)
 
-    attempts = min(configured.max_attempts, caller_attempts) if caller_attempts > 1 else configured.max_attempts
+    attempts = configured.max_attempts if caller_attempts is None else min(configured.max_attempts, caller_attempts)
     if attempts <= 1:
         return None
     return replace(configured, max_attempts=attempts)

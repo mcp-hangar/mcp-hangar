@@ -46,7 +46,7 @@ def _clean_store():
     reset_retry_store()
 
 
-def _call(mcp_server: str = _SERVER, max_retries: int = 1):
+def _call(mcp_server: str = _SERVER, max_retries: int | None = None):
     return Mock(mcp_server=mcp_server, tool="t", max_retries=max_retries)
 
 
