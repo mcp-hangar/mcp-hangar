@@ -1,1 +1,0 @@
-`GET /api/auth/principals` lists principals on every role store. It probed for a method or a private attribute only the in-memory store had, so SQLite, Postgres and the event-sourced store answered an empty list even with role assignments in place. `list_principals()` is now part of the `IRoleStore` contract and implemented by all four.

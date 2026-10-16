@@ -50,6 +50,12 @@ SESSION: Final = "session"
 #: own withdraw/restore lifecycle, and it outlives any single tool catalogue.
 TOOL_WITHDRAWAL: Final = "tool_withdrawal"
 
+#: Stream for the pin ledger of one server (#1800): every pin recorded or
+#: revoked for its tools. Its own stream for the reason `TOOL_WITHDRAWAL` is: a
+#: replica reconciling the pins at startup reads it whole, and the server's own
+#: stream also holds every invocation.
+PIN_LEDGER: Final = "pin_ledger"
+
 SEPARATOR: Final = ":"
 
 
@@ -88,6 +94,10 @@ def stream_id_for_event(event: object) -> str | None:
     # its history. The event opts in by exposing `withdrawal_of`; nothing is
     # sniffed here, so an event acquiring an `mcp_server` field later does not
     # silently change stream.
+    pin_ledger_of = getattr(event, "pin_ledger_of", None)
+    if isinstance(pin_ledger_of, str) and pin_ledger_of:
+        return stream_id_for(PIN_LEDGER, pin_ledger_of)
+
     withdrawal_of = getattr(event, "withdrawal_of", None)
     if isinstance(withdrawal_of, str) and withdrawal_of:
         return stream_id_for(TOOL_WITHDRAWAL, withdrawal_of)

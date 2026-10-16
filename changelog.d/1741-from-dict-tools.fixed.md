@@ -1,1 +1,0 @@
-`McpServerConfig.from_dict` now refuses a `tools` value that is neither an access-policy mapping nor a list of tool-schema mappings, the same shapes the config loader accepts, instead of silently skipping it. REST registration carries no `tools` field, so it could not store such a value.

@@ -112,3 +112,32 @@ def test_config_check_passes_values_the_boot_accepts(tmp_path):
     }
     result = _check(tmp_path, config)
     assert result.exit_code == 0, result.output
+
+
+def test_config_check_runs_the_loader_and_reports_what_it_refuses(tmp_path):
+    """`args` that is not a list passes the key check and refuses the boot; the check now builds the section."""
+    config = {"mcp_servers": {"s": {"mode": "subprocess", "command": "x", "args": "--flag"}}}
+    result = _check(tmp_path, config)
+    assert result.exit_code == 1
+    assert "args must be a list of strings" in result.output
+
+
+def test_config_check_reports_a_malformed_block_and_names_the_server(tmp_path):
+    config = {"mcp_servers": {"broken": {"mode": "subprocess", "command": ["x"], "access": "deny"}}}
+    result = _check(tmp_path, config)
+    assert result.exit_code == 1
+    assert "broken" in result.output
+
+
+def test_config_check_reports_a_process_wide_section_the_boot_refuses(tmp_path):
+    result = _check(tmp_path, {"execution": {"tenant_limits": "many"}})
+    assert result.exit_code == 1
+    assert "tenant_limits" in result.output
+
+
+def test_config_check_builds_nothing_into_the_running_configuration(tmp_path):
+    from mcp_hangar.server.config import _staged
+
+    config = {"mcp_servers": {"s": {"mode": "subprocess", "command": ["x"]}}}
+    assert _check(tmp_path, config).exit_code == 0
+    assert _staged.get() is None

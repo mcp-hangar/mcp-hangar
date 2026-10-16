@@ -1,3 +1,0 @@
-### `init` keeps its client-config backup in the state directory
-
-`mcp-hangar init` no longer writes `<name>.backup.<timestamp>.json` next to each client config it changes (including `./.mcp.json` and `./.cursor/mcp.json` in your project). It saves the first, pre-Hangar copy under `$XDG_STATE_HOME/mcp-hangar/init-backups` (`~/.local/state/mcp-hangar/init-backups`) and records it in `init-manifest.json` there; a re-run keeps that first copy. `mcp-hangar init --undo` restores from it. Backups earlier versions left beside your files are not touched or tracked; delete them if you no longer need them, and add `*.backup.*.json` to your ignore file only if you want to keep them out of version control.

@@ -112,6 +112,8 @@ from .enforcement import (
     ProviderCapabilityQuarantineReleased,
     ResponseTruncated,
     ToolAdmissionRequested,
+    ToolPinRecorded,
+    ToolPinRevoked,
 )
 from .health import (
     HealthCheckFailed,
@@ -231,6 +233,8 @@ __all__ = [
     "CustomRoleUpdated",
     "DetectionRuleMatched",
     "DigestMismatchEvent",
+    "ToolPinRecorded",
+    "ToolPinRevoked",
     "ToolAdmissionRequested",
     "DigestMismatchInTask",
     "DEGRADED_BY_HEALTH_CHECKS",
