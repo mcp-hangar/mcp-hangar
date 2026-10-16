@@ -380,19 +380,35 @@ class TestWithdrawAndRestore:
         assert self._post(client, keys["admin"], "restore", "danger").status_code == 200
         assert self._withdrawn("danger") == {"A": False, "B": False, "C": False, None: False}
 
-    def test_a_global_developer_is_unchanged(self, client_and_keys):
-        """No body still means every tenant -- for a grant that reaches every tenant."""
+    def test_a_global_developer_acts_on_one_tenant_but_not_on_every_tenant(self, client_and_keys):
+        """A named tenant is unchanged. No tenant means the whole fleet, which needs the admin grant (#1656)."""
         client, keys = client_and_keys
 
-        response = self._post(client, keys["dev-global"], "withdraw", "danger")
-        assert response.status_code == 200 and response.json()["tenant_id"] is None
-        assert self._withdrawn("danger") == {"A": True, "B": True, "C": True, None: True}
-
-        assert self._post(client, keys["dev-global"], "restore", "danger").status_code == 200
+        refused = self._post(client, keys["dev-global"], "withdraw", "danger")
+        assert refused.status_code == 403
         assert self._withdrawn("danger") == {"A": False, "B": False, "C": False, None: False}
 
         assert self._post(client, keys["dev-global"], "withdraw", "danger", {"tenant_id": "B"}).status_code == 200
         assert self._withdrawn("danger")["B"] is True
+        assert self._post(client, keys["dev-global"], "restore", "danger", {"tenant_id": "B"}).status_code == 200
+        assert self._withdrawn("danger")["B"] is False
+
+    def test_a_global_developer_cannot_lift_a_fleet_wide_withdrawal(self, client_and_keys):
+        client, keys = client_and_keys
+        assert self._post(client, keys["admin"], "withdraw", "danger").status_code == 200
+
+        assert self._post(client, keys["dev-global"], "restore", "danger").status_code == 403
+        assert self._withdrawn("danger") == {"A": True, "B": True, "C": True, None: True}
+
+    def test_an_admin_withdraws_and_restores_for_every_tenant(self, client_and_keys):
+        client, keys = client_and_keys
+
+        response = self._post(client, keys["admin"], "withdraw", "danger")
+        assert response.status_code == 200 and response.json()["tenant_id"] is None
+        assert self._withdrawn("danger") == {"A": True, "B": True, "C": True, None: True}
+
+        assert self._post(client, keys["admin"], "restore", "danger").status_code == 200
+        assert self._withdrawn("danger") == {"A": False, "B": False, "C": False, None: False}
 
     def test_a_principal_without_lifecycle_is_refused(self, client_and_keys):
         client, keys = client_and_keys

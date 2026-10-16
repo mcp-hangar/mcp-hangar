@@ -80,6 +80,11 @@ def _within_grant(request: Request, tenant_id: str | None, *, action: str, targe
     """
     confined = confined_tenant(request)
     if confined is None:
+        if tenant_id is None:
+            # Every tenant at once. `mcp_servers:lifecycle` is what lets `developer`
+            # start and stop a server, and it must not also let one take a tool
+            # away from the whole fleet: that needs the administrator's grant (#1656).
+            _check_permission(request, resource_type="admin", action="*")
         return tenant_id, False
     if tenant_id is not None and tenant_id != confined:
         raise out_of_scope(
