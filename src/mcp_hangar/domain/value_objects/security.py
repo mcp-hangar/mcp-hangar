@@ -204,8 +204,8 @@ class Role:
     """Named collection of permissions.
 
     Roles group related permissions for easier assignment and management.
-    Built-in roles: admin, provider-admin, developer, viewer, auditor,
-    service-account. Defined in mcp_hangar.auth.roles.
+    Built-in roles: admin, provider-admin, kubernetes-operator, developer, viewer,
+    auditor, service-account. Defined in mcp_hangar.auth.roles.
 
     Attributes:
         name: Unique role identifier.

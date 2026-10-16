@@ -190,6 +190,27 @@ ROLE_PROVIDER_ADMIN = Role(
     ),
 )
 
+ROLE_KUBERNETES_OPERATOR = Role(
+    name="kubernetes-operator",
+    description="The Kubernetes operator's key: register, start and remove servers, deliver egress policy",
+    permissions=frozenset(
+        [
+            # Exactly what mcp-hangar-operator calls (0.17.26 and later): read a
+            # server, register it (POST /mcp_servers), start and stop it, remove
+            # it, and POST/DELETE its /l7_policy. Nothing else: no tool
+            # invocation, no groups, no discovery approval, no config reload, no
+            # admin. Pinned by tests/unit/test_kubernetes_operator_role.py, so an
+            # addition is a decision. Lifecycle is not scoped per server, so the
+            # role can also start a server it did not register (#1827).
+            PERMISSION_PROVIDERS_READ,
+            PERMISSION_PROVIDERS_WRITE,
+            PERMISSION_PROVIDERS_LIFECYCLE,
+            PERMISSION_POLICY_READ,
+            PERMISSION_POLICY_WRITE,
+        ]
+    ),
+)
+
 ROLE_DEVELOPER = Role(
     name="developer",
     description="Invoke tools and view providers",
@@ -262,6 +283,7 @@ ROLE_SERVICE_ACCOUNT = Role(
 BUILTIN_ROLES: dict[str, Role] = {
     "admin": ROLE_ADMIN,
     "provider-admin": ROLE_PROVIDER_ADMIN,
+    "kubernetes-operator": ROLE_KUBERNETES_OPERATOR,
     "developer": ROLE_DEVELOPER,
     "viewer": ROLE_VIEWER,
     "auditor": ROLE_AUDITOR,

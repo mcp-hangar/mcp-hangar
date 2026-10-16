@@ -57,3 +57,28 @@ def compute_tool_digest(tool: dict[str, Any]) -> ToolDigest:
     sha256_hex = hashlib.sha256(serialized).hexdigest()
 
     return ToolDigest(tool_name=name, sha256=sha256_hex)
+
+
+def compute_digest_parts(tool: dict[str, Any]) -> tuple[str, str | None]:
+    """The two halves of a tool's definition, hashed apart: ``(structure, description)`` (#1800).
+
+    The structure is the name and the schemas, the description the text a model
+    reads. A pin records both beside the whole, so a history can say which half
+    changed. The description is ``None`` when the tool has none. The whole-tool
+    digest (``compute_tool_digest``) stays what is pinned and compared.
+    """
+    name = tool.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("tool missing required string field 'name'")
+    structure: dict[str, Any] = {"name": name}
+    for field in ("inputSchema", "outputSchema"):
+        value = tool.get(field)
+        if _is_meaningful(value):
+            structure[field] = value
+    description = tool.get("description")
+    return (
+        hashlib.sha256(jcs.canonicalize(structure)).hexdigest(),
+        hashlib.sha256(description.encode("utf-8")).hexdigest()
+        if isinstance(description, str) and _is_meaningful(description)
+        else None,
+    )

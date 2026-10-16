@@ -1,0 +1,48 @@
+# The fast subset of the live tier on pull requests (#1787).
+#
+# The live tier (tests/live: a real process, a real transport) runs nightly, so a
+# change that breaks it is found a day later and by someone else. Tier 0 needs
+# nothing but this checkout -- one process and a stub backend -- and runs in about
+# a minute, so it runs on the pull requests that touch what it exercises. The
+# nightly keeps the rest (T1 needs compose, T2 an IdP).
+#
+# Not a required check: whether it should be is a branch-protection decision.
+name: live-pr
+
+on:
+  pull_request:
+    paths:
+      - "src/mcp_hangar/fastmcp_server/**"
+      - "src/mcp_hangar/server/**"
+      - "src/mcp_hangar/domain/services/**"
+      - "src/mcp_hangar/application/**"
+      - "tests/live/**"
+      - ".github/workflows/live-pr.yml"
+
+concurrency:
+  group: live-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  live-t0:
+    name: Live tier 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Run tier 0
+        env:
+          MCP_HANGAR_LIVE_VERIFY: "1"
+        run: uv run pytest tests/live -m t0 -n auto --timeout=180 -ra

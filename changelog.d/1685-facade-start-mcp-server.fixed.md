@@ -1,1 +1,0 @@
-`Hangar.start_mcp_server` and `SyncHangar.start_mcp_server` start the server. They called `McpServer.start`, which does not exist, and raised `AttributeError` every time; they now send `StartMcpServerCommand` through the command bus, the path `hangar_start` takes.

@@ -570,6 +570,32 @@ class McpServer(AggregateRoot):
         """McpServer identifier as string (for backward compatibility)."""
         return str(self._id)
 
+    def upstream_identity(self) -> str:
+        """What this server's upstream is, as a stable string a pin can be bound to (#1802).
+
+        The server's id is the operator's name for it and says nothing about what
+        answers behind it. This is derived from where the tools come from: the
+        origin of a remote endpoint (no credentials, path or query), the image of
+        a container, or the executable and a hash of the whole command line of a
+        subprocess (the hash keeps secrets in arguments out of config and logs).
+        A pin bound to it is not honoured by a server that points somewhere else.
+        """
+        if self._mode == McpServerMode.REMOTE:
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(self._endpoint or "")
+            host = (parts.hostname or "").lower()
+            port = f":{parts.port}" if parts.port else ""
+            return f"remote:{parts.scheme.lower()}://{host}{port}"
+        if self._mode == McpServerMode.SUBPROCESS:
+            import hashlib
+            from pathlib import PurePath
+
+            argv = [str(part) for part in (self._command or [])]
+            digest = hashlib.sha256("\0".join(argv).encode("utf-8")).hexdigest()[:16]
+            return f"stdio:{PurePath(argv[0]).name if argv else ''}:{digest}"
+        return f"image:{self._image or ''}"
+
     @property
     def mode(self) -> McpServerMode:
         """McpServer mode enum."""

@@ -1,1 +1,0 @@
-Docker and Kubernetes discovery no longer read the `mcp.hangar.group` label / `mcp-hangar.io/group` annotation. They were stored in the discovered server's metadata and nothing used them, so a discovered server never joined a group. A label already set is ignored; groups are declared in the config.

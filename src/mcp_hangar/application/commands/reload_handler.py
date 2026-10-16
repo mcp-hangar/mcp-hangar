@@ -14,6 +14,8 @@ from ...domain.services import get_tool_access_resolver
 from ...domain.services.tool_access_resolver import configured_topology_mode
 from ...logging_config import get_logger
 from ..ports.config_loader import IConfigLoader, PreparedServers
+from ..read_models.tool_projection import get_tool_projection_registry
+from ..services.pin_ledger import reconcile_pin_ledger
 from .commands import ReloadConfigurationCommand
 
 logger = get_logger(__name__)
@@ -133,6 +135,7 @@ class ReloadConfigurationHandler(CommandHandler):
 
         try:
             diff = self._reload(config_path, graceful=command.graceful)
+            self._record_pins()
         except ConfigurationError as e:
             # Already a domain error whose message was written to be shown to
             # the operator (e.g. "Failed to stop mcp_server '<id>' ..."). Let
@@ -316,6 +319,18 @@ class ReloadConfigurationHandler(CommandHandler):
             # the ones a runtime caller set.
             resolver.remove_mcp_server_policy(mcp_server_id)
             logger.info("mcp_server_removed", mcp_server_id=mcp_server_id)
+
+    def _record_pins(self) -> None:
+        """Record in the log the pins this reload added, changed or removed (#1800).
+
+        After the reload has applied, so it describes the pins now in force. A
+        ledger that cannot be written is logged and does not fail the reload,
+        which has already taken effect.
+        """
+        try:
+            reconcile_pin_ledger(get_tool_projection_registry(), self._event_bus)
+        except Exception:  # noqa: BLE001 -- fault-barrier: the reload has applied; the ledger is its record
+            logger.warning("pin_ledger_not_recorded", exc_info=True)
 
     def _report_failure(self, error: Exception, config_path: str, requested_by: str, start_time: float) -> None:
         duration_ms = (time.perf_counter() - start_time) * 1000

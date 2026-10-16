@@ -1,1 +1,0 @@
-`retry_metadata.attempts` equals the attempts really made. `RetryResult.attempt_count` added the last attempt only on success, so three failed attempts reported 2 and a first failure that was not retried reported 0.
