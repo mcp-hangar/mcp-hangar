@@ -123,10 +123,13 @@ def main_callback(
 
     # If no subcommand, default to serve
     if ctx.invoked_subcommand is None:
-        # Import and run the serve command
-        from .commands.serve import serve_command
-
-        serve_command(ctx)
+        # Through the `serve` command's own option parsing, so its environment
+        # bindings (MCP_HTTP_HOST, MCP_HTTP_PORT, MCP_LOG_LEVEL, MCP_JSON_LOGS)
+        # apply. Calling the function directly handed it only its Python
+        # defaults, and a bare `mcp-hangar` ignored every one of them (#1651).
+        serve = ctx.command.get_command(ctx, "serve")  # type: ignore[attr-defined]
+        with serve.make_context("serve", [], parent=ctx) as serve_ctx:
+            serve.invoke(serve_ctx)
 
 
 # Import and register subcommand modules
