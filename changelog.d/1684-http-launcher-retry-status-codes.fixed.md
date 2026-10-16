@@ -1,1 +1,0 @@
-`http.retry_status_codes` on a remote server is now honoured. The launcher dropped it, so a configured 500 was never retried and only 502, 503 and 504 were. A value that is not a list of status codes (100-599) is refused.
