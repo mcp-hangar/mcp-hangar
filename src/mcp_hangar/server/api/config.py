@@ -19,6 +19,7 @@ from starlette.routing import Route
 
 from ...application.commands.commands import ReloadConfigurationCommand
 from ...domain.exceptions import ConfigurationUnavailableError, ValidationError
+from ..bootstrap.composition import get_running_config_path
 from ..config_serializer import serialize_full_config, write_config_backup
 from .actor import request_actor
 from .middleware import dispatch_command, get_context
@@ -136,24 +137,37 @@ async def export_config(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"yaml": yaml_str})
 
 
+def _running_config_file() -> str:
+    """The configuration file this gateway runs on.
+
+    A gateway built from a dict (``Hangar`` as a library) has none; the routes
+    then fall back to what they always did, ``MCP_CONFIG`` or ``./config.yaml``.
+    """
+    return get_running_config_path() or os.environ.get("MCP_CONFIG", "config.yaml")
+
+
 async def backup_config(request: Request) -> HangarJSONResponse:
     """Write a rotating backup of the current config file (bak1..bak5).
 
-    Optional JSON body:
-        config_path: Path to the config file to back up. Defaults to the
-            MCP_CONFIG environment variable, or "config.yaml" if not set.
+    The file is the one this gateway was started with. ``config_path`` is not
+    accepted, for the reason ``/config/reload`` refuses it: a caller-supplied
+    path copied any file the process could read to ``<path>.bak1``, and without
+    one the route backed up ``MCP_CONFIG`` or ``./config.yaml`` instead of the
+    file ``--config`` named (#1652).
 
     Returns:
         JSON with {"path": "<backup file path>"} and HTTP 200.
     """
-    config_path: str | None = None
     try:
         body = await request.json()
-        config_path = body.get("config_path")
-    except (json.JSONDecodeError, ValueError):
-        pass
-    if not config_path:
-        config_path = os.environ.get("MCP_CONFIG", "config.yaml")
+    except (json.JSONDecodeError, ValueError):  # empty body or non-JSON content
+        body = {}
+    if isinstance(body, dict) and "config_path" in body:
+        raise ValidationError(
+            "config_path is not accepted; the backup is of the server's own configuration file",
+            field="config_path",
+        )
+    config_path = _running_config_file()
     try:
         backup_path = await run_in_threadpool(write_config_backup, config_path)
     except OSError as error:
@@ -182,9 +196,8 @@ async def diff_config(request: Request) -> HangarJSONResponse:
     state.  The diff is returned as a unified-diff string along with the raw
     dicts for both sides.
 
-    Query parameters:
-        config_path: Path to the config file (default: MCP_CONFIG env var or
-            ``"config.yaml"``).
+    The file is the one this gateway was started with; a ``config_path`` query
+    parameter is refused (#1652), as on ``/config/reload``.
 
     Returns:
         JSON with:
@@ -193,7 +206,12 @@ async def diff_config(request: Request) -> HangarJSONResponse:
           - ``on_disk``: Sanitized on-disk config dict (``{}`` if file missing).
           - ``in_memory``: Current in-memory config dict.
     """
-    config_path = request.query_params.get("config_path") or os.environ.get("MCP_CONFIG", "config.yaml")
+    if "config_path" in request.query_params:
+        raise ValidationError(
+            "config_path is not accepted; the diff is against the server's own configuration file",
+            field="config_path",
+        )
+    config_path = _running_config_file()
 
     def _compute_diff() -> dict:
         from ...server.config import load_config_from_file
