@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -349,6 +350,27 @@ def _parse_tenant_audiences(raw: Any) -> dict[str, str]:
     return result
 
 
+#: The most clock drift a token's exp/iat/nbf may be forgiven. Past five minutes the
+#: leeway stops absorbing drift and starts extending every token's lifetime.
+MAX_CLOCK_SKEW_LEEWAY_SECONDS = 300
+
+
+def _clock_skew_leeway(value: Any, where: str) -> int:
+    """The configured ``clock_skew_leeway_seconds``, or a refusal naming the key (#1654).
+
+    The key was never read, so a leeway an operator set to tighten token time
+    validation stayed at 60. A value that is not a whole number of seconds from
+    0 to :data:`MAX_CLOCK_SKEW_LEEWAY_SECONDS` refuses the configuration rather
+    than falling back to a default that is looser than what was asked for.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_CLOCK_SKEW_LEEWAY_SECONDS:
+        raise ConfigurationError(
+            f"{where}.clock_skew_leeway_seconds must be a whole number of seconds from 0 to "
+            f"{MAX_CLOCK_SKEW_LEEWAY_SECONDS}, got {value!r}"
+        )
+    return value
+
+
 def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     """Parse auth configuration from dictionary.
 
@@ -405,6 +427,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
 
     # Parse per-issuer trust entries. Omitted fields inherit the top-level
     # oidc.* values so per-issuer claim mappings fall back to the globals.
+    clock_skew_leeway_seconds = _clock_skew_leeway(oidc_dict.get("clock_skew_leeway_seconds", 60), "oidc")
     issuers: list[OIDCIssuerConfig] = []
     for issuer_dict in oidc_dict.get("issuers", []):
         if isinstance(issuer_dict, dict):
@@ -421,6 +444,11 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                     session_id_claim=issuer_dict.get("session_id_claim", oidc_dict.get("session_id_claim", "sid")),
                     max_token_lifetime_seconds=issuer_dict.get(
                         "max_token_lifetime_seconds", max_token_lifetime_seconds
+                    ),
+                    clock_skew_leeway_seconds=(
+                        _clock_skew_leeway(issuer_dict["clock_skew_leeway_seconds"], "oidc.issuers")
+                        if "clock_skew_leeway_seconds" in issuer_dict
+                        else clock_skew_leeway_seconds
                     ),
                     require_tenant=issuer_dict.get("require_tenant", oidc_dict.get("require_tenant", False)),
                     strict_tenant_audience=issuer_dict.get("strict_tenant_audience", top_strict_tenant_audience),
@@ -444,6 +472,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         email_claim=oidc_dict.get("email_claim", "email"),
         session_id_claim=oidc_dict.get("session_id_claim", "sid"),
         max_token_lifetime_seconds=max_token_lifetime_seconds,
+        clock_skew_leeway_seconds=clock_skew_leeway_seconds,
         resource_uri=oidc_dict.get("resource_uri", ""),
         require_tenant=oidc_dict.get("require_tenant", False),
         strict_tenant_audience=top_strict_tenant_audience,

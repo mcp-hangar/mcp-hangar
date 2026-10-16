@@ -1,0 +1,1 @@
+`oidc.clock_skew_leeway_seconds` (and the same key on an entry of `oidc.issuers`) is now read. It was documented and ignored, so a configured `5` left the leeway at 60 and an operator could not tighten token time validation. An issuer entry inherits the top-level value and may override it. A value that is not a whole number of seconds from 0 to 300 refuses the configuration.
