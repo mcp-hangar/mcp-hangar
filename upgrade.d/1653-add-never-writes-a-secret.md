@@ -1,0 +1,3 @@
+### `mcp-hangar add` keeps a prompted secret out of the config file
+
+A secret entered at the `add` prompt used to be written under the server's `env` in `config.yaml`. The file now holds `${NAME}` and the value is not stored anywhere: set that variable in the environment that starts Hangar (your shell profile, or the `env` block of the MCP client entry). A server added with an earlier version still has its plaintext value in the file; replace it with `${NAME}` and rotate the secret if the file was ever shared or committed. Configuration files created by `add` and `init` are now mode 0600; existing files are left as they are.

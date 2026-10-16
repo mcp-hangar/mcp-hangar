@@ -218,6 +218,12 @@ def add_command(
     use_env = mcp_server_config.get("use_env")
     config_mgr.add_mcp_server(mcp_server, config_value=config_value, use_env=use_env)
     console.print(f"[green]Added {mcp_server.name} to {config_mgr.config_path}[/green]")
+    if config_value and mcp_server.env_var and mcp_server.config_type == "secret":
+        # The value is not in the file. Say so, and say what to do with it.
+        console.print(
+            f"[yellow]The secret was not written to the file.[/yellow] The entry reads ${mcp_server.env_var}: "
+            f"set it in the environment that starts Hangar (your shell profile, or the client's env block)."
+        )
 
     # Try hot reload
     if not no_reload:
