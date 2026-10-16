@@ -154,3 +154,21 @@ def test_no_log_means_no_history_and_no_noise():
 
     assert reconcile_pin_ledger(registry, bus) == Reconciled(0, 0)
     bus.publish.assert_not_called()
+
+
+class TestTheDigestParts:
+    def test_a_tool_without_a_name_is_refused(self):
+        with pytest.raises(ValueError, match="name"):
+            compute_digest_parts({"description": "d"})
+        with pytest.raises(ValueError, match="name"):
+            compute_digest_parts({"name": ""})
+
+    def test_the_output_schema_is_part_of_the_structure(self):
+        base = {"name": "t", "inputSchema": {"type": "object"}}
+        with_output = {**base, "outputSchema": {"type": "object", "properties": {"r": {}}}}
+
+        assert compute_digest_parts(with_output)[0] != compute_digest_parts(base)[0]
+
+    @pytest.mark.parametrize("description", [None, "", 5, ["x"]])
+    def test_a_missing_or_unusable_description_has_no_digest(self, description):
+        assert compute_digest_parts({"name": "t", "description": description})[1] is None
