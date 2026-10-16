@@ -2474,6 +2474,36 @@ class BatchExecutor:
             return "not_required"
         return "unavailable" if l7_rule is not None else "not_required"
 
+    def _l7_refuses_without_a_start(self, p: "_CallPipeline") -> bool:
+        """Whether the target's enforced L7 policy will refuse this call, so starting it would be for nothing.
+
+        True for a deny, and for a requireApproval nobody granted: the aggregate
+        raises on both before it wakes the server. Audit mode never refuses, and
+        a call with a pin check still to run is left to start, because that check
+        reads the catalogue the start publishes (#601). Read-only: the verdict the
+        aggregate reaches is the one recorded. The arguments are the call's own;
+        a mutator that rewrites them after this point can only make the aggregate
+        allow what this predicted a refusal for, and the aggregate then starts the
+        server itself.
+        """
+        if p.digest_pin_deferred:
+            return False
+        try:
+            policy = p.governance.l7_policy
+            if policy is None:
+                return False
+            from mcp_hangar.context import get_routing_headers
+            from mcp_hangar.domain.policies.egress_l7 import PolicyMode, ToolAction, evaluate
+
+            if policy.mode is not PolicyMode.ENFORCE:
+                return False
+            action = evaluate(p.call.tool, p.call.arguments or {}, policy, get_routing_headers()).action
+        except Exception:  # noqa: BLE001 -- a prediction must never decide the call: start as before
+            return False
+        if action is ToolAction.DENY:
+            return True
+        return action is ToolAction.REQUIRE_APPROVAL and getattr(_approval_loop_local, "approval_id", None) is None
+
     def _gate_cold_start(self, p: "_CallPipeline") -> CallResult | None:
         """Single-flight cold start of the resolved target.
 
@@ -2492,6 +2522,13 @@ class BatchExecutor:
             refusal = self._refuse_dead_target(p)
             if refusal is not None:
                 return self._report_refusal(p, refusal)
+        if self._l7_refuses_without_a_start(p):
+            # The aggregate refuses this call before it reaches ensure_ready, with
+            # the event and the record a refusal carries. Starting the server here
+            # first made a denied call spawn it and run initialize and tools/list
+            # upstream (#1708).
+            p.note(Gate.SKIP, "l7_refuses")
+            return None
         with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
             # The target the caller named; the member a group selected is the backend (#1286).
             cs_span.set_attribute(McpServer.ID, p.call.mcp_server)
