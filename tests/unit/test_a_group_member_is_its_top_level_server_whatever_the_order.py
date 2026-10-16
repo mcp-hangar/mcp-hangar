@@ -187,7 +187,7 @@ class TestTheCheckReadsWhatTheLoaderReads:
                 build_config(config)
 
     def test_a_mode_that_does_not_normalise_is_left_to_the_server_check(self) -> None:
-        """As on main: the server refuses a mode `McpServerMode.normalize` does not know."""
+        """The server refuses a mode `McpServerMode.normalize` does not know, naming the group that holds it."""
         for config in _both_orders({"id": "m2", "mode": "Docker", "image": "example/server:1"}):
-            with pytest.raises(ValueError, match="not a valid McpServerMode"):
+            with pytest.raises(ConfigurationError, match="'pool'.*not a valid McpServerMode"):
                 build_config(config)

@@ -48,11 +48,15 @@ from mcp_hangar.tasks_wire import EXTENSION_ID
 from tests.unit._security_predicates import (
     COMPLETION,
     FLAT_TOOL_CALL,
+    FRONT_DOOR_HANGAR_DETAILS,
+    FRONT_DOOR_HANGAR_TOOLS,
     FRONT_DOOR_MANAGEMENT_TOOL,
     FRONT_DOOR_TASKS_CANCEL,
     FRONT_DOOR_TASKS_GET,
     FRONT_DOOR_TASKS_UPDATE,
     HANGAR_CALL,
+    HANGAR_DETAILS,
+    HANGAR_TOOLS,
     MANAGEMENT_TOOL,
     PREDICATES,
     PROMPTS_GET,
@@ -60,6 +64,7 @@ from tests.unit._security_predicates import (
     RESOURCE_TEMPLATES_LIST,
     RESOURCES_LIST,
     RESOURCES_READ,
+    SERVER_DISCOVER,
     TASKS_CANCEL,
     TASKS_GET,
     TASKS_UPDATE,
@@ -175,6 +180,8 @@ class _Probe:
     #: The SEP-2243 `Mcp-Name` routing header, where the method carries a name.
     name: str | None = None
     capabilities: dict[str, Any] = field(default_factory=dict)
+    #: The route, for a surface that is not the MCP endpoint (`server/discover`).
+    path: str = "/mcp"
 
 
 def _hangar_call(tool: str) -> dict[str, Any]:
@@ -229,10 +236,37 @@ PROBES: dict[str, _Probe] = {
     RESOURCES_LIST: _Probe("front_door", "resources/list", {}),
     RESOURCE_TEMPLATES_LIST: _Probe("front_door", "resources/templates/list", {}),
     RESOURCES_READ: _Probe("front_door", "resources/read", {"uri": _READ_URI}, name=_READ_URI),
+    HANGAR_TOOLS: _Probe(
+        "egress", "tools/call", {"name": "hangar_tools", "arguments": {"mcp_server": _UPSTREAM}}, name="hangar_tools"
+    ),
+    HANGAR_DETAILS: _Probe(
+        "egress",
+        "tools/call",
+        {"name": "hangar_details", "arguments": {"mcp_server": _UPSTREAM}},
+        name="hangar_details",
+    ),
+    FRONT_DOOR_HANGAR_TOOLS: _Probe(
+        "front_door",
+        "tools/call",
+        {"name": "hangar_tools", "arguments": {"mcp_server": _UPSTREAM}},
+        name="hangar_tools",
+    ),
+    FRONT_DOOR_HANGAR_DETAILS: _Probe(
+        "front_door",
+        "tools/call",
+        {"name": "hangar_details", "arguments": {"mcp_server": _UPSTREAM}},
+        name="hangar_details",
+    ),
+    SERVER_DISCOVER: _Probe("front_door", "server/discover", {}, path="/server/discover"),
 }
 
 
 # --- the spy -----------------------------------------------------------------------
+
+
+def _plain(value: Any) -> Any:
+    """A recorded argument: a string or None as it is, anything else as its repr."""
+    return value if value is None or isinstance(value, str) else repr(value)
 
 
 class _Spy:
@@ -245,6 +279,7 @@ class _Spy:
         self._lock = threading.Lock()
         self._recording = False
         self._calls: set[tuple[str, Any]] = set()
+        self._scopes: set[tuple[str, str, Any]] = set()
 
     def _hook(self, frame: FrameType, event: str, _arg: Any) -> None:
         if event != "call" or not self._recording:
@@ -253,8 +288,10 @@ class _Spy:
         if predicate is None:
             return
         value = frame.f_locals.get(predicate.by) if predicate.by else None
+        scoped = [(param, role, _plain(frame.f_locals.get(param))) for param, role in predicate.scope.items()]
         with self._lock:
             self._calls.add((predicate.name, value))
+            self._scopes.update((predicate.name, role, (param, held)) for param, role, held in scoped)
 
     @contextmanager
     def installed(self) -> Iterator[None]:
@@ -269,13 +306,15 @@ class _Spy:
             threading.setprofile(previous[1])
 
     @contextmanager
-    def recording(self) -> Iterator[set[tuple[str, Any]]]:
+    def recording(self) -> Iterator[tuple[set[tuple[str, Any]], set[tuple[str, str, Any]]]]:
         calls: set[tuple[str, Any]] = set()
+        scopes: set[tuple[str, str, Any]] = set()
         with self._lock:
             self._calls = calls
+            self._scopes = scopes
             self._recording = True
         try:
-            yield calls
+            yield calls, scopes
         finally:
             with self._lock:
                 self._recording = False
@@ -306,7 +345,7 @@ class _Gateway:
             "io.modelcontextprotocol/clientCapabilities": probe.capabilities,
         }
         body = {"jsonrpc": "2.0", "id": 1, "method": probe.method, "params": {**probe.params, "_meta": envelope}}
-        response = self.client.post("/mcp", headers=headers, content=json.dumps(body))
+        response = self.client.post(probe.path, headers=headers, content=json.dumps(body))
         return response.status_code, _jsonrpc(response.text)
 
 
@@ -449,6 +488,8 @@ class _Outcome:
     status: int
     payload: dict[str, Any]
     calls: frozenset[tuple[str, Any]]
+    #: Each registered predicate's scope arguments on this path: (predicate, role, (parameter, value)).
+    scopes: frozenset[tuple[str, str, Any]] = frozenset()
 
 
 @pytest.fixture(scope="module")
@@ -471,9 +512,9 @@ def reached(tmp_path_factory: pytest.TempPathFactory) -> dict[str, _Outcome]:
                     for path, probe in PROBES.items():
                         if probe.topology != topology:
                             continue
-                        with spy.recording() as calls:
+                        with spy.recording() as (calls, scopes):
                             status, payload = gateway.send(probe)
-                        outcomes[path] = _Outcome(status, payload, frozenset(calls))
+                        outcomes[path] = _Outcome(status, payload, frozenset(calls), frozenset(scopes))
         finally:
             asgi._forwarded_session_extractor.cache_clear()
     return outcomes
@@ -519,6 +560,81 @@ class TestEveryPredicateRunsOnItsPaths:
             + (f" (it ran with {predicate.by} in {sorted(map(str, ran_as))})" if ran_as else "")
             + ". Either the call was removed from that path, or the table in _security_predicates.py is wrong."
         )
+
+
+#: What each scope role may hold on a probe: the caller's tenant (or none), the
+#: probes' one upstream (or none). The probes' tenant and server ids differ, so a
+#: value in the wrong slot cannot pass for the right one.
+_TENANT = "tenant-a"
+_ALLOWED = {"tenant": {None, _TENANT}, "server": {None, _UPSTREAM}}
+
+
+def scope_violations(outcome: _Outcome) -> list[str]:
+    """The scope arguments on a path that hold what their slot must not: a server in a tenant slot, and the like."""
+    return sorted(
+        f"{predicate}({param}={value!r}) is a {role} slot"
+        for predicate, role, (param, value) in outcome.scopes
+        if value not in _ALLOWED[role]
+    )
+
+
+class TestEveryPredicateIsAskedAboutTheRequestsOwnScope:
+    """Running is not enough: a check reached with the wrong key decides about something else (#1786)."""
+
+    @pytest.mark.parametrize("path", list(PROBES))
+    def test_the_scope_arguments_are_the_callers_and_the_targets(self, reached: dict[str, _Outcome], path: str) -> None:
+        assert scope_violations(reached[path]) == []
+
+    def test_a_scope_slot_is_actually_observed_on_every_path_that_declares_one(
+        self, reached: dict[str, _Outcome]
+    ) -> None:
+        """A recorder that saw nothing would make the check above pass for the wrong reason."""
+        for predicate in PREDICATES:
+            if not predicate.scope:
+                continue
+            for path in predicate.paths:
+                seen = {(p, role) for name, role, (p, _v) in reached[path].scopes if name == predicate.name}
+                assert seen == {(p, r) for p, r in predicate.scope.items()}, (predicate.name, path, seen)
+
+    def test_the_tenant_slot_holds_the_callers_tenant_where_the_call_has_one(
+        self, reached: dict[str, _Outcome]
+    ) -> None:
+        held = {
+            value
+            for outcome in reached.values()
+            for _name, role, (_param, value) in outcome.scopes
+            if role == "tenant" and value is not None
+        }
+        assert held == {_TENANT}, "no path asked about the caller's tenant, so the tenant check proves nothing"
+
+
+class TestAMemberServerInTheTenantSlotIsCaught:
+    """The gate must fail when a surface passes a server id where the tenant goes (mutation test)."""
+
+    def test_the_mutation_is_detected(self, tmp_path_factory: pytest.TempPathFactory) -> None:
+        from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
+
+        original = ToolAccessResolver.is_tool_allowed
+
+        def server_in_the_tenant_slot(self, mcp_server_id, tool_name, group_id=None, member_id=None, **kwargs):  # type: ignore[no-untyped-def]
+            return original(self, mcp_server_id, tool_name, group_id, member_id=mcp_server_id, **kwargs)
+
+        from mcp_hangar.fastmcp_server import asgi
+
+        spy = _Spy(PREDICATES)
+        with _upstream() as upstream_url, pytest.MonkeyPatch.context() as env, spy.installed():
+            env.delenv("MCP_TRUSTED_PROXIES", raising=False)
+            env.setattr(ToolAccessResolver, "is_tool_allowed", server_in_the_tenant_slot)
+            asgi._forwarded_session_extractor.cache_clear()
+            try:
+                with _served("egress", upstream_url, tmp_path_factory.mktemp("mutated")) as gateway:
+                    with spy.recording() as (calls, scopes):
+                        status, payload = gateway.send(PROBES[HANGAR_CALL])
+            finally:
+                asgi._forwarded_session_extractor.cache_clear()
+
+        outcome = _Outcome(status, payload, frozenset(calls), frozenset(scopes))
+        assert scope_violations(outcome), "a server id in the tenant slot was not noticed"
 
 
 class TestTheTableAndTheProbesAgree:

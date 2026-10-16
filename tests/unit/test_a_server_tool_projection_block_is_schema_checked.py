@@ -44,7 +44,9 @@ def _keys_read_with_get(function: str, variable: str) -> set[str]:
 
 def test_the_schema_copies_hold_to_what_the_reader_looks_up():
     scope = _keys_read_with_get("_register_tool_projection_block", "tool_projection_config")
-    assert scope == {"digest_enforcement", "pins", "tenant_overrides"}, f"the scan or the reader changed: {scope}"
+    assert scope == {"digest_enforcement", "new_tools", "pins", "tenant_overrides", "upstream"}, (
+        f"the scan or the reader changed: {scope}"
+    )
     assert scope | set(_WITHDRAWAL_KEYS) == TOOL_PROJECTION_SCOPE_KEYS
     assert {"pins"} | set(_WITHDRAWAL_KEYS) == TOOL_PROJECTION_TENANT_KEYS
 

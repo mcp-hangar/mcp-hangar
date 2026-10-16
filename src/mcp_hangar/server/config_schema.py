@@ -341,7 +341,16 @@ def _policy_problems(where: str, spec: Any) -> list[str]:
 #: ``POLICY_KEYS`` is a copy; a test holds it to the reader. The all-gateway
 #: ``tool_projection`` section is a different block with its own key, in SECTIONS.
 TOOL_PROJECTION_SCOPE_KEYS = frozenset(
-    {"digest_enforcement", "pins", "tenant_overrides", "withdrawn", "withdrawn_prompts", "withdrawn_resources"}
+    {
+        "digest_enforcement",
+        "new_tools",
+        "pins",
+        "tenant_overrides",
+        "upstream",
+        "withdrawn",
+        "withdrawn_prompts",
+        "withdrawn_resources",
+    }
 )
 TOOL_PROJECTION_TENANT_KEYS = frozenset({"pins", "withdrawn", "withdrawn_prompts", "withdrawn_resources"})
 

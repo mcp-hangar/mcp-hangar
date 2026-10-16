@@ -200,6 +200,9 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # `{tool:path}`: a resource is withdrawn by its upstream uri, slashes and all.
     # Tenant-aware: a tenant grant withdraws and restores for its own tenant
     # only; acting for every tenant needs a global grant.
+    # The pin history of a tool is an audit-grade read; tenant-aware like the
+    # withdrawals beside it (a tenant grant sees its own tenant's pins only).
+    _rule("/admin/tools/pins", "GET", ("audit", "read"), tenant_aware=True),
     _rule("/admin/tools/{server}/{tool:path}/withdraw", "POST", ("mcp_servers", "lifecycle"), tenant_aware=True),
     _rule("/admin/tools/{server}/{tool:path}/restore", "POST", ("mcp_servers", "lifecycle"), tenant_aware=True),
     # --- WebSocket ---------------------------------------------------------
