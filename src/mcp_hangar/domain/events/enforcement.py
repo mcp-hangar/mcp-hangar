@@ -308,6 +308,9 @@ class DigestMismatchEvent(DomainEvent):
         tenant_id: Tenant whose pin was evaluated (per-tenant pinning, #278); None
             for non-tenant-scoped digest checks.
         schema_version: Event schema version.
+        expected_upstream: The upstream identity the pin was bound to, when the
+            mismatch is the upstream having changed (#1802); None otherwise.
+        observed_upstream: The upstream identity that served the tool then.
     """
 
     mcp_server_id: str
@@ -318,6 +321,99 @@ class DigestMismatchEvent(DomainEvent):
     correlation_id: str
     tenant_id: str | None = None
     schema_version: int = 1
+    expected_upstream: str | None = None
+    observed_upstream: str | None = None
+
+
+@dataclass
+class ToolAdmissionRequested(DomainEvent):
+    """Published when a tool appears on a server after its pins were taken and is withheld (#1801).
+
+    The server declares ``tool_projection.new_tools: withhold`` and has pins; the
+    tool is in none of them, so it is neither listed nor callable until it is
+    pinned (``mcp-hangar pin --write``), which is the admission. One event for
+    each tool and definition, not one for each listing.
+
+    Attributes:
+        mcp_server_id: The server that now serves the tool.
+        tool_name: The new tool.
+        observed_digest: The digest of the definition the server serves, which is
+            what pinning it would approve.
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    observed_digest: str
+    schema_version: int = 1
+
+
+@dataclass
+class ToolPinRecorded(DomainEvent):
+    """A pin was created, or re-approved with another digest (#1800).
+
+    One line of a tool's pin history, kept in the server's pin-ledger stream. The
+    pins live in the configuration; this is how the log learns of them, when a
+    configuration is loaded or reloaded, so the history of a tool's pin can be
+    read from the log alone, after a restart and on another replica.
+
+    Attributes:
+        mcp_server_id: The server the pin is declared for.
+        tool_name: The pinned tool.
+        sha256: The pinned digest (the definition as a whole).
+        tenant_id: The tenant the pin is for; None for all tenants.
+        previous_sha256: The digest this pin replaced; None for a first pin.
+        upstream: The upstream identity the pin is bound to, if it is (#1802).
+        structure_sha256: Digest of the name and schemas alone, when the tool is
+            served with this digest as the pin is recorded; None otherwise.
+        description_sha256: Digest of the description alone, on the same terms.
+        approved_by: Who approved it. A pin comes from the configuration file, which
+            carries no author, so this is ``config``; the file is the authority.
+        source: Where the pin was read from (``config``).
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    sha256: str
+    tenant_id: str | None = None
+    previous_sha256: str | None = None
+    upstream: str | None = None
+    structure_sha256: str | None = None
+    description_sha256: str | None = None
+    approved_by: str = "config"
+    source: str = "config"
+    schema_version: int = 1
+
+    @property
+    def pin_ledger_of(self) -> str:
+        """The server whose pin-ledger stream this belongs to."""
+        return self.mcp_server_id
+
+
+@dataclass
+class ToolPinRevoked(DomainEvent):
+    """A pin the ledger held is no longer in the configuration (#1800).
+
+    Attributes:
+        mcp_server_id: The server the pin was declared for.
+        tool_name: The tool that is no longer pinned.
+        sha256: The digest it was pinned to.
+        tenant_id: The tenant the pin was for; None for all tenants.
+        revoked_by: Who revoked it: ``config``, for the same reason as the approval.
+        source: Where the removal was read from (``config``).
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    sha256: str
+    tenant_id: str | None = None
+    revoked_by: str = "config"
+    source: str = "config"
+    schema_version: int = 1
+
+    @property
+    def pin_ledger_of(self) -> str:
+        """The server whose pin-ledger stream this belongs to."""
+        return self.mcp_server_id
 
 
 # ---------------------------------------------------------------------------

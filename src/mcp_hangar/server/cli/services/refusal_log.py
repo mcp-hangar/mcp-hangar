@@ -52,6 +52,88 @@ class Refusal:
     observed_digest: str | None = None
 
 
+@dataclass(frozen=True)
+class PinEntry:
+    """One line of a tool's pin history (#1800)."""
+
+    event: str  # "recorded" or "revoked"
+    occurred_at: datetime | None
+    server: str
+    tool: str
+    tenant_id: str | None
+    sha256: str
+    previous_sha256: str | None
+    upstream: str | None
+    structure_sha256: str | None
+    description_sha256: str | None
+    approved_by: str
+
+
+def read_pin_history(db_path: Path, tool: str, *, server: str | None = None) -> list[PinEntry]:
+    """Every pin recorded or revoked for *tool*, oldest first, read from the pin-ledger streams (#1800).
+
+    From the log alone: no configuration and no running gateway is consulted, so
+    the answer is the same after a restart and on another replica reading the
+    same store. Read-only, like :func:`read_refusals`.
+    """
+    rows = _read_rows(db_path, ("ToolPinRecorded", "ToolPinRevoked"), order="ASC")
+    history: list[PinEntry] = []
+    for event_type, raw in rows:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict) or data.get("tool_name") != tool:
+            continue
+        if server is not None and data.get("mcp_server_id") != server:
+            continue
+        occurred = data.get("occurred_at")
+        recorded = event_type == "ToolPinRecorded"
+        history.append(
+            PinEntry(
+                event="recorded" if recorded else "revoked",
+                occurred_at=datetime.fromtimestamp(occurred, tz=UTC) if isinstance(occurred, (int, float)) else None,
+                server=str(data.get("mcp_server_id", "")),
+                tool=tool,
+                tenant_id=data.get("tenant_id"),
+                sha256=str(data.get("sha256", "")),
+                previous_sha256=data.get("previous_sha256"),
+                upstream=data.get("upstream"),
+                structure_sha256=data.get("structure_sha256"),
+                description_sha256=data.get("description_sha256"),
+                approved_by=str(data.get("approved_by" if recorded else "revoked_by", "")),
+            )
+        )
+    return history
+
+
+def _read_rows(db_path: Path, event_types: tuple[str, ...], *, order: str) -> list[tuple[str, str]]:
+    """``(event_type, data)`` of the stored events of *event_types*, read-only, in position order."""
+    if not db_path.is_file():
+        raise EventStoreNotReadable(
+            f"No event store at {db_path}. The gateway writes it when it first runs with this config; "
+            "pass --db to read another file."
+        )
+    marks = ",".join("?" for _ in event_types)
+    try:
+        # `mode=ro`: no write, no journal, no schema change; WAL is read beside the writer.
+        connection = sqlite3.connect(f"file:{quote(str(db_path.absolute()))}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error as exc:
+        raise EventStoreNotReadable(f"Cannot open {db_path} read-only: {exc}") from exc
+    try:
+        return [
+            (str(r[0]), str(r[1]))
+            for r in connection.execute(
+                f"SELECT event_type, data FROM events WHERE event_type IN ({marks}) ORDER BY global_position {order}",
+                event_types,
+            ).fetchall()
+        ]
+    except sqlite3.Error as exc:
+        raise EventStoreNotReadable(f"Cannot read {db_path}: {exc}") from exc
+    finally:
+        connection.close()
+
+
 def event_store_path(config: dict[str, Any]) -> Path:
     """Where *config* puts the SQLite event store, or raise `EventStoreNotReadable`."""
     persistence = config.get("persistence") or {}
@@ -90,32 +172,11 @@ def read_refusals(
     event_id: str | None = None,
 ) -> list[Refusal]:
     """The newest *last* refusals in the store at *db_path*, newest first; or the one with *event_id*."""
-    if not db_path.is_file():
-        raise EventStoreNotReadable(
-            f"No event store at {db_path}. The gateway writes it when it first runs with this config; "
-            "pass --db to read another file."
-        )
-    marks = ",".join("?" for _ in REFUSAL_EVENT_TYPES)
-    try:
-        # `mode=ro`: no write, no journal, no schema change; WAL is read beside the writer.
-        connection = sqlite3.connect(f"file:{quote(str(db_path.absolute()))}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error as exc:
-        raise EventStoreNotReadable(f"Cannot open {db_path} read-only: {exc}") from exc
-    try:
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            f"SELECT global_position, event_type, data FROM events WHERE event_type IN ({marks}) "
-            "ORDER BY global_position DESC",
-            REFUSAL_EVENT_TYPES,
-        ).fetchall()
-    except sqlite3.Error as exc:
-        raise EventStoreNotReadable(f"Cannot read {db_path}: {exc}") from exc
-    finally:
-        connection.close()
+    rows = _read_rows(db_path, REFUSAL_EVENT_TYPES, order="DESC")
 
     refusals: list[Refusal] = []
-    for row in rows:
-        refusal = _refusal(str(row["event_type"]), str(row["data"]))
+    for event_type, raw in rows:
+        refusal = _refusal(event_type, raw)
         if refusal is None:
             continue
         if event_id is not None:

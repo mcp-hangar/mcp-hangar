@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from ...domain.services.digest_computation import compute_tool_digest
@@ -157,6 +157,9 @@ class ToolProjectionRegistry:
         # server defaults to the strictest (block). Scoped per server so one
         # server's `audit` cannot downgrade another server's pins (#278).
         self._digest_enforcement: dict[str, DigestEnforcement] = {}
+        # Servers whose tools that appear after their pins were taken are withheld
+        # (`tool_projection.new_tools: withhold`, #1801). Absent: served unpinned.
+        self._withhold_new_tools: set[str] = set()
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -269,8 +272,34 @@ class ToolProjectionRegistry:
         logger.debug("config_withdrawals_cleared")
         _projection_changed()
 
+    def _is_unadmitted(self, mcp_server: str, tool: str, tenant_id: str | None) -> bool:
+        """A tool that appeared after the server's pins were taken, on a server that withholds those (#1801).
+
+        The baseline is the server's own pins: a server with none has no baseline
+        and withholds nothing, and a tool pinned for this caller (for its tenant
+        or for all tenants) is admitted. Called with the lock held.
+        """
+        if mcp_server not in self._withhold_new_tools:
+            return False
+        has_baseline = any(scope == mcp_server for scope, _tool in self._config_pins) or any(
+            scope == mcp_server for scope, _tool in self._config_pins_all_tenants
+        )
+        if not has_baseline:
+            return False
+        key = (mcp_server, tool)
+        if key in self._config_pins_all_tenants:
+            return False
+        return tenant_id is None or tenant_id not in self._config_pins.get(key, {})
+
+    def is_unadmitted(self, mcp_server: str, tool: str, tenant_id: str | None = None) -> bool:
+        """Is *tool* withheld on *mcp_server* because it is not among the pins (#1801)?"""
+        with self._lock:
+            return self._is_unadmitted(mcp_server, tool, tenant_id)
+
     def _is_config_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None, kind: str = "tool") -> bool:
         """Return True if (mcp_server, kind, tool) is config-withdrawn for tenant_id."""
+        if kind == "tool" and self._is_unadmitted(mcp_server, tool, tenant_id):
+            return True
         entry = self._config_withdrawals.get((mcp_server, kind, tool))
         if entry is None:
             return False
@@ -348,6 +377,22 @@ class ToolProjectionRegistry:
                 found.extend((scope, tool, tenant_id, digest) for tenant_id, digest in by_tenant.items())
         return found
 
+    def set_new_tools_policy(self, mcp_server: str, policy: str) -> None:
+        """Set what happens to a tool that appears after *mcp_server*'s pins: ``withhold`` or ``allow`` (#1801)."""
+        if policy not in ("withhold", "allow"):
+            raise ValueError(f"new_tools must be 'withhold' or 'allow', got {policy!r}")
+        with self._lock:
+            if policy == "withhold":
+                self._withhold_new_tools.add(mcp_server)
+            else:
+                self._withhold_new_tools.discard(mcp_server)
+        _projection_changed()
+
+    def new_tools_policy(self, mcp_server: str) -> str:
+        """``withhold`` or ``allow`` for *mcp_server*."""
+        with self._lock:
+            return "withhold" if mcp_server in self._withhold_new_tools else "allow"
+
     def digest_enforcement(self, mcp_server: str) -> DigestEnforcement:
         """Return the digest-enforcement mode for *mcp_server* (block if unset)."""
         with self._lock:
@@ -364,6 +409,7 @@ class ToolProjectionRegistry:
             self._config_pins.clear()
             self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
+            self._withhold_new_tools.clear()
         logger.debug("config_pins_cleared")
         _projection_changed()
 
@@ -389,8 +435,10 @@ class ToolProjectionRegistry:
             pins = {key: dict(by_tenant) for key, by_tenant in staged._config_pins.items()}
             pins_all_tenants = dict(staged._config_pins_all_tenants)
             enforcement = dict(staged._digest_enforcement)
+            withhold = set(staged._withhold_new_tools)
         with self._lock:
             if replace:
+                self._withhold_new_tools = withhold
                 self._config_withdrawals = withdrawals
                 self._config_pins = pins
                 self._config_pins_all_tenants = pins_all_tenants
@@ -407,6 +455,7 @@ class ToolProjectionRegistry:
                 for (mcp_server, tool), digest in pins_all_tenants.items():
                     self.set_config_pin(mcp_server, tool, None, digest)
                 self._digest_enforcement.update(enforcement)
+                self._withhold_new_tools |= withhold
         _projection_changed()
 
     # ------------------------------------------------------------------
@@ -578,6 +627,16 @@ class ToolProjectionRegistry:
 
             # Is it a blanket (ALL-tenants) withdrawal from either source?
             all_tenants_withdrawn = config_entry is _ALL_TENANTS or runtime_entry is _ALL_TENANTS
+
+            if config_entry is None and runtime_entry is None:
+                # Withheld only because it is in none of the server's pins (#1801), for
+                # this caller: a tool the catalogue does not know stays unknown, and a
+                # known one reads withdrawn for this tenant (or for all, with no tenant).
+                if discovered is None:
+                    return None
+                if tenant_id is None:
+                    return replace(discovered, status="withdrawn")
+                return replace(discovered, tenant_overrides={**discovered.tenant_overrides, tenant_id: "withdrawn"})
 
             if discovered is not None:
                 # Discovered projection exists — augment it so is_withdrawn_for() fires.

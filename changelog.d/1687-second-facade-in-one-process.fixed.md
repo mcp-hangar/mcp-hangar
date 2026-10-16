@@ -1,1 +1,0 @@
-A second `Hangar` or `SyncHangar` can be created in one process after the first was stopped. Stopping now releases the runtime and the three process-wide buses; before, the second failed with `Handler already registered for StartMcpServerCommand`.

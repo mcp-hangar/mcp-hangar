@@ -25,7 +25,7 @@ first.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +70,13 @@ COMPLETION = "front door completion/complete"
 RESOURCES_LIST = "front door resources/list"
 RESOURCE_TEMPLATES_LIST = "front door resources/templates/list"
 RESOURCES_READ = "front door resources/read"
+# The read-only management tools that list a server's tools and describe it (#1786),
+# and the SEP-2575 discovery route; each has its own tenant filter.
+HANGAR_TOOLS = "hangar_tools"
+HANGAR_DETAILS = "hangar_details"
+FRONT_DOOR_HANGAR_TOOLS = "front door hangar_tools"
+FRONT_DOOR_HANGAR_DETAILS = "front door hangar_details"
+SERVER_DISCOVER = "front door server/discover"
 
 _TASK_PATHS = (
     TASKS_GET,
@@ -82,6 +89,12 @@ _TASK_PATHS = (
 _PROMPT_PATHS = (PROMPTS_LIST, PROMPTS_GET, COMPLETION)
 _RESOURCE_PATHS = (RESOURCES_LIST, RESOURCE_TEMPLATES_LIST, RESOURCES_READ)
 _INVOKE_PATHS = (HANGAR_CALL, FLAT_TOOL_CALL)
+#: The read-only management tools that list or describe a server (#1786). They are
+#: management tools like any other: session guard, role check, authorizer.
+_LISTING_TOOL_PATHS = (HANGAR_TOOLS, HANGAR_DETAILS, FRONT_DOOR_HANGAR_TOOLS, FRONT_DOOR_HANGAR_DETAILS)
+#: Where the front door projects a server's tools for the caller (#1786).
+_FRONT_DOOR_PROJECTION_PATHS = (FRONT_DOOR_HANGAR_TOOLS, FRONT_DOOR_HANGAR_DETAILS, SERVER_DISCOVER)
+_SCOPE_IS_ALLOWED = {"mcp_server_id": "server", "member_server_id": "server", "member_id": "tenant"}
 
 
 @dataclass(frozen=True)
@@ -98,11 +111,17 @@ class Predicate:
             request reaches it from two. On a front-door prompt request the flat
             tool map calls ``is_governed_allowed`` with ``kind="tool"``, so a
             deleted ``kind="prompt"`` check would go unnoticed without it.
+        scope: The parameters that carry the request's scope, each mapped to what
+            it must hold: ``tenant`` (the caller's tenant, or None) or ``server``
+            (the target server, or None). A predicate reached with the wrong key
+            in a slot -- a member server id in the tenant slot -- ran, and decided
+            about the wrong thing (#1786).
     """
 
     function: Callable[..., Any]
     paths: Mapping[str, str | None]
     by: str | None = None
+    scope: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -130,6 +149,7 @@ PREDICATES: tuple[Predicate, ...] = (
             MANAGEMENT_TOOL: "management_tool",
             FLAT_TOOL_CALL: "flat_tool",
             FRONT_DOOR_MANAGEMENT_TOOL: "management_tool",
+            **_each(_LISTING_TOOL_PATHS, "management_tool"),
             **_each(_TASK_PATHS, "task_relay"),
             PROMPTS_LIST: "prompt",
             PROMPTS_GET: "prompt",
@@ -154,6 +174,7 @@ PREDICATES: tuple[Predicate, ...] = (
         InMemorySessionSuspensionRegistry.is_suspended,
         paths=_each(
             (HANGAR_CALL, MANAGEMENT_TOOL, FLAT_TOOL_CALL, FRONT_DOOR_MANAGEMENT_TOOL)
+            + _LISTING_TOOL_PATHS
             + _TASK_PATHS
             + _PROMPT_PATHS
             + _RESOURCE_PATHS
@@ -162,39 +183,73 @@ PREDICATES: tuple[Predicate, ...] = (
     # Role-based authorization: per tool on the management surface, per call on
     # both invoke paths -- `hangar_call` and the front door's flat call (#1622) --
     # and the authorizer all of them ask.
-    Predicate(authorize_tool, paths=_each((MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL))),
+    Predicate(authorize_tool, paths=_each((MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL) + _LISTING_TOOL_PATHS)),
     Predicate(_authorize_calls, paths=_each(_INVOKE_PATHS)),
     Predicate(_authorize_flat_call, paths={FLAT_TOOL_CALL: None}),
     Predicate(
         AuthorizationMiddleware.authorize,
-        paths=_each(_INVOKE_PATHS + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL)),
+        paths=_each(_INVOKE_PATHS + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL) + _LISTING_TOOL_PATHS),
     ),
     # Tool-access policy: the executor's call-time check, and the decision
     # every projected surface shares.
-    Predicate(ToolAccessResolver.is_tool_allowed, paths=_each(_INVOKE_PATHS)),
+    Predicate(ToolAccessResolver.is_tool_allowed, paths=_each(_INVOKE_PATHS), scope=_SCOPE_IS_ALLOWED),
     Predicate(
         ToolAccessResolver.is_allowed,
         by="kind",
-        paths={**_each(_INVOKE_PATHS, "tool"), **_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
+        paths={
+            **_each(_INVOKE_PATHS, "tool"),
+            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+        },
+        scope=_SCOPE_IS_ALLOWED,
     ),
     Predicate(
         is_governed_allowed,
         by="kind",
-        paths={FLAT_TOOL_CALL: "tool", **_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
+        paths={
+            FLAT_TOOL_CALL: "tool",
+            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+        },
+        scope={"mcp_server": "server", "tenant_id": "tenant"},
+    ),
+    # What `hangar_tools` and `hangar_details` show the caller: the server's tools,
+    # filtered by the tool-access policy under the caller's tenant.
+    Predicate(
+        ToolAccessResolver.filter_tools,
+        paths=_each((HANGAR_TOOLS, FRONT_DOOR_HANGAR_TOOLS)),
+        scope={"mcp_server_id": "server", "member_id": "tenant"},
+    ),
+    Predicate(
+        ToolAccessResolver.filter_tool_dicts,
+        paths=_each((HANGAR_DETAILS, FRONT_DOOR_HANGAR_DETAILS)),
+        scope={"mcp_server_id": "server", "member_id": "tenant"},
     ),
     # Withdrawal: the overlay the governed surfaces read, and the check the
     # executor's withdrawal gate makes.
     Predicate(
         ToolProjectionRegistry.is_withdrawn,
         by="kind",
-        paths={FLAT_TOOL_CALL: "tool", **_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
+        paths={
+            FLAT_TOOL_CALL: "tool",
+            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+        },
+        scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
-    Predicate(ToolProjection.is_withdrawn_for, paths=_each(_INVOKE_PATHS)),
+    Predicate(
+        ToolProjection.is_withdrawn_for,
+        paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS),
+        scope={"tenant_id": "tenant"},
+    ),
     # The scope the executor's gates ask under: every scope a call's policy is
     # resolved under, and every scope a withdrawal can hold in. The front
     # door's flat call dispatches through the same executor, so both run there.
     Predicate(_CallPipeline.policy_scopes, paths=_each(_INVOKE_PATHS)),
-    Predicate(_withdrawn_in_scope, paths=_each(_INVOKE_PATHS)),
+    Predicate(_withdrawn_in_scope, paths=_each(_INVOKE_PATHS), scope={"tenant_id": "tenant"}),
     # The executor's digest-pin and approval gates. `_enforce_digest_pins`
     # applies every pin a call must match, a member's group pins included,
     # and `_enforce_digest_pin` checks one of them.

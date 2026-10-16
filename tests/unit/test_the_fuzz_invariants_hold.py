@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gc
 import pathlib
+import random
 import sys
 from typing import Any
 
@@ -26,7 +27,9 @@ sys.path.insert(0, str(ROOT / "fuzz"))
 
 from invariants import (  # noqa: E402 -- the path insert above has to come first
     check_access_precedence,
+    check_config_document,
     check_evaluate,
+    check_front_door_projection,
     check_policy_parse,
 )
 
@@ -129,3 +132,45 @@ class TestDenyKeepsWinning:
         self, tool: str, allow: list[str], deny: list[str], other_allow: list[str], other_deny: list[str]
     ) -> None:
         check_access_precedence(tool, allow, deny, [], other_allow, other_deny)
+
+
+# --- the front door and the configuration (#1787) ------------------------------------------
+
+
+def _chooser(seed: int):
+    """A deterministic stand-in for the fuzzer's bytes: the same generator, seeded."""
+    rng = random.Random(seed)
+    return lambda n: rng.randrange(n)
+
+
+class TestTheFrontDoorListsNothingItWouldRefuse:
+    def test_a_few_hundred_random_fleets_hold_the_invariant(self) -> None:
+        listed = sum(check_front_door_projection(_chooser(seed)) for seed in range(300))
+
+        assert listed > 100, f"only {listed} names were ever listed: the replay is not looking at anything"
+
+
+class TestAConfigurationIsCheckedOrRefusedByName:
+    def test_a_few_hundred_random_documents_hold_the_invariant(self) -> None:
+        for seed in range(400):
+            check_config_document(_chooser(seed))
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            "a string where a mapping goes",
+            ["a", "list"],
+            {"mode": "subprocess", "command": ["x"], "capabilities": 5},
+            {"mode": 7},
+            {"mode": "group", "members": "m1"},
+            {"mode": "group", "members": [5]},
+        ],
+        ids=["string", "list", "capabilities", "mode", "members-str", "member-int"],
+    )
+    def test_a_block_of_the_wrong_kind_is_refused_by_name(self, spec: Any) -> None:
+        """Each of these ended boot in an `AttributeError`, `TypeError` or bare `ValueError` (#1787)."""
+        from mcp_hangar.domain.exceptions import ConfigurationError
+        from mcp_hangar.server.config import build_config
+
+        with pytest.raises(ConfigurationError, match="'s0'"):
+            build_config({"s0": spec})

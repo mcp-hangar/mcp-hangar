@@ -66,6 +66,7 @@ TENANT_AWARE_RULES = {
     "GET /mcp_servers/{id}/tools/history",
     "POST /admin/tools/{server}/{tool:path}/withdraw",
     "POST /admin/tools/{server}/{tool:path}/restore",
+    "GET /admin/tools/pins",
     "ANY /ws/events",
     "POST /approvals/{approval_id}/resolve",
     "GET /approvals/{approval_id}",

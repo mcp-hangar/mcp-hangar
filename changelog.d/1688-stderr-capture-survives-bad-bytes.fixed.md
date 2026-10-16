@@ -1,1 +1,0 @@
-Capturing a server's stderr no longer stops at the first byte that is not valid text. The subprocess, docker and container launchers read the child's pipes as UTF-8 and replace what they cannot decode, instead of using the locale's codec with a strict handler; the reader also logs `stderr_reader_stopped` if it ever ends on an error.

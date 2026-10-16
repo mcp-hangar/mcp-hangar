@@ -1,1 +1,0 @@
-`MCP_MODE=http mcp-hangar serve` serves HTTP instead of exiting with code 2. The variable was bound to the boolean `--http` option, which refused the documented value. `true`, `1`, `yes` and `on` still work.

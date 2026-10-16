@@ -1,5 +1,63 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.28.0
+
+### Subprocess `args` are now passed to the server
+
+For `mode: subprocess`, `args` is appended to `command`. Before, it was silently ignored, so a hand-written `args` on a subprocess server starts doing something. If you kept an `args` there that the server must not receive, remove it. `args` for `mode: docker` is unchanged.
+
+### `serve --http` binds 127.0.0.1 by default
+
+The default `--host` (and `MCP_HTTP_HOST`) changed from `0.0.0.0` to `127.0.0.1`. A gateway that relied on the default to be reachable from other hosts or containers must now say so: `--host 0.0.0.0` (or `MCP_HTTP_HOST=0.0.0.0`), which still requires authentication. The published image and the Helm chart already pass `--host` explicitly and are unaffected.
+
+### `add` and `init` lose seven registry entries and the `data` bundle
+
+The registry no longer offers `github`, `postgres`, `slack`, `puppeteer`, `brave-search`, `google-maps` and `sqlite`: their npm packages are unsupported or do not exist, so the configuration they wrote could not start. `init --bundle data` is gone (it was `filesystem`, `fetch`, `memory`, `sqlite` and `postgres`); `developer` is now `filesystem`, `fetch`, `memory` and `git`. A `config.yaml` that already names one of these servers is not touched; to keep it, point its `command` at a maintained server of your choice. `fetch` and `git` now need `uvx`, since their npm names do not exist.
+
+### `max_consecutive_failures` must be 1 to 100
+
+A server whose `max_consecutive_failures` is 0, above 100, or not an integer now refuses the config instead of booting. Set it inside 1-100 (the default is 3) before upgrading; `mcp-hangar config check` does not flag it, so look for it with `grep -rn max_consecutive_failures`.
+
+### `IRoleStore` requires `list_principals()`
+
+A custom role store (a class implementing `IRoleStore` outside this package) must now implement `list_principals() -> list[dict]`, returning one `{"principal_id": ..., "roles": [...]}` per principal that holds a role. The four stores that ship with Hangar already do. Without it the store cannot be instantiated.
+
+### Registering a discovery source over REST now builds it
+
+`POST /api/discovery/sources` used to store the specification and run nothing. It now builds the source and starts it, which changes three answers: an unknown or unavailable `source_type` is refused with 422 (it was accepted and ignored); a type the gateway already holds, from the config or an earlier call, is refused with 422 (the orchestrator keeps one source per type; update it with `PUT`); and the returned `source_id` is the id `GET /api/discovery/sources` shows. Source registration needs the `discovery:approve` permission, as before. Check any automation that posted sources the gateway silently ignored: they begin to run.
+
+### `GET /api/tools` returns `input_schema` as an object
+
+`input_schema` was a string holding a Python repr (`"{'type': 'object'}"`). It is now the JSON object itself, and `{}` when a tool declares none. A client that parsed the string must read the field directly.
+
+### Docker-discovered http servers default to the path `/mcp`
+
+The endpoint of a container discovered in `http` or `sse` mode is now `http://host:port/mcp`; it was `http://host:port`. A container that serves MCP at the root, or elsewhere, must say so with the label `mcp.hangar.path` (for example `mcp.hangar.path: "/"`). Kubernetes discovery already behaved this way.
+
+### The negotiated `interceptors/list` shape returns the reverse-DNS interceptor ids
+
+With the `MCP-Interceptor-Ext: io.modelcontextprotocol/interceptors` header, `interceptors/list` now answers `io.mcp-hangar.validator` and `io.mcp-hangar.mutator`, as the default shape already did, instead of `mcp-hangar-validator` and `mcp-hangar-mutator`. A client that keyed on the old names reads the new ones. `interceptor/invoke` still accepts the old names but its answer, and the `InterceptorInvoked` event, carry the new id.
+
+### `GET /api/auth/keys` requires `principal_id`
+
+A request without `principal_id` (or with a blank one) now gets HTTP 400 instead of 200 with an empty list. Pass the principal whose keys you want.
+
+### Config reload with auth off is recorded as `anonymous`
+
+`POST /api/config/reload` with authentication disabled recorded `requested_by="api"`; it now records `anonymous`, the same value the auth routes use. If you filter the audit trail or logs on `requested_by="api"`, match `anonymous` as well. With auth on, the caller's principal id is recorded as before.
+
+### `MCP_COMPLIANCE_OUTPUT` without `MCP_COMPLIANCE_FORMAT` refuses startup
+
+A gateway with `MCP_COMPLIANCE_OUTPUT` set and `MCP_COMPLIANCE_FORMAT` unset used to start with no SIEM export at all. It now refuses to start. Set `MCP_COMPLIANCE_FORMAT` (`cef`, `leef`, `jsonlines` or `syslog`) to export to that path, or unset `MCP_COMPLIANCE_OUTPUT` if you meant no export.
+
+### `init` keeps its client-config backup in the state directory
+
+`mcp-hangar init` no longer writes `<name>.backup.<timestamp>.json` next to each client config it changes (including `./.mcp.json` and `./.cursor/mcp.json` in your project). It saves the first, pre-Hangar copy under `$XDG_STATE_HOME/mcp-hangar/init-backups` (`~/.local/state/mcp-hangar/init-backups`) and records it in `init-manifest.json` there; a re-run keeps that first copy. `mcp-hangar init --undo` restores from it. Backups earlier versions left beside your files are not touched or tracked; delete them if you no longer need them, and add `*.backup.*.json` to your ignore file only if you want to keep them out of version control.
+
+### Bind existing pins to their upstream
+
+Pins you already have keep working and check the tool definition only. To have them also refuse a server that points at a different upstream, run `mcp-hangar pin --write` once: it adds `tool_projection.upstream` to each pinned server. A subprocess server's identity includes a hash of its command line, so changing the command (a new package version in `npx` arguments, for example) is a new upstream and the pins need `pin --write` again. A remote server's identity is its origin (scheme, host, port), so a path change does not matter.
+
 ## Upgrade to 2.27.5
 
 ### `init` writes absolute paths; state follows a configured `event_store.path`

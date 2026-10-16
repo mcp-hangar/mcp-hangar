@@ -67,7 +67,7 @@ def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerReposit
     An upstream's ``list_changed`` arrives only on the replica holding its GET
     stream, so the announcement is local by construction.
     """
-    tool_projection_handler = ToolProjectionPopulationHandler(repository=repository)
+    tool_projection_handler = ToolProjectionPopulationHandler(repository=repository, event_bus=event_bus)
     event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
     tool_catalogue_changes.register_listener(tool_projection_handler.project)
     return tool_projection_handler

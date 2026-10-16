@@ -37,6 +37,8 @@ class Observation:
     mcp_server_id: str
     digests: dict[str, str] = field(default_factory=dict)
     error: str | None = None
+    #: The upstream these were read from (`McpServer.upstream_identity`), for the pins to bind to (#1802).
+    upstream: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -102,7 +104,7 @@ def _observe_one(mcp_server_id: str, spec: dict[str, Any], timeout_s: float) -> 
                 error=f"did not reach READY within {timeout_s:.0f}s (state: {mcp_server.state.value})",
             )
 
-        return Observation(mcp_server_id, digests=digest_tools(mcp_server))
+        return Observation(mcp_server_id, digests=digest_tools(mcp_server), upstream=mcp_server.upstream_identity())
     except Exception as exc:  # noqa: BLE001 -- one unreachable server must not hide the others
         return Observation(mcp_server_id, error=str(exc))
     finally:
@@ -134,6 +136,21 @@ def configured_pins(config: dict[str, Any]) -> dict[str, dict[str, str]]:
     return pins
 
 
+#: The `Drift.tool` of a moved upstream: the pins' own binding changed, not one tool.
+UPSTREAM_DRIFT = "(upstream)"
+
+
+def configured_upstreams(config: dict[str, Any]) -> dict[str, str]:
+    """The upstream identity each server's pins are bound to (`tool_projection.upstream`), where written (#1802)."""
+    bound: dict[str, str] = {}
+    for server_id, spec in (config.get("mcp_servers") or {}).items():
+        projection = spec.get("tool_projection") if isinstance(spec, dict) else None
+        upstream = projection.get("upstream") if isinstance(projection, dict) else None
+        if isinstance(upstream, str) and upstream:
+            bound[str(server_id)] = upstream
+    return bound
+
+
 def find_drift(config: dict[str, Any], observations: list[Observation]) -> list[Drift]:
     """Every disagreement between the pins in the file and the servers now.
 
@@ -147,6 +164,10 @@ def find_drift(config: dict[str, Any], observations: list[Observation]) -> list[
         if not observation.ok:
             continue
         configured = pins.get(observation.mcp_server_id, {})
+        bound = configured_upstreams(config).get(observation.mcp_server_id)
+        if bound is not None and observation.upstream is not None and bound != observation.upstream:
+            # The pins describe another upstream: none of them can be trusted for this one (#1802).
+            drift.append(Drift(observation.mcp_server_id, UPSTREAM_DRIFT, bound, observation.upstream))
         for tool, expected in sorted(configured.items()):
             observed = observation.digests.get(tool)
             if observed != expected:
@@ -169,6 +190,10 @@ def merge_pins(config: dict[str, Any], observations: list[Observation]) -> dict[
         spec = dict(servers[observation.mcp_server_id])
         projection = dict(spec.get("tool_projection") or {})
         projection["pins"] = dict(observation.digests)
+        if observation.upstream is not None:
+            # Binds the pins to where they were read from: they stop holding for a
+            # server of the same name that points somewhere else (#1802).
+            projection["upstream"] = observation.upstream
         spec["tool_projection"] = projection
         servers[observation.mcp_server_id] = spec
     merged["mcp_servers"] = servers

@@ -17,10 +17,12 @@ import os
 
 try:  # SDK v2: FastMCP -> MCPServer; host/port bind at run(), not construction.
     from mcp.server.mcpserver import MCPServer as FastMCP
+    from mcp.server.mcpserver.exceptions import ToolError
 
     _MCP_V2 = True
 except ImportError:  # SDK v1
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.exceptions import ToolError
 
     _MCP_V2 = False
 
@@ -93,10 +95,12 @@ def divide(a: float, b: float) -> dict:
         Dictionary with 'result' key
 
     Raises:
-        ValueError: If b is zero
+        ToolError: If b is zero. The SDK shows a client the text of a ToolError and
+            nothing of any other exception, so this is how a tool reports a failure
+            the caller should read.
     """
     if b == 0:
-        raise ValueError("division by zero")
+        raise ToolError("division by zero")
     return {"result": a / b}
 
 

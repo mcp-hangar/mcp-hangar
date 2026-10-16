@@ -48,6 +48,7 @@ class DigestValidator:
         mcp_server_id: str,
         correlation_id: str,
         tenant_id: str | None = None,
+        upstream: str | None = None,
     ) -> DigestValidationResult:
         """Validate a single tool schema against the digest policy.
 
@@ -57,6 +58,10 @@ class DigestValidator:
             correlation_id: Request correlation ID for audit trail.
             tenant_id: Tenant whose pin is being checked (per-tenant pinning);
                 recorded on any emitted DigestMismatchEvent.
+            upstream: The identity of the upstream that served the tool
+                (``McpServer.upstream_identity()``). A pin bound to an upstream
+                (``ToolDigest.upstream``) is a mismatch for any other, however
+                identical the definition (#1802).
 
         Returns:
             DigestValidationResult with validation outcome and optional event.
@@ -69,7 +74,8 @@ class DigestValidator:
                 observed.tool_name, observed.sha256, mcp_server_id, correlation_id, tenant_id
             )
 
-        if expected.sha256 == observed.sha256:
+        moved = expected.upstream is not None and upstream != expected.upstream
+        if expected.sha256 == observed.sha256 and not moved:
             return DigestValidationResult(tool_name=observed.tool_name, valid=True, blocked=False, event=None)
 
         return self._handle_mismatch(
@@ -79,6 +85,8 @@ class DigestValidator:
             mcp_server_id=mcp_server_id,
             correlation_id=correlation_id,
             tenant_id=tenant_id,
+            expected_upstream=expected.upstream if moved else None,
+            observed_upstream=upstream if moved else None,
         )
 
     def validate_tool_list(
@@ -128,6 +136,8 @@ class DigestValidator:
         mcp_server_id: str,
         correlation_id: str,
         tenant_id: str | None = None,
+        expected_upstream: str | None = None,
+        observed_upstream: str | None = None,
     ) -> DigestValidationResult:
         enforcement = self._policy.enforcement
 
@@ -139,6 +149,8 @@ class DigestValidator:
             enforcement=enforcement.value,
             correlation_id=correlation_id,
             tenant_id=tenant_id,
+            expected_upstream=expected_upstream,
+            observed_upstream=observed_upstream,
         )
 
         blocked = enforcement == DigestEnforcement.BLOCK

@@ -546,6 +546,14 @@ def bootstrap(
 
     restore_runtime_withdrawals(runtime)
 
+    # And the pins the configuration declares, recorded in the log (#1800): what
+    # is new or changed since the log last heard of it. After the withdrawals so
+    # the log is in the state the rest of boot reads, and fault-barriered because
+    # a ledger that cannot be written must not stop a gateway from serving.
+    from .pin_ledger import record_configured_pins
+
+    record_configured_pins(runtime.event_bus)
+
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
     # Initialize saga with persistence
@@ -663,9 +671,10 @@ def bootstrap(
     if discovery_orchestrator is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
         from ...application.discovery.discovery_registry import DiscoveryRegistry
+        from ...infrastructure.discovery.registry import create_source
 
         discovery_registry = DiscoveryRegistry(orchestrator=discovery_orchestrator)
-        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        register_discovery_handlers(runtime.command_bus, discovery_registry, source_factory=create_source)
         _register_configured_sources(discovery_registry, full_config)
         logger.info("discovery_registry_created")
 
