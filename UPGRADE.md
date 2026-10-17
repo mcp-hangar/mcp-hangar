@@ -1,5 +1,31 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.29.1
+
+### A failing `hangar_*` tool now returns `isError: true`
+
+The error payload every `hangar_*` tool returns on failure (`error`, `error_type`, `details`) used to arrive with `isError: false`. It now arrives with `isError: true`; the payload itself, in `structuredContent` or as the single JSON text block, is the same.
+
+A client that treated every `hangar_*` result as a success and looked for an `error` key still sees the key. A client that raises or retries on `isError` will now do so for these failures, which is the intent. Only the exact three-key payload of a `hangar_*` tool is flagged: a proxied backend tool's answer is never changed, and the few `hangar_*` tools that answer with a single-key `{"error": ...}` of their own (discovery and continuation when not configured) are not covered by this change.
+
+### `provider-admin` can now register, start, stop and remove servers
+
+The built-in `provider-admin` role held the pre-rename `provider:*` permissions, which no route or tool checks, so it could read servers and push egress policy but nothing else. It now holds `mcp_servers:write` and `mcp_servers:lifecycle`.
+
+Any API key or role assignment on `provider-admin` gains those four capabilities: `POST /api/mcp_servers`, `PUT` and `DELETE /api/mcp_servers/{id}`, and `start` and `stop`. It still has no `config:reload`, no `admin:*` and no access to the credential store. If a key must stay narrower, move it to `viewer`, or to `kubernetes-operator` for the Kubernetes operator.
+
+### Several pods sharing one `mcp-hangar.io/name` register as one server
+
+Pods that carry the same `mcp-hangar.io/name` annotation, which is every replica of a Deployment, used to be discovered as separate entries under one name. The gateway tracks a server by name, so they replaced each other each cycle and raised a config-change event per swap. Discovery now registers one pod per name, the one that sorts first by namespace and pod name, and logs `kubernetes_discovery_several_pods_for_one_name` listing the rest.
+
+This is not load balancing. For a workload with several replicas, put a Service in front, point the registration at it and give it its own name, instead of annotating the pods. The same name in two namespaces is treated the same way.
+
+### A misspelled `digest_enforcement` or a malformed `tool_projection` now refuses the configuration
+
+A server or group `tool_projection` block that is not a mapping, or whose `digest_enforcement` is not `audit`, `warn` or `block`, used to be ignored (the second with one log line) and the entry ran on the default mode. It is now a `ConfigurationError` naming the scope and the value: the gateway will not start with it, a reload leaves the running configuration untouched, and `mcp-hangar config check` reports it.
+
+Run `mcp-hangar config check` before upgrading. If it names an entry, correct the value; the entry was running on the default `block` mode all along.
+
 ## Upgrade to 2.29.0
 
 ### `/api/config/diff` and `/api/config/backup` refuse `config_path`

@@ -1,1 +1,0 @@
-The built-in `provider-admin` role now holds `mcp_servers:write` and `mcp_servers:lifecycle` instead of the pre-rename `provider:*` permissions that nothing checks, so it can register, reconfigure, start, stop and remove a server as its name says (#1671).
