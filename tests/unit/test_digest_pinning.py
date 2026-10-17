@@ -39,6 +39,7 @@ from mcp_hangar.domain.value_objects import (
     DigestUnknownPolicy,
     ToolDigest,
 )
+from mcp_hangar.server.config import ConfigurationError
 
 # ---------------------------------------------------------------------------
 # Neutral placeholders
@@ -334,22 +335,18 @@ class TestConfigParsing:
         assert pin.tool_name == _TOOL
         assert registry.digest_enforcement(_SERVER) is DigestEnforcement.WARN
 
-    def test_invalid_enforcement_is_skipped(self) -> None:
-        self._load(
-            self._spec(
-                {
-                    "digest_enforcement": "not-a-mode",
-                    "tenant_overrides": {
-                        "t1": {"pins": {_TOOL: _STALE_SHA}},
-                    },
-                }
+    def test_invalid_enforcement_refuses_the_configuration(self) -> None:
+        with pytest.raises(ConfigurationError, match="digest_enforcement"):
+            self._load(
+                self._spec(
+                    {
+                        "digest_enforcement": "not-a-mode",
+                        "tenant_overrides": {
+                            "t1": {"pins": {_TOOL: _STALE_SHA}},
+                        },
+                    }
+                )
             )
-        )
-
-        registry = get_tool_projection_registry()
-        # Enforcement falls back to the strict default; the (valid) pin still lands.
-        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
-        assert registry.resolve_pin(_SERVER, _TOOL, "t1") is not None
 
     def test_malformed_digest_is_skipped(self) -> None:
         self._load(
