@@ -1,5 +1,27 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.29.0
+
+### `/api/config/diff` and `/api/config/backup` refuse `config_path`
+
+Both routes now act on the file the gateway was started with and answer `422` to a request that names `config_path` (the `GET /api/config/diff` query parameter, the `POST /api/config/backup` body field), the way `/api/config/reload` has since 2.x. Drop the parameter from any script that sends it; if it pointed at the gateway's own file, nothing else changes. A gateway started with `--config X` now backs up and diffs `X` instead of `MCP_CONFIG` or `./config.yaml`.
+
+### `mcp-hangar add` keeps a prompted secret out of the config file
+
+A secret entered at the `add` prompt used to be written under the server's `env` in `config.yaml`. The file now holds `${NAME}` and the value is not stored anywhere: set that variable in the environment that starts Hangar (your shell profile, or the `env` block of the MCP client entry). A server added with an earlier version still has its plaintext value in the file; replace it with `${NAME}` and rotate the secret if the file was ever shared or committed. Configuration files created by `add` and `init` are now mode 0600; existing files are left as they are.
+
+### `oidc.clock_skew_leeway_seconds` now takes effect, and an invalid value refuses the configuration
+
+The key was ignored: the leeway was always 60 seconds. If your configuration sets it (top level or on an `oidc.issuers` entry), that value now applies, so a tighter value starts rejecting tokens that are further out of step with the issuer's clock than before. A value that is not a whole number from 0 to 300 (including a quoted number) now stops the gateway at boot or the reload with a message naming the key, where it was silently ignored. Remove the key to keep the default of 60.
+
+### Withdrawing or restoring a tool for every tenant needs the administrator's grant
+
+`POST /api/admin/tools/{server}/{tool}/withdraw` and `.../restore` with no `tenant_id` act on every tenant, and now answer `403` to a global `developer`; the `admin` role (or any grant holding `admin:*`) is required. Send the `tenant_id` to act on one tenant, which a global developer and a tenant-scoped developer can still do. If a script or an operator relied on a developer key for a fleet-wide withdrawal, give that key an administrator role or name the tenants.
+
+### `hangar_call(max_attempts=1)` disables the configured retries
+
+With a `retry:` block configured, `max_attempts=1` used to get the configured count anyway. It now means one attempt. A caller that passed `1` explicitly and relied on the configured retries (rather than omitting the argument) now gets a single attempt; omit `max_attempts` to keep the configured policy. The argument's default in the tool schema changes from `1` to `null`, which means "the configured policy". Nothing changes for a gateway without a `retry:` block.
+
 ## Upgrade to 2.28.0
 
 ### Subprocess `args` are now passed to the server

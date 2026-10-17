@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.28.0...v2.29.0) (2026-10-17)
+
+### Added
+
+- `GET /api/admin/tools/pins?tool=NAME[&server=ID]` returns the history of a tool's pin (recorded, re-approved, revoked) from the pin-ledger streams of the event store, oldest first, for a caller with `audit:read`; a tenant-scoped grant sees its own tenant's pins only. The CEF export now gives `ToolPinRecorded` and `ToolPinRevoked` their own signatures (410, 411) and carries the pinned digest (`fileHash`), the one it replaced (`oldFileHash`) and the approver (`flexString2`). ([#1886](https://github.com/mcp-hangar/mcp-hangar/pull/1886))
+
+### Fixed
+
+- `mcp-hangar config check` now runs the checks the boot and a reload run: the process-wide sections and the `mcp_servers` section built the way a reload builds it, with nothing put in force. A file the gateway refuses (an `args` that is not a list, an `access` block that is not a mapping, a bad `execution.tenant_limits`) now fails the check with the same message and names the server, instead of passing and failing at boot. A value the loader only warns about and defaults is still not reported. ([#1888](https://github.com/mcp-hangar/mcp-hangar/pull/1888))
+- A call that an enforced L7 egress policy refuses (a deny, or a requireApproval nobody granted) no longer starts a COLD server first. The batch executor started the target before the aggregate evaluated the policy, so a denied call spawned the server and ran `initialize` and `tools/list` upstream, and left it READY; the refusal, its event and its record are unchanged. A call with a pin check still to run, and a policy in Audit mode, start the server as before. ([#1889](https://github.com/mcp-hangar/mcp-hangar/pull/1889))
+- `hangar_call(max_attempts=1)` now means exactly one attempt when the gateway configures a `retry:` policy. It was read as "unset", so the default and an explicit 1 both got the configured count (3) and a caller could only lower it to 2, which left no way to call a tool that is not idempotent once. `max_attempts` now defaults to `null` (use the configured policy, or a single attempt when none is configured); a larger number still only lowers the configured count. ([#1895](https://github.com/mcp-hangar/mcp-hangar/pull/1895))
+- `oidc.clock_skew_leeway_seconds` (and the same key on an entry of `oidc.issuers`) is now read. It was documented and ignored, so a configured `5` left the leeway at 60 and an operator could not tighten token time validation. An issuer entry inherits the top-level value and may override it. A value that is not a whole number of seconds from 0 to 300 refuses the configuration. ([#1891](https://github.com/mcp-hangar/mcp-hangar/pull/1891))
+- `GET /api/config/diff` and `POST /api/config/backup` act on the configuration file the gateway was started with, as `/api/config/reload` already does. They no longer accept `config_path` (a query parameter on the diff, a body field on the backup): the path made the diff load, and the backup copy, any file the process could read. Without it they resolved `MCP_CONFIG` or `./config.yaml` and ignored `--config`, so a gateway started with `--config X` backed up the wrong file. ([#1892](https://github.com/mcp-hangar/mcp-hangar/pull/1892))
+- A bare `mcp-hangar` (no subcommand) now reads the same environment as `mcp-hangar serve`: `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `MCP_LOG_LEVEL` and `MCP_JSON_LOGS`. The implicit serve called the command's function with its Python defaults, so a gateway started as `MCP_MODE=http MCP_HTTP_HOST=10.1.2.3 mcp-hangar` listened on loopback and port 8000 instead of the address that was asked for. ([#1890](https://github.com/mcp-hangar/mcp-hangar/pull/1890))
+
+### Security
+
+- Withdrawing or restoring a tool, prompt or resource for every tenant at once (`POST /api/admin/tools/{server}/{tool}/withdraw|restore` with no `tenant_id`) now needs the administrator's grant. It was open to any global `developer`, whose `mcp_servers:lifecycle` is there to start and stop servers, and let one take a tool away from the whole fleet. A global grant naming a tenant, and a tenant-scoped grant acting on its own tenant, are unchanged. ([#1894](https://github.com/mcp-hangar/mcp-hangar/pull/1894))
+- `mcp-hangar add` no longer writes a secret it prompts for into `config.yaml`. The entry reads the server's environment variable (`${NAME}`) and the command says where to set it. The configuration files the CLI creates (`add`, `init`) are now created readable by their owner only (0600); an existing file keeps its mode. ([#1893](https://github.com/mcp-hangar/mcp-hangar/pull/1893))
+
 ## [2.28.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.27.5...v2.28.0) (2026-10-16)
 
 ### Added

@@ -1,1 +1,0 @@
-`mcp-hangar add` no longer writes a secret it prompts for into `config.yaml`. The entry reads the server's environment variable (`${NAME}`) and the command says where to set it. The configuration files the CLI creates (`add`, `init`) are now created readable by their owner only (0600); an existing file keeps its mode.
