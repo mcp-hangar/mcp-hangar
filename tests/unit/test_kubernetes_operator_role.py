@@ -3,7 +3,7 @@
 Since 0.17.26 the operator registers remote servers (`POST /api/mcp_servers/`),
 starts and removes them and delivers compiled egress policy. That needs
 `mcp_servers:write`, `mcp_servers:lifecycle` and `policy:write`, which only
-`admin` held together; `developer` lacks the policy push and `provider-admin`
+`admin` held together; `developer` lacks the policy push and `provider-admin` (before #1671)
 lacks registration. So every operator ran with a full admin key.
 
 The permission set is pinned: a later addition is a decision, not a drift.

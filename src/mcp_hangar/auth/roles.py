@@ -146,33 +146,16 @@ ROLE_PROVIDER_ADMIN = Role(
     description="Manage providers, deliver egress policy, and invoke tools",
     permissions=frozenset(
         [
-            # The REST API authorizes against the mcp_servers:* vocabulary; the
-            # provider:* entries below are the pre-rename names and are checked
-            # by nothing (see UNENFORCED_BY_DESIGN in
-            # tests/unit/test_permissions_defined_are_enforced.py). Without
-            # these two, this role cannot read a server or deliver a policy
-            # through the API at all, which is why the operator's API key has
-            # had to be `developer` or `admin`.
-            #
-            # policy:write is deliberately paired with mcp_servers:READ and not
-            # with mcp_servers:write: the operator only GETs servers and
-            # POST/DELETEs /l7_policy, so this is the whole set it needs.
-            # Granting write/lifecycle here would widen the role towards admin
-            # for a capability nothing asked for.
+            # The REST API and the tool-invoke path authorize against the
+            # mcp_servers:* vocabulary, so that is what this role holds. It
+            # carried the pre-rename provider:* entries too, which nothing
+            # checks, so it could read a server and push a policy but not
+            # register, start or stop one -- the opposite of its name.
             PERMISSION_PROVIDERS_READ,
+            PERMISSION_PROVIDERS_WRITE,
+            PERMISSION_PROVIDERS_LIFECYCLE,
             PERMISSION_POLICY_READ,
             PERMISSION_POLICY_WRITE,
-            PERMISSION_PROVIDER_CREATE,
-            PERMISSION_PROVIDER_READ,
-            PERMISSION_PROVIDER_UPDATE,
-            PERMISSION_PROVIDER_DELETE,
-            PERMISSION_PROVIDER_LIST,
-            PERMISSION_PROVIDER_START,
-            PERMISSION_PROVIDER_STOP,
-            PERMISSION_PROVIDER_LOAD,
-            PERMISSION_PROVIDER_LOAD_VERIFIED,
-            PERMISSION_PROVIDER_LOAD_ANY,
-            PERMISSION_PROVIDER_UNLOAD,
             PERMISSION_TOOL_INVOKE,
             PERMISSION_TOOL_LIST,
             PERMISSION_METRICS_READ,
