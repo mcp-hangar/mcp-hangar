@@ -1056,10 +1056,21 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
 
     Args:
         scope_id: The mcp_server or group id the entries are keyed under.
-        tool_projection_config: The block, or anything else (ignored).
+        tool_projection_config: The block, or None when the entry has none.
+
+    Raises:
+        ConfigurationError: If the block is not a mapping, or ``digest_enforcement``
+            is not one of the modes. Both used to be dropped with at most a log
+            line, which left a server on the default mode while its file said
+            otherwise.
     """
-    if not isinstance(tool_projection_config, dict):
+    if tool_projection_config is None:
         return
+    if not isinstance(tool_projection_config, dict):
+        raise ConfigurationError(
+            f"Invalid tool_projection for '{scope_id}': expected a mapping, got "
+            f"{type(tool_projection_config).__name__} {tool_projection_config!r}"
+        )
 
     tp_registry = _staged_config().projections
 
@@ -1069,11 +1080,10 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
         try:
             tp_registry.set_digest_enforcement(scope_id, DigestEnforcement(enforcement_raw))
         except ValueError:
-            logger.warning(
-                "invalid_digest_enforcement_config",
-                mcp_server_id=scope_id,
-                value=enforcement_raw,
-            )
+            raise ConfigurationError(
+                f"Invalid tool_projection.digest_enforcement for '{scope_id}': expected one of "
+                f"{', '.join(repr(mode.value) for mode in DigestEnforcement)}, got {enforcement_raw!r}"
+            ) from None
 
     # All-tenants digest pins: {tool_name: sha256}. The counterpart of
     # `withdrawn:`, and the only pin that holds a caller carrying no tenant
