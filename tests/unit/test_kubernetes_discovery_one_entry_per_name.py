@@ -9,11 +9,22 @@ order, keeps a steady state steady.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
+
+
+@pytest.fixture(autouse=True)
+def _no_kubernetes_package():
+    """The source is built without the `kubernetes` package, as CI's core install is."""
+    with (
+        patch("mcp_hangar.infrastructure.discovery.kubernetes_source.KUBERNETES_AVAILABLE", True),
+        patch("mcp_hangar.infrastructure.discovery.kubernetes_source.config"),
+        patch("mcp_hangar.infrastructure.discovery.kubernetes_source.client"),
+    ):
+        yield
 
 
 def _pod(name: str, ip: str, *, app_name: str = "search", phase: str = "Running"):
