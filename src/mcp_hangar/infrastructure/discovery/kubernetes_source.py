@@ -159,7 +159,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             List of discovered mcp_servers
         """
         self._ensure_initialized()
-        mcp_servers = []
+        found: list[DiscoveredMcpServer] = []
 
         namespaces = self.namespaces or await self._get_all_namespaces()
 
@@ -171,16 +171,51 @@ class KubernetesDiscoverySource(DiscoverySource):
                 for pod in pods.items:
                     mcp_server = self._parse_pod(pod, namespace)
                     if mcp_server:
-                        mcp_servers.append(mcp_server)
-                        await self.on_mcp_server_discovered(mcp_server)
+                        found.append(mcp_server)
 
             except ApiException as e:
                 logger.warning(f"Failed to list pods in {namespace}: {e.reason}")
             except Exception as e:  # noqa: BLE001 -- infra-boundary: skip namespace on discovery error
                 logger.error(f"Error discovering in namespace {namespace}: {e}")
 
+        mcp_servers = self._one_entry_per_name(found)
+        for mcp_server in mcp_servers:
+            await self.on_mcp_server_discovered(mcp_server)
+
         logger.debug(f"Kubernetes discovery found {len(mcp_servers)} mcp_servers")
         return mcp_servers
+
+    @staticmethod
+    def _one_entry_per_name(found: list[DiscoveredMcpServer]) -> list[DiscoveredMcpServer]:
+        """One entry per ``mcp-hangar.io/name``: the pod that sorts first by namespace and pod name (#1692).
+
+        Pods that share a name -- every replica of a Deployment -- used to be
+        returned as separate entries. The orchestrator tracks a server by name
+        and compares fingerprints, which include the pod address, so each cycle
+        saw the "same" server change, replaced the last with the next and
+        recorded a config change per replica, forever. A fixed choice makes a
+        steady state steady. It is not load balancing: only one pod is
+        registered, and when it goes away the next one takes its place. A
+        workload with several replicas belongs behind a Service, registered
+        under its own name, which is what the warning says.
+        """
+        by_name: dict[str, list[DiscoveredMcpServer]] = {}
+        for entry in found:
+            by_name.setdefault(entry.name, []).append(entry)
+
+        chosen: list[DiscoveredMcpServer] = []
+        for name, entries in by_name.items():
+            entries.sort(key=lambda e: (e.metadata.get("namespace", ""), e.metadata.get("pod_name", "")))
+            if len(entries) > 1:
+                logger.warning(
+                    "kubernetes_discovery_several_pods_for_one_name",
+                    mcp_server_name=name,
+                    pods=[f"{e.metadata.get('namespace')}/{e.metadata.get('pod_name')}" for e in entries],
+                    registered=f"{entries[0].metadata.get('namespace')}/{entries[0].metadata.get('pod_name')}",
+                    hint="front the replicas with a Service and register it under one name",
+                )
+            chosen.append(entries[0])
+        return chosen
 
     def _parse_pod(self, pod, namespace: str) -> DiscoveredMcpServer | None:
         """Parse pod annotations into DiscoveredMcpServer.

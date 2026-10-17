@@ -1,0 +1,1 @@
+Kubernetes discovery returns one entry per `mcp-hangar.io/name`: the pod that sorts first by namespace and pod name, with a warning naming the others. Replicas of one Deployment used to come back as separate entries that replaced each other every cycle, each swap recorded as a config change (#1692).
