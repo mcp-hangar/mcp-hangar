@@ -302,7 +302,7 @@ def hangar_call(
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     timeout: float = DEFAULT_TIMEOUT,
     fail_fast: bool = False,
-    max_attempts: int = 1,
+    max_attempts: int | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Invoke tools on MCP mcp_servers (single or batch).
@@ -331,7 +331,9 @@ def hangar_call(
             A call held for approval is not cut short by it: the call reads its
             approval outcome, and the batch returns when the hold ends.
         fail_fast: bool - Stop batch on first error (default: false)
-        max_attempts: int - Total attempts per call including retries (default: 1, range: 1-10)
+        max_attempts: int | null - Total attempts per call including retries (range: 1-10). Omit it to use the
+            gateway's configured `retry:` policy (a single attempt when none is configured); 1 means exactly
+            one attempt, whatever is configured; a larger number can only lower the configured count.
 
     Returns:
         Success: {
@@ -507,7 +509,7 @@ def call_as(
         max_concurrency=1,
         timeout=timeout,
         fail_fast=False,
-        max_attempts=1,
+        max_attempts=None,
         whole_result=True,
     )
 
@@ -521,7 +523,7 @@ def _run_calls(
     max_concurrency: int,
     timeout: float,
     fail_fast: bool,
-    max_attempts: int,
+    max_attempts: int | None,
     whole_result: bool = False,
 ) -> dict[str, Any]:
     """Validate, authorize and execute *calls* for one caller: the body of ``hangar_call``.
@@ -541,7 +543,8 @@ def _run_calls(
     batch_id = str(uuid.uuid4())
 
     # Clamp max_attempts to valid range
-    max_attempts = max(1, min(max_attempts, 10))
+    if max_attempts is not None:
+        max_attempts = max(1, min(max_attempts, 10))
 
     tracer = get_tracer(__name__)
     with tracer.start_as_current_span("hangar_call") as root_span:
@@ -550,7 +553,8 @@ def _run_calls(
         root_span.set_attribute("batch.max_concurrency", max_concurrency)
         root_span.set_attribute("batch.timeout", timeout)
         root_span.set_attribute("batch.fail_fast", fail_fast)
-        root_span.set_attribute("batch.max_attempts", max_attempts)
+        if max_attempts is not None:
+            root_span.set_attribute("batch.max_attempts", max_attempts)
 
         logger.info(
             "hangar_call_requested",

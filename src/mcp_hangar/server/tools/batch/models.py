@@ -50,7 +50,8 @@ class CallSpec:
     tool: str
     arguments: dict[str, Any]
     timeout: float | None = None
-    max_retries: int = 1  # Default: no retries (single attempt)
+    #: Total attempts the caller asked for; None = it did not say, and the configured `retry:` policy decides.
+    max_retries: int | None = None
     metadata: dict[str, str] | None = None  # W3C TraceContext headers (traceparent, tracestate)
     progress_token: str | None = None  # Minted upstream progress token (#883)
     #: The caller takes the whole result: no
