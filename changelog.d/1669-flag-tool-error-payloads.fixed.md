@@ -1,0 +1,1 @@
+A `hangar_*` tool that fails now answers with `isError: true`, not `false`. The payload (`error`, `error_type`, `details`) is unchanged; generic MCP clients, which decide success from the flag, used to read a refused or failed call as a success (#1669).
