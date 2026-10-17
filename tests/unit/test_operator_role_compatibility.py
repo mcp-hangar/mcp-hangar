@@ -17,12 +17,15 @@ Two things make this a contract worth pinning rather than an incidental fact.
    no non-admin role holds ``policy:write``, every operator deployment has to
    run with an admin key -- or, worse, silently stops delivering policy while
    the CRD still reports ``Compiled``.
-2. ``provider-admin`` holds only the pre-rename ``provider:*`` permissions,
-   which the REST API authorizes against nothing. Before this it failed every
-   call in the list above, including the reads.
+2. ``provider-admin`` used to hold the pre-rename ``provider:*`` permissions,
+   which the REST API authorizes against nothing, so it could read and push
+   policy but not register, start or stop a server (#1671). It now holds the
+   ``mcp_servers:*`` set its name promises.
 
-So ``provider-admin`` is the documented least-privilege home for an operator
-key, and these tests fail if that stops being true -- in either direction.
+The least-privilege home for an operator key is the ``kubernetes-operator``
+role (``test_kubernetes_operator_role.py``); ``provider-admin`` must keep
+working for the calls above, and must still stop short of governance inputs
+and the credential store. These tests fail if either stops being true.
 """
 
 import pytest
@@ -60,24 +63,36 @@ class TestProviderAdminCanRunTheOperator:
         assert all(_permits("admin", m, p) for m, p in OPERATOR_CALLS)
 
 
-class TestProviderAdminStaysLeastPrivilege:
-    """Granting the operator its set must not quietly widen the role."""
+class TestProviderAdminManagesServers:
+    """What the role's name promises, now that it holds mcp_servers:*."""
 
     @pytest.mark.parametrize(
         "method,path",
         [
-            ("DELETE", "/mcp_servers/srv1"),  # deleting a server
-            ("PUT", "/mcp_servers/srv1"),  # reconfiguring one
-            ("POST", "/mcp_servers"),  # creating one
-            ("POST", "/mcp_servers/srv1/start"),  # lifecycle
+            ("DELETE", "/mcp_servers/srv1"),
+            ("PUT", "/mcp_servers/srv1"),
+            ("POST", "/mcp_servers"),
+            ("POST", "/mcp_servers/srv1/start"),
             ("POST", "/mcp_servers/srv1/stop"),
+        ],
+    )
+    def test_it_registers_reconfigures_starts_and_removes_a_server(self, method, path):
+        assert _permits("provider-admin", method, path), f"provider-admin cannot {method} {path}"
+
+
+class TestProviderAdminStaysShortOfAdmin:
+    """Mapping the role to its real permissions must not quietly widen it to admin."""
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
             ("POST", "/config/reload"),  # re-applying governance inputs
             ("POST", "/auth/roles/assign"),  # self-escalation
         ],
     )
     def test_capabilities_the_operator_does_not_use_stay_denied(self, method, path):
         assert not _permits("provider-admin", method, path), (
-            f"provider-admin gained {method} {path}, which the operator never calls"
+            f"provider-admin gained {method} {path}, which is an admin capability"
         )
 
 
