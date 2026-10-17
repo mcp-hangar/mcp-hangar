@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.0...v2.29.1) (2026-10-17)
+
+### Fixed
+
+- A `tool_projection` block that is not a mapping, or a `digest_enforcement` that is not one of `audit`, `warn` or `block`, now refuses the configuration with the key and scope named, at startup, on reload and in `config check`. Both used to be dropped, so a server ran on the default mode while its file said otherwise (#1733). ([#1909](https://github.com/mcp-hangar/mcp-hangar/pull/1909))
+- Kubernetes discovery returns one entry per `mcp-hangar.io/name`: the pod that sorts first by namespace and pod name, with a warning naming the others. Replicas of one Deployment used to come back as separate entries that replaced each other every cycle, each swap recorded as a config change (#1692). ([#1912](https://github.com/mcp-hangar/mcp-hangar/pull/1912))
+- The built-in `provider-admin` role now holds `mcp_servers:write` and `mcp_servers:lifecycle` instead of the pre-rename `provider:*` permissions that nothing checks, so it can register, reconfigure, start, stop and remove a server as its name says (#1671). ([#1908](https://github.com/mcp-hangar/mcp-hangar/pull/1908))
+- A `hangar_*` tool that fails now answers with `isError: true`, not `false`. The payload (`error`, `error_type`, `details`) is unchanged; generic MCP clients, which decide success from the flag, used to read a refused or failed call as a success (#1669). ([#1911](https://github.com/mcp-hangar/mcp-hangar/pull/1911))
+
 ## [2.29.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.28.0...v2.29.0) (2026-10-17)
 
 ### Added
