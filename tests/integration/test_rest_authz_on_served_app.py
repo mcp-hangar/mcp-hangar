@@ -179,7 +179,7 @@ class TestGuardDoesNotOverreach:
         `test_operator_role_compatibility.py` already pins this contract, but it
         pins it against `resolve_rule` and the role definitions -- the table and
         the roles agreed, and the *handler* disagreed with both: it demanded
-        `mcp_servers:write` on top, which `provider-admin` does not hold. So the
+        `mcp_servers:write` on top, which the role did not hold then. So the
         operator's push answered 403 while every test of the contract passed.
 
         Asserted through the served stack for that reason: only the request path
