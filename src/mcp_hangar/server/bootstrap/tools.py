@@ -45,4 +45,8 @@ def register_all_tools(mcp_server: FastMCP) -> None:
 
     register_interceptors_list(mcp_server)
 
+    from ...fastmcp_server.tool_error_flag import install_tool_error_flag
+
+    install_tool_error_flag(mcp_server)
+
     logger.info("mcp_tools_registered")

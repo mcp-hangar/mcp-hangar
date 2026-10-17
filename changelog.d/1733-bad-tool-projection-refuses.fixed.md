@@ -1,0 +1,1 @@
+A `tool_projection` block that is not a mapping, or a `digest_enforcement` that is not one of `audit`, `warn` or `block`, now refuses the configuration with the key and scope named, at startup, on reload and in `config check`. Both used to be dropped, so a server ran on the default mode while its file said otherwise (#1733).
