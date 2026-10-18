@@ -496,11 +496,10 @@ class TestFlatListToolsHandler:
         assert "read_item" in names_a
         assert "read_item" in names_b
 
-        # Cross-tenant cache isolation (issue #292): each tenant's list carries a
-        # distinct SEP-2549 cacheScope so a downstream cache cannot cross tenants.
-        assert result_a.meta is not None
-        assert result_b.meta is not None
-        assert result_a.meta["cacheScope"] != result_b.meta["cacheScope"]
+        # Cross-tenant cache isolation (issues #292, #1897): the lists differ per
+        # caller, so each says ``private`` at the top level and nothing in _meta.
+        assert result_a.cache_scope == result_b.cache_scope == "private"
+        assert "cacheScope" not in (result_a.meta or {})
 
 
 # ---------------------------------------------------------------------------

@@ -43,8 +43,6 @@ from mcp_hangar.domain.services.tool_access_resolver import (
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server.flat_tool_projection import (
-    CACHE_SCOPE_META_KEY,
-    CACHE_TTL_META_KEY,
     PROJECTED_LIST_CACHE_TTL_MS,
     register_flat_tool_handlers,
 )
@@ -181,11 +179,10 @@ def _tool_names(result: Any) -> set[str]:
 
 
 def _cache_scope(result: Any) -> str:
-    meta = result.meta  # pydantic exposes the ``_meta`` alias as ``.meta``
-    assert isinstance(meta, dict)
-    scope = meta[CACHE_SCOPE_META_KEY]
-    assert isinstance(scope, str)
-    return scope
+    """The SEP-2549 ``cacheScope``, read from the top level of the result (#1897)."""
+    assert not (result.meta or {}).keys() & {"cacheScope", "ttlMs"}, "the hints belong at the top level"
+    assert isinstance(result.cache_scope, str)
+    return result.cache_scope
 
 
 # --------------------------------------------------------------------------- #
@@ -249,43 +246,31 @@ class TestE2EStatelessFrontDoorProjection:
         assert not any(n.startswith("hangar_") for n in names_a | names_b)
 
     @pytest.mark.asyncio
-    async def test_two_tenants_get_distinct_cache_scope(self, registry, resolver):
-        """Each tenant's list carries a DISTINCT cacheScope in _meta; same tenant is stable."""
+    async def test_every_tenants_list_is_private(self, registry, resolver):
+        """Each list is a per-caller projection, so each says ``private`` (SEP-2549)."""
         _configure_two_tenants(registry, resolver)
         list_fn = _capture_list_handler(registry, resolver)
 
         result_a = await _serve_list(list_fn, TENANT_A, registry, resolver)
         result_b = await _serve_list(list_fn, TENANT_B, registry, resolver)
-        result_a_again = await _serve_list(list_fn, TENANT_A, registry, resolver)
 
-        scope_a = _cache_scope(result_a)
-        scope_b = _cache_scope(result_b)
-        scope_a_again = _cache_scope(result_a_again)
-
-        # Distinct per tenant: a naive cache keyed on cacheScope can never serve
-        # tenant A's list to tenant B.
-        assert scope_a != scope_b
-        # Stable per tenant: the same tenant twice gets the SAME scope (cacheable
-        # within the tenant).
-        assert scope_a == scope_a_again
-        # The advertised scope must not embed the raw tenant identifier.
-        assert TENANT_A not in scope_a
-        assert TENANT_B not in scope_b
+        assert _cache_scope(result_a) == "private"
+        assert _cache_scope(result_b) == "private"
 
     @pytest.mark.asyncio
-    async def test_list_meta_carries_conservative_ttl(self, registry, resolver):
+    async def test_list_carries_conservative_ttl(self, registry, resolver):
         """The projected list advertises the SEP-2549 ttlMs freshness hint."""
         _configure_two_tenants(registry, resolver)
         list_fn = _capture_list_handler(registry, resolver)
 
         result = await _serve_list(list_fn, TENANT_A, registry, resolver)
 
-        assert result.meta[CACHE_TTL_META_KEY] == PROJECTED_LIST_CACHE_TTL_MS
-        assert result.meta[CACHE_TTL_META_KEY] > 0
+        assert result.ttl_ms == PROJECTED_LIST_CACHE_TTL_MS
+        assert result.ttl_ms > 0
 
     @pytest.mark.asyncio
     async def test_unknown_tenant_fails_closed(self, registry, resolver):
-        """No identity -> empty list AND a narrowest, non-shareable no-store scope."""
+        """No identity -> an empty list, still marked private."""
         _configure_two_tenants(registry, resolver)
         list_fn = _capture_list_handler(registry, resolver)
 
@@ -296,17 +281,9 @@ class TestE2EStatelessFrontDoorProjection:
         # front_door mode (deny-all), so neither tenant's tool leaks.
         assert _tool_names(result_none_1) == set()
 
-        scope_none_1 = _cache_scope(result_none_1)
-        scope_none_2 = _cache_scope(result_none_2)
-
-        # Non-shareable: a fresh token every request, so a cache never gets a
-        # second hit on it (structurally uncacheable).
-        assert scope_none_1 != scope_none_2
-        # And it can never equal any real tenant's shareable scope.
-        result_a = await _serve_list(list_fn, TENANT_A, registry, resolver)
-        result_b = await _serve_list(list_fn, TENANT_B, registry, resolver)
-        assert scope_none_1 != _cache_scope(result_a)
-        assert scope_none_1 != _cache_scope(result_b)
+        # An unknown caller is no less private than a known one.
+        assert _cache_scope(result_none_1) == "private"
+        assert _cache_scope(result_none_2) == "private"
 
 
 # --------------------------------------------------------------------------- #
@@ -403,10 +380,10 @@ class TestE2EStatelessRouting:
 
         # 2. Serving: the identity carries no session id either (session_id=None);
         #    the projection depends only on the tenant.  Each tenant still gets its
-        #    own isolated list with its own distinct cacheScope.
+        #    own isolated list, marked private.
         result_a = await _serve_list(list_fn, TENANT_A, registry, resolver)
         result_b = await _serve_list(list_fn, TENANT_B, registry, resolver)
 
         assert _tool_names(result_a) == {TOOL_A}
         assert _tool_names(result_b) == {TOOL_B}
-        assert _cache_scope(result_a) != _cache_scope(result_b)
+        assert _cache_scope(result_a) == _cache_scope(result_b) == "private"

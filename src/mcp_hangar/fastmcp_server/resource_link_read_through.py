@@ -370,7 +370,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
     # (GHSA-fhwh-fmq2-7m5c). Lazily, like the rest.
     from ..server.session_guard import refuse_request_if_session_suspended
     from .asgi import bind_caller_identity, release_caller_identity
-    from .flat_tool_projection import build_projected_list_cache_meta
+    from .flat_tool_projection import projected_list_cache_hints
 
     def _tenant() -> str | None:
         identity = get_identity_context()
@@ -421,8 +421,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
             return ListResourcesResult.model_validate(
                 {
                     "resources": resources,
-                    # Per-tenant SEP-2549 cacheScope, same isolation as tools/list.
-                    "_meta": build_projected_list_cache_meta(tenant_id),
+                    **projected_list_cache_hints(),
                 }
             )
         finally:
@@ -435,7 +434,7 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
             tenant_id = _tenant()
             templates = await asyncio.to_thread(_build_catalog, tenant_id, TEMPLATES)
             return ListResourceTemplatesResult.model_validate(
-                {"resourceTemplates": templates, "_meta": build_projected_list_cache_meta(tenant_id)}
+                {"resourceTemplates": templates, **projected_list_cache_hints()}
             )
         finally:
             release_caller_identity(token)

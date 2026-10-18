@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hashlib
 import json
 import logging
 import uuid
@@ -112,88 +111,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# --- SEP-2549 cache-scope advertisement for projected lists (issue #292) ------
+# --- SEP-2549 cache hints on projected lists (issues #292, #1897) -------------
 #
-# SEP-2549 defines ``cacheScope`` / ``ttlMs`` as caching hints on list results so
-# downstream caches know whether — and for how long — a list response may be
-# reused.  ``mcp.types.ListToolsResult`` predates the SEP and has no typed
-# top-level ``cacheScope`` / ``ttlMs`` fields (only ``_meta``/``nextCursor``/
-# ``tools``), so we advertise the hints under the result's ``_meta`` using the
-# SEP-2549 field names.
+# SEP-2549 defines ``cacheScope`` and ``ttlMs`` as top-level fields of every
+# cacheable list result (``CacheableResult`` in the 2026-07-28 schema). Both are
+# typed fields of the SDK's list results, so they are set there and nowhere in
+# ``_meta``, where no client or cache looks.
 #
-# Cross-tenant isolation is the whole point here.  The hangar fronts MANY tenants
-# behind a SINGLE endpoint, and each tenant's ``tools/list`` is a distinct,
-# per-request projection.  SEP-2549's bare ``"private"`` enum relies on the
-# downstream cache correctly keying by authorization context; if it does not, it
-# could serve tenant A's list to tenant B.  To make cross-tenant reuse
-# STRUCTURALLY impossible even for a naive cache that keys only on the advertised
-# scope, we emit a DISTINCT, stable, opaque scope TOKEN per tenant instead of a
-# shared constant.
+# Every projected list is a per-caller projection: the front door fronts many
+# tenants behind one endpoint and filters each list by the caller's tenant and
+# role. The spec's ``"private"`` means exactly "not shared across authorization
+# contexts", so it is the only value a projected list carries; ``"public"`` is
+# for a result identical for every caller, and no projected list is.
 #
-# Fail-closed: when the tenant is unknown (``None``/empty) we emit a unique,
-# non-shareable per-request ``no-store`` token so a cache can never get a second
-# hit on it — never a shared or global scope.
-CACHE_SCOPE_META_KEY = "cacheScope"
-CACHE_TTL_META_KEY = "ttlMs"
-
-# Conservative freshness hint (SEP-2549 ``ttlMs`` is in milliseconds).  Small on
-# purpose: the projection is cheap to rebuild and changes to a tenant's tool
-# surface (withdrawals, policy edits) must propagate quickly.
+# ``ttlMs`` is a ceiling on staleness, not the only freshness signal: a change to
+# what a caller may see also reaches it as ``list_changed``. It is small because
+# a withdrawal or a policy edit must propagate quickly and the projection is
+# cheap to rebuild.
+PROJECTED_LIST_CACHE_SCOPE = "private"
 PROJECTED_LIST_CACHE_TTL_MS = 5_000
 
-# Prefix for real, per-tenant shareable-within-tenant scope tokens.
-_TENANT_SCOPE_PREFIX = "tenant"
-# Prefix for the fail-closed, non-shareable per-request scope tokens.
-_NO_STORE_SCOPE_PREFIX = "no-store"
 
-
-def derive_tenant_cache_scope(tenant_id: str | None) -> str:
-    """Derive a per-tenant SEP-2549 ``cacheScope`` token (pure, unit-testable).
-
-    Properties (relied on by the cross-tenant isolation tests):
-
-    * Two DIFFERENT tenants get DIFFERENT tokens.
-    * The SAME tenant gets the SAME token every time (stable).
-    * It is NEVER a shared/global constant across tenants.
-    * FAIL CLOSED: an unknown tenant (``None`` or empty) yields a unique,
-      non-shareable per-request ``no-store`` token that a cache can never reuse,
-      and which can never equal a real tenant's token.
-
-    The tenant id is hashed so the raw tenant identifier does not leak into the
-    advertised scope; the hash is stable, so the token is stable per tenant.
-
-    Args:
-        tenant_id: The calling tenant's id, or ``None``/empty if unknown.
+def projected_list_cache_hints() -> dict[str, Any]:
+    """The SEP-2549 hints for a projected list, as SDK result field names.
 
     Returns:
-        An opaque, per-tenant (or per-request, when unknown) scope token.
+        ``cache_scope`` and ``ttl_ms``, to be passed to a list result's constructor.
     """
-    if not tenant_id:
-        # Unknown tenant -> narrowest possible scope.  A fresh uuid guarantees
-        # the token is unique to this single response, so any downstream cache
-        # keyed on it can never produce a cross-request (or cross-tenant) hit.
-        return f"{_NO_STORE_SCOPE_PREFIX}:{uuid.uuid4().hex}"
-
-    digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:32]
-    return f"{_TENANT_SCOPE_PREFIX}:{digest}"
-
-
-def build_projected_list_cache_meta(tenant_id: str | None) -> dict[str, Any]:
-    """Build the ``_meta`` cache-scope block for a projected list response.
-
-    Attaches the SEP-2549 ``cacheScope`` (per-tenant, fail-closed) and a
-    conservative ``ttlMs`` freshness hint.
-
-    Args:
-        tenant_id: The calling tenant's id, or ``None`` if unknown.
-
-    Returns:
-        A ``_meta`` dict carrying ``cacheScope`` and ``ttlMs``.
-    """
-    return {
-        CACHE_SCOPE_META_KEY: derive_tenant_cache_scope(tenant_id),
-        CACHE_TTL_META_KEY: PROJECTED_LIST_CACHE_TTL_MS,
-    }
+    return {"cache_scope": PROJECTED_LIST_CACHE_SCOPE, "ttl_ms": PROJECTED_LIST_CACHE_TTL_MS}
 
 
 def _member_to_groups() -> dict[str, tuple[str, ...]]:
@@ -953,7 +898,7 @@ async def _list_projected_tools(mcp_ctx: Any, load_management: Any) -> ListTools
     _memoise_flat_map(mcp_ctx, projection)
     return ListToolsResult(
         tools=governed + management,
-        _meta=build_projected_list_cache_meta(tenant_id),
+        **projected_list_cache_hints(),
     )
 
 
@@ -1203,10 +1148,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         an agent without a control plane and an operator with one -- the reason
         the mode-wide swap was not enough (ADR-022).
 
-        The response advertises a per-tenant SEP-2549 ``cacheScope`` under
-        ``_meta`` (fail-closed to a non-shareable ``no-store`` token when the
-        tenant is unknown) so a downstream cache can never serve one tenant's
-        list to another (issue #292).
+        The response carries the SEP-2549 ``cacheScope: "private"`` and ``ttlMs``
+        at the top level, so a downstream cache never serves one caller's list to
+        another (issues #292, #1897).
         """
         return await _list_projected_tools(mcp_ctx, _management_tools)
 
