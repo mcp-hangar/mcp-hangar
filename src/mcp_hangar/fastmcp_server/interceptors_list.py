@@ -103,12 +103,23 @@ def interceptor_ext_negotiated(request: Request) -> bool:
 
 # --- interceptors/list ---------------------------------------------------------
 
-#: Reverse-DNS extension identifiers (SEP-2133). The vendor prefix is the
-#: reversed ``mcp-hangar.io`` domain, giving a globally unambiguous namespace.
-VALIDATOR_ID = "io.mcp-hangar.validator"
-MUTATOR_ID = "io.mcp-hangar.mutator"
+#: Extension identifiers in the SEP-2133 form ``{vendor-prefix}/{extension-name}``.
+#: The vendor prefix is the reversed ``mcp-hangar.io`` domain, giving a globally
+#: unambiguous namespace (#1898).
+VALIDATOR_ID = "io.mcp-hangar/validator"
+MUTATOR_ID = "io.mcp-hangar/mutator"
 
-_LEGACY_NAMES = {_LEGACY_VALIDATOR: VALIDATOR_ID, _LEGACY_MUTATOR: MUTATOR_ID}
+#: The identifiers before #1898 spelled the separator as a dot. Still accepted by
+#: ``interceptors/invoke`` for one minor; never listed.
+_DOTTED_VALIDATOR = "io.mcp-hangar.validator"
+_DOTTED_MUTATOR = "io.mcp-hangar.mutator"
+
+_LEGACY_NAMES = {
+    _LEGACY_VALIDATOR: VALIDATOR_ID,
+    _LEGACY_MUTATOR: MUTATOR_ID,
+    _DOTTED_VALIDATOR: VALIDATOR_ID,
+    _DOTTED_MUTATOR: MUTATOR_ID,
+}
 
 
 def interceptors_list_response() -> dict[str, Any]:

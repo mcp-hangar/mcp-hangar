@@ -69,7 +69,7 @@ class TestBothListShapesNameOneInterceptorOneWay:
 
         legacy = [i["name"] for i in interceptors_list_response()["interceptors"]]
         negotiated = [i["name"] for i in interceptors_list_response_v2()["interceptors"]]
-        assert legacy == negotiated == ["io.mcp-hangar.validator", "io.mcp-hangar.mutator"]
+        assert legacy == negotiated == ["io.mcp-hangar/validator", "io.mcp-hangar/mutator"]
 
     def test_every_listed_id_can_be_invoked(self, bus_recorder):
         for entry in interceptors_list_response_v2()["interceptors"]:
@@ -79,8 +79,10 @@ class TestBothListShapesNameOneInterceptorOneWay:
 
     def test_the_names_before_the_rename_still_invoke(self, bus_recorder):
         for old, new in (
-            ("mcp-hangar-validator", "io.mcp-hangar.validator"),
-            ("mcp-hangar-mutator", "io.mcp-hangar.mutator"),
+            ("mcp-hangar-validator", "io.mcp-hangar/validator"),
+            ("mcp-hangar-mutator", "io.mcp-hangar/mutator"),
+            ("io.mcp-hangar.validator", "io.mcp-hangar/validator"),
+            ("io.mcp-hangar.mutator", "io.mcp-hangar/mutator"),
         ):
             result = interceptor_invoke_result({"name": old, "event": "tools/call", "phase": "request"})
             assert result["interceptor"] == new
@@ -92,7 +94,7 @@ class TestInterceptorInvokeResult:
             {"name": "mcp-hangar-validator", "event": "tools/call", "phase": "request", "payload": {}}
         )
         # The name before the rename is accepted; the answer is the reverse-DNS id (#1690).
-        assert result["interceptor"] == "io.mcp-hangar.validator"
+        assert result["interceptor"] == "io.mcp-hangar/validator"
         assert result["type"] == "validation"
         assert result["phase"] == "request"
         assert result["valid"] is True
@@ -154,7 +156,7 @@ class TestListV2Shape:
 
     def test_v2_validator_hooks(self):
         validator = interceptors_list_response_v2()["interceptors"][0]
-        assert validator["name"] == "io.mcp-hangar.validator"
+        assert validator["name"] == "io.mcp-hangar/validator"
         assert validator["hooks"] == [{"events": ["tools/call", "tools/list"], "phase": "request"}]
 
 

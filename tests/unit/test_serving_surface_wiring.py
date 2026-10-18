@@ -45,7 +45,7 @@ class TestGovernanceIsAdvertised:
         advertised = _experimental(build_serving_mcp_server())
 
         assert advertised, "capabilities.experimental is empty on the served server"
-        assert any(key.startswith("io.mcp-hangar.") for key in advertised), advertised
+        assert any(key.startswith("io.mcp-hangar/") for key in advertised), advertised
 
     def test_advertising_goes_through_get_capabilities_so_discover_sees_it_too(self):
         """Injecting at the initialize-only seam would hide it from stateless clients.
@@ -60,7 +60,7 @@ class TestGovernanceIsAdvertised:
 
         result = server_discover_result(None, mcp)
 
-        assert result["capabilities"].get("experimental"), "governance is invisible on the stateless discovery surface"
+        assert result["capabilities"].get("extensions"), "governance is invisible on the stateless discovery surface"
 
 
 class TestTopologyDecidesTheToolSurface:
