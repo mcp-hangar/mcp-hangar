@@ -206,7 +206,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
     # suspended session first (GHSA-fhwh-fmq2-7m5c). Lazily, like the rest.
     from ..server.session_guard import refuse_request_if_session_suspended
     from .asgi import bind_caller_identity, release_caller_identity
-    from .flat_tool_projection import build_projected_list_cache_meta
+    from .flat_tool_projection import projected_list_cache_hints
     from .resource_link_read_through import project_result_uris
 
     def _tenant() -> str | None:
@@ -222,8 +222,7 @@ def maybe_register_prompt_proxy(mcp: Any) -> bool:
             return ListPromptsResult.model_validate(
                 {
                     "prompts": [prompt for _server, prompt in prompt_map.values()],
-                    # Per-tenant SEP-2549 cacheScope, same isolation as tools/list.
-                    "_meta": build_projected_list_cache_meta(tenant_id),
+                    **projected_list_cache_hints(),
                 }
             )
         finally:

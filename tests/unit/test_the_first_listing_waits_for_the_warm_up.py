@@ -121,7 +121,6 @@ class TestTheListingRebuildsAfterWaiting:
         monkeypatch.setattr(ftp, "_classify_empty_projection", lambda tenant_id: reason)
         monkeypatch.setattr(ftp, "_memoise_flat_map", lambda *a, **k: None)
         monkeypatch.setattr(ftp, "_envelope", lambda ctx: {"method": "tools/list"})
-        monkeypatch.setattr(ftp, "build_projected_list_cache_meta", lambda tenant: None)
         monkeypatch.setattr(
             ftp,
             "get_identity_context",
@@ -155,7 +154,6 @@ class TestTheListingRebuildsAfterWaiting:
         monkeypatch.setattr(ftp, "_classify_empty_projection", lambda tenant_id: "nothing_discovered")
         monkeypatch.setattr(ftp, "_memoise_flat_map", lambda *a, **k: None)
         monkeypatch.setattr(ftp, "_envelope", lambda ctx: {"method": "tools/list"})
-        monkeypatch.setattr(ftp, "build_projected_list_cache_meta", lambda tenant: None)
         monkeypatch.setattr(
             ftp,
             "get_identity_context",
