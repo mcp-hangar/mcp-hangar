@@ -5,7 +5,7 @@ enforcement path from exactly one place: `Principal.tenant_id`. With auth
 disabled every caller is anonymous, `tenant_id` is `None` on every request, and
 `ToolProjectionRegistry.resolve_pin` matched no per-tenant pin -- so the gate
 took its "no pin" branch and every call went through unverified, while
-`initialize` kept advertising `io.mcp-hangar.digest-pinning` with its three
+`initialize` kept advertising `io.mcp-hangar/digest-pinning` with its three
 enforcement modes.
 
 Nothing was wrong with the pins in the file. They were simply addressed to a
