@@ -86,6 +86,9 @@ def run(workdir: Path) -> dict[str, Any]:
 
         _write(path, _config("edited"))
         status, body = gateway.reload(None)
+        # A denied call no longer wakes a cold server (#1708), so start the rebuilt one
+        # here, the way the denied calls below used to.
+        repository.get("edit").ensure_ready()
         out["edited"] = {
             "status": status,
             "diff": {key: body["result"].get(key) for key in DIFF_KEYS},

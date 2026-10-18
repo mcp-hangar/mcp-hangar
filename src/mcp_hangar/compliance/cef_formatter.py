@@ -49,6 +49,8 @@ _SIGNATURE_MAP: dict[str, tuple[str, str]] = {
     "ProviderDiscovered": ("210", "Provider Discovered"),
     "ProviderRegistered": ("211", "Provider Registered"),
     "ProviderDeregistered": ("212", "Provider Deregistered"),
+    "ToolPinRecorded": ("410", "Tool Pin Recorded"),
+    "ToolPinRevoked": ("411", "Tool Pin Revoked"),
 }
 
 # Map event types to CEF severity (0-10 scale).
@@ -69,6 +71,9 @@ _SEVERITY_MAP: dict[str, int] = {
     "ProviderDiscovered": 1,
     "ProviderRegistered": 1,
     "ProviderDeregistered": 3,
+    # A pin changing is a governance decision; a revoked one lifts a protection.
+    "ToolPinRecorded": 3,
+    "ToolPinRevoked": 5,
 }
 
 
@@ -142,6 +147,26 @@ def _caller_cost_extensions(data: Mapping[str, object]) -> list[str]:
             extensions.append(f"{slot}={data[key]}")
             extensions.append(f"{slot}Label={label}")
     return extensions
+
+
+def _pin_extensions(event_type: str, data: Mapping[str, object]) -> list[str]:
+    """A tool pin's provenance (#1800): the pinned digest, the one it replaced, the approver.
+
+    `fileHash`/`oldFileHash` are the dictionary's fields for a hash and the hash
+    it replaced; the approver rides a labelled flex string.
+    """
+    if event_type not in ("ToolPinRecorded", "ToolPinRevoked"):
+        return []
+    out: list[str] = []
+    if data.get("sha256"):
+        out.append(f"fileHash={_escape_extension_value(str(data['sha256']))}")
+    if data.get("previous_sha256"):
+        out.append(f"oldFileHash={_escape_extension_value(str(data['previous_sha256']))}")
+    approver = data.get("approved_by") or data.get("revoked_by")
+    if approver:
+        out.append(f"flexString2={_escape_extension_value(str(approver))}")
+        out.append("flexString2Label=PinApprovedBy")
+    return out
 
 
 def format_audit_record(record: AuditRecord) -> str:
@@ -248,6 +273,8 @@ def format_audit_record(record: AuditRecord) -> str:
     from_state, to_state = data.get("from_state"), data.get("to_state")
     if from_state is not None and to_state is not None:
         extensions.append(f"msg={_escape_extension_value(f'{from_state} -> {to_state}')}")
+
+    extensions.extend(_pin_extensions(event_type, data))
 
     # A refused call's bounded gate or L7 fields (#1582).
     extensions.extend(f"{key}={_escape_extension_value(value)}" for key, value in refusal_wire_fields(data))

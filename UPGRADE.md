@@ -1,5 +1,127 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.29.1
+
+### A failing `hangar_*` tool now returns `isError: true`
+
+The error payload every `hangar_*` tool returns on failure (`error`, `error_type`, `details`) used to arrive with `isError: false`. It now arrives with `isError: true`; the payload itself, in `structuredContent` or as the single JSON text block, is the same.
+
+A client that treated every `hangar_*` result as a success and looked for an `error` key still sees the key. A client that raises or retries on `isError` will now do so for these failures, which is the intent. Only the exact three-key payload of a `hangar_*` tool is flagged: a proxied backend tool's answer is never changed, and the few `hangar_*` tools that answer with a single-key `{"error": ...}` of their own (discovery and continuation when not configured) are not covered by this change.
+
+### `provider-admin` can now register, start, stop and remove servers
+
+The built-in `provider-admin` role held the pre-rename `provider:*` permissions, which no route or tool checks, so it could read servers and push egress policy but nothing else. It now holds `mcp_servers:write` and `mcp_servers:lifecycle`.
+
+Any API key or role assignment on `provider-admin` gains those four capabilities: `POST /api/mcp_servers`, `PUT` and `DELETE /api/mcp_servers/{id}`, and `start` and `stop`. It still has no `config:reload`, no `admin:*` and no access to the credential store. If a key must stay narrower, move it to `viewer`, or to `kubernetes-operator` for the Kubernetes operator.
+
+### Several pods sharing one `mcp-hangar.io/name` register as one server
+
+Pods that carry the same `mcp-hangar.io/name` annotation, which is every replica of a Deployment, used to be discovered as separate entries under one name. The gateway tracks a server by name, so they replaced each other each cycle and raised a config-change event per swap. Discovery now registers one pod per name, the one that sorts first by namespace and pod name, and logs `kubernetes_discovery_several_pods_for_one_name` listing the rest.
+
+This is not load balancing. For a workload with several replicas, put a Service in front, point the registration at it and give it its own name, instead of annotating the pods. The same name in two namespaces is treated the same way.
+
+### A misspelled `digest_enforcement` or a malformed `tool_projection` now refuses the configuration
+
+A server or group `tool_projection` block that is not a mapping, or whose `digest_enforcement` is not `audit`, `warn` or `block`, used to be ignored (the second with one log line) and the entry ran on the default mode. It is now a `ConfigurationError` naming the scope and the value: the gateway will not start with it, a reload leaves the running configuration untouched, and `mcp-hangar config check` reports it.
+
+Run `mcp-hangar config check` before upgrading. If it names an entry, correct the value; the entry was running on the default `block` mode all along.
+
+### List results carry their cache hints at the top level
+
+`tools/list`, `prompts/list`, `resources/list` and `resources/templates/list` no longer put `cacheScope` and `ttlMs` in `_meta`. They are top-level fields of the result (`"cacheScope": "private"`, `"ttlMs": 5000`), as the 2026-07-28 spec defines them. The `_meta.cacheScope` value was a per-tenant token (`tenant:<hash>`) and is no longer emitted.
+
+A client or proxy that read `_meta.cacheScope` or `_meta.ttlMs` from Hangar should read the top-level fields instead. Nothing else changes: every projected list is still per caller, which is what `"private"` says.
+
+### Governance extension identifiers use a slash
+
+The governance extensions are now named `io.mcp-hangar/validator`, `io.mcp-hangar/mutator` and `io.mcp-hangar/digest-pinning` (SEP-2133 form), in `interceptors/list` and in the capabilities. Where to look depends on the protocol era: `server/discover` (2026-07-28) carries them under `capabilities.extensions`; `initialize` carries them under `capabilities.experimental`.
+
+A client that looks the dotted names up (`io.mcp-hangar.validator`, and so on) keeps finding them in `capabilities.experimental` of `initialize` for this minor, marked `"deprecated": true` with `replacedBy`; `interceptors/invoke` also still accepts them. The modern `server/discover` surface never carried them under the old names, and the dotted aliases will be removed in the next minor. Switch the lookup to the slash form.
+
+### An upstream's failure result is relayed whole
+
+When an upstream answers a tool call with `isError: true`, a front-door `tools/call` now returns that result as sent (content blocks, `structuredContent`, `_meta`), instead of a result holding only the error text. A client that read nothing but the first text block keeps working. A `hangar_call` entry for the same call keeps `success: false`, `result: null` and `error`, and gains an `upstream_result` field with the upstream's whole answer; a client that rejects unknown fields in a batch entry should accept it.
+
+## Upgrade to 2.29.0
+
+### `/api/config/diff` and `/api/config/backup` refuse `config_path`
+
+Both routes now act on the file the gateway was started with and answer `422` to a request that names `config_path` (the `GET /api/config/diff` query parameter, the `POST /api/config/backup` body field), the way `/api/config/reload` has since 2.x. Drop the parameter from any script that sends it; if it pointed at the gateway's own file, nothing else changes. A gateway started with `--config X` now backs up and diffs `X` instead of `MCP_CONFIG` or `./config.yaml`.
+
+### `mcp-hangar add` keeps a prompted secret out of the config file
+
+A secret entered at the `add` prompt used to be written under the server's `env` in `config.yaml`. The file now holds `${NAME}` and the value is not stored anywhere: set that variable in the environment that starts Hangar (your shell profile, or the `env` block of the MCP client entry). A server added with an earlier version still has its plaintext value in the file; replace it with `${NAME}` and rotate the secret if the file was ever shared or committed. Configuration files created by `add` and `init` are now mode 0600; existing files are left as they are.
+
+### `oidc.clock_skew_leeway_seconds` now takes effect, and an invalid value refuses the configuration
+
+The key was ignored: the leeway was always 60 seconds. If your configuration sets it (top level or on an `oidc.issuers` entry), that value now applies, so a tighter value starts rejecting tokens that are further out of step with the issuer's clock than before. A value that is not a whole number from 0 to 300 (including a quoted number) now stops the gateway at boot or the reload with a message naming the key, where it was silently ignored. Remove the key to keep the default of 60.
+
+### Withdrawing or restoring a tool for every tenant needs the administrator's grant
+
+`POST /api/admin/tools/{server}/{tool}/withdraw` and `.../restore` with no `tenant_id` act on every tenant, and now answer `403` to a global `developer`; the `admin` role (or any grant holding `admin:*`) is required. Send the `tenant_id` to act on one tenant, which a global developer and a tenant-scoped developer can still do. If a script or an operator relied on a developer key for a fleet-wide withdrawal, give that key an administrator role or name the tenants.
+
+### `hangar_call(max_attempts=1)` disables the configured retries
+
+With a `retry:` block configured, `max_attempts=1` used to get the configured count anyway. It now means one attempt. A caller that passed `1` explicitly and relied on the configured retries (rather than omitting the argument) now gets a single attempt; omit `max_attempts` to keep the configured policy. The argument's default in the tool schema changes from `1` to `null`, which means "the configured policy". Nothing changes for a gateway without a `retry:` block.
+
+## Upgrade to 2.28.0
+
+### Subprocess `args` are now passed to the server
+
+For `mode: subprocess`, `args` is appended to `command`. Before, it was silently ignored, so a hand-written `args` on a subprocess server starts doing something. If you kept an `args` there that the server must not receive, remove it. `args` for `mode: docker` is unchanged.
+
+### `serve --http` binds 127.0.0.1 by default
+
+The default `--host` (and `MCP_HTTP_HOST`) changed from `0.0.0.0` to `127.0.0.1`. A gateway that relied on the default to be reachable from other hosts or containers must now say so: `--host 0.0.0.0` (or `MCP_HTTP_HOST=0.0.0.0`), which still requires authentication. The published image and the Helm chart already pass `--host` explicitly and are unaffected.
+
+### `add` and `init` lose seven registry entries and the `data` bundle
+
+The registry no longer offers `github`, `postgres`, `slack`, `puppeteer`, `brave-search`, `google-maps` and `sqlite`: their npm packages are unsupported or do not exist, so the configuration they wrote could not start. `init --bundle data` is gone (it was `filesystem`, `fetch`, `memory`, `sqlite` and `postgres`); `developer` is now `filesystem`, `fetch`, `memory` and `git`. A `config.yaml` that already names one of these servers is not touched; to keep it, point its `command` at a maintained server of your choice. `fetch` and `git` now need `uvx`, since their npm names do not exist.
+
+### `max_consecutive_failures` must be 1 to 100
+
+A server whose `max_consecutive_failures` is 0, above 100, or not an integer now refuses the config instead of booting. Set it inside 1-100 (the default is 3) before upgrading; `mcp-hangar config check` does not flag it, so look for it with `grep -rn max_consecutive_failures`.
+
+### `IRoleStore` requires `list_principals()`
+
+A custom role store (a class implementing `IRoleStore` outside this package) must now implement `list_principals() -> list[dict]`, returning one `{"principal_id": ..., "roles": [...]}` per principal that holds a role. The four stores that ship with Hangar already do. Without it the store cannot be instantiated.
+
+### Registering a discovery source over REST now builds it
+
+`POST /api/discovery/sources` used to store the specification and run nothing. It now builds the source and starts it, which changes three answers: an unknown or unavailable `source_type` is refused with 422 (it was accepted and ignored); a type the gateway already holds, from the config or an earlier call, is refused with 422 (the orchestrator keeps one source per type; update it with `PUT`); and the returned `source_id` is the id `GET /api/discovery/sources` shows. Source registration needs the `discovery:approve` permission, as before. Check any automation that posted sources the gateway silently ignored: they begin to run.
+
+### `GET /api/tools` returns `input_schema` as an object
+
+`input_schema` was a string holding a Python repr (`"{'type': 'object'}"`). It is now the JSON object itself, and `{}` when a tool declares none. A client that parsed the string must read the field directly.
+
+### Docker-discovered http servers default to the path `/mcp`
+
+The endpoint of a container discovered in `http` or `sse` mode is now `http://host:port/mcp`; it was `http://host:port`. A container that serves MCP at the root, or elsewhere, must say so with the label `mcp.hangar.path` (for example `mcp.hangar.path: "/"`). Kubernetes discovery already behaved this way.
+
+### The negotiated `interceptors/list` shape returns the reverse-DNS interceptor ids
+
+With the `MCP-Interceptor-Ext: io.modelcontextprotocol/interceptors` header, `interceptors/list` now answers `io.mcp-hangar.validator` and `io.mcp-hangar.mutator`, as the default shape already did, instead of `mcp-hangar-validator` and `mcp-hangar-mutator`. A client that keyed on the old names reads the new ones. `interceptor/invoke` still accepts the old names but its answer, and the `InterceptorInvoked` event, carry the new id.
+
+### `GET /api/auth/keys` requires `principal_id`
+
+A request without `principal_id` (or with a blank one) now gets HTTP 400 instead of 200 with an empty list. Pass the principal whose keys you want.
+
+### Config reload with auth off is recorded as `anonymous`
+
+`POST /api/config/reload` with authentication disabled recorded `requested_by="api"`; it now records `anonymous`, the same value the auth routes use. If you filter the audit trail or logs on `requested_by="api"`, match `anonymous` as well. With auth on, the caller's principal id is recorded as before.
+
+### `MCP_COMPLIANCE_OUTPUT` without `MCP_COMPLIANCE_FORMAT` refuses startup
+
+A gateway with `MCP_COMPLIANCE_OUTPUT` set and `MCP_COMPLIANCE_FORMAT` unset used to start with no SIEM export at all. It now refuses to start. Set `MCP_COMPLIANCE_FORMAT` (`cef`, `leef`, `jsonlines` or `syslog`) to export to that path, or unset `MCP_COMPLIANCE_OUTPUT` if you meant no export.
+
+### `init` keeps its client-config backup in the state directory
+
+`mcp-hangar init` no longer writes `<name>.backup.<timestamp>.json` next to each client config it changes (including `./.mcp.json` and `./.cursor/mcp.json` in your project). It saves the first, pre-Hangar copy under `$XDG_STATE_HOME/mcp-hangar/init-backups` (`~/.local/state/mcp-hangar/init-backups`) and records it in `init-manifest.json` there; a re-run keeps that first copy. `mcp-hangar init --undo` restores from it. Backups earlier versions left beside your files are not touched or tracked; delete them if you no longer need them, and add `*.backup.*.json` to your ignore file only if you want to keep them out of version control.
+
+### Bind existing pins to their upstream
+
+Pins you already have keep working and check the tool definition only. To have them also refuse a server that points at a different upstream, run `mcp-hangar pin --write` once: it adds `tool_projection.upstream` to each pinned server. A subprocess server's identity includes a hash of its command line, so changing the command (a new package version in `npx` arguments, for example) is a new upstream and the pins need `pin --write` again. A remote server's identity is its origin (scheme, host, port), so a path change does not matter.
+
 ## Upgrade to 2.27.5
 
 ### `init` writes absolute paths; state follows a configured `event_store.path`

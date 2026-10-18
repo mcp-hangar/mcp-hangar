@@ -1,0 +1,97 @@
+# Known non-passes of the official MCP conformance suite against `serve --http`,
+# run with `--requirements 2026-07-28` (the scenarios that revision requires).
+#
+# Same semantics as baseline.yml: a failure listed here is known, a failure not
+# listed is a regression, and a listed scenario that now passes is a stale entry
+# that fails the run until its line is deleted. A WARNING or SKIPPED result
+# counts as a non-pass here, as it does in the suite.
+#
+# The gateway under test is the one conformance.yml starts: one subprocess
+# backend (`examples/provider_math`), no authentication, `mode` left at its
+# default. Every entry below is classified; the classification says why the
+# scenario cannot pass in THAT setup, which is not the same as saying the
+# gateway is wrong. Read a line as "not evaluated here", not "broken".
+#
+# ---------------------------------------------------------------------------
+# 1. Fixture-dependent. The scenario calls a tool, prompt or resource that the
+#    suite's reference server defines (`json_schema_2020_12_tool`,
+#    `test_missing_capability`, `failing_job`, `confirm_delete`, image/audio
+#    tools, an `x-mcp-header` annotated tool, ...). The gateway relays what its
+#    upstream serves and the math backend serves none of these. Passing them
+#    needs the reference server behind the gateway, and the front_door topology
+#    that exposes upstream tool names needs an identity, which the suite's
+#    `server` command cannot present (it has no --header or auth option; the
+#    ecosystem watch in conformance.yml notices when that changes).
+#
+# 2. Capability not advertised. Hangar declares no `completions`, `prompts` or
+#    `resources` for this configuration, so `completion/complete`, `prompts/*`
+#    and `resources/*` answer -32601. The suite runs these scenarios regardless
+#    of what discovery advertised. `caching` is in this group because three of
+#    its seven checks are the prompts/resources list hints; the tools/list check
+#    passes.
+#
+# 3. Gateway behaviour with no fixture to exercise it. The `input-required-*`
+#    and `tasks-*` families need a backend tool that returns an
+#    InputRequiredResult or creates a task. Hangar relays those from an
+#    upstream (see TOOL_RESULT_SURFACES in the docs repo); with no such upstream
+#    in the run, the gateway returns an ordinary complete result, which the
+#    suite reports as a failure. The first failing check of each is a "got
+#    complete" or "no taskId" message, which is what this classification rests
+#    on. It has not been confirmed by running the reference server behind a
+#    front_door gateway, which is the follow-up that would turn these lines
+#    into either passes or real findings.
+#
+# Not covered yet, by design of this file: the second role in the issue, Hangar
+# as the CLIENT under test against the suite's reference servers. That needs a
+# harness that makes the upstream client path act on the suite's stdin/stdout
+# protocol and is tracked separately.
+# ---------------------------------------------------------------------------
+
+server:
+  # -- 1. fixture-dependent ---------------------------------------------------
+  - server-stateless # needs the diagnostic tool test_missing_capability
+  - json-schema-2020-12 # needs json_schema_2020_12_tool
+  - http-custom-header-server-validation # needs a tool with x-mcp-header
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-progress
+
+  # -- 2. capability not advertised -------------------------------------------
+  - completion-complete
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - sep-2164-resource-not-found # resources/read answers -32601, the check wants -32602
+  - caching # prompts/resources hints; the tools/list hint passes
+
+  # -- 3. no fixture to exercise the relay ------------------------------------
+  - input-required-result-basic-elicitation
+  - input-required-result-basic-sampling
+  - input-required-result-basic-list-roots
+  - input-required-result-request-state
+  - input-required-result-multiple-input-requests
+  - input-required-result-multi-round
+  - input-required-result-missing-input-response
+  - input-required-result-non-tool-request
+  - input-required-result-result-type
+  - input-required-result-tampered-state
+  - input-required-result-capability-check
+  - input-required-result-validate-input
+  - tasks-lifecycle
+  - tasks-capability-negotiation
+  - tasks-wire-fields
+  - tasks-request-state-removal
+  - tasks-mrtr-input
+  - tasks-request-headers
+  - tasks-dispatch-and-envelope
+  - tasks-status-notifications
+  - tasks-required-task-error
+  - tasks-mrtr-composition

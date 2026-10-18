@@ -2121,8 +2121,9 @@ class McpServer(AggregateRoot):
             # A backend tool result with isError:true is a tool-level failure,
             # even though the JSON-RPC envelope carries no protocol error. Map it
             # to a failure here (the single authoritative point) so downstream
-            # health, batch counts, and events all reflect reality. The front
-            # door still re-surfaces the raw result verbatim to the caller.
+            # health, batch counts, and events all reflect reality. The raw result
+            # rides along in the error's details, and the executor hands it to the
+            # caller unchanged (#1900).
             if isinstance(result, dict) and result.get("isError"):
                 # Tool-level errors live in the content blocks (typically
                 # [{"type": "text", "text": ...}]), not the JSON-RPC error
@@ -2158,6 +2159,9 @@ class McpServer(AggregateRoot):
                         "correlation_id": correlation_id,
                         "is_error": True,
                         "content": result.get("content"),
+                        # The whole answer, so a caller that is owed it unchanged
+                        # (`_meta` envelopes, `structuredContent`) can have it (#1900).
+                        "result": result,
                     },
                 )
 

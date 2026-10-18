@@ -90,13 +90,13 @@ class TestWhoSeesTheControlPlane:
         assert management_tools_for(_ctx(principal)) == frozenset()
 
     def test_an_operator_sees_what_its_role_permits_and_no_more(self, as_role):
-        """provider-admin holds mcp_servers:read but not :lifecycle.
+        """viewer holds mcp_servers:read but not :lifecycle.
 
         So it reads the fleet here and cannot start or stop a server -- which is
         exactly what it can and cannot do over REST. The mirroring is the point:
         the same identity gets the same answer whichever door it uses.
         """
-        principal = as_role("provider-admin")
+        principal = as_role("viewer")
 
         permitted = management_tools_for(_ctx(principal))
 
@@ -104,6 +104,12 @@ class TestWhoSeesTheControlPlane:
         assert "hangar_details" in permitted
         assert "hangar_start" not in permitted
         assert "hangar_stop" not in permitted
+
+    def test_provider_admin_starts_and_stops_what_its_name_promises(self, as_role):
+        permitted = management_tools_for(_ctx(as_role("provider-admin")))
+
+        assert "hangar_start" in permitted
+        assert "hangar_stop" in permitted
 
     def test_an_admin_sees_the_configuration_tools_an_operator_does_not(self, as_role):
         """provider-admin deliberately stops short of config:reload."""

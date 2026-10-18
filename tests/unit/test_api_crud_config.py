@@ -165,15 +165,12 @@ class TestBackupConfig:
                 response = client.post("/config/backup")
         assert response.status_code == 200
 
-    def test_uses_config_path_from_body_when_provided(self):
-        """POST /config/backup passes config_path from request body to write_config_backup."""
+    def test_refuses_a_config_path_in_the_body(self):
+        """POST /config/backup acts on the gateway's own file: a caller-supplied path is a 422 (#1652)."""
         custom_path = "/etc/mcp/custom.yaml"
-        with patch(
-            "mcp_hangar.server.api.config.write_config_backup",
-            return_value=f"{custom_path}.bak1",
-        ) as mock_backup:
+        with patch("mcp_hangar.server.api.config.write_config_backup") as mock_backup:
             for client in _make_client():
-                client.post("/config/backup", json={"config_path": custom_path})
+                response = client.post("/config/backup", json={"config_path": custom_path})
 
-        args, _ = mock_backup.call_args
-        assert args[0] == custom_path
+        assert response.status_code == 422
+        mock_backup.assert_not_called()

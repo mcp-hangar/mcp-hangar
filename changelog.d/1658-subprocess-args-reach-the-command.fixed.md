@@ -1,1 +1,0 @@
-A subprocess server now receives its `args`: they follow `command`. They were read for docker only, so the paths `mcp-hangar init` and `add` write into `args` never reached the server. A subprocess `args` that is not a list of strings now refuses the config.

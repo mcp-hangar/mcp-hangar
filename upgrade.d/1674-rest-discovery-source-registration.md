@@ -1,3 +1,0 @@
-### Registering a discovery source over REST now builds it
-
-`POST /api/discovery/sources` used to store the specification and run nothing. It now builds the source and starts it, which changes three answers: an unknown or unavailable `source_type` is refused with 422 (it was accepted and ignored); a type the gateway already holds, from the config or an earlier call, is refused with 422 (the orchestrator keeps one source per type; update it with `PUT`); and the returned `source_id` is the id `GET /api/discovery/sources` shows. Source registration needs the `discovery:approve` permission, as before. Check any automation that posted sources the gateway silently ignored: they begin to run.

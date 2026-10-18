@@ -33,7 +33,8 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.read_models.tool_projection import get_tool_projection_registry
-from ...domain.events import ToolRestored, ToolWithdrawn
+from ...domain.events import ToolPinRecorded, ToolPinRevoked, ToolRestored, ToolWithdrawn
+from ...stream_ids import PIN_LEDGER, stream_id_for
 from ..context import get_context
 from .mcp_servers import _check_permission
 from .serializers import HangarJSONResponse
@@ -79,6 +80,11 @@ def _within_grant(request: Request, tenant_id: str | None, *, action: str, targe
     """
     confined = confined_tenant(request)
     if confined is None:
+        if tenant_id is None:
+            # Every tenant at once. `mcp_servers:lifecycle` is what lets `developer`
+            # start and stop a server, and it must not also let one take a tool
+            # away from the whole fleet: that needs the administrator's grant (#1656).
+            _check_permission(request, resource_type="admin", action="*")
         return tenant_id, False
     if tenant_id is not None and tenant_id != confined:
         raise out_of_scope(
@@ -186,10 +192,70 @@ async def restore_tool(request: Request) -> HangarJSONResponse:
     )
 
 
+async def list_tool_pins(request: Request) -> HangarJSONResponse:
+    """GET /admin/tools/pins?tool=NAME[&server=ID] -- the history of a tool's pin (#1800).
+
+    Read from the pin-ledger streams of the event store, oldest first, so the
+    answer is the same after a restart and on another replica reading the same
+    store. ``tool`` is required: the history is per tool. ``server`` narrows it
+    to one server; omitted, every server's ledger is read.
+
+    A tenant-scoped grant sees the pins recorded for its own tenant. A pin for
+    all tenants (``tenant_id`` null) is withheld from it, as an approval naming
+    no tenant is.
+
+    Returns:
+        JSON ``{"tool": ..., "pins": [{"event": "recorded"|"revoked", ...}]}``.
+    """
+    _check_permission(request, resource_type="audit", action="read")
+    tool = request.query_params.get("tool")
+    if not tool:
+        return HangarJSONResponse({"error": "query parameter 'tool' is required"}, status_code=400)
+    server = request.query_params.get("server")
+    confined = confined_tenant(request)
+
+    store = getattr(get_context().event_bus, "event_store", None)
+    if store is None:
+        return HangarJSONResponse({"error": "no event store is configured; pin history is not kept"}, status_code=503)
+    prefix = f"{PIN_LEDGER}:"
+    streams = [stream_id_for(PIN_LEDGER, server)] if server else store.list_streams(prefix)
+    pins = []
+    for stream in streams:
+        for event in store.read_stream(stream):
+            if not isinstance(event, (ToolPinRecorded, ToolPinRevoked)) or event.tool_name != tool:
+                continue
+            if confined is not None and event.tenant_id != confined:
+                continue
+            recorded = isinstance(event, ToolPinRecorded)
+            entry = {
+                "event": "recorded" if recorded else "revoked",
+                "occurred_at": event.occurred_at,
+                "mcp_server_id": event.mcp_server_id,
+                "tool": event.tool_name,
+                "tenant_id": event.tenant_id,
+                "sha256": event.sha256,
+                "source": event.source,
+            }
+            if isinstance(event, ToolPinRecorded):
+                entry.update(
+                    previous_sha256=event.previous_sha256,
+                    upstream=event.upstream,
+                    structure_sha256=event.structure_sha256,
+                    description_sha256=event.description_sha256,
+                    approved_by=event.approved_by,
+                )
+            else:
+                entry["revoked_by"] = event.revoked_by
+            pins.append(entry)
+    pins.sort(key=lambda e: e["occurred_at"] or 0)
+    return HangarJSONResponse({"tool": tool, "pins": pins})
+
+
 # Route definitions for mounting in the API router. `{tool:path}` so an
 # upstream resource uri (`demo://doc/1`) can ride the segment; the trailing
 # verb anchors it. `route_permissions.py` carries the same two templates.
 admin_tools_routes = [
+    Route("/pins", list_tool_pins, methods=["GET"]),
     Route("/{server:str}/{tool:path}/withdraw", withdraw_tool, methods=["POST"]),
     Route("/{server:str}/{tool:path}/restore", restore_tool, methods=["POST"]),
 ]

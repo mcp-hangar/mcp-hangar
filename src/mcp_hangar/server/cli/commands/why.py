@@ -17,9 +17,11 @@ from ..config_path import resolve_config_path
 from ..main import GlobalOptions
 from ..services.refusal_log import (
     EventStoreNotReadable,
+    PinEntry,
     Refusal,
     default_path,
     event_store_path,
+    read_pin_history,
     read_refusals,
 )
 
@@ -76,6 +78,30 @@ def _show_table(refusals: list[Refusal]) -> None:
             )
 
 
+def _show_pin_history(entries: list[PinEntry]) -> None:
+    table = Table(show_header=True, header_style="bold")
+    for column in ("Time (UTC)", "Event", "Server", "Tenant", "Digest", "Replaced", "Upstream", "By"):
+        table.add_column(column, overflow="fold")
+    for entry in entries:
+        table.add_row(
+            entry.occurred_at.strftime("%Y-%m-%d %H:%M:%S") if entry.occurred_at else "?",
+            entry.event,
+            entry.server,
+            entry.tenant_id or "(all)",
+            entry.sha256[:12],
+            (entry.previous_sha256 or "")[:12],
+            entry.upstream or "",
+            entry.approved_by,
+        )
+    console.print(table)
+    for entry in entries:
+        if entry.structure_sha256 or entry.description_sha256:
+            console.print(
+                f"  {entry.sha256[:12]}  structure {(entry.structure_sha256 or '-')[:12]}"
+                f"  description {(entry.description_sha256 or '-')[:12]}"
+            )
+
+
 def why_command(
     ctx: typer.Context,
     event_id: Annotated[
@@ -88,6 +114,10 @@ def why_command(
         Path | None,
         typer.Option("--db", help="Read this event store file instead of the one the config names."),
     ] = None,
+    tool: Annotated[
+        str | None,
+        typer.Option("--tool", "-t", help="Show the history of this tool's pin instead: each pin recorded or revoked."),
+    ] = None,
 ) -> None:
     """Show why calls were refused: the gate, the reason and, for a digest mismatch, both digests.
 
@@ -99,10 +129,18 @@ def why_command(
         mcp-hangar why --last 1
         mcp-hangar why --server filesystem
         mcp-hangar why 3f2a9c1b
+        mcp-hangar why --tool read_file
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
     try:
         path = _store_path(db, global_opts)
+        if tool is not None:
+            history = read_pin_history(path, tool, server=server)
+            if not history:
+                console.print(f"No pin recorded for {tool!r} in {path}.")
+                return
+            _show_pin_history(history)
+            return
         refusals = read_refusals(path, last=last, server=server, event_id=event_id)
     except EventStoreNotReadable as exc:
         console.print(f"[red]{exc}[/red]")

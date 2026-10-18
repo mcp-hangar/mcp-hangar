@@ -50,7 +50,8 @@ class CallSpec:
     tool: str
     arguments: dict[str, Any]
     timeout: float | None = None
-    max_retries: int = 1  # Default: no retries (single attempt)
+    #: Total attempts the caller asked for; None = it did not say, and the configured `retry:` policy decides.
+    max_retries: int | None = None
     metadata: dict[str, str] | None = None  # W3C TraceContext headers (traceparent, tracestate)
     progress_token: str | None = None  # Minted upstream progress token (#883)
     #: The caller takes the whole result: no
@@ -150,6 +151,11 @@ class CallResult:
     # The aggregate refused the call because its L7 policy could not inspect the
     # arguments (#1295): `hangar.call.outcome=error`, not `deny`.
     l7_evaluator_failed: bool = False
+    # What the upstream answered when it reported its own failure (`isError: true`):
+    # the whole result, untouched, so its `_meta` envelopes (SEP-3313, SEP-2643),
+    # `structuredContent` and every content block reach the caller as sent (#1900).
+    # None for a failure Hangar raised itself and for every success.
+    upstream_result: dict[str, Any] | None = None
 
 
 @dataclass

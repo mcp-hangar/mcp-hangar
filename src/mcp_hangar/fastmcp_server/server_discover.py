@@ -33,6 +33,7 @@ from mcp_hangar.logging_config import get_logger
 
 from ..protocol import HANGAR_SERVER_NAME
 from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list
+from .governance_extensions import move_governance_to_extensions
 
 logger = get_logger(__name__)
 
@@ -129,7 +130,9 @@ def _advertised_capabilities(mcp: FastMCP | None) -> dict[str, Any]:
     try:
         capabilities = lowlevel_server(mcp).get_capabilities()
         dumped = capabilities.model_dump(mode="json", by_alias=True, exclude_none=True)
-        return dumped or {"tools": {"listChanged": True}}
+        # This is the 2026-07-28 surface: the governance descriptors live under
+        # ``extensions`` here, as the handshake era keeps them under ``experimental``.
+        return move_governance_to_extensions(dumped) if dumped else {"tools": {"listChanged": True}}
     except Exception:  # noqa: BLE001 -- never fail discovery over a capability read
         logger.warning("server_discover_capabilities_failed", exc_info=True)
         return {"tools": {"listChanged": True}}

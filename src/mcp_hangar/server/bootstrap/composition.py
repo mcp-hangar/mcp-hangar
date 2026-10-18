@@ -60,6 +60,7 @@ RUNTIME_PROVIDERS: RuntimeMcpServerStore = RuntimeMcpServerStore()
 _group_rebalance_saga: GroupRebalanceSaga | None = None
 _discovery_orchestrator: DiscoveryOrchestrator | None = None
 _persistence_backend: Any = None
+_running_config_path: str | None = None
 
 # What bootstrap starts that no component it hands out will stop: the loop
 # behind the fleet writer and the one behind the fleet projection. The handlers
@@ -91,13 +92,14 @@ def release_process_wiring() -> None:
     StartMcpServerCommand" (#1687). Called as the last step of
     `ApplicationContext.shutdown`, after every server and worker is stopped.
     """
-    global _runtime
+    global _runtime, _running_config_path
     from ...infrastructure.command_bus import reset_command_bus
     from ...infrastructure.event_bus import reset_event_bus
     from ...infrastructure.query_bus import reset_query_bus
 
     with _runtime_lock:
         _runtime = None
+    _running_config_path = None
     reset_command_bus()
     reset_query_bus()
     reset_event_bus()
@@ -180,6 +182,17 @@ def get_group_rebalance_saga() -> GroupRebalanceSaga | None:
     return _group_rebalance_saga
 
 
+def set_running_config_path(path: str | None) -> None:
+    """Record the configuration file this gateway was started with (#1652)."""
+    global _running_config_path
+    _running_config_path = path
+
+
+def get_running_config_path() -> str | None:
+    """The configuration file this gateway was started with, or None when it was given a dict."""
+    return _running_config_path
+
+
 def get_runtime_mcp_servers() -> RuntimeMcpServerStore:
     """Get the runtime mcp_servers store."""
     return RUNTIME_PROVIDERS
@@ -199,8 +212,10 @@ __all__ = [
     "SECURITY_HANDLER",
     "get_discovery_orchestrator",
     "get_group_rebalance_saga",
+    "get_running_config_path",
     "get_runtime",
     "get_runtime_mcp_servers",
     "set_discovery_orchestrator",
     "set_group_rebalance_saga",
+    "set_running_config_path",
 ]

@@ -49,7 +49,7 @@ from ..config import apply_configuration, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import GROUPS, get_runtime
 from .components import ServerComponents, get_auth_compat_exports, load_components
-from .composition import close_what_bootstrap_started, release_process_wiring
+from .composition import close_what_bootstrap_started, release_process_wiring, set_running_config_path
 from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_auth_cqrs, init_cqrs, init_saga
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
@@ -546,8 +546,18 @@ def bootstrap(
 
     restore_runtime_withdrawals(runtime)
 
+    # And the pins the configuration declares, recorded in the log (#1800): what
+    # is new or changed since the log last heard of it. After the withdrawals so
+    # the log is in the state the rest of boot reads, and fault-barriered because
+    # a ledger that cannot be written must not stop a gateway from serving.
+    from .pin_ledger import record_configured_pins
+
+    record_configured_pins(runtime.event_bus)
+
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
+    # What `/config/diff` and `/config/backup` act on: the file this gateway runs on (#1652).
+    set_running_config_path(config_path)
     # Initialize saga with persistence
     init_saga(full_config)
 

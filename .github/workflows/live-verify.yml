@@ -1,9 +1,23 @@
-# Live (black-box) feature verification. Opt-in: runs on demand and nightly,
-# NOT on pull requests. Tiers whose prerequisites are absent skip cleanly, so
-# T0 always runs; T1 (compose) and T2 (Keycloak) are filled in as harnesses land.
+# Live (black-box) feature verification. The whole suite runs on demand and
+# nightly. Tier 0 (a real process and a stub backend, no compose, no IdP) also
+# runs on pull requests that touch the front door, the server or the domain
+# services: 48 tests in about 2.5 minutes, inside the 5-minute target. Tiers
+# whose prerequisites are absent skip cleanly; T1 (compose) and T2 (Keycloak)
+# stay nightly.
+#
+# The PR trigger is path-filtered, so `live-pr` reports only when those paths
+# change. A check that is sometimes absent cannot be a required status as it is;
+# making it required is a branch-protection decision for the maintainer.
 name: live-verify
 
 on:
+  pull_request:
+    paths:
+      - "src/mcp_hangar/fastmcp_server/**"
+      - "src/mcp_hangar/server/**"
+      - "src/mcp_hangar/domain/services/**"
+      - "tests/live/**"
+      - ".github/workflows/live-verify.yml"
   workflow_dispatch:
     inputs:
       marker:
@@ -21,14 +35,36 @@ permissions:
   contents: read
 
 jobs:
+  live-pr:
+    name: Live tier 0 on pull requests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Run live tier 0
+        env:
+          MCP_HANGAR_LIVE_VERIFY: "1"
+        run: uv run pytest tests/live -m "live and t0" --timeout=180 -ra
+
   live:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.11"
 

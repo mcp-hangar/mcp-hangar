@@ -656,19 +656,42 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
                 logger.warning("skipping_invalid_mcp_server_id", mcp_server_id=mcp_server_id)
                 continue
 
-            mode = spec_dict.get("mode", "subprocess")
+            with _naming(mcp_server_id):
+                mode = spec_dict.get("mode", "subprocess")
 
-            if mode == "group":
-                groups.append((mcp_server_id, spec_dict))
-                # A call that names the group is limited under the group's id.
-                _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
-                continue
+                if mode == "group":
+                    groups.append((mcp_server_id, spec_dict))
+                    # A call that names the group is limited under the group's id.
+                    _stage_concurrency_limit(mcp_server_id, spec_dict.get("max_concurrency"))
+                    continue
 
-            _load_mcp_server_config(mcp_server_id, spec_dict)
+                _load_mcp_server_config(mcp_server_id, spec_dict)
 
         for group_id, spec_dict in groups:
-            _load_group_config(group_id, spec_dict)
+            with _naming(group_id):
+                _load_group_config(group_id, spec_dict)
     return staged
+
+
+@contextmanager
+def _naming(mcp_server_id: str) -> Iterator[None]:
+    """Turn a malformed block into a refusal that names the server (#1787).
+
+    A block of the wrong shape reached the loader's own reads as an
+    ``AttributeError`` (a ``.get`` on a string), a ``TypeError`` or a bare
+    ``ValueError``, and boot ended in a traceback that named none of the
+    config. The fuzz target found that a typo in about one spec in six did it.
+    A refusal the loader already raises as ``ConfigurationError`` is left as it is.
+    """
+    try:
+        yield
+    except ConfigurationError:
+        raise
+    except (ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise ConfigurationError(
+            f"Invalid configuration for '{mcp_server_id}': {type(exc).__name__}: {exc}. "
+            "Check that each block is the kind of value the reference documents (a mapping, a list or a string)."
+        ) from exc
 
 
 def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
@@ -1033,10 +1056,21 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
 
     Args:
         scope_id: The mcp_server or group id the entries are keyed under.
-        tool_projection_config: The block, or anything else (ignored).
+        tool_projection_config: The block, or None when the entry has none.
+
+    Raises:
+        ConfigurationError: If the block is not a mapping, or ``digest_enforcement``
+            is not one of the modes. Both used to be dropped with at most a log
+            line, which left a server on the default mode while its file said
+            otherwise.
     """
-    if not isinstance(tool_projection_config, dict):
+    if tool_projection_config is None:
         return
+    if not isinstance(tool_projection_config, dict):
+        raise ConfigurationError(
+            f"Invalid tool_projection for '{scope_id}': expected a mapping, got "
+            f"{type(tool_projection_config).__name__} {tool_projection_config!r}"
+        )
 
     tp_registry = _staged_config().projections
 
@@ -1046,11 +1080,10 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
         try:
             tp_registry.set_digest_enforcement(scope_id, DigestEnforcement(enforcement_raw))
         except ValueError:
-            logger.warning(
-                "invalid_digest_enforcement_config",
-                mcp_server_id=scope_id,
-                value=enforcement_raw,
-            )
+            raise ConfigurationError(
+                f"Invalid tool_projection.digest_enforcement for '{scope_id}': expected one of "
+                f"{', '.join(repr(mode.value) for mode in DigestEnforcement)}, got {enforcement_raw!r}"
+            ) from None
 
     # All-tenants digest pins: {tool_name: sha256}. The counterpart of
     # `withdrawn:`, and the only pin that holds a caller carrying no tenant

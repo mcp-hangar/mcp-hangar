@@ -1,7 +1,8 @@
 """SEP-2133 governance extension advertisement.
 
-Declares the governance mcp-hangar offers as experimental MCP extensions
-keyed by reverse-DNS extension IDs. This is a PURE DECLARATION of
+Declares the governance mcp-hangar offers as MCP extensions keyed by SEP-2133
+identifiers (``io.mcp-hangar/<name>``): under ``experimental`` on the handshake
+era, under ``extensions`` on the 2026-07-28 surface. This is a PURE DECLARATION of
 *availability*: every extension is off by default and requires explicit
 client/operator opt-in (SEP-2133). Advertising an extension does not
 enable it.
@@ -20,8 +21,18 @@ from mcp_hangar import __version__
 
 from .interceptors_list import MUTATOR_ID, VALIDATOR_ID
 
-#: Reverse-DNS extension ID for configuration-driven tool-digest pinning.
-DIGEST_PINNING_ID = "io.mcp-hangar.digest-pinning"
+#: Extension ID (SEP-2133 form ``{vendor-prefix}/{extension-name}``) for
+#: configuration-driven tool-digest pinning.
+DIGEST_PINNING_ID = "io.mcp-hangar/digest-pinning"
+
+#: The identifiers before #1898 spelled the separator as a dot. They stay in
+#: ``capabilities.experimental`` of the handshake era for one minor, so a client
+#: that looked them up keeps finding them; the modern surface never carries them.
+LEGACY_DOTTED_IDS = {
+    "io.mcp-hangar.validator": VALIDATOR_ID,
+    "io.mcp-hangar.mutator": MUTATOR_ID,
+    "io.mcp-hangar.digest-pinning": DIGEST_PINNING_ID,
+}
 
 #: The specification this advertisement conforms to.
 _SPEC = "SEP-2133"
@@ -38,7 +49,7 @@ def governance_experimental_capabilities() -> dict[str, dict[str, Any]]:
     Returns:
         Mapping of reverse-DNS extension ID to its descriptor.
     """
-    return {
+    current = {
         VALIDATOR_ID: {
             "spec": _SPEC,
             "version": __version__,
@@ -73,12 +84,46 @@ def governance_experimental_capabilities() -> dict[str, dict[str, Any]]:
             "enabledByDefault": False,
         },
     }
+    aliases = {old: {**current[new], "deprecated": True, "replacedBy": new} for old, new in LEGACY_DOTTED_IDS.items()}
+    return {**current, **aliases}
+
+
+def move_governance_to_extensions(capabilities: dict[str, Any]) -> dict[str, Any]:
+    """Re-home the governance advertisement for the 2026-07-28 surface.
+
+    That generation has a dedicated ``capabilities.extensions`` field and no
+    handshake, so the governance descriptors leave ``experimental`` for it, and
+    the deprecated dotted aliases are dropped: nobody looked them up there.
+
+    Args:
+        capabilities: A dumped ``ServerCapabilities`` (wire names), as the
+            handshake era would serve it.
+
+    Returns:
+        A copy with the descriptors under ``extensions``.
+    """
+    experimental = dict(capabilities.get("experimental") or {})
+    current_ids = set(LEGACY_DOTTED_IDS.values())
+    moved = {key: value for key, value in experimental.items() if key in current_ids}
+    if not moved:
+        return capabilities
+    out = dict(capabilities)
+    for key in (*current_ids, *LEGACY_DOTTED_IDS):
+        experimental.pop(key, None)
+    if experimental:
+        out["experimental"] = experimental
+    else:
+        out.pop("experimental", None)
+    out["extensions"] = {**(capabilities.get("extensions") or {}), **moved}
+    return out
 
 
 __all__ = [
     "DIGEST_PINNING_ID",
+    "LEGACY_DOTTED_IDS",
     "advertise_governance_extensions",
     "governance_experimental_capabilities",
+    "move_governance_to_extensions",
 ]
 
 
