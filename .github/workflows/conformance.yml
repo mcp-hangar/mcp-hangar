@@ -5,10 +5,10 @@
 # maintainers say it requires, which is the part we cannot mark our own
 # homework on.
 #
-# Scope, stated plainly: the published suite has NO 2026-07-28 server vectors
-# yet. Its CLI accepts 2025-03-26 / 2025-06-18 / 2025-11-25 / draft / extension,
-# and `--spec-version draft` lists zero server scenarios. So this run certifies
-# the generation we still serve for back-compat, not the modern surface. The
+# Scope, stated plainly: the `latest` suite (0.1.16) has NO 2026-07-28 server
+# vectors, so the first job certifies the generation we still serve for
+# back-compat. The second job runs the `0.2.0-alpha` line, which has them
+# (`--requirements 2026-07-28`), against its own baseline. The
 # upstream repo already carries `server-stateless` (SEP-2575 discover) and
 # `tasks-lifecycle` scenarios that are not in the npm build; when they ship,
 # they cover exactly what we built and belong here. `check-for-new-scenarios`
@@ -79,6 +79,71 @@ jobs:
             --url http://127.0.0.1:52444/mcp \
             --suite core \
             --expected-failures tests/conformance/baseline.yml
+
+      - name: Gateway log on failure
+        if: failure()
+        run: tail -100 gateway.log
+
+  # The same suite, on the revision Hangar is built for. The published `latest`
+  # (0.1.16) has no 2026-07-28 vectors; the `0.2.0-alpha` line does, selected by
+  # `--requirements 2026-07-28`. Pinned to an exact alpha for the reason the
+  # core run is pinned, and baselined in its own file so the two generations'
+  # known failures do not blur. The pass table is generated from the run's
+  # results and written to the job summary; nothing in it is hand-written.
+  conformance-2026-07-28:
+    name: Server conformance 2026-07-28 (baselined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+
+      - name: Install the gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Start `serve --http` with a subprocess backend
+        run: |
+          cat > conformance-config.yaml <<'EOF'
+          logging:
+            level: WARNING
+          mcp_servers:
+            math:
+              mode: subprocess
+              command: ["python", "examples/provider_math/server.py"]
+              idle_ttl_s: 300
+          EOF
+          mcp-hangar --config conformance-config.yaml serve --http \
+            --host 127.0.0.1 --port 52444 > gateway.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:52444/health/live; then
+              echo "gateway healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::gateway never became healthy"; tail -50 gateway.log; exit 1
+
+      - name: Run the conformance suite for 2026-07-28
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.2.0-alpha.12 server \
+            --url http://127.0.0.1:52444/mcp \
+            --requirements 2026-07-28 \
+            --expected-failures tests/conformance/baseline-2026-07-28.yml \
+            --output-dir conformance-results
+
+      - name: Pass table
+        if: always()
+        run: |
+          if [ -d conformance-results ]; then
+            python scripts/conformance_pass_table.py conformance-results \
+              tests/conformance/baseline-2026-07-28.yml "Server, 2026-07-28" >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: Gateway log on failure
         if: failure()
