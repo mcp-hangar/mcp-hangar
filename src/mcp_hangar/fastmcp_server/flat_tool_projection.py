@@ -1094,6 +1094,27 @@ def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Ca
     return guarded
 
 
+def _failed_flat_result(error: str | None, upstream_result: dict[str, Any] | None) -> Any:
+    """The tool result for a flat call that did not succeed.
+
+    An upstream that reported its own failure is owed its answer back as sent: its
+    ``_meta`` envelopes, structured content and every content block reach the
+    caller untouched (#1900). Any other failure, and an upstream answer that
+    cannot be carried as a tool result, is Hangar's error text with
+    ``isError=True``, so the MCP envelope stays valid.
+    """
+    from mcp_hangar._sdk_compat import CallToolResult
+
+    if upstream_result is not None:
+        try:
+            return CallToolResult.model_validate({**upstream_result, "isError": True})
+        except ValueError:
+            logger.warning("upstream_failure_result_not_relayable", exc_info=True)
+    return CallToolResult.model_validate(
+        {"content": [{"type": "text", "text": error or "tool call failed"}], "isError": True}
+    )
+
+
 def register_flat_tool_handlers(mcp: FastMCP) -> None:
     """Replace the default tools/list and tools/call handlers with flat-projection ones.
 
@@ -1317,14 +1338,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         result, created_task = govern_flat_call(batch.results)
         if not result.success:
             note_failure(result.error_type)  # the text below does not carry the code; the log line does
-            # Surface enforcement failures as tool errors (isError=True),
-            # not as unhandled exceptions, so the MCP envelope stays valid.
-            return CallToolResult.model_validate(
-                {
-                    "content": [{"type": "text", "text": result.error or "tool call failed"}],
-                    "isError": True,
-                }
-            )
+            return _failed_flat_result(result.error, result.upstream_result)
 
         # Namespace every resource URI we are about to hand this tenant with its
         # owning upstream, and remember the resource_links, so following one on

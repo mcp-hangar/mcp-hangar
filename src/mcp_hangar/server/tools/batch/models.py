@@ -151,6 +151,11 @@ class CallResult:
     # The aggregate refused the call because its L7 policy could not inspect the
     # arguments (#1295): `hangar.call.outcome=error`, not `deny`.
     l7_evaluator_failed: bool = False
+    # What the upstream answered when it reported its own failure (`isError: true`):
+    # the whole result, untouched, so its `_meta` envelopes (SEP-3313, SEP-2643),
+    # `structuredContent` and every content block reach the caller as sent (#1900).
+    # None for a failure Hangar raised itself and for every success.
+    upstream_result: dict[str, Any] | None = None
 
 
 @dataclass

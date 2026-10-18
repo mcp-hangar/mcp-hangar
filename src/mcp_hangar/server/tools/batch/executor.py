@@ -2804,6 +2804,7 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(retry_result.final_error),
+                    upstream_result=_upstream_result_of(retry_result.final_error),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                     retry_metadata=RetryMetadata(
                         attempts=retry_result.attempt_count,
@@ -2831,6 +2832,7 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(e),
+                    upstream_result=_upstream_result_of(e),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                 )
             else:
@@ -2872,6 +2874,20 @@ class BatchExecutor:
             elapsed_ms=elapsed_ms,
             retry_metadata=retry_meta,
         )
+
+
+def _upstream_result_of(error: BaseException | None) -> dict[str, Any] | None:
+    """The result an upstream sent with ``isError: true``, as the aggregate kept it (#1900).
+
+    Relayed untouched: Hangar neither adds to nor rewrites what the upstream said,
+    and never replaces an upstream's remediation hint with one of its own. A
+    failure Hangar raises itself carries Hangar's reason in ``error``, not here.
+    """
+    details = getattr(error, "details", None)
+    if not isinstance(details, dict) or not details.get("is_error"):
+        return None
+    result = details.get("result")
+    return result if isinstance(result, dict) else None
 
 
 def _remaining_budget(p: _CallPipeline) -> float:
@@ -3074,6 +3090,9 @@ def format_result_dict(result: CallResult) -> dict[str, Any]:
 
     if result.retry_metadata:
         d["retry_metadata"] = result.retry_metadata.to_dict()
+
+    if result.upstream_result is not None:
+        d["upstream_result"] = result.upstream_result
 
     return d
 
