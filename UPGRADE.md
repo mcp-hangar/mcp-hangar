@@ -1,5 +1,47 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.29.1
+
+### A failing `hangar_*` tool now returns `isError: true`
+
+The error payload every `hangar_*` tool returns on failure (`error`, `error_type`, `details`) used to arrive with `isError: false`. It now arrives with `isError: true`; the payload itself, in `structuredContent` or as the single JSON text block, is the same.
+
+A client that treated every `hangar_*` result as a success and looked for an `error` key still sees the key. A client that raises or retries on `isError` will now do so for these failures, which is the intent. Only the exact three-key payload of a `hangar_*` tool is flagged: a proxied backend tool's answer is never changed, and the few `hangar_*` tools that answer with a single-key `{"error": ...}` of their own (discovery and continuation when not configured) are not covered by this change.
+
+### `provider-admin` can now register, start, stop and remove servers
+
+The built-in `provider-admin` role held the pre-rename `provider:*` permissions, which no route or tool checks, so it could read servers and push egress policy but nothing else. It now holds `mcp_servers:write` and `mcp_servers:lifecycle`.
+
+Any API key or role assignment on `provider-admin` gains those four capabilities: `POST /api/mcp_servers`, `PUT` and `DELETE /api/mcp_servers/{id}`, and `start` and `stop`. It still has no `config:reload`, no `admin:*` and no access to the credential store. If a key must stay narrower, move it to `viewer`, or to `kubernetes-operator` for the Kubernetes operator.
+
+### Several pods sharing one `mcp-hangar.io/name` register as one server
+
+Pods that carry the same `mcp-hangar.io/name` annotation, which is every replica of a Deployment, used to be discovered as separate entries under one name. The gateway tracks a server by name, so they replaced each other each cycle and raised a config-change event per swap. Discovery now registers one pod per name, the one that sorts first by namespace and pod name, and logs `kubernetes_discovery_several_pods_for_one_name` listing the rest.
+
+This is not load balancing. For a workload with several replicas, put a Service in front, point the registration at it and give it its own name, instead of annotating the pods. The same name in two namespaces is treated the same way.
+
+### A misspelled `digest_enforcement` or a malformed `tool_projection` now refuses the configuration
+
+A server or group `tool_projection` block that is not a mapping, or whose `digest_enforcement` is not `audit`, `warn` or `block`, used to be ignored (the second with one log line) and the entry ran on the default mode. It is now a `ConfigurationError` naming the scope and the value: the gateway will not start with it, a reload leaves the running configuration untouched, and `mcp-hangar config check` reports it.
+
+Run `mcp-hangar config check` before upgrading. If it names an entry, correct the value; the entry was running on the default `block` mode all along.
+
+### List results carry their cache hints at the top level
+
+`tools/list`, `prompts/list`, `resources/list` and `resources/templates/list` no longer put `cacheScope` and `ttlMs` in `_meta`. They are top-level fields of the result (`"cacheScope": "private"`, `"ttlMs": 5000`), as the 2026-07-28 spec defines them. The `_meta.cacheScope` value was a per-tenant token (`tenant:<hash>`) and is no longer emitted.
+
+A client or proxy that read `_meta.cacheScope` or `_meta.ttlMs` from Hangar should read the top-level fields instead. Nothing else changes: every projected list is still per caller, which is what `"private"` says.
+
+### Governance extension identifiers use a slash
+
+The governance extensions are now named `io.mcp-hangar/validator`, `io.mcp-hangar/mutator` and `io.mcp-hangar/digest-pinning` (SEP-2133 form), in `interceptors/list` and in the capabilities. Where to look depends on the protocol era: `server/discover` (2026-07-28) carries them under `capabilities.extensions`; `initialize` carries them under `capabilities.experimental`.
+
+A client that looks the dotted names up (`io.mcp-hangar.validator`, and so on) keeps finding them in `capabilities.experimental` of `initialize` for this minor, marked `"deprecated": true` with `replacedBy`; `interceptors/invoke` also still accepts them. The modern `server/discover` surface never carried them under the old names, and the dotted aliases will be removed in the next minor. Switch the lookup to the slash form.
+
+### An upstream's failure result is relayed whole
+
+When an upstream answers a tool call with `isError: true`, a front-door `tools/call` now returns that result as sent (content blocks, `structuredContent`, `_meta`), instead of a result holding only the error text. A client that read nothing but the first text block keeps working. A `hangar_call` entry for the same call keeps `success: false`, `result: null` and `error`, and gains an `upstream_result` field with the upstream's whole answer; a client that rejects unknown fields in a batch entry should accept it.
+
 ## Upgrade to 2.29.0
 
 ### `/api/config/diff` and `/api/config/backup` refuse `config_path`

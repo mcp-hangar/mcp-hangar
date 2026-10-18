@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.0...v2.29.1) (2026-10-18)
+
+### Fixed
+
+- An upstream tool result that reports its own failure (`isError: true`) now reaches the caller as the upstream sent it. A front-door `tools/call` returns the whole result, including its `_meta` envelopes (the structured tool-failure classification of SEP-3313, the structured authorization denial of SEP-2643), `structuredContent` and every content block, where it used to return only the text. A `hangar_call` result entry for such a call carries the same result as `upstream_result`, beside the unchanged `success: false` and `error`. ([#1915](https://github.com/mcp-hangar/mcp-hangar/pull/1915))
+- Hangar's governance extensions now carry SEP-2133 identifiers, `io.mcp-hangar/validator`, `io.mcp-hangar/mutator` and `io.mcp-hangar/digest-pinning`, instead of the dotted `io.mcp-hangar.<name>`, which has no `{vendor-prefix}/{extension-name}` form. `server/discover` (the 2026-07-28 surface) advertises them under `capabilities.extensions`; `initialize` keeps them under `capabilities.experimental`, together with the dotted forms marked `deprecated` for one minor. `interceptors/list` lists the new identifiers and `interceptors/invoke` still accepts the dotted ones. ([#1914](https://github.com/mcp-hangar/mcp-hangar/pull/1914))
+- Projected lists (`tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`) now carry the SEP-2549 `cacheScope` and `ttlMs` at the top level of the result, where a client or cache reads them, instead of in `_meta`. A client used to see `ttlMs: 0` and refetch on every call; it now sees `cacheScope: "private"` and `ttlMs: 5000`. The per-tenant `cacheScope` token that was in `_meta` is gone: `"private"` already means "not shared across authorization contexts". ([#1913](https://github.com/mcp-hangar/mcp-hangar/pull/1913))
+- A `tool_projection` block that is not a mapping, or a `digest_enforcement` that is not one of `audit`, `warn` or `block`, now refuses the configuration with the key and scope named, at startup, on reload and in `config check`. Both used to be dropped, so a server ran on the default mode while its file said otherwise (#1733). ([#1909](https://github.com/mcp-hangar/mcp-hangar/pull/1909))
+- Kubernetes discovery returns one entry per `mcp-hangar.io/name`: the pod that sorts first by namespace and pod name, with a warning naming the others. Replicas of one Deployment used to come back as separate entries that replaced each other every cycle, each swap recorded as a config change (#1692). ([#1912](https://github.com/mcp-hangar/mcp-hangar/pull/1912))
+- The built-in `provider-admin` role now holds `mcp_servers:write` and `mcp_servers:lifecycle` instead of the pre-rename `provider:*` permissions that nothing checks, so it can register, reconfigure, start, stop and remove a server as its name says (#1671). ([#1908](https://github.com/mcp-hangar/mcp-hangar/pull/1908))
+- A `hangar_*` tool that fails now answers with `isError: true`, not `false`. The payload (`error`, `error_type`, `details`) is unchanged; generic MCP clients, which decide success from the flag, used to read a refused or failed call as a success (#1669). ([#1911](https://github.com/mcp-hangar/mcp-hangar/pull/1911))
+
 ## [2.29.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.28.0...v2.29.0) (2026-10-17)
 
 ### Added
