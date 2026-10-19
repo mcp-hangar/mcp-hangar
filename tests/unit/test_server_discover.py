@@ -109,7 +109,7 @@ class TestDiscoverResultShape:
             flat_map = flat_tool_projection._build_flat_map("tenant:a")
             list_tools = [
                 t.model_dump(mode="json", by_alias=True, exclude_none=True)
-                for t in flat_tool_projection._build_mcp_tool_list(flat_map)
+                for t in flat_tool_projection._build_mcp_tool_list(flat_map, "tenant:a")
             ]
 
         assert discover_tools == list_tools

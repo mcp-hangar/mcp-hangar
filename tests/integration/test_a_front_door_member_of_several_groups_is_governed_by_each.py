@@ -49,10 +49,10 @@ DECISIONS: dict[str, dict[str, str]] = {
     "c_denied": {"tenant-a": "refused", "tenant-b": "refused"},
     "c_withdrawn": {"tenant-a": "refused", "tenant-b": "refused"},
 }
-#: A pin is checked when the call is made, so a pinned tool is listed.
+#: A tool that drifted from a group's pin is withheld as well as refused (#1776).
 LISTED = {
-    "tenant-a": ["b_pinned", "shared_ok", "single_ok"],
-    "tenant-b": ["b_pinned", "b_withdrawn_for_a", "shared_ok", "single_ok"],
+    "tenant-a": ["shared_ok", "single_ok"],
+    "tenant-b": ["b_withdrawn_for_a", "shared_ok", "single_ok"],
 }
 SINGLE_TOOLS = ("single_ok", "c_denied", "c_withdrawn")
 

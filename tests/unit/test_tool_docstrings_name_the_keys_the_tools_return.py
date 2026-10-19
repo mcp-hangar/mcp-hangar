@@ -73,8 +73,8 @@ def test_hangar_list_documents_the_summary_keys_it_returns():
 
 def test_hangar_details_documents_the_server_keys_it_returns():
     documented = _keys(_returns("mcp_server", "hangar_details"), "McpServer: {")
-    # `tools_policy` is added by the tool on top of the read model.
-    returned = set(_details()) | {"tools_policy"}
+    # `tools_policy` and `withheld_tools` (#1776) are added by the tool on top of the read model.
+    returned = set(_details()) | {"tools_policy", "withheld_tools"}
     assert documented == returned, sorted(documented ^ returned)
 
 

@@ -955,15 +955,52 @@ class MissingSecretsError(MCPError):
 
 
 class UnverifiedMcpServerError(MCPError):
-    """Attempted to load an unverified mcp_server without explicit flag."""
+    """Attempted to load a registry entry that is not verified.
 
-    def __init__(self, mcp_server_name: str):
+    Verified is a trusted namespace and an entry the registry lists as active.
+    The message names the operator's decision, not an argument for the caller
+    to retry with: the caller is an agent, and what it reads here a registry
+    entry's own text can steer.
+    """
+
+    def __init__(
+        self,
+        mcp_server_name: str,
+        *,
+        force_ignored: bool = False,
+        published: bool = True,
+        trusted: bool = False,
+    ):
+        if trusted:
+            # Only the second condition failed: a namespace cannot fix it.
+            message = (
+                f"McpServer {mcp_server_name!r} is not verified: the registry no longer lists it as active "
+                "(deprecated or deleted). Whether it may be loaded anyway is the operator's decision, made in "
+                "config.yaml: set `hot_loading.allow_force_unverified: true`."
+            )
+        else:
+            message = (
+                f"McpServer {mcp_server_name!r} is not verified: its registry name is in no namespace listed in "
+                "`hot_loading.trusted_namespaces`. Whether it may be loaded is the operator's decision, made in "
+                "config.yaml: list its namespace in `hot_loading.trusted_namespaces`, or set "
+                "`hot_loading.allow_force_unverified: true`."
+            )
+        if force_ignored:
+            message += " force_unverified was ignored, because `hot_loading.allow_force_unverified` is not set."
         super().__init__(
-            message=f"McpServer '{mcp_server_name}' is not verified. Use force_unverified=True to load.",
+            message=message,
             operation="load",
-            details={"mcp_server_name": mcp_server_name},
+            details={
+                "mcp_server_name": mcp_server_name,
+                "force_ignored": force_ignored,
+                "published": published,
+                "trusted": trusted,
+            },
         )
         self.mcp_server_name = mcp_server_name
+        self.force_ignored = force_ignored
+        self.published = published
+        self.trusted = trusted
 
 
 class McpServerAlreadyLoadedError(MCPError):

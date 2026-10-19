@@ -327,6 +327,10 @@ class McpServer(AggregateRoot):
         # handler); off for config-file / directly-built servers so an
         # intentionally private endpoint is not newly refused at connect.
         enforce_ssrf: bool = False,
+        # The only names a subprocess server takes from the gateway's own
+        # environment; None inherits it as the launcher's filters allow. Set for
+        # a server loaded from the registry, whose author is not the operator.
+        inherit_env_names: frozenset[str] | None = None,
     ):
         super().__init__()
 
@@ -343,6 +347,7 @@ class McpServer(AggregateRoot):
         self._image = image
         self._endpoint = endpoint
         self._env = env or {}
+        self._inherit_env_names = None if inherit_env_names is None else frozenset(inherit_env_names)
         self._max_response_bytes = max_response_bytes
 
         # Idle TTL - normalize to value object
@@ -1155,9 +1160,23 @@ class McpServer(AggregateRoot):
         return {"mcp_server_id": self.mcp_server_id, "mcp_server_mode": self._mode.value}
 
     def _get_launch_config(self) -> dict[str, Any]:
-        """Get launch configuration for the current mode."""
+        """Get launch configuration for the current mode.
+
+        Raises:
+            ValueError: When `inherit_env_names` is set for a mode other than
+                subprocess. Only the subprocess launcher can honour it, and
+                ignoring it would launch with an environment nobody restricted.
+        """
+        if self._inherit_env_names is not None and self._mode != McpServerMode.SUBPROCESS:
+            raise ValueError(
+                f"inherit_env_names restricts a subprocess's inherited environment; mode {self._mode.value!r} "
+                "cannot honour it, so the server is not launched"
+            )
         if self._mode == McpServerMode.SUBPROCESS:
-            return {"command": self._command, "env": self._env, **self._span_labels()}
+            config: dict[str, Any] = {"command": self._command, "env": self._env, **self._span_labels()}
+            if self._inherit_env_names is not None:
+                config["inherit_only"] = self._inherit_env_names
+            return config
 
         if self._mode == McpServerMode.DOCKER:
             return {

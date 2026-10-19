@@ -22,6 +22,7 @@ import yaml
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
+from ..domain.security.hot_load_trust import HotLoadTrust, parse_hot_load_trust, set_hot_load_trust
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
@@ -1872,6 +1873,43 @@ def _trusted_networks(full_config: dict[str, Any]) -> tuple[TrustedNetwork, ...]
         raise ConfigurationError(str(e)) from e
 
 
+def _init_hot_load_trust_from_config(full_config: dict[str, Any]) -> None:
+    """Put the `hot_loading` trust keys in force.
+
+    ::
+
+        hot_loading:
+          trusted_namespaces: ["io.github.acme/"]
+          allow_force_unverified: false
+          secrets:
+            allow:
+              "io.github.acme/weather": [WEATHER_API_KEY]
+
+    Which registry entries are verified, whether a caller's `force_unverified`
+    may load one that is not, and what a server loaded from the registry may
+    receive. Its registry entry names the variables it wants, and
+    only the ones listed here for its exact registry name are looked up. Read
+    by the load handler on every load, so a reload that narrows either list
+    applies to the next load; an absent section trusts and binds nothing.
+    """
+    trust = _hot_load_trust(full_config)
+    set_hot_load_trust(trust)
+    if trust.trusted_namespaces:
+        logger.info("hot_loading_trusted_namespaces_configured", namespaces=list(trust.trusted_namespaces))
+    if trust.allow_force_unverified:
+        logger.warning("hot_loading_force_unverified_allowed")
+    if trust.secrets_allow:
+        logger.info("hot_loading_secrets_allowlist_configured", servers=sorted(trust.secrets_allow))
+
+
+def _hot_load_trust(full_config: dict[str, Any]) -> HotLoadTrust:
+    """The checked trust keys of ``hot_loading``, the default when there are none."""
+    try:
+        return parse_hot_load_trust(full_config.get("hot_loading"))
+    except ValueError as e:
+        raise ConfigurationError(str(e)) from e
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1984,6 +2022,7 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_interceptors_from_config,
     _init_ui_resources_from_config,
     _init_ssrf_from_config,
+    _init_hot_load_trust_from_config,
 )
 
 
@@ -2009,6 +2048,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     _max_response_bytes(full_config)
     _ui_resource_policies(full_config)
     _trusted_networks(full_config)
+    _hot_load_trust(full_config)
     # Checked, not applied: `run_http` reads it when the server starts (#1447).
     http_graceful_shutdown_timeout(full_config)
     try:
@@ -2030,7 +2070,7 @@ def apply_process_config(full_config: dict[str, Any]) -> None:
 
     `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
     `headers.param_validation`, `resource_links`, `interceptors`,
-    `ui_resources` and `ssrf`. A section that is absent is put back to its default, so
+    `ui_resources`, `ssrf` and the trust keys of `hot_loading`. A section that is absent is put back to its default, so
     deleting a block and reloading removes it. Checked first, so nothing is
     applied unless all of it can be.
     """

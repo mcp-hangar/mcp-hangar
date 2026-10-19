@@ -1,5 +1,146 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.30.0
+
+### `hangar_load` loads only what the operator trusts, with only the environment and secrets bound to it
+
+Before, any server published in the registry could be loaded with
+`hangar_load`, because the registry marks every published entry
+`status: active` and that status was read as "verified". The variables its
+entry named were looked up in the gateway's environment and in the secrets
+directory and passed to it. It also inherited the gateway's whole environment,
+minus the names a heuristic called sensitive. A caller could load an entry
+that was not active by passing `force_unverified=True`.
+
+Now four `hot_loading` keys decide, and each defaults to refusing:
+
+- `trusted_namespaces`: a list of registry name prefixes. An entry is
+  verified when its name is under one of them **and** the registry lists it
+  as active. Anything else is refused with `status: unverified`. With the
+  default, an empty list, every `hangar_load` is refused until a namespace is
+  listed. Every namespace ends in `/`, one is added if it is left out, and
+  matching is case-sensitive by whole segment, so list each sub-namespace you
+  trust.
+- `allow_force_unverified`: `false` by default, and `force_unverified` is
+  then ignored. Set it to `true` only to let callers load entries that are
+  not verified, a deprecated entry in a trusted namespace included.
+- `secrets.allow`: the exact registry name of a server mapped to the
+  variables it may receive. A variable not listed is answered with
+  `status: missing_secrets`, even when the gateway has it set. Two keys that
+  differ only in case are refused.
+- `inherit_env`: names a hot-loaded server takes from the gateway's
+  environment, in addition to a fixed base: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `TMP`, `TEMP`,
+  and on Windows `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `APPDATA`,
+  `LOCALAPPDATA`, `USERPROFILE`. Hangar passes it nothing else from its
+  environment. A server that
+  needs a proxy (`HTTPS_PROXY`), a CA bundle (`SSL_CERT_FILE`) or `UV_*` and
+  `npm_config_*` settings to install needs them listed here. Statically
+  configured servers inherit as before.
+
+What Hangar hands the server is bounded; a hot-loaded server is code running
+as the gateway's user, so `trusted_namespaces` is the boundary. It can read
+whatever files that user can, the secrets directory and `~/.aws/credentials`
+included, on its own.
+
+To keep loading a server as before, add its namespace, its variables and
+anything its runtime needs from the environment:
+
+```yaml
+hot_loading:
+  trusted_namespaces: ["io.github.acme/"]
+  inherit_env: [HTTPS_PROXY]
+  secrets:
+    allow:
+      "io.github.acme/weather": [WEATHER_API_KEY]
+```
+
+A per-server secrets file is still read from
+`~/.config/mcp-hangar/secrets/<registry name>/<NAME>`, one directory per `/`
+segment of the name (`secrets/io.github.acme/weather/WEATHER_API_KEY`). A
+name with a segment outside `[A-Za-z0-9._-]`, or equal to `.` or `..`, has no
+per-server directory. A variable name that is not an environment variable
+name, or a file whose resolved path leaves the secrets directory, reads
+nothing.
+
+#### Changed signatures
+
+- `ServerSummary.is_official` and `ServerDetails.is_official` are now
+  `is_published`. It means only that the registry lists the entry as active.
+- `SecretsResolver.resolve(required, mcp_server_name)` is now
+  `SecretsResolver.resolve(required, mcp_server_name, *, allowed)`: `allowed`,
+  the names the server may receive, is a required keyword argument.
+- `SecretsResolver.get_missing_instructions(missing: list[str], mcp_server_name)`
+  is now `get_missing_instructions(result: SecretsResult, mcp_server_name)`.
+- `LoadMcpServerHandler` takes `trust`, a callable returning the
+  `HotLoadTrust` in force. Omitted, nothing is trusted or delivered.
+- `UnverifiedMcpServerError` takes the keyword arguments `force_ignored`,
+  `published` and `trusted`, and its message no longer suggests
+  `force_unverified`.
+
+### a tool that drifted from its pin disappears from the listing
+
+A pinned tool whose definition no longer matches its pin, under
+`digest_enforcement: block` (the default), used to stay in `tools/list` and
+`hangar_tools` and be refused when called with `Tool '<name>' schema does not
+match its pinned digest`. It is now withheld: it is not listed, and on the
+front door a call of it is answered `-32601 Tool '<name>' not found`, as for a
+tool that does not exist. `hangar_call` still answers `ToolDigestMismatchError`.
+
+What to do:
+
+- Anything that waited for the digest-mismatch refusal on the front door to
+  learn about drift should read `hangar_details <server>` (`withheld_tools`,
+  reason `digest_drift`), the `withheld` field on `GET /api/tools` and
+  `GET /api/mcp_servers/{id}/tools`, the `tool_digest_pin_drift_detected` log
+  line, or the `DigestMismatchEvent`. Both are emitted once when the drift is
+  first seen, whether or not the interval re-check is on.
+- REST no longer returns a withheld tool's description or input schema, to any
+  role: a withheld entry is its name, `digest`, `pinned_digest` and `withheld`
+  only. A tool withheld from any tenant, or by a pin on a group that owns the
+  server, is shown withheld there. Review the new definition at the upstream
+  itself before re-pinning; `mcp-hangar pin --check` shows both digests.
+- To bring the tool back after reviewing the change, re-pin it
+  (`mcp-hangar pin --write`) and reload; clients are sent
+  `notifications/tools/list_changed`.
+- A server pinned under `warn` or `audit` is unchanged: its drifted tools stay
+  listed and callable.
+
+### a pinned tool is served without its title, annotations, icons and `_meta`
+
+A tool under a digest pin in `block` mode (the default `digest_enforcement`)
+is now served with only `name`, `description`, `inputSchema` and
+`outputSchema`, the fields the pin covers. Its `title`, `annotations`,
+`execution`, `icons` and `_meta` are left out of the front door's
+`tools/list`, `server/discover`, `hangar_tools`, `hangar_details` and the REST
+server and tool routes. Hangar's own fields (`digest`, `pinned_digest`,
+`withheld`) are unchanged. The cut does not depend on where the fields came
+from: a `title` or `annotations` you wrote yourself for a server's predefined
+`tools` in the configuration is stripped too while the tool is under a `block`
+pin.
+
+What a client sees:
+
+- The display name falls back to `name`.
+- With no `annotations`, the spec's defaults apply: `readOnlyHint: false`,
+  `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: true`. A
+  client that skipped confirmation for a pinned read-only tool will ask again.
+- `execution` is left out on every protocol version, but only a handshake-era
+  client (2025-11-25 and earlier) reads `execution.taskSupport` to decide
+  whether to call a tool as a task. Such a client no longer sees a pinned tool
+  that declared `taskSupport: "required"` as a task tool, and calls it without
+  one. On 2026-07-28, task use is negotiated through the tasks extension
+  instead.
+
+What to do:
+
+- Nothing, if the pinned tools' metadata is not load-bearing for your clients.
+- A tool left unpinned, or a server pinned with `digest_enforcement: warn` or
+  `audit`, is served whole as before. Both also give up the protection: an
+  unpinned tool is not checked, and `warn`/`audit` let a drifted call through.
+  A follow-up is planned to let a pin approve these fields explicitly.
+- The digest is unchanged: existing pins stay valid and need no `pin --write`.
+
 ## Upgrade to 2.29.1
 
 ### A failing `hangar_*` tool now returns `isError: true`

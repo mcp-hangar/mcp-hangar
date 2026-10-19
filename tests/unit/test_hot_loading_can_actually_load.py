@@ -25,6 +25,7 @@ from mcp_hangar.application.services.package_resolver import PackageResolver
 from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 from mcp_hangar.domain.contracts.registry import PackageInfo, ServerDetails, TransportInfo
 from mcp_hangar.domain.exceptions import InstallationError
+from mcp_hangar.domain.security.hot_load_trust import HotLoadTrust
 from mcp_hangar.domain.value_objects import McpServerMode
 from mcp_hangar.infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 
@@ -136,7 +137,7 @@ class TestAvailabilityComesFromTheInstallers:
 class _FakeRegistry:
     server: ServerDetails
 
-    async def get_server(self, server_id: str) -> ServerDetails | None:
+    async def get_server(self, server_id: str, *, fresh: bool = False) -> ServerDetails | None:
         return self.server if server_id in (self.server.id, self.server.name) else None
 
     async def search(self, query: str, limit: int = 10) -> list[Any]:
@@ -161,7 +162,7 @@ def _server_details(registry_type: str = "pypi") -> ServerDetails:
         description="Time tools",
         vendor="example",
         source_url=None,
-        is_official=True,
+        is_published=True,
         packages=[_package(registry_type)],
         required_env_vars=[],
     )
@@ -198,6 +199,7 @@ def _handler(
         mcp_server_factory=factory,
         mcp_server_repository=repository,
         approval_gate_available=approval_gate_available,
+        trust=lambda: HotLoadTrust(trusted_namespaces=("io.github.example/",)),
     )
     return handler, started, store
 

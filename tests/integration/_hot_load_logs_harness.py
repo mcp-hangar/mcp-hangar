@@ -62,7 +62,7 @@ def _config() -> dict[str, Any]:
 class _FakeRegistry:
     """Answers for any name in BANNERS, so `hangar_load` resolves without a registry."""
 
-    async def get_server(self, server_id: str) -> Any:
+    async def get_server(self, server_id: str, *, fresh: bool = False) -> Any:
         from mcp_hangar.domain.contracts.registry import PackageInfo, ServerDetails, TransportInfo
 
         if server_id not in BANNERS:
@@ -73,7 +73,7 @@ class _FakeRegistry:
             description="a hot-loaded server",
             vendor=None,
             source_url=None,
-            is_official=True,
+            is_published=True,
             packages=[
                 PackageInfo(
                     registry_type="pypi",
@@ -130,8 +130,15 @@ def _load_handler(context: Any) -> Any:
     from mcp_hangar.application.commands.load_handlers import LoadMcpServerHandler
     from mcp_hangar.application.services.secrets_resolver import SecretsResolver
     from mcp_hangar.domain.model import McpServer
+    from mcp_hangar.domain.security.hot_load_trust import HotLoadTrust
     from mcp_hangar.server.bootstrap.logs import LogBuffers
     from mcp_hangar.server.state import get_runtime, get_runtime_mcp_servers
+
+    class TrustsEveryName(HotLoadTrust):
+        """What this harness loads is in no namespace, and trust is not what it tests."""
+
+        def is_trusted(self, server_name: str) -> bool:
+            return True
 
     return LoadMcpServerHandler(
         registry_client=_FakeRegistry(),
@@ -143,6 +150,7 @@ def _load_handler(context: Any) -> Any:
         mcp_server_factory=lambda **kwargs: McpServer(**kwargs),
         mcp_server_repository=get_runtime().repository,
         log_buffers=LogBuffers(),
+        trust=TrustsEveryName,
     )
 
 

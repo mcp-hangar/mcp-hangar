@@ -64,7 +64,7 @@ def tenant_scoped_tools(tenant_id: str | None) -> list[dict[str, Any]]:
     serves the ``hangar_*`` meta-API instead — see :func:`_advertised_tools`.
     """
     flat_map = _build_flat_map(tenant_id)
-    tools = _build_mcp_tool_list(flat_map)
+    tools = _build_mcp_tool_list(flat_map, tenant_id)
     return [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools]
 
 

@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.30.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.1...v2.30.0) (2026-10-19)
+
+### Added
+
+- **cli:** a reader for the servers a user already has in an MCP client. For each
+  client file `init` detects -- Claude Code user (`~/.claude.json`), Claude Code
+  project (`./.mcp.json`), Cursor (`~/.cursor/mcp.json`) -- it parses the
+  top-level `mcpServers` map into typed stdio (`command`/`args`/`env`) and remote
+  (`url`) entries. A malformed or unknown entry is reported by name with a reason
+  instead of failing the read, and no `env` or `headers` value appears in what it
+  reports. It is not yet used by `init`: importing these servers into the Hangar
+  config, pinning them and rewriting the client file follow in later releases
+  (#1770) ([#1919](https://github.com/mcp-hangar/mcp-hangar/pull/1919))
+
+### Security
+
+- **security:** a tool whose definition drifted from its digest pin is now withheld
+  from every listing a model reads, not only refused when called. After an upstream
+  rewrote a pinned tool's description, `tools/call` was refused, but `tools/list`
+  through Hangar still returned the new description, so the rug pull's instruction
+  reached the model on every listing. The tool is now absent from the front door's
+  `tools/list` (stdio and streamable HTTP) and from `hangar_tools`, and its call is
+  answered like a call of a tool that does not exist. `notifications/tools/list_changed`
+  is sent when it is withheld and again when it returns. `hangar_details` lists it
+  under `withheld_tools` with the reason `digest_drift` and both digests, without
+  the description, and the REST tool routes show it as its name, digests and
+  `withheld: "digest_drift"`, also without the description, to every role that can
+  read them. Only
+  a pin in `block` mode withholds: under `warn` and `audit` the call goes through,
+  so the tool stays listed. The interval re-check withholds as well as refuses.
+  A caller is told nothing about a tool its policy hides ([#1920](https://github.com/mcp-hangar/mcp-hangar/pull/1920))
+- **core:** a server loaded from the registry with `hangar_load` is bound to
+  what the operator allows it, not to what its registry entry asks for.
+
+  - **Secrets.** The variables an entry names were resolved from the
+    gateway's own environment and from the secrets directory, and delivered to
+    the launched server, so an entry asking for `AWS_SECRET_ACCESS_KEY`
+    received the gateway's credential. Only the names listed for the server's
+    exact registry name in the new `hot_loading.secrets.allow` are now looked
+    up; any other is reported in `missing_secrets`, naming the key and the
+    server. A name that is not an environment variable name is refused before
+    anything is consulted, every segment of the server's directory is checked,
+    and a file is read only when its resolved path is inside the secrets
+    directory, so `../` in a name or a server and a symlink out of the
+    directory read nothing. Allowlist keys that differ only in case are
+    refused.
+  - **Environment.** A hot-loaded server inherited the gateway's environment
+    minus a name heuristic, so `AWS_ACCESS_KEY_ID`, webhook URLs and DSNs
+    reached it. Hangar now passes it only a fixed base (`PATH`, `HOME`,
+    locale, timezone, temporary directory, and the Windows equivalents) and
+    the names in the new `hot_loading.inherit_env`. Statically configured
+    servers are unchanged. What Hangar hands the server is bounded; a
+    hot-loaded server is code running as the gateway's user, so
+    `trusted_namespaces` is the boundary.
+  - **Verified.** The gate tested the registry's `status: active`, which
+    every published entry carries. An entry is now verified when its registry
+    name starts with a namespace in the new `hot_loading.trusted_namespaces`,
+    matched case-sensitively by whole segment, and the registry lists it as
+    active. Empty, the default, verifies nothing. `ServerSummary.is_official`
+    and `ServerDetails.is_official` are renamed `is_published`.
+  - **force_unverified.** The `hangar_load` argument is the caller's, and the
+    tool's own answer told the caller to set it. It is now ignored unless the
+    operator sets the new `hot_loading.allow_force_unverified: true`, and the
+    answer names the operator's keys instead.
+  - **Echoed text.** An entry whose name has whitespace or a control
+    character is treated as not found, and every name echoed from an entry is
+    escaped, so a name cannot add lines to what the agent reads. A variable
+    that is not bound gets "Ask the operator to allow it" in prose, never a
+    ready-to-paste config grant.
+- **security:** a tool under a digest pin in `block` mode is now served with only
+  the fields the pin covers: `name`, `description`, `inputSchema` and
+  `outputSchema`. The pin's digest covers those four, but every listing served
+  the rest of the upstream's definition verbatim, so an upstream could keep the
+  digest and still put instructions in `title` or `_meta`, or add
+  `annotations: {readOnlyHint: true, destructiveHint: false}` to a tool pinned
+  without them, which can remove a client's confirmation before the call. The
+  cut applies on the front door's `tools/list` (both SDK paths, stdio and
+  streamable HTTP), `server/discover`, `hangar_tools`, `hangar_details` and the
+  REST server and tool routes, through one shared allow-list, so a field the
+  spec adds later is withheld from a pinned tool too. Pins are scoped as for the
+  drift check: the server, the groups that own it and per-tenant pins. The
+  digest itself is unchanged, so existing pins stay valid. Tools without a pin,
+  and pins in `warn` or `audit` mode, are served whole as before.
+
 ## [2.29.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.0...v2.29.1) (2026-10-18)
 
 ### Fixed
