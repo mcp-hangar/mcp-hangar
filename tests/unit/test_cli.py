@@ -100,6 +100,14 @@ class TestParseArgsHTTPMode:
 
         assert config.http_mode is True
 
+    @pytest.mark.parametrize("mode", ["true", "1", "yes"])
+    def test_parse_args_http_mode_truthy_env(self, mode):
+        """MCP_MODE accepts Typer-style truthy env values."""
+        with patch.dict(os.environ, {"MCP_MODE": mode}, clear=True):
+            config = parse_args([])
+
+        assert config.http_mode is True
+
     def test_parse_args_http_flag_overrides_env(self):
         """CLI --http flag works even if env is stdio."""
         with patch.dict(os.environ, {"MCP_MODE": "stdio"}, clear=True):
@@ -145,6 +153,14 @@ class TestParseArgsHostPort:
             config = parse_args([])
 
         assert config.http_port == 7777
+
+    def test_parse_args_port_env_must_be_integer(self):
+        """Invalid MCP_HTTP_PORT exits with argparse's clean usage error."""
+        with patch.dict(os.environ, {"MCP_HTTP_PORT": "abc"}, clear=True):
+            with pytest.raises(SystemExit) as exc_info:
+                parse_args([])
+
+        assert exc_info.value.code == 2
 
 
 class TestParseArgsConfig:
@@ -199,6 +215,13 @@ class TestParseArgsLogging:
     def test_parse_args_json_logs_from_env(self):
         """MCP_JSON_LOGS=true enables JSON formatted logs."""
         with patch.dict(os.environ, {"MCP_JSON_LOGS": "true"}, clear=True):
+            config = parse_args([])
+
+        assert config.json_logs is True
+
+    def test_parse_args_json_logs_numeric_env(self):
+        """MCP_JSON_LOGS=1 enables JSON formatted logs."""
+        with patch.dict(os.environ, {"MCP_JSON_LOGS": "1"}, clear=True):
             config = parse_args([])
 
         assert config.json_logs is True
