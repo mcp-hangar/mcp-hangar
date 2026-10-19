@@ -624,6 +624,23 @@ def _validate_mcp_server_name(name: str) -> None:
         raise ValueError("McpServer name too long (max 128 characters)")
 
 
+#: What `hangar_load` answers for an unverified server. It names the operator's
+#: decision and never the `force_unverified` argument: the reader is an agent,
+#: and the server it is loading wrote the text that brought it here.
+UNVERIFIED_INSTRUCTIONS = (
+    "Loading a server outside the trusted namespaces is the operator's decision, made in config.yaml: "
+    "list the server's namespace in `hot_loading.trusted_namespaces`, or set "
+    "`hot_loading.allow_force_unverified: true`. Ask the operator."
+)
+
+#: The same, for an entry in a trusted namespace that the registry no longer
+#: lists as active: no namespace can fix that.
+UNPUBLISHED_INSTRUCTIONS = (
+    "The registry no longer lists this server as active. Loading it anyway is the operator's decision, made in "
+    "config.yaml: set `hot_loading.allow_force_unverified: true`. Ask the operator."
+)
+
+
 def register_load_tools(mcp: FastMCP) -> None:
     """Register hot-loading tools with MCP server."""
 
@@ -654,7 +671,8 @@ def register_load_tools(mcp: FastMCP) -> None:
 
         Args:
             name: str - McpServer name from registry (e.g., "time", "stripe", "mcp-server-github")
-            force_unverified: bool - Allow loading unverified mcp_servers (default: false)
+            force_unverified: bool - Load a server outside the operator's trusted namespaces. Ignored
+                unless the operator set `hot_loading.allow_force_unverified: true` (default: false)
             allow_tools: list[str] | None - If set, only these tools are visible (glob patterns supported)
             deny_tools: list[str] | None - If set, these tools are hidden (glob patterns supported)
             approval_tools: list[str] | None - If set, these tools are visible but held for human
@@ -691,7 +709,8 @@ def register_load_tools(mcp: FastMCP) -> None:
             #  "instructions": "Set STRIPE_API_KEY environment variable"}
 
             hangar_load("untrusted-tool")
-            # {"status": "unverified", "instructions": "Use force_unverified=True to load"}
+            # {"status": "unverified", "instructions": "... the operator's decision ...
+            #  `hot_loading.trusted_namespaces` ... `hot_loading.allow_force_unverified`"}
         """
         ctx = get_context()
 
@@ -720,7 +739,7 @@ def register_load_tools(mcp: FastMCP) -> None:
                 "status": "unverified",
                 "mcp_server_name": e.mcp_server_name,
                 "message": str(e),
-                "instructions": "Use force_unverified=True to load unverified mcp_servers (security risk).",
+                "instructions": UNPUBLISHED_INSTRUCTIONS if e.trusted else UNVERIFIED_INSTRUCTIONS,
             }
 
         except MissingSecretsError as e:

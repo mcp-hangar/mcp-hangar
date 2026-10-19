@@ -140,7 +140,12 @@ SECTIONS: dict[str, frozenset[str] | None] = {
     # `param_validation.required` (ADR-025). Global to the front door: the
     # condition is a property of the request, not of one upstream.
     "headers": frozenset({"param_validation"}),
-    "hot_loading": frozenset({"cache", "enabled", "registry"}),
+    # `secrets` (the per-server allowlist), `trusted_namespaces`,
+    # `allow_force_unverified` and `inherit_env`, read by `domain.security.hot_load_trust`, which
+    # checks their values.
+    "hot_loading": frozenset(
+        {"allow_force_unverified", "cache", "enabled", "inherit_env", "registry", "secrets", "trusted_namespaces"}
+    ),
     # `graceful_shutdown_timeout_s` (#1447), read by `config.http_graceful_shutdown_timeout`
     # for `serve --http`, which hands it to uvicorn.
     "http": frozenset({"graceful_shutdown_timeout_s"}),

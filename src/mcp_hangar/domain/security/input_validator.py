@@ -121,6 +121,16 @@ DOCKER_IMAGE_PATTERN = re.compile(
 # Environment variable key: standard env var pattern
 ENV_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+
+def is_env_var_name(name: object) -> bool:
+    """Whether `name` is an environment variable name, by `ENV_KEY_PATTERN`.
+
+    `fullmatch`, not the pattern's own `$`: `$` also matches before a trailing
+    newline, so `match` accepts `"KEY\\n"`.
+    """
+    return isinstance(name, str) and ENV_KEY_PATTERN.fullmatch(name) is not None
+
+
 # Allowed subprocess executables. Unknown commands are denied by default.
 ALLOWED_COMMANDS = frozenset(
     {

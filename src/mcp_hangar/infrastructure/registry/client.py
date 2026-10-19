@@ -6,6 +6,7 @@ registry.modelcontextprotocol.io.
 """
 
 import asyncio
+import unicodedata
 from typing import Any, cast
 
 import httpx
@@ -122,14 +123,16 @@ class RegistryClient(IRegistryClient):
             raise
 
         servers = data.get("servers", [])
-        results = [self._parse_server_summary(s) for s in servers]
+        results = [
+            summary for summary in map(self._parse_server_summary, servers) if is_usable_registry_name(summary.name)
+        ]
 
         if self._cache:
             self._cache.set(cache_key, results)
 
         return results
 
-    async def get_server(self, server_id: str) -> ServerDetails | None:
+    async def get_server(self, server_id: str, *, fresh: bool = False) -> ServerDetails | None:
         """Get detailed information about a specific MCP server.
 
         Since the registry API doesn't have a direct GET endpoint for individual
@@ -138,6 +141,10 @@ class RegistryClient(IRegistryClient):
 
         Args:
             server_id: Server name/identifier in the registry.
+            fresh: Skip the cache read and ask the registry. The answer is still
+                cached for callers that only display it. The load handler passes
+                True: it gates on the entry's status, and a cached entry stays
+                `active` for the cache's whole TTL after the registry deprecates it.
 
         Returns:
             Server details if found, None if not found.
@@ -147,7 +154,7 @@ class RegistryClient(IRegistryClient):
         """
         cache_key = f"server:{server_id}"
 
-        if self._cache:
+        if self._cache and not fresh:
             cached = self._cache.get(cache_key)
             if cached is not None:
                 logger.debug("registry_cache_hit", key=cache_key)
@@ -166,6 +173,8 @@ class RegistryClient(IRegistryClient):
         servers = data.get("servers", [])
         for server_data in servers:
             details = self._parse_server_details(server_data)
+            if not is_usable_registry_name(details.name):
+                continue
             if details.id == server_id or details.name == server_id:
                 if self._cache:
                     self._cache.set(cache_key, details)
@@ -273,7 +282,7 @@ class RegistryClient(IRegistryClient):
             id=server_name,
             name=server_name,
             description=server_data.get("description", ""),
-            is_official=official_meta.get("status") == "active",
+            is_published=official_meta.get("status") == "active",
         )
 
     def _parse_server_details(self, data: dict[str, Any]) -> ServerDetails:
@@ -336,7 +345,24 @@ class RegistryClient(IRegistryClient):
             description=server_data.get("description", ""),
             vendor=None,
             source_url=repository.get("url") if repository else None,
-            is_official=official_meta.get("status") == "active",
+            is_published=official_meta.get("status") == "active",
             packages=packages,
             required_env_vars=required_env_vars,
         )
+
+
+def is_usable_registry_name(name: object) -> bool:
+    """Whether a registry entry's `name` may be treated as a server at all.
+
+    The name is written by whoever published the entry and is echoed to the
+    caller -- an agent -- in every answer about the server. A name with
+    whitespace or a control or format character (a newline followed by
+    `SYSTEM: ...`) is text aimed at that reader, not a name, so such an entry
+    is treated as not found.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    usable = all(not c.isspace() and not unicodedata.category(c).startswith("C") for c in name)
+    if not usable:
+        logger.warning("registry_entry_name_refused", name=repr(name))
+    return usable

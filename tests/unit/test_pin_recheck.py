@@ -36,6 +36,20 @@ def test_an_interval_of_zero_builds_no_worker(monkeypatch: pytest.MonkeyPatch) -
     assert _built(monkeypatch, {"tool_projection": {"pin_recheck_interval_s": 0}}) == []
 
 
+def test_with_the_interval_at_zero_a_drift_is_still_reported_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp_hangar.application.read_models import tool_projection
+    from mcp_hangar.server.bootstrap import workers as workers_module
+
+    _built(monkeypatch, {"tool_projection": {"pin_recheck_interval_s": 0}})
+    _built(monkeypatch, {"tool_projection": {"pin_recheck_interval_s": 0}})
+
+    # Installed as a change listener (#1776), and replaced rather than added to.
+    listeners = [
+        entry for entry in tool_projection._change_listeners if getattr(entry, "__name__", "") == "report_drift"
+    ]
+    assert listeners == [workers_module._drift_listener]
+
+
 def test_a_set_interval_is_the_workers(monkeypatch: pytest.MonkeyPatch) -> None:
     (worker,) = _built(monkeypatch, {"tool_projection": {"pin_recheck_interval_s": 15}})
     assert worker.interval_s == 15

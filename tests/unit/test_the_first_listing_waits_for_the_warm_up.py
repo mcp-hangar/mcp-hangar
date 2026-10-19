@@ -22,7 +22,7 @@ from mcp_hangar._sdk_compat import Tool as MCPTool
 from mcp_hangar.fastmcp_server import catalogue_warmup
 
 
-def _as_tools(flat):
+def _as_tools(flat, tenant_id=None):
     """Real Tool objects: ListToolsResult validates what it is handed."""
     return [MCPTool(name=n, description=n, inputSchema={"type": "object"}) for n in flat]
 

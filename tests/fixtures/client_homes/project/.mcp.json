@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "files": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "files-server", "/home/u/work/app"]
+    },
+    "tickets": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["tickets-server"],
+      "env": {"TICKETS_API_KEY": "${TICKETS_API_KEY}"}
+    },
+    "clock": {
+      "command": "clock-server"
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.com/sse"
+    }
+  }
+}

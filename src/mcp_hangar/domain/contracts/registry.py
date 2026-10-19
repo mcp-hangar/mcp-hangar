@@ -49,13 +49,15 @@ class ServerSummary:
         id: Unique server identifier in the registry.
         name: Human-readable server name.
         description: Brief description of the server's functionality.
-        is_official: Whether this is an official/verified server.
+        is_published: Whether the registry lists the entry as active. Every
+            published entry is, so this says nothing about who wrote it and is
+            not a trust signal: `hot_loading.trusted_namespaces` decides that.
     """
 
     id: str
     name: str
     description: str
-    is_official: bool
+    is_published: bool
 
 
 @dataclass(frozen=True)
@@ -68,7 +70,9 @@ class ServerDetails:
         description: Full description of the server's functionality.
         vendor: Optional vendor/organization name.
         source_url: Optional URL to source repository.
-        is_official: Whether this is an official/verified server.
+        is_published: Whether the registry lists the entry as active. Every
+            published entry is, so this says nothing about who wrote it and is
+            not a trust signal: `hot_loading.trusted_namespaces` decides that.
         packages: Available package distributions for installation.
         required_env_vars: Environment variables required by the server.
     """
@@ -78,7 +82,7 @@ class ServerDetails:
     description: str
     vendor: str | None
     source_url: str | None
-    is_official: bool
+    is_published: bool
     packages: list[PackageInfo]
     required_env_vars: list[str]
 
@@ -105,11 +109,14 @@ class IRegistryClient(Protocol):
         """
         ...
 
-    async def get_server(self, server_id: str) -> ServerDetails | None:
+    async def get_server(self, server_id: str, *, fresh: bool = False) -> ServerDetails | None:
         """Get detailed information about a specific MCP server.
 
         Args:
             server_id: Unique server identifier in the registry.
+            fresh: Ask the registry rather than a cache. A caller that decides
+                something on the answer -- whether a load is verified -- passes
+                True, so a deprecation is not read late.
 
         Returns:
             Server details if found, None if not found.

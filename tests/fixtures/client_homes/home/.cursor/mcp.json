@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "browser": {
+      "command": "npx",
+      "args": ["browser-server"],
+      "env": {"BROWSER_SECRET": "not-a-real-token-cursor"}
+    },
+    "docs": {
+      "url": "https://docs.example.com/mcp"
+    },
+    "not-an-object": "browser-server",
+    "no-launch": {"args": ["--verbose"]},
+    "both": {"command": "a-server", "url": "https://both.example.com/mcp"},
+    "numeric-env": {"command": "a-server", "env": {"PORT": 8080}},
+    "args-as-string": {"command": "a-server", "args": "--verbose"},
+    "wrong-type": {"type": "sse", "command": "a-server"},
+    "ftp": {"url": "ftp://files.example.com/mcp"}
+  }
+}
