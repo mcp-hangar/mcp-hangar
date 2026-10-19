@@ -104,8 +104,9 @@ class PinRecheckWorker:
         self._event_bus = event_bus or get_event_bus()
         self._registry = registry
         # Mismatches already published, so a drift is reported once and not
-        # every pass. Touched only by the worker's own thread.
+        # every pass. The worker's thread and the change listener touch it.
         self._reported: set[tuple[str, str, str, str | None, str]] = set()
+        self._reported_lock = threading.Lock()
         self.running = False
         self._stopped = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-pin-recheck")
@@ -136,8 +137,33 @@ class PinRecheckWorker:
             except Exception:  # noqa: BLE001 -- fault-barrier: one failed pass must not end the worker
                 logger.exception("pin_recheck_pass_failed")
 
+    def report_drift(self) -> None:
+        """The projection change listener: report each new mismatch, re-listing nothing (#1776).
+
+        A drifted tool is withheld from every listing, so on the front door its
+        call never reaches the digest gate. Installed by bootstrap whether or
+        not the worker runs, so a drift seen at start, with the re-check off,
+        is still logged and published once. Never raises.
+        """
+        try:
+            self._each_covered(lambda registry, server_id, pins: self._report(registry, server_id, pins))
+        except Exception:  # noqa: BLE001 -- fault-barrier: a listener must not fail the mutation that fired it
+            logger.exception("pin_drift_report_failed")
+
     def recheck_once(self) -> None:
         """One pass: re-list every READY server a pin covers, then report any new mismatch."""
+
+        def recheck(registry: Any, server_id: str, pins: list[tuple[str, str, str | None, Any]]) -> None:
+            server = self._servers.get(server_id)
+            if server is not None:
+                # READY only: a server that is not is neither listed nor started.
+                server.recheck_catalogue()
+                self._report(registry, server_id, pins)
+
+        self._each_covered(recheck)
+
+    def _each_covered(self, act: Callable[[Any, str, list[tuple[str, str, str | None, Any]]], None]) -> None:
+        """Call *act* for every server a pin covers, each behind its own barrier."""
         registry = self._registry()
         # Every id is collected before any I/O, and no group lock is held for it.
         covered: dict[str, list[tuple[str, str, str | None, Any]]] = {}
@@ -155,13 +181,8 @@ class PinRecheckWorker:
         # the same every pass, so one that always raised would otherwise stop
         # the re-check of every server after it for good.
         for server_id, pins in covered.items():
-            server = self._servers.get(server_id)
-            if server is None:
-                continue
             try:
-                # READY only: a server that is not is neither listed nor started.
-                server.recheck_catalogue()
-                self._report(registry, server_id, pins)
+                act(registry, server_id, pins)
             except Exception as exc:  # noqa: BLE001 -- fault-barrier: one server must not stop the others' re-check
                 logger.warning(
                     "pin_recheck_failed",
@@ -177,12 +198,13 @@ class PinRecheckWorker:
             if projection is None:
                 continue
             key = (server_id, scope, tool, tenant_id, projection.digest.sha256)
-            if projection.digest.sha256 == pin.sha256:
-                self._reported = {k for k in self._reported if k[:4] != key[:4]}
-                continue
-            if key in self._reported:
-                continue
-            self._reported.add(key)
+            with self._reported_lock:
+                if projection.digest.sha256 == pin.sha256:
+                    self._reported = {k for k in self._reported if k[:4] != key[:4]}
+                    continue
+                if key in self._reported:
+                    continue
+                self._reported.add(key)
             enforcement = registry.digest_enforcement(scope)
             result = DigestValidator(
                 DigestPolicy(enforcement=enforcement, unknown=DigestUnknownPolicy.BLOCK, allowlist=frozenset({pin}))

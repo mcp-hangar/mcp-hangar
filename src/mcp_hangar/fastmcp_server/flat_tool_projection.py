@@ -486,12 +486,18 @@ def _group_exposure_policies(mcp_server: str) -> list[Any]:
 
 
 def _build_mcp_tool_list(
-    flat_map: dict[str, tuple[str, str]],
+    flat_map: Mapping[str, tuple[str, str]],
+    tenant_id: str | None,
 ) -> list[MCPTool]:
     """Convert the flat map to MCP Tool objects using discovered schemas.
 
+    The definition served is read again here, after the map was built, so the
+    drift check is made again on exactly that definition (#1776): a catalogue
+    rebuilt in between must not put a drifted description on the wire.
+
     Args:
         flat_map: Mapping from flat name to (mcp_server, tool_name).
+        tenant_id: The tenant the map was built for, whose pins apply.
 
     Returns:
         List of MCP Tool objects ready for the tools/list response.
@@ -503,6 +509,8 @@ def _build_mcp_tool_list(
         proj = registry.resolve(mcp_server, tool_name)
         if proj is None:
             continue  # Should not happen after _build_flat_map, but be safe.
+        if registry.drifted_pin(tool_name, proj.digest.sha256, tenant_id, _withdrawal_scopes(mcp_server)):
+            continue
 
         # Carry the WHOLE definition, renaming only what the flat surface owns.
         # Hand-picking three keys dropped `title`, `annotations`, `execution`,
@@ -596,7 +604,7 @@ def generate_projection(tenant_id: str | None) -> Projection:
     the per-POST memo and the cache-scope meta stay there too.
     """
     routes = _build_flat_map(tenant_id)
-    tools = _build_mcp_tool_list(routes)
+    tools = _build_mcp_tool_list(routes, tenant_id)
     return Projection(
         tenant_id=tenant_id,
         routes=MappingProxyType(routes),

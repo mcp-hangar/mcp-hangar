@@ -779,6 +779,23 @@ class ToolProjectionRegistry:
                     return scope, pin
         return None
 
+    def drifted_for_any_tenant(self, tool: str, digest: str, scopes: Iterable[str]) -> bool:
+        """Whether *tool* at *digest* drifted from a blocking pin on *scopes* for any tenant or all (#1776).
+
+        For a fleet-wide surface such as REST, which has no tenant to resolve
+        a pin for: a tool withheld from any tenant is shown withheld there too.
+        """
+        with self._lock:
+            for scope in scopes:
+                if self._digest_enforcement.get(scope, DigestEnforcement.BLOCK) != DigestEnforcement.BLOCK:
+                    continue
+                pins = [*self._config_pins.get((scope, tool), {}).values()]
+                if (all_tenants := self._config_pins_all_tenants.get((scope, tool))) is not None:
+                    pins.append(all_tenants)
+                if any(pin.sha256 != digest for pin in pins):
+                    return True
+        return False
+
     def list_for_server(self, mcp_server: str) -> list[ToolProjection]:
         """Return all projections for *mcp_server* (snapshot)."""
         with self._lock:

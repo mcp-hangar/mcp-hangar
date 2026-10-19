@@ -7,7 +7,9 @@ reached the model on every listing. The tool is now absent from the front door's
 answered like a call of a tool that does not exist. `notifications/tools/list_changed`
 is sent when it is withheld and again when it returns. `hangar_details` lists it
 under `withheld_tools` with the reason `digest_drift` and both digests, without
-the description, and the REST tool routes mark it `withheld: "digest_drift"`. Only
+the description, and the REST tool routes show it as its name, digests and
+`withheld: "digest_drift"`, also without the description, to every role that can
+read them. Only
 a pin in `block` mode withholds: under `warn` and `audit` the call goes through,
 so the tool stays listed. The interval re-check withholds as well as refuses.
 A caller is told nothing about a tool its policy hides

@@ -273,7 +273,7 @@ class TestBuildMcpToolList:
             "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_projection_registry",
             return_value=registry,
         ):
-            tools = _build_mcp_tool_list(flat_map)
+            tools = _build_mcp_tool_list(flat_map, None)
 
         assert len(tools) == 1
         assert tools[0].name == "read_item"
@@ -284,7 +284,7 @@ class TestBuildMcpToolList:
             "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_projection_registry",
             return_value=registry,
         ):
-            tools = _build_mcp_tool_list({})
+            tools = _build_mcp_tool_list({}, None)
 
         assert tools == []
 
