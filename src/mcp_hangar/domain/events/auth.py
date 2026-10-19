@@ -3,7 +3,6 @@
 """Authentication, authorization, tenancy and quota events."""
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from .base import DomainEvent
@@ -83,15 +82,6 @@ class AuthorizationGranted(DomainEvent):
     resource_type: str
     resource_id: str
     granted_by_role: str
-
-
-@dataclass
-class PolicyPushRejected(DomainEvent):
-    """Published when a policy push request is rejected."""
-
-    principal_id: str
-    reason: str
-    timestamp: datetime
 
 
 @dataclass
