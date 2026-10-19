@@ -107,12 +107,17 @@ async def get_mcp_server(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with mcp_server details including tools and health, and `dead`:
         null unless its state is dead, then why, since when and what starts it
-        again (`DeadInfo` in `application.read_models`, #1418).
+        again (`DeadInfo` in `application.read_models`, #1418). A tool withheld
+        for drift is shown as on the `/tools` route: name, digests and reason,
+        without its description (#1776).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
-    result = await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse(result.to_dict())
+    result = (await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))).to_dict()
+    result["tools"] = [
+        shown if "withheld" in (shown := tool_with_digest(tool, mcp_server_id)) else tool for tool in result["tools"]
+    ]
+    return HangarJSONResponse(result)
 
 
 async def start_mcp_server(request: Request) -> HangarJSONResponse:

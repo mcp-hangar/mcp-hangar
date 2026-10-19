@@ -109,3 +109,30 @@ def test_the_change_listener_reports_a_drift_once_with_the_recheck_off(registry)
 
     mismatches = [event for event in published if isinstance(event, DigestMismatchEvent)]
     assert [(e.mcp_server_id, e.tool_name) for e in mismatches] == [("store", TOOL)]
+
+
+async def test_the_server_details_route_shows_a_withheld_tool_without_its_description(registry) -> None:
+    import json
+    from types import SimpleNamespace
+
+    from mcp_hangar.server.api import mcp_servers
+
+    _pin_good(registry)
+    registry.build_from_tools("store", [BAD])
+    details = SimpleNamespace(to_dict=lambda: {"mcp_server_id": "store", "tools": [BAD.to_dict()]})
+
+    async def answer(query: object) -> object:
+        return details
+
+    request = SimpleNamespace(path_params={"mcp_server_id": "store"})
+    with (
+        patch.object(mcp_servers, "_check_permission", lambda *a, **k: None),
+        patch.object(mcp_servers, "dispatch_query", answer),
+        patch("mcp_hangar.server.tools.batch.executor.owners_by_member", return_value={}),
+    ):
+        response = await mcp_servers.get_mcp_server(request)  # type: ignore[arg-type]
+
+    (tool,) = json.loads(response.body)["tools"]
+    assert tool["withheld"] == tp.WITHHELD_DIGEST_DRIFT
+    assert set(tool) <= {"name", "digest", "pinned_digest", "withheld"}, tool
+    assert b"id_rsa" not in response.body
