@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.31.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.30.0...v2.31.0) (2026-10-19)
+
+### Added
+
+- **cli:** `mcp-hangar approvals list|approve|deny` resolves a call held by a gateway that runs over stdio, which serves no REST API, so until now a call on an `approval_list` could only time out. The command opens the approval store the gateway shares (the selected `persistence.backend`, or `mcp_hangar.db` beside an absolute `event_store.path`; `--db` names a file) and decides through the same resolution chokepoint as `POST /api/approvals/{id}/resolve`, so expiry, the compare-and-swap and tenant scoping are unchanged. The waiting gateway sees the decision on its next poll of the store, about two seconds, and publishes the usual `ToolApprovalGranted` or `ToolApprovalDenied`. No listener or IPC channel is added. The approver is always the declared `auth.stdio.principal`, and a configuration without one is refused. The principal's declared roles must hold `approval:resolve` (`provider-admin` or `admin`), and that holds even with auth off: `viewer`, the role `init` declares, is refused with the role it needs and the key to change. ([#1929](https://github.com/mcp-hangar/mcp-hangar/pull/1929))
+- **core:** `hangar_whoami` tells a caller who the gateway thinks it is. It takes
+  no parameters and returns the caller's principal, tenant, groups and role
+  bindings with their scopes, read from the same lookup the authorizer decides on,
+  plus `opa_policy` when an OPA policy can change what those roles decide. It
+  needs no permission: on a `front_door` gateway every authenticated caller is
+  offered it on the management surface, including one with no role at all, and
+  so is a declared stdio principal. With auth off, or for an anonymous caller,
+  there is no identity to report, so it is absent there and refused if called (on
+  `egress`, where the whole `hangar_*` surface is listed, a call is refused). ([#1923](https://github.com/mcp-hangar/mcp-hangar/pull/1923))
+
+### Removed
+
+- **core:** the `PolicyPushRejected` domain event is removed. Its only producer
+  was the `POST /agent/policy` endpoint retired with the Hangar Cloud connector in
+  1.5.x, and since then nothing has constructed it and nothing has handled it. A
+  refused policy push is still recorded, as `AuthorizationDenied`. No event store
+  needs migrating: the endpoint published it through the bus's delivery-only
+  `publish()`, three weeks before `publish()` started persisting, and an event
+  naming no aggregate is still delivered only, so no stored stream holds one. ([#1924](https://github.com/mcp-hangar/mcp-hangar/pull/1924))
+
+### Fixed
+
+- **cli:** `python -m mcp_hangar.server` (the legacy `parse_args` entry point) now reads the environment the way
+  `mcp-hangar serve` does: `MCP_MODE` accepts `true`/`1`/`yes`/`on` as well as `http`, `MCP_JSON_LOGS=1` turns JSON logs
+  on, and a non-integer `MCP_HTTP_PORT` is a usage error (exit 2) instead of a traceback. ([#1712](https://github.com/mcp-hangar/mcp-hangar/pull/1712))
+- **core:** a `hangar.shaping.mutation` event is recorded only when a mutator applies to the call's method. A mutator registered for another method, such as `resources/read` only, used to add two `changed=false` mutation events to every `tools/call` span although no mutator ran. ([#1574](https://github.com/mcp-hangar/mcp-hangar/pull/1574))
+
 ## [2.30.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.1...v2.30.0) (2026-10-19)
 
 ### Added

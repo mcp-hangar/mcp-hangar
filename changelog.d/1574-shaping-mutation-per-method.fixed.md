@@ -1,1 +1,0 @@
-**core:** a `hangar.shaping.mutation` event is recorded only when a mutator applies to the call's method. A mutator registered for another method, such as `resources/read` only, used to add two `changed=false` mutation events to every `tools/call` span although no mutator ran.
