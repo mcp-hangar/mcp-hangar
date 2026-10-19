@@ -112,6 +112,16 @@ class Upstream(BaseHTTPRequestHandler):
         }.get(method, {"error": {"code": METHOD_NOT_FOUND, "message": f"Unknown method: {method}"}})
         self._send(200, json.dumps({"jsonrpc": "2.0", "id": request["id"], **answer}).encode())
 
+    def do_GET(self) -> None:  # noqa: N802 -- http.server's handler name
+        # No standing GET stream here, answered as a server without one does: 405.
+        # `BaseHTTPRequestHandler` answers 501, which the client retries with a
+        # backoff that reaches 8 and 16 s, and a closed client's stream thread
+        # sleeps it out after the test ends -- past the thread guard's grace.
+        self.send_response(405)
+        self.send_header("Allow", "POST")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send(self, status: int, body: bytes) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "application/json")

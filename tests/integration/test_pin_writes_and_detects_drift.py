@@ -27,6 +27,10 @@ from mcp_hangar.server.cli.services.pinning import (
 
 MOCK_PROVIDER = str(Path(__file__).resolve().parent.parent / "mock_provider.py")
 
+# `observe_digests` loads the file the way the CLI does, which commits its servers
+# and pins process-wide; a pin left behind refuses its tool in a later test.
+pytestmark = pytest.mark.usefixtures("applied_configuration_is_undone")
+
 
 @pytest.fixture
 def config_path(tmp_path: Path) -> Path:
