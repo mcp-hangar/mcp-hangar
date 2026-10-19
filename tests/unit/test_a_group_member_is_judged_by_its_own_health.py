@@ -166,14 +166,25 @@ class TestHangarDecided:
     def test_a_gates_refusal(self, code: str) -> None:
         assert member_outcome(code) is UNJUDGED
 
-    @pytest.mark.parametrize("code", sorted(DENIAL_CODES))
+    # A denial is Hangar's decision before the member was asked -- except one: a
+    # member whose TLS key is not in its key list is refused because of what
+    # the member presented, so it counts against that member (ADR-030 §5).
+    _DENIALS_ABOUT_HANGAR = DENIAL_CODES - MEMBER_HEALTH_REFUSALS
+
+    @pytest.mark.parametrize("code", sorted(_DENIALS_ABOUT_HANGAR))
     def test_a_denial_never_counts(self, code: str) -> None:
         assert member_outcome(code) is UNJUDGED
+
+    def test_a_member_presenting_an_unlisted_key_counts(self) -> None:
+        counted_denials = DENIAL_CODES & MEMBER_HEALTH_REFUSALS
+        assert counted_denials == {"UpstreamPeerKeyMismatchError"}
+        assert member_outcome("UpstreamPeerKeyMismatchError") is UNHEALTHY
+        assert member_outcome(domain_exceptions.UpstreamPeerKeyMismatchError("sha256:" + "0" * 64)) is UNHEALTHY
 
     def test_an_error_named_as_a_denial_is_hangars_own_refusal(self) -> None:
         named = [
             cls
-            for code in sorted(DENIAL_CODES)
+            for code in sorted(self._DENIALS_ABOUT_HANGAR)
             if isinstance(cls := getattr(domain_exceptions, code, None), type) and issubclass(cls, BaseException)
         ]
 
