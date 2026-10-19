@@ -76,7 +76,7 @@ def _skip(reason: str) -> float:
 
 def _patch_empty(monkeypatch) -> None:
     monkeypatch.setattr(flat_tool_projection, "_build_flat_map", lambda _tenant: {})
-    monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map: [])
+    monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map, _tenant: [])
     monkeypatch.setattr(
         "mcp_hangar.server.tools.tool_permissions.management_tools_for",
         lambda _ctx: set(),
@@ -124,7 +124,7 @@ class TestParamHeaderValidationSkipsAreCounted:
             }
         )
         monkeypatch.setattr(flat_tool_projection, "_build_flat_map", lambda _t: {"add": ("s", "add")})
-        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _m: [tool])
+        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _m, _tenant: [tool])
         monkeypatch.setattr(
             "mcp_hangar.server.tools.tool_permissions.management_tools_for",
             lambda _ctx: set(),
@@ -152,7 +152,7 @@ class TestParamHeaderValidationSkipsAreCounted:
             }
         )
         monkeypatch.setattr(flat_tool_projection, "_build_flat_map", lambda _t: {"add": ("s", "add")})
-        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _m: [tool])
+        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _m, _tenant: [tool])
         monkeypatch.setattr(
             "mcp_hangar.server.tools.tool_permissions.management_tools_for",
             lambda _ctx: set(),

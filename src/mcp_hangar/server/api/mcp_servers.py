@@ -27,7 +27,7 @@ from ...application.queries.queries import (
     GetToolInvocationHistoryQuery,
     ListMcpServersQuery,
 )
-from ...application.read_models.tool_projection import get_tool_projection_registry
+from ...application.read_models.tool_projection import WITHHELD_DIGEST_DRIFT, get_tool_projection_registry
 from ...domain.exceptions import McpServerDeclaredInConfigError, MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
@@ -107,12 +107,17 @@ async def get_mcp_server(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with mcp_server details including tools and health, and `dead`:
         null unless its state is dead, then why, since when and what starts it
-        again (`DeadInfo` in `application.read_models`, #1418).
+        again (`DeadInfo` in `application.read_models`, #1418). A tool withheld
+        for drift is shown as on the `/tools` route: name, digests and reason,
+        without its description (#1776).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
-    result = await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse(result.to_dict())
+    result = (await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))).to_dict()
+    result["tools"] = [
+        shown if "withheld" in (shown := tool_with_digest(tool, mcp_server_id)) else tool for tool in result["tools"]
+    ]
+    return HangarJSONResponse(result)
 
 
 async def start_mcp_server(request: Request) -> HangarJSONResponse:
@@ -178,22 +183,39 @@ async def get_mcp_server_tools(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with {"tools": [...]} array of tool info. Each tool carries its
-        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528).
+        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528);
+        one that drifted from a pin in block mode, which ``tools/list`` and
+        ``hangar_tools`` withhold, is ``{name, digest, pinned_digest?,
+        withheld: "digest_drift"}``, without its description (#1776).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
     result = await dispatch_query(GetMcpServerToolsQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse({"tools": [_with_digest(t.to_dict(), mcp_server_id) for t in result]})
+    return HangarJSONResponse({"tools": [tool_with_digest(t.to_dict(), mcp_server_id) for t in result]})
 
 
-def _with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]:
+def tool_with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]:
     """*tool* with its digest and its all-tenants pin, if any (#1528).
 
     This route admits only a fleet-wide grant (it is not ``tenant_aware``), so
     the pin shown is the all-tenants one: the block ``mcp-hangar pin --check``
     compares. A per-tenant pin is shown on ``hangar_tools`` to that tenant.
+
+    A tool that drifted from a blocking pin -- for any tenant, on the server or
+    a group that owns it -- is withheld from every listing a model reads, and
+    is shown here as its name, digests and ``withheld`` reason only (#1776).
+    Every role that can read this route sees it, a service account included,
+    so the drifted description is not.
     """
-    return {**tool, **get_tool_projection_registry().digest_fields(tool, named=mcp_server_id)}
+    from ..tools.batch.executor import owners_by_member
+
+    registry = get_tool_projection_registry()
+    fields = registry.digest_fields(tool, named=mcp_server_id)
+    fields.pop("withheld", None)
+    scopes = (mcp_server_id, *owners_by_member().get(mcp_server_id, ()))
+    if registry.drifted_for_any_tenant(str(tool.get("name", "")), fields["digest"], scopes):
+        return {"name": tool.get("name", ""), **fields, "withheld": WITHHELD_DIGEST_DRIFT}
+    return {**tool, **fields}
 
 
 async def get_mcp_server_health(request: Request) -> HangarJSONResponse:

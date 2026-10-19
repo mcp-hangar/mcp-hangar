@@ -66,6 +66,8 @@ class Upstream(BaseHTTPRequestHandler):
     #: Each tool's input properties. A property may declare ``x-mcp-header``
     #: so its value is mirrored in, and validated against, an ``Mcp-Param-*``.
     properties: ClassVar[dict[str, Any]] = {"x": {"type": "string"}}
+    #: A description for a tool named here; a tool not named here has none.
+    descriptions: ClassVar[dict[str, str]] = {}
     called: ClassVar[list[str]] = []
     #: A tool named here is answered only once its event is set, so a test can
     #: keep a call in flight. The call is recorded in `called` when it arrives.
@@ -87,7 +89,12 @@ class Upstream(BaseHTTPRequestHandler):
             if hold is not None:
                 hold.wait(timeout=30)
         definitions = [
-            {"name": name, "inputSchema": {"type": "object", "properties": self.properties}} for name in self.tools
+            {
+                "name": name,
+                **({"description": self.descriptions[name]} if name in self.descriptions else {}),
+                "inputSchema": {"type": "object", "properties": self.properties},
+            }
+            for name in self.tools
         ]
         answer = {
             "initialize": {
@@ -281,7 +288,9 @@ def front_door(
     for tenant, allowed in (policies or {}).items():
         resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
 
-    handler: type[Upstream] = type("_ThisUpstream", (upstream_class,), {"tools": tools, "called": [], "holds": {}})
+    handler: type[Upstream] = type(
+        "_ThisUpstream", (upstream_class,), {"tools": tools, "called": [], "holds": {}, "descriptions": {}}
+    )
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     runtime = None

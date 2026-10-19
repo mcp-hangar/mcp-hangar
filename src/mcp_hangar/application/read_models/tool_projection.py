@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -52,6 +52,10 @@ def _projection_changed() -> None:
             listener()
         except Exception:  # noqa: BLE001 -- fault-barrier: a listener must not fail the mutation that fired it
             logger.warning("tool_projection_change_listener_failed", exc_info=True)
+
+
+#: Why a listing withholds a tool whose definition drifted from a blocking pin (#1776).
+WITHHELD_DIGEST_DRIFT = "digest_drift"
 
 
 class _AllTenants:
@@ -699,6 +703,7 @@ class ToolProjectionRegistry:
         named: str,
         served_by: str | None = None,
         tenant_id: str | None = None,
+        groups: Iterable[str] = (),
     ) -> dict[str, str]:
         """The digest fields a listing shows next to *tool* (#1528).
 
@@ -713,6 +718,12 @@ class ToolProjectionRegistry:
         in. It is omitted when there is none, as a tool object omits every unset
         optional field. Pins a member inherits from the groups that own it are
         not shown here.
+
+        ``withheld`` is :data:`WITHHELD_DIGEST_DRIFT` when the tool drifted from
+        a blocking pin on *named*, *served_by* or one of *groups* (the groups
+        that own the server named), as :meth:`drifted_pin` decides (#1776). A
+        listing a model reads drops such a tool; one an operator reads shows
+        it with this reason.
 
         Callers pass only the tools the caller was allowed to list, so a tool
         the caller cannot see gets no digest and no pin.
@@ -731,7 +742,59 @@ class ToolProjectionRegistry:
             pin = self.resolve_pin(server, name, tenant_id)
         if pin is not None:
             fields["pinned_digest"] = pin.sha256
+        if self.drifted_pin(name, digest, tenant_id, dict.fromkeys((named, server, *groups))) is not None:
+            fields["withheld"] = WITHHELD_DIGEST_DRIFT
         return fields
+
+    def drifted_pin(
+        self, tool: str, digest: str, tenant_id: str | None, scopes: Iterable[str]
+    ) -> tuple[str, ToolDigest] | None:
+        """The first ``(scope, pin)`` on *scopes* that *tool* at *digest* drifted from and that blocks (#1776).
+
+        A listing withholds such a tool. The digest gate refuses the call
+        already, and listing the tool still put the drifted description -- the
+        rug pull's instruction -- in front of the model on every listing. Only
+        a pin declared on an id in ``block`` mode counts: under ``warn`` and
+        ``audit`` the call goes through, and a listing shows what can be
+        called. The SHA-256 is compared and nothing else: a pin bound to
+        another upstream (#1802) is the call gate's to refuse, and the
+        description such a tool carries is the pinned one.
+
+        Pure, with no event and no log: a front-door projection is generated
+        for every channel on every change.
+
+        Args:
+            tool: The tool's name.
+            digest: The SHA-256 of the definition the listing would show.
+            tenant_id: The caller's tenant; each pin resolves as for the call.
+            scopes: Each id whose pins hold the tool: the server, and the groups
+                that own it or the group the listing was made through.
+        """
+        with self._lock:
+            for scope in scopes:
+                pin = self.resolve_pin(scope, tool, tenant_id)
+                if pin is None or pin.sha256 == digest:
+                    continue
+                if self._digest_enforcement.get(scope, DigestEnforcement.BLOCK) == DigestEnforcement.BLOCK:
+                    return scope, pin
+        return None
+
+    def drifted_for_any_tenant(self, tool: str, digest: str, scopes: Iterable[str]) -> bool:
+        """Whether *tool* at *digest* drifted from a blocking pin on *scopes* for any tenant or all (#1776).
+
+        For a fleet-wide surface such as REST, which has no tenant to resolve
+        a pin for: a tool withheld from any tenant is shown withheld there too.
+        """
+        with self._lock:
+            for scope in scopes:
+                if self._digest_enforcement.get(scope, DigestEnforcement.BLOCK) != DigestEnforcement.BLOCK:
+                    continue
+                pins = [*self._config_pins.get((scope, tool), {}).values()]
+                if (all_tenants := self._config_pins_all_tenants.get((scope, tool))) is not None:
+                    pins.append(all_tenants)
+                if any(pin.sha256 != digest for pin in pins):
+                    return True
+        return False
 
     def list_for_server(self, mcp_server: str) -> list[ToolProjection]:
         """Return all projections for *mcp_server* (snapshot)."""

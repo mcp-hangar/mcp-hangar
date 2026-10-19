@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from mcp_hangar.application.read_models import tool_projection
-from mcp_hangar.application.read_models.tool_projection import ToolProjectionRegistry
+from mcp_hangar.application.read_models.tool_projection import WITHHELD_DIGEST_DRIFT, ToolProjectionRegistry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
 from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
@@ -81,7 +81,12 @@ def test_a_group_listing_reads_the_members_projection_and_pin(registry: ToolProj
         fields = registry.digest_fields(listed, named="pool", served_by="store")
 
     compute.assert_not_called()
-    assert fields == {"digest": compute_tool_digest(listed).sha256, "pinned_digest": PIN_MEMBER}
+    # The pin does not match what is served, so the tool is marked withheld (#1776).
+    assert fields == {
+        "digest": compute_tool_digest(listed).sha256,
+        "pinned_digest": PIN_MEMBER,
+        "withheld": WITHHELD_DIGEST_DRIFT,
+    }
 
 
 def test_a_pin_on_the_group_wins_over_one_on_its_member(registry: ToolProjectionRegistry) -> None:

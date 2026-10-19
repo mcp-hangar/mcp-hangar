@@ -119,7 +119,7 @@ class TestFlatProjection:
             ],
         )
         try:
-            tools = _build_mcp_tool_list({"get-annotated-message": ("everything", "get-annotated-message")})
+            tools = _build_mcp_tool_list({"get-annotated-message": ("everything", "get-annotated-message")}, None)
         finally:
             # Process-global singleton: leave it as found or the next test in the
             # session inherits this fixture.

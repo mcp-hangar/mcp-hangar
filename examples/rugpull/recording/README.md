@@ -35,7 +35,9 @@ exists rather than a GIF someone made once on a laptop.
 
 On camera: the pinned call is allowed, the server rewrites its own tool
 description, and the identical call is refused by Hangar before the server is
-asked.
+asked. Since #1776 the drifted tool is withheld from the listing instead, so
+the call is answered as for a tool that does not exist; the recording predates
+that and has to be regenerated.
 
 Off camera, in the tape's `Hide` block: `mcp-hangar pin --config demo.yaml
 --write`. That step is real and required — the deny is measured against the pin

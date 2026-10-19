@@ -1,8 +1,8 @@
 """Tier 0 live verification: the documented local path, end to end (ADR-026, #1189).
 
 The claim (LIVE_VERIFICATION.md): the sequence the quickstart prints actually
-produces a refusal -- pin what the servers serve, call the tool through your own
-client, change the tool, and watch the same call be refused.
+protects the client -- pin what the servers serve, call the tool through your own
+client, change the tool, and watch it disappear from the listing.
 
 This is deliberately the *operator's* path and not the developer's. The unit and
 integration suites assert the same mechanics against a hand-written config;
@@ -15,8 +15,8 @@ What it pins, in order:
 1. with `auth.stdio.principal`, `front_door` over stdio serves the upstream's
    flat tool names (identity reaches Hangar on a transport that has no request);
 2. that tool is callable;
-3. after the upstream changes its description, the identical call is refused
-   with the pinned-digest error;
+3. after the upstream changes its description, the tool is withheld: it is
+   not listed, and the new description is in no listing (#1776);
 4. without the principal block, the same config serves nothing -- the
    fail-closed behaviour ADR-026 must not have loosened.
 
@@ -115,12 +115,17 @@ def _drive(config: Path, *, rug: str | None = None, wait_for_tool: bool = True) 
                         "is_error": bool(dumped.get("isError") or dumped.get("is_error")),
                         "content": str(dumped.get("content")),
                     }
-                return {"tools": names, "called": called}
+                listing = (await session.list_tools()).model_dump_json()
+                details = ""
+                if "hangar_details" in names:
+                    answer = await session.call_tool("hangar_details", {"mcp_server": "demo"})
+                    details = str(answer.model_dump(mode="json").get("content"))
+                return {"tools": names, "called": called, "listing": listing, "details": details}
 
     return asyncio.run(_run())
 
 
-def test_the_quickstart_sequence_ends_in_a_refusal(tmp_path: Path):
+def test_the_quickstart_sequence_ends_with_the_tool_withheld(tmp_path: Path):
     config = _write_config(tmp_path, principal=True)
     _pin(config)
 
@@ -128,10 +133,15 @@ def test_the_quickstart_sequence_ends_in_a_refusal(tmp_path: Path):
     assert "echo" in allowed["tools"], allowed
     assert allowed["called"] is not None and allowed["called"]["is_error"] is False, allowed
 
+    # The drifted tool is withheld, not listed and refused (#1776): the
+    # attack text never reaches the client, so there is nothing to call. The
+    # listing is polled for the whole warm-up window, so absent is not "not yet".
     denied = _drive(config, rug=_RUGGED)
-    assert denied["called"] is not None, denied
-    assert denied["called"]["is_error"] is True, denied
-    assert "pinned digest" in denied["called"]["content"], denied
+    assert "echo" not in denied["tools"], denied
+    assert "id_rsa" not in denied["listing"], denied
+    # Withheld, not merely missing: the operator view names it, without the text.
+    assert "digest_drift" in denied["details"], denied
+    assert "id_rsa" not in denied["details"], denied
 
 
 def test_the_management_surface_follows_the_declared_role(tmp_path: Path):
