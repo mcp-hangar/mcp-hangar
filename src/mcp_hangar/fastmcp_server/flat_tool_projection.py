@@ -334,6 +334,13 @@ def _flat_map_now(
         if not is_governed_allowed(mcp_server, tool_name, kind="tool", tenant_id=tenant_id):
             continue
 
+        # Drifted from a blocking pin on the server or a group that owns it:
+        # withheld until it is re-pinned, so the drifted description never
+        # reaches the model (#1776). Not routed either, so a call reads `-32601`
+        # like any name this caller cannot call (#905).
+        if registry.drifted_pin(tool_name, resolved.digest.sha256, tenant_id, _withdrawal_scopes(mcp_server)):
+            continue
+
         # Shown == callable, and a conforming client drops this one on arrival
         # (#1056). Dropping it here keeps both halves of that invariant: it is
         # absent from the listing and `-32601` on the call.

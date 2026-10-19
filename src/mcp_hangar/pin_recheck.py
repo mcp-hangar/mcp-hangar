@@ -10,7 +10,8 @@ server itself, or on a group it is a member of, for all tenants or for one --
 once per ``tool_projection.pin_recheck_interval_s``. A changed listing replaces
 the catalogue and its projection through the same seam ``tools/list_changed``
 uses, so the digest gate refuses a drifted tool from the next call on, with
-the refusal, audit record and events it always had. On top of the per-call
+the refusal, audit record and events it always had, and every listing
+withholds it from then on (#1776). On top of the per-call
 ``DigestMismatchEvent``, the worker publishes one when it first sees a pin
 drift, so the drift is on record before anyone calls the tool.
 

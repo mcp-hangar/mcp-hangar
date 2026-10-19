@@ -178,7 +178,9 @@ async def get_mcp_server_tools(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with {"tools": [...]} array of tool info. Each tool carries its
-        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528).
+        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528);
+        ``withheld: "digest_drift"`` marks one that drifted from that pin in
+        block mode, which ``tools/list`` and ``hangar_tools`` withhold (#1776).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]

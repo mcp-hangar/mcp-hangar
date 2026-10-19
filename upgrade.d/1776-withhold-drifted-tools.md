@@ -1,0 +1,22 @@
+### a tool that drifted from its pin disappears from the listing
+
+A pinned tool whose definition no longer matches its pin, under
+`digest_enforcement: block` (the default), used to stay in `tools/list` and
+`hangar_tools` and be refused when called with `Tool '<name>' schema does not
+match its pinned digest`. It is now withheld: it is not listed, and on the
+front door a call of it is answered `-32601 Tool '<name>' not found`, as for a
+tool that does not exist. `hangar_call` still answers `ToolDigestMismatchError`.
+
+What to do:
+
+- Anything that waited for the digest-mismatch refusal on the front door to
+  learn about drift should read `hangar_details <server>` (`withheld_tools`,
+  reason `digest_drift`), the `withheld` field on `GET /api/tools` and
+  `GET /api/mcp_servers/{id}/tools`, the `tool_digest_pin_drift_detected` log
+  line, or the `DigestMismatchEvent` the interval re-check publishes (only
+  while `tool_projection.pin_recheck_interval_s` is not 0).
+- To bring the tool back after reviewing the change, re-pin it
+  (`mcp-hangar pin --write`) and reload; clients are sent
+  `notifications/tools/list_changed`.
+- A server pinned under `warn` or `audit` is unchanged: its drifted tools stay
+  listed and callable.

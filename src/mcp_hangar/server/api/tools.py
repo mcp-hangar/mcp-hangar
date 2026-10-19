@@ -24,7 +24,9 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"tools": [...]} where each tool includes mcp_server_id,
         tool_name, description, input_schema and digest, and pinned_digest
-        when the tool has an all-tenants pin (#1528).
+        when the tool has an all-tenants pin (#1528), and ``withheld:
+        "digest_drift"`` when it drifted from such a pin in block mode and is
+        withheld from every listing a model reads (#1776).
     """
     mcp_servers = await dispatch_query(ListMcpServersQuery(state_filter=None))
     registry = get_tool_projection_registry()
