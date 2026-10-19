@@ -329,31 +329,42 @@ def _declare_stdio_principal(full_config: dict[str, Any], stdio: bool) -> None:
     empty, exactly as before.
     """
     from mcp_hangar.auth.stdio_principal import clear_stdio_principal, set_stdio_principal
-    from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
 
     clear_stdio_principal()
     if not stdio:
         return
 
+    principal = declared_stdio_principal(full_config)
+    if principal is None:
+        return
+
+    set_stdio_principal(principal)
+    logger.info(
+        "stdio_principal_declared",
+        principal_id=principal.id.value,
+        tenant_id=principal.tenant_id,
+        roles=principal.metadata["roles"],
+    )
+
+
+def declared_stdio_principal(full_config: dict[str, Any]) -> Any:
+    """The principal ``auth.stdio.principal`` declares, or None when it declares none (ADR-026).
+
+    One construction for the gateway and for ``mcp-hangar approvals`` (#1778):
+    the approval a stdio gateway records carries this principal's tenant, and a
+    decision the CLI writes names it, so the two must be the same principal.
+    """
     from mcp_hangar.auth.config import parse_auth_config
+    from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
 
     declared = parse_auth_config(full_config.get("auth")).stdio
     if declared is None:
-        return
-
-    set_stdio_principal(
-        Principal(
-            id=PrincipalId(declared.id),
-            type=PrincipalType.USER,
-            tenant_id=declared.tenant_id,
-            metadata={"roles": list(declared.roles), "source": "auth.stdio.principal"},
-        )
-    )
-    logger.info(
-        "stdio_principal_declared",
-        principal_id=declared.id,
+        return None
+    return Principal(
+        id=PrincipalId(declared.id),
+        type=PrincipalType.USER,
         tenant_id=declared.tenant_id,
-        roles=declared.roles,
+        metadata={"roles": list(declared.roles), "source": "auth.stdio.principal"},
     )
 
 

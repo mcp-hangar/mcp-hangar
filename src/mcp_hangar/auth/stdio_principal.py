@@ -38,7 +38,7 @@ def set_stdio_principal(principal: Principal) -> None:
     """
     global _principal, _identity, _authorizer
     _principal = principal
-    _authorizer = _middleware_over_declared_roles(principal)
+    _authorizer = authorizer_over_declared_roles(principal)
     _identity = IdentityContext(
         caller=CallerIdentity(
             user_id=principal.id.value,
@@ -78,8 +78,12 @@ def get_stdio_authorizer() -> Any:
     return _authorizer
 
 
-def _middleware_over_declared_roles(principal: Principal) -> Any:
-    """RBAC over a private in-memory store holding only the declared built-in roles."""
+def authorizer_over_declared_roles(principal: Principal) -> Any:
+    """RBAC over a private in-memory store holding only the declared built-in roles.
+
+    Public for ``mcp-hangar approvals`` (#1778), which decides for the declared
+    principal in a process that serves no stdio session to bind it to.
+    """
     from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
     from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
     from mcp_hangar.auth.roles import BUILTIN_ROLES

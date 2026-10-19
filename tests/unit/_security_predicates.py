@@ -369,4 +369,8 @@ EXEMPT: dict[str, str] = {
     "auth/infrastructure/jwt_authenticator.py::JWTAuthenticator._enforce_tenant_audience": (
         "Bearer-token validation during authentication. The probes authenticate with API keys."
     ),
+    "auth/stdio_principal.py::authorizer_over_declared_roles": (
+        "Builds the RBAC middleware for the declared stdio principal; it decides nothing itself. The "
+        "gates that use it -- authorize_tool, the batch check, ResolveApprovalHandler -- are tested where they run."
+    ),
 }
