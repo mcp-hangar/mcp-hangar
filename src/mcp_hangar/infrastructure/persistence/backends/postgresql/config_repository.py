@@ -184,6 +184,82 @@ class PostgresMcpServerConfigRepository:
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
 
+    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Save only if the row is still the one the caller read (#1954).
+
+        See `IMcpServerConfigRepository.save_versioned`. A live row is matched
+        on `enabled = TRUE` as well as the version, because a deletion disables
+        the row without changing its version: a write read before the deletion
+        must not bring the server back.
+        """
+        mcp_server_id = config.mcp_server_id
+        config_json = json.dumps(config.to_dict())
+        now = datetime.now(UTC).isoformat()
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        live = True
+                        if expected_version == 0:
+                            # No row of any kind, deleted or live: the caller saw none.
+                            cur.execute(
+                                """
+                                INSERT INTO mcp_server_configs
+                                (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                                VALUES (%s, %s, %s, %s, 1, %s, %s)
+                                """,
+                                (mcp_server_id, config.mode, config_json, config.enabled, now, now),
+                            )
+                            conn.commit()
+                            return
+                        if expected_version is None:
+                            cur.execute(
+                                "SELECT version, enabled FROM mcp_server_configs WHERE mcp_server_id = %s",
+                                (mcp_server_id,),
+                            )
+                            row = cur.fetchone()
+                            if row is None:
+                                cur.execute(
+                                    """
+                                    INSERT INTO mcp_server_configs
+                                    (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                                    VALUES (%s, %s, %s, %s, 1, %s, %s)
+                                    """,
+                                    (mcp_server_id, config.mode, config_json, config.enabled, now, now),
+                                )
+                                conn.commit()
+                                return
+                            if row[1]:
+                                raise ConcurrentModificationError(mcp_server_id, 0, row[0])
+                            # A deleted server is created again over its disabled row.
+                            expected_version, live = row[0], False
+
+                        cur.execute(
+                            """
+                            UPDATE mcp_server_configs
+                            SET mode = %s, config_json = %s, enabled = %s, version = version + 1, updated_at = %s
+                            WHERE mcp_server_id = %s AND version = %s AND enabled = %s
+                            """,
+                            (config.mode, config_json, config.enabled, now, mcp_server_id, expected_version, live),
+                        )
+                        if cur.rowcount == 0:
+                            raise ConcurrentModificationError(mcp_server_id, expected_version, expected_version + 1)
+                    conn.commit()
+                except Exception:
+                    # See class docstring: never hand a pooled connection back
+                    # in an aborted transaction.
+                    conn.rollback()
+                    raise
+
+        except ConcurrentModificationError:
+            raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            if getattr(e, "pgcode", None) == "23505":
+                # Two creates raced past the SELECT; the primary key decided.
+                raise ConcurrentModificationError(mcp_server_id, 0, 1) from e
+            logger.error(f"Failed to save mcp_server config: {e}")
+            raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
 
@@ -409,14 +485,17 @@ class PostgresMcpServerConfigRepository:
             mcp_server_id: McpServer identifier
 
         Returns:
-            Tuple of (config, version) if found, None otherwise
+            Tuple of (config, version) for a live row, None otherwise. A deleted
+            (disabled) row is not returned: a change built on it would bring
+            the server back.
         """
         try:
             with self._connections.get_connection() as conn:
                 try:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "SELECT config_json, version FROM mcp_server_configs WHERE mcp_server_id = %s",
+                            "SELECT config_json, version FROM mcp_server_configs"
+                            " WHERE mcp_server_id = %s AND enabled = TRUE",
                             (mcp_server_id,),
                         )
                         row = cur.fetchone()
