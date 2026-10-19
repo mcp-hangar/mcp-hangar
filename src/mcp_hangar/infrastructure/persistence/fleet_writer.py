@@ -17,6 +17,7 @@ latency of one row write, on registration only.
 """
 
 from collections.abc import Callable
+from typing import cast
 
 from mcp_hangar.domain.contracts.fleet import IFleetWriter, NotTheManagerError
 from mcp_hangar.domain.contracts.management_lease import Lease
@@ -65,6 +66,16 @@ class RepositoryFleetWriter(IFleetWriter):
         """Persist a server's configuration, waiting for the write."""
         self._loop.run(self._repository.save(snapshot), self._timeout_s)
         logger.debug("fleet_snapshot_saved", mcp_server_id=snapshot.mcp_server_id)
+
+    def read(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """Read a live server's recorded configuration and its version, waiting for the read."""
+        recorded = self._loop.run(self._repository.get_with_version(mcp_server_id), self._timeout_s)
+        return cast("tuple[McpServerConfigSnapshot, int] | None", recorded)
+
+    def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Persist a configuration only if the row is still the one that was read."""
+        self._loop.run(self._repository.save_versioned(snapshot, expected_version), self._timeout_s)
+        logger.debug("fleet_snapshot_saved", mcp_server_id=snapshot.mcp_server_id, expected_version=expected_version)
 
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         """Remove a server's configuration, waiting for the write.

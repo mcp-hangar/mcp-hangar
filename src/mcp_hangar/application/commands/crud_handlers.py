@@ -7,12 +7,14 @@ All handlers:
 - Are thread-safe (mutations guarded via repository or injected lock)
 """
 
+import dataclasses
 import threading
 from collections.abc import Callable
 from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.fleet import IFleetWriter
+from ...domain.contracts.persistence import ConcurrentModificationError
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
@@ -25,7 +27,7 @@ from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
-from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
@@ -44,6 +46,20 @@ from .crud_commands import (
 )
 
 logger = get_logger(__name__)
+
+
+def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
+    """Record a change to some fields of a server, on top of the recorded row (#1954).
+
+    The row is the base, not this replica's copy: a copy that has not yet seen a
+    peer's change would otherwise write every other field back as it was -- an
+    older L7 policy included -- and win. The write is refused if the row changed
+    after it was read. A server with no row (one from the configuration file)
+    is recorded from this replica's copy, and only if no row appeared meanwhile.
+    """
+    recorded = fleet_writer.read(mcp_server.mcp_server_id)
+    base, version = (snapshot_of(mcp_server), 0) if recorded is None else recorded
+    fleet_writer.save_versioned(dataclasses.replace(base, **fields), version)
 
 
 def _get_mcp_server_or_raise(repository: IMcpServerRepository, mcp_server_id: str) -> McpServer:
@@ -159,8 +175,13 @@ class CreateMcpServerHandler(CommandHandler):
         # told the registration did not happen. The other order gives a running
         # server, a published event, and no record -- which is what a restart
         # then quietly resolves by forgetting the server.
+        # Insert-only: another replica may have created it already, before this
+        # one heard of it (#1954). Its row is refused rather than overwritten.
         if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(mcp_server))
+            try:
+                self._fleet_writer.save_versioned(snapshot_of(mcp_server), None)
+            except ConcurrentModificationError as e:
+                raise ValidationError(f"McpServer already exists: {command.mcp_server_id}") from e
 
         # Before it joins the repository, so nothing can start it -- and write
         # output -- with no buffer attached.
@@ -256,18 +277,30 @@ class UpdateMcpServerHandler(CommandHandler):
         """
         mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
+        # Recorded first, and only the fields this command changes (#1954). An
+        # update that is not recorded is reverted by the next restart; one that
+        # is recorded from this replica's whole copy reverts whatever a peer
+        # changed meanwhile. Validated before the write, so a bad value cannot
+        # leave the record changed and the server not.
+        if command.idle_ttl_s is not None:
+            IdleTTL(command.idle_ttl_s)
+        if command.health_check_interval_s is not None:
+            HealthCheckInterval(command.health_check_interval_s)
+        if self._fleet_writer is not None:
+            changed: dict[str, Any] = {
+                "description": command.description,
+                "env": dict(command.env) if command.env is not None else None,
+                "idle_ttl_s": command.idle_ttl_s,
+                "health_check_interval_s": command.health_check_interval_s,
+            }
+            _record_fields(self._fleet_writer, mcp_server, **{k: v for k, v in changed.items() if v is not None})
+
         mcp_server.update_config(
             description=command.description,
             env=command.env,
             idle_ttl_s=command.idle_ttl_s,
             health_check_interval_s=command.health_check_interval_s,
         )
-
-        # After the aggregate has changed, not before: the record is of what the
-        # server now is. An update that is not recorded is reverted by the next
-        # restart, which reads a snapshot describing the server as it used to be.
-        if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(mcp_server))
 
         # Collect the McpServerUpdated event recorded by update_config() and
         # append it to the aggregate's stream, which also delivers it.
@@ -321,14 +354,21 @@ class SetL7PolicyHandler(CommandHandler):
         if mcp_server is None:
             raise McpServerNotFoundError(command.mcp_server_id)
 
-        cast(McpServer, mcp_server).set_l7_policy(command.policy)
-
-        # Record it, like every other configuration change (#991). Unrecorded,
-        # the policy lived only in this replica's RAM: a restart dropped it and
-        # peer replicas never had it, so denied tools ran while the CR reported
-        # enforcement. The save also gives the peer projection a row to read.
+        # Record it, like every other configuration change (#991), and before
+        # the server takes it. Unrecorded, the policy lived only in this
+        # replica's RAM: a restart dropped it and peer replicas never had it, so
+        # denied tools ran while the CR reported enforcement. The save also gives
+        # the peer projection a row to read. Only the policy is written, on top
+        # of the recorded row, so a replica that has not yet seen a peer's change
+        # does not write the rest of its stale copy back (#1954).
         if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(cast(McpServer, mcp_server)))
+            _record_fields(
+                self._fleet_writer,
+                cast(McpServer, mcp_server),
+                l7_policy=command.policy.to_wire() if command.policy is not None else None,
+            )
+
+        cast(McpServer, mcp_server).set_l7_policy(command.policy)
 
         # Changing this policy changes what the enforcement plane blocks, so
         # the change belongs in the audit trail and not only in a log line.

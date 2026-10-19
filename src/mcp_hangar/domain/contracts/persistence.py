@@ -243,6 +243,27 @@ class IMcpServerConfigRepository(Protocol):
         """
         ...
 
+    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Save a configuration only if the row is still the one the caller read (#1954).
+
+        `save` replaces whatever is there, so a replica whose copy is behind
+        writes its stale copy back over a peer's newer one -- an older L7 policy
+        included -- and the stale write wins. This is the compare-and-set form.
+
+        Args:
+            config: The configuration to store.
+            expected_version: The version `get_with_version` returned; 0 when
+                it returned nothing, meaning no row of any kind may exist; or
+                None for a create, which may replace a deleted (disabled) row
+                but never a live one.
+
+        Raises:
+            ConcurrentModificationError: The row changed, was deleted, or (for a
+                create) already exists, since the caller read it.
+            PersistenceError: If the write fails for any other reason.
+        """
+        ...
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
 
@@ -251,6 +272,18 @@ class IMcpServerConfigRepository(Protocol):
 
         Returns:
             Configuration snapshot if found, None otherwise
+        """
+        ...
+
+    async def get_with_version(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """Retrieve a live configuration with the version `save_versioned` expects.
+
+        Args:
+            mcp_server_id: McpServer identifier
+
+        Returns:
+            The configuration and its version, or None when there is no row or
+            the server was deleted.
         """
         ...
 

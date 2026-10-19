@@ -51,6 +51,34 @@ class IFleetWriter(ABC):
         """
 
     @abstractmethod
+    def read(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """Read a live server's recorded configuration and its version.
+
+        A change to one field is built from this, not from the replica's own
+        copy, which may be behind a peer's write (#1954).
+
+        Args:
+            mcp_server_id: The server to read.
+
+        Returns:
+            The recorded configuration and its version, or None when there is
+            no live row.
+        """
+
+    @abstractmethod
+    def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Write a configuration only if the row is still the one that was read.
+
+        Args:
+            snapshot: The configuration to record.
+            expected_version: The version `read` returned, 0 when it returned
+                nothing, or None for a create (see `IMcpServerConfigRepository`).
+
+        Raises:
+            ConcurrentModificationError: The row changed since it was read.
+        """
+
+    @abstractmethod
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         """Remove a server's configuration.
 

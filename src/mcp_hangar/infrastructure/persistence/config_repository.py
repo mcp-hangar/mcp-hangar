@@ -4,6 +4,7 @@ Provides both in-memory and SQLite implementations of IMcpServerConfigRepository
 """
 
 import json
+import sqlite3
 import threading
 from datetime import UTC, datetime
 
@@ -58,10 +59,29 @@ class InMemoryMcpServerConfigRepository:
             self._configs[config.mcp_server_id] = new_config
             logger.debug(f"Saved config for mcp_server: {config.mcp_server_id}")
 
+    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Save only if the stored version is still the one the caller read (#1954).
+
+        Deletion removes the entry here, so a create over a deleted server is a
+        plain insert.
+        """
+        with self._lock:
+            current = self._versions.get(config.mcp_server_id)
+            if (current or 0) != (expected_version or 0):
+                raise ConcurrentModificationError(config.mcp_server_id, expected_version or 0, current or 0)
+            # `save` never suspends, so the re-entrant lock covers check and write.
+            await self.save(config)
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID."""
         with self._lock:
             return self._configs.get(mcp_server_id)
+
+    async def get_with_version(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """Retrieve a configuration with its version."""
+        with self._lock:
+            config = self._configs.get(mcp_server_id)
+            return None if config is None else (config, self._versions[mcp_server_id])
 
     async def get_all(self) -> list[McpServerConfigSnapshot]:
         """Retrieve all mcp_server configurations."""
@@ -181,6 +201,84 @@ class SQLiteMcpServerConfigRepository:
 
         except ConcurrentModificationError:
             raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            logger.error(f"Failed to save mcp_server config: {e}")
+            raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        """Save only if the row is still the one the caller read (#1954).
+
+        See `IMcpServerConfigRepository.save_versioned`. A live row is matched
+        on `enabled = 1` as well as the version, because a deletion disables the
+        row without changing its version: a write read before the deletion must
+        not bring the server back.
+        """
+        mcp_server_id = config.mcp_server_id
+        config_json = json.dumps(config.to_dict())
+        now = datetime.now(UTC).isoformat()
+        try:
+            async with self._db.transaction() as conn:
+                live = 1
+                if expected_version == 0:
+                    # No row of any kind, deleted or live: the caller saw none.
+                    await conn.execute(
+                        """
+                        INSERT INTO mcp_server_configs
+                        (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 1, ?, ?)
+                        """,
+                        (mcp_server_id, config.mode, config_json, 1 if config.enabled else 0, now, now),
+                    )
+                    return
+                if expected_version is None:
+                    cursor = await conn.execute(
+                        "SELECT version, enabled FROM mcp_server_configs WHERE mcp_server_id = ?",
+                        (mcp_server_id,),
+                    )
+                    row = await cursor.fetchone()
+                    if row is None:
+                        await conn.execute(
+                            """
+                            INSERT INTO mcp_server_configs
+                            (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, 1, ?, ?)
+                            """,
+                            (mcp_server_id, config.mode, config_json, 1 if config.enabled else 0, now, now),
+                        )
+                        return
+                    if row[1]:
+                        raise ConcurrentModificationError(mcp_server_id, 0, row[0])
+                    # A deleted server is created again over its disabled row.
+                    expected_version, live = row[0], 0
+
+                result = await conn.execute(
+                    """
+                    UPDATE mcp_server_configs
+                    SET mode = ?, config_json = ?, enabled = ?, version = version + 1, updated_at = ?
+                    WHERE mcp_server_id = ? AND version = ? AND enabled = ?
+                    """,
+                    (
+                        config.mode,
+                        config_json,
+                        1 if config.enabled else 0,
+                        now,
+                        mcp_server_id,
+                        expected_version,
+                        live,
+                    ),
+                )
+                if result.rowcount == 0:
+                    cursor = await conn.execute(
+                        "SELECT version FROM mcp_server_configs WHERE mcp_server_id = ?", (mcp_server_id,)
+                    )
+                    current = await cursor.fetchone()
+                    raise ConcurrentModificationError(mcp_server_id, expected_version, current[0] if current else 0)
+
+        except ConcurrentModificationError:
+            raise
+        except sqlite3.IntegrityError as e:
+            # Two creates raced past the SELECT; the primary key decided.
+            raise ConcurrentModificationError(mcp_server_id, 0, 1) from e
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
@@ -375,12 +473,14 @@ class SQLiteMcpServerConfigRepository:
             mcp_server_id: McpServer identifier
 
         Returns:
-            Tuple of (config, version) if found, None otherwise
+            Tuple of (config, version) for a live row, None otherwise. A deleted
+            (disabled) row is not returned: a change built on it would bring
+            the server back.
         """
         try:
             async with self._db.connection() as conn:
                 cursor = await conn.execute(
-                    "SELECT config_json, version FROM mcp_server_configs WHERE mcp_server_id = ?",
+                    "SELECT config_json, version FROM mcp_server_configs WHERE mcp_server_id = ? AND enabled = 1",
                     (mcp_server_id,),
                 )
                 row = await cursor.fetchone()

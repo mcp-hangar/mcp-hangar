@@ -185,6 +185,9 @@ class TestTheCallPath:
             def save(self, snapshot: Any) -> None:
                 pass
 
+            def save_versioned(self, snapshot: Any, expected_version: int | None) -> None:
+                pass
+
             def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
                 asked.append(fenced)
 
