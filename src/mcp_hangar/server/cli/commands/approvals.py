@@ -89,35 +89,54 @@ def _principal(full_config: dict[str, Any], config_path: Path) -> Any:
     return principal
 
 
+def _sqlite_backend_path(full_config: dict[str, Any]) -> Path | None:
+    """Where `persistence.backend: sqlite` keeps approvals, read without building the backend.
+
+    Building it creates its data directory, which here would be one beside the
+    command rather than beside the gateway. Mirrors ``SqliteBackend._path_for``.
+    """
+    from mcp_hangar.infrastructure.persistence.backends.sqlite import DEFAULT_DATA_DIR
+
+    settings = (full_config.get("persistence") or {}).get("sqlite") or {}
+    override = settings.get("database_path")
+    path = Path(str(override)) if override else Path(str(settings.get("data_dir", DEFAULT_DATA_DIR))) / "mcp_hangar.db"
+    return path if path.is_absolute() else None
+
+
+_RELATIVE = CLIError(
+    "This configuration keeps approvals under the gateway's working directory, which this command cannot know.",
+    suggestions=[
+        "Give the store an absolute path: event_store.path (as `mcp-hangar init` writes it), or "
+        "persistence.sqlite.data_dir when persistence.backend is sqlite.",
+        "Or name the file with --db.",
+    ],
+)
+
+
 def _repository(full_config: dict[str, Any], db: Path | None) -> tuple[Any, str]:
     """The approval repository the gateway uses, and a description of where it is."""
     from mcp_hangar.server.bootstrap.components import approval_database_path
     from mcp_hangar.server.bootstrap.persistence import select_backend
 
-    if db is None:
+    backend_name = str((full_config.get("persistence") or {}).get("backend") or "").lower()
+    if db is None and backend_name == "sqlite":
+        db = _sqlite_backend_path(full_config)
+        if db is None:
+            raise _RELATIVE
+    elif db is None and backend_name:
         try:
             backend = select_backend(full_config)
         except Exception as exc:  # noqa: BLE001 -- a storage config error becomes an actionable CLI error
             raise CLIError(f"Could not open the configured storage backend: {exc}") from exc
-        if backend is not None:
-            name = (full_config.get("persistence") or {}).get("backend")
-            return backend.approval_repository(), f"persistence.backend: {name}"
+        if backend is None:  # unreachable: a named backend is built or raises
+            raise CLIError(f"persistence.backend {backend_name!r} selected no backend.")
+        return backend.approval_repository(), f"persistence.backend: {backend_name}"
+    elif db is None:
         db = approval_database_path(full_config)
         if db is None:
-            raise CLIError(
-                "This configuration keeps approvals in data/mcp_hangar.db under the gateway's working "
-                "directory, which this command cannot know.",
-                suggestions=[
-                    "Set event_store.path to an absolute path (as `mcp-hangar init` does); approvals then live "
-                    "beside it.",
-                    "Or name the file with --db.",
-                ],
-            )
+            raise _RELATIVE
     if not db.is_file():
-        raise CLIError(
-            f"No approval store at {db}.",
-            reason="The gateway creates it the first time it holds a call.",
-        )
+        raise CLIError(f"No approval store at {db}.", reason="Is a gateway running with this configuration?")
     from mcp_hangar.approvals.persistence.sqlite_approval_repository import SqliteApprovalRepository
     from mcp_hangar.infrastructure.persistence.database import Database, DatabaseConfig
 

@@ -178,3 +178,30 @@ def test_an_unknown_state_is_refused(runner: CliRunner, tmp_path: Path) -> None:
     result = runner.invoke(app, ["approvals", "list", "-c", str(_config(tmp_path)), "--state", "maybe"])
 
     assert "Unknown state" in _refusal(result)
+
+
+def test_a_relative_sqlite_backend_is_not_guessed_or_created(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text("mcp_servers: {}\npersistence:\n  backend: sqlite\n" + PRINCIPAL.format(roles="provider-admin"))
+
+    result = runner.invoke(app, ["approvals", "list", "-c", str(config)])
+
+    assert "working directory" in _refusal(result)
+    assert not (tmp_path / "data").exists()
+
+
+def test_an_absolute_sqlite_backend_is_the_store(runner: CliRunner, tmp_path: Path) -> None:
+    approval_id = _seed(tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'mcp_servers: {{}}\npersistence:\n  backend: sqlite\n  sqlite:\n    data_dir: "{tmp_path}"\n'
+        + PRINCIPAL.format(roles="provider-admin")
+    )
+
+    result = runner.invoke(app, ["approvals", "approve", approval_id, "-c", str(config)])
+
+    assert result.exit_code == 0, result.output
+    assert _record(tmp_path, approval_id).decided_by == "local-user"
