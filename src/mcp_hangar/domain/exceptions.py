@@ -426,6 +426,30 @@ class ClientError(MCPError):
         )
 
 
+class UpstreamPeerKeyMismatchError(ClientError, ExpectedRefusal):
+    """The upstream's TLS key is not in its key list (ADR-030 §5).
+
+    Raised inside the handshake, before any request byte is written, so the
+    upstream received nothing. A refusal the gateway decided, not a transport
+    failure: it is not an `OSError`, which httpcore would turn into a retryable
+    `ConnectError` and lose the type of.
+    """
+
+    #: The bounded reason code (ADR-029 §5) this refusal carries.
+    failure_code = "upstream_peer_key_mismatch"
+
+    def __init__(self, observed_peer_spki: str | None, mcp_server_id: str = ""):
+        #: The key pin the peer presented, or None when it presented no certificate.
+        self.observed_peer_spki = observed_peer_spki
+        super().__init__(
+            message=(
+                "upstream TLS key is not in the key list" if observed_peer_spki else "upstream presented no certificate"
+            ),
+            mcp_server_id=mcp_server_id,
+            details={"failure_code": self.failure_code, "observed_peer_spki": observed_peer_spki},
+        )
+
+
 class ClientNotConnectedError(ClientError):
     """Raised when attempting to use a client that is not connected."""
 

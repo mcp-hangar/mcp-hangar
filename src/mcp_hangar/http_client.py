@@ -11,6 +11,7 @@ Thread-safe HTTP client with:
 Follows the same interface as StdioClient for consistency.
 """
 
+import hashlib
 import json
 import ssl
 import threading
@@ -24,9 +25,11 @@ from queue import Queue
 from typing import Any, cast
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from . import metrics as prometheus_metrics
-from .domain.exceptions import ClientError, ResponseTooLarge
+from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMismatchError
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
@@ -173,6 +176,61 @@ class HttpClientConfig:
     enforce_ssrf: bool = False
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
+    # The upstream's key list (ADR-030): canonical key pins, `sha256:` + hex over
+    # the DER SubjectPublicKeyInfo. When set, every connection must end at one of
+    # these keys, checked inside the TLS handshake; `verify_ssl` and
+    # `ca_cert_path` are then not used, because no CA is a trust input.
+    peer_key_pins: frozenset[str] | None = None
+
+
+def peer_key_pin(der_certificate: bytes) -> str:
+    """The canonical key pin of a DER certificate: SHA-256 over its DER SubjectPublicKeyInfo."""
+    public_key = x509.load_der_x509_certificate(der_certificate).public_key()
+    spki = public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+    return "sha256:" + hashlib.sha256(spki).hexdigest()
+
+
+class _PeerKeyCheckedSocket(ssl.SSLSocket):
+    """A TLS socket that refuses a peer whose key is not in the key list (ADR-030 §5).
+
+    The check runs inside `do_handshake`, which `SSLContext.wrap_socket` calls
+    before httpcore hands the connection to the pool, so a refused peer receives
+    no request byte -- not even on the standing GET stream, which no per-request
+    hook would see. Verification of the chain and the name is off: the key is
+    the identity, and a CA would only add an issuance policy Hangar cannot see.
+    """
+
+    #: The key list this socket accepts; set per context by `_peer_key_context`.
+    _key_pins: frozenset[str] = frozenset()
+    #: The key pin the peer presented, kept for the audit record.
+    observed_peer_spki: str | None = None
+
+    def do_handshake(self, block: bool = False) -> None:
+        super().do_handshake(block)
+        certificate = self.getpeercert(binary_form=True)
+        self.observed_peer_spki = peer_key_pin(certificate) if certificate else None
+        if self.observed_peer_spki in self._key_pins:
+            return
+        # `SSLSocket._create` closes the socket only for OSError and ValueError,
+        # and this refusal is deliberately neither: close it here.
+        self.close()
+        raise UpstreamPeerKeyMismatchError(self.observed_peer_spki)
+
+
+def _peer_key_context(key_pins: frozenset[str]) -> ssl.SSLContext:
+    """A TLS 1.3 client context whose handshake accepts only a peer in *key_pins*.
+
+    TLS 1.3 binds the certificate and its CertificateVerify to the handshake
+    transcript and has no renegotiation, so the key checked is the key the
+    channel was established with. SNI is still sent: `server_hostname` reaches
+    `wrap_socket` from `sni_hostname` as before, only the name check is off.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_3
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.sslsocket_class = type("_PinnedSocket", (_PeerKeyCheckedSocket,), {"_key_pins": key_pins})
+    return context
 
 
 @dataclass
@@ -430,6 +488,14 @@ class HttpClient:
         verify: bool | str | ssl.SSLContext = config.verify_ssl
         if config.ca_cert_path:
             verify = config.ca_cert_path
+        if config.peer_key_pins is not None:
+            # A key list that verifies nothing must not become a client that
+            # connects anyway: empty, or on a scheme with no handshake, refuse.
+            if not config.peer_key_pins:
+                raise ClientError("a key-pinned upstream needs a non-empty key list", self._mcp_server_id or "")
+            if self._scheme != "https":
+                raise ClientError("a key-pinned upstream must be reached over https", self._mcp_server_id or "")
+            verify = _peer_key_context(config.peer_key_pins)
 
         # Timeout configuration
         timeout = httpx.Timeout(

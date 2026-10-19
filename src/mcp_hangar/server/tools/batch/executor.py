@@ -139,12 +139,20 @@ _GATE_REASONS = {
 _GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalRevalidationError"})
 
 #: Refusals raised past the gates rather than returned by one: the aggregate's
-#: L7 policy (#1295) and a spent command-bus rate-limit budget. A call they end
+#: L7 policy (#1295), a spent command-bus rate-limit budget, and an upstream
+#: whose TLS key is not in its key list (ADR-030 §5). A call they end
 #: is `deny`, not `error` -- each is the gateway answering on purpose, which is
 #: what `ExpectedRefusal` marks. `tests/unit/test_refusal_span_status.py` holds
 #: this set to the exceptions carrying that marker, so a new one cannot be
 #: recorded as a failure here while the tracer treats it as a refusal.
-_REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError", "RateLimitExceeded"})
+_REFUSED_AT_DISPATCH = frozenset(
+    {
+        "EgressPolicyDeniedError",
+        "EgressPolicyApprovalRequiredError",
+        "RateLimitExceeded",
+        "UpstreamPeerKeyMismatchError",
+    }
+)
 
 #: The dispatch refusals the aggregate's L7 policy raises (#1295). Their log line
 #: carries the verdict's bounded fields, not the policy's joined reasons.
