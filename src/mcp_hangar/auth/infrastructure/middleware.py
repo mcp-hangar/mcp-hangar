@@ -273,6 +273,11 @@ class AuthorizationMiddleware:
         self._authorizer = authorizer
         self._event_publisher = event_publisher
 
+    @property
+    def authorizer(self) -> IAuthorizer:
+        """The authorizer this middleware decides with."""
+        return self._authorizer
+
     def authorize(
         self,
         principal: Principal,

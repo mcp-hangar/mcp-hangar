@@ -24,7 +24,7 @@ from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RB
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.security import Permission, Principal, PrincipalId, PrincipalType, Role
-from mcp_hangar.server.tools.tool_permissions import management_tools_for
+from mcp_hangar.server.tools.tool_permissions import SELF_SCOPED_TOOLS, management_tools_for
 
 _SERVER = "payments"
 _UPSTREAM_TOOL = "refund"
@@ -84,10 +84,13 @@ def as_role(monkeypatch):
 
 class TestWhoSeesTheControlPlane:
     def test_an_agent_principal_sees_none_of_it(self, as_role):
-        """A role that may invoke tools and administer nothing gets no surface."""
+        """A role that may invoke tools and administer nothing gets no surface.
+
+        Except the self-scoped whoami: any authenticated caller may ask who it is (#1363).
+        """
         principal = as_role("agent")
 
-        assert management_tools_for(_ctx(principal)) == frozenset()
+        assert management_tools_for(_ctx(principal)) == SELF_SCOPED_TOOLS
 
     def test_an_operator_sees_what_its_role_permits_and_no_more(self, as_role):
         """viewer holds mcp_servers:read but not :lifecycle.
@@ -196,7 +199,7 @@ class TestTheProjectionTheFrontDoorActuallyServes:
         names = {tool.name for tool in result.tools}
 
         assert _UPSTREAM_TOOL in names
-        assert not any(name.startswith("hangar_") for name in names)
+        assert {name for name in names if name.startswith("hangar_")} == SELF_SCOPED_TOOLS
 
     async def test_an_operator_gets_both_from_the_same_endpoint(self, monkeypatch):
         """The acceptance criterion: one deployment, two answers."""

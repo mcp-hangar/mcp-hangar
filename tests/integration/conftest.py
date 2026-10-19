@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from tests._applied_config import undo_applied_configuration
 from tests._thread_guard import fail_on_threads_started_since
 
 # Threads allowed to outlive the suite, by name prefix. Every entry says why it
@@ -29,3 +30,16 @@ def no_thread_outlives_the_integration_suite() -> Iterator[None]:
     before = set(threading.enumerate())
     yield
     fail_on_threads_started_since(before, suite="tests/integration", allowed=_ALLOWED_THREAD_PREFIXES)
+
+
+@pytest.fixture
+def applied_configuration_is_undone() -> Iterator[None]:
+    """Undo, after the test, what each configuration it loaded put in force in the process.
+
+    For a test that loads a configuration file the way the CLI does, through
+    `load_configuration` or `mcp-hangar pin`'s `observe_digests`, both of which
+    commit the file's servers, pins and policies process-wide. See
+    `tests/_applied_config.py` for what leaked when this was missing.
+    """
+    yield
+    undo_applied_configuration()

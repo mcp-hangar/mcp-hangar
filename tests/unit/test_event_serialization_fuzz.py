@@ -41,7 +41,6 @@ from mcp_hangar.domain.events import (
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
-    PolicyPushRejected,
     ToolApprovalCancelled,
     ToolApprovalDenied,
     ToolApprovalExpired,
@@ -166,11 +165,6 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     "McpServerCapabilityQuarantineReleased": McpServerCapabilityQuarantineReleased(
         mcp_server_id="p1",
         released_by="ops@example.com",
-    ),
-    "PolicyPushRejected": PolicyPushRejected(
-        principal_id="anonymous",
-        reason="authentication_required",
-        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
     ),
     # Approval gate
     "ToolApprovalRequested": ToolApprovalRequested(
@@ -317,7 +311,7 @@ class TestEventSerializerFuzz:
     def test_round_trip_preserves_every_field(self, event_type: str) -> None:
         """Same type is not enough -- the values have to come back too.
 
-        `PolicyPushRejected.timestamp` did not: JSON has no datetime, the encoder
+        A `datetime` field once did not: JSON has no datetime, the encoder
         wrote an ISO string, and nothing parsed it back, so a `datetime` went
         into the store and a `str` came out. Silently, and only on replay.
         """
@@ -331,6 +325,24 @@ class TestEventSerializerFuzz:
                 f"{event_type}.{field.name} came back as {type(roundtripped).__name__}, not {type(original).__name__}"
             )
             assert roundtripped == original, f"{event_type}.{field.name} changed value across a round trip"
+
+    def test_a_datetime_field_comes_back_as_a_datetime(self) -> None:
+        """The parametrized round trip covers this only while some event has a `datetime` field.
+
+        None does today, so the decoder is pinned directly. The carrier is a
+        plain dataclass, not a DomainEvent subclass: the registry is derived
+        from the subclass tree, and a test-defined event would join it.
+        """
+
+        @dataclasses.dataclass
+        class Stamped:
+            at: datetime
+            label: str
+
+        moment = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+        restored = EventSerializer()._restore_datetimes(Stamped, {"at": moment.isoformat(), "label": "x"})  # type: ignore[arg-type]
+
+        assert restored == {"at": moment, "label": "x"}
 
     def test_the_identity_survives_a_round_trip(self) -> None:
         """Replay must not mint a new id or re-date the event."""

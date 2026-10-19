@@ -114,6 +114,31 @@ def _should_inject_ctx(func: Callable[..., Any]) -> bool:
     return True
 
 
+def _own_ctx_param(func: Callable[..., Any]) -> str | None:
+    """The name of the MCP ``Context`` parameter *func* declares itself, or None.
+
+    A tool that takes its own Context (``hangar_whoami``) reads the caller from
+    it, so the guard must authorize against that same Context. Without this the
+    guard saw no Context at all and refused such a tool as anonymous under auth.
+    """
+    try:
+        from ..._sdk_compat import Context
+
+        for name, ann in typing.get_type_hints(func).items():
+            if name != "return" and inspect.isclass(ann) and issubclass(ann, Context):
+                return name
+    except Exception:  # noqa: BLE001 -- annotation resolution is best-effort
+        return None
+    return None
+
+
+def _take_request_ctx(kwargs: dict[str, Any], inject_ctx: bool, own_ctx_param: str | None) -> Any:
+    """The request Context the guard authorizes against: injected and stripped, or the tool's own (left in place)."""
+    if inject_ctx:
+        return kwargs.pop(_CTX_KW, None)
+    return kwargs.get(own_ctx_param) if own_ctx_param else None
+
+
 def _bridge_ctx_identity(mcp_ctx: Any) -> Any:
     """Bind caller identity from the injected MCP request Context, or return None.
 
@@ -271,12 +296,13 @@ def mcp_tool_wrapper(
         # request Context under _CTX_KW so the wrapper can bridge caller identity
         # centrally for every wrapped tool (fixes the v2 tool-listing fail-open).
         inject_ctx = _should_inject_ctx(func)
+        own_ctx_param = None if inject_ctx else _own_ctx_param(func)
 
         if is_async:
 
             @wraps(func)
             async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
-                _mcp_ctx = kwargs.pop(_CTX_KW, None) if inject_ctx else None
+                _mcp_ctx = _take_request_ctx(kwargs, inject_ctx, own_ctx_param)
                 _identity_token = _bridge_ctx_identity(_mcp_ctx)
                 try:
                     key, refused = _guard_the_call(
@@ -336,7 +362,7 @@ def mcp_tool_wrapper(
 
             @wraps(func)
             def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
-                _mcp_ctx = kwargs.pop(_CTX_KW, None) if inject_ctx else None
+                _mcp_ctx = _take_request_ctx(kwargs, inject_ctx, own_ctx_param)
                 _identity_token = _bridge_ctx_identity(_mcp_ctx)
                 try:
                     key, refused = _guard_the_call(

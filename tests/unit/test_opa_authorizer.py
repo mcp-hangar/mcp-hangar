@@ -324,6 +324,15 @@ class TestCombinedAuthorizer:
             opa_auth = opa
         return CombinedAuthorizer(rbac, opa_auth, require_both=require_both), rbac, opa_auth
 
+    def test_it_exposes_its_rbac_and_how_opa_can_change_a_verdict(self):
+        """`hangar_whoami` (#1363) reads these to show the caller what judges it."""
+        combined, rbac, _ = self._make_combined(opa=None)
+        assert combined.rbac is rbac
+        assert combined.opa_effect is None
+
+        assert self._make_combined(require_both=True)[0].opa_effect == "may_refuse_more"
+        assert self._make_combined(require_both=False)[0].opa_effect == "may_admit_more"
+
     def test_no_opa_returns_rbac_result(self):
         combined, rbac, _ = self._make_combined(opa=None)
         rbac.authorize.return_value = AuthorizationResult.allow(reason="rbac_ok")

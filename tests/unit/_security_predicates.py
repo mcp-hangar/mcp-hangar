@@ -348,6 +348,9 @@ EXEMPT: dict[str, str] = {
     "auth/bootstrap.py::NullAuthComponents.__init__.<locals>.NullAuthorizer.authorize": (
         "The auth-off authorizer. It allows by design."
     ),
+    "auth/infrastructure/middleware.py::AuthorizationMiddleware.authorizer": (
+        "A read-only accessor returning the backend, so hangar_whoami can show its role bindings. It decides nothing."
+    ),
     "domain/contracts/session_suspension.py::ISessionSuspensionRegistry.is_suspended": (
         "An interface. Its implementation, InMemorySessionSuspensionRegistry.is_suspended, is registered."
     ),

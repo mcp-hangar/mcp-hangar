@@ -103,7 +103,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.9",
+    "ruff==0.17.0",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -480,8 +480,7 @@ reserved_without_producer = [
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
   "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
-  "McpServerApproved", "McpServerCapabilityQuarantineReleased",
-  "PolicyPushRejected", ]
+  "McpServerApproved", "McpServerCapabilityQuarantineReleased", ]
 # DiscoveryCycleCompleted and DiscoverySourceHealthChanged stay unemitted on
 # purpose rather than for lack of a caller: at the default 30s refresh a cycle
 # event is 2880 rows a day per gateway saying "nothing changed", and source
