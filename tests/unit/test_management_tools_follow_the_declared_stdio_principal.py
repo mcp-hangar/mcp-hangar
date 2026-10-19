@@ -29,13 +29,14 @@ from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, Pri
 from mcp_hangar.server.bootstrap import _declare_stdio_principal
 from mcp_hangar.server.tools.tool_permissions import (
     INVOKE_PATH_TOOLS,
+    SELF_SCOPED_TOOLS,
     TOOL_PERMISSIONS,
     ToolAccessNotAuthorizedError,
     authorize_tool,
     management_tools_for,
 )
 
-MANAGEMENT_TOOLS = sorted(set(TOOL_PERMISSIONS) - INVOKE_PATH_TOOLS)
+MANAGEMENT_TOOLS = sorted((set(TOOL_PERMISSIONS) - INVOKE_PATH_TOOLS) | SELF_SCOPED_TOOLS)
 
 #: The context a stdio session hands a tool: a request context with no request.
 STDIO_CTX = SimpleNamespace(request_context=SimpleNamespace(request=None))
@@ -145,7 +146,8 @@ class TestHttpIsUnchanged:
         _declare(["admin"])
         same_id = Principal(id=PrincipalId("local-user"), type=PrincipalType.USER, tenant_id="local")
 
-        assert management_tools_for(_http_ctx(same_id)) == frozenset()
+        # Only the self-scoped whoami, which any authenticated caller is shown (#1363).
+        assert management_tools_for(_http_ctx(same_id)) == SELF_SCOPED_TOOLS
         with pytest.raises(ToolAccessNotAuthorizedError, match="permission required"):
             authorize_tool("hangar_status", _http_ctx(same_id))
 

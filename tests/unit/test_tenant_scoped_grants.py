@@ -50,6 +50,7 @@ from mcp_hangar.server.api.ws.filters import visible_to_tenant
 from mcp_hangar.server.tools.tool_permissions import (
     INVOKE_PATH_TOOLS,
     SELF_AUTHORIZING_TOOLS,
+    SELF_SCOPED_TOOLS,
     TENANT_SCOPED_GRANT_TOOLS,
     TOOL_PERMISSIONS,
     ToolAccessNotAuthorizedError,
@@ -573,12 +574,13 @@ class TestTheManagementToolsNeedAGlobalGrant:
         authorize_tool(tool, _mcp_ctx(granted("developer", "tenant:A")))
 
     def test_a_tenant_scoped_admin_is_shown_no_management_tool(self, granted):
-        assert management_tools_for(_mcp_ctx(granted("admin", "tenant:A"))) == frozenset()
+        # Only the self-scoped whoami, which needs an identity and no grant (#1363).
+        assert management_tools_for(_mcp_ctx(granted("admin", "tenant:A"))) == SELF_SCOPED_TOOLS
 
     def test_a_global_admin_is_shown_all_of_them(self, granted):
         assert (
             management_tools_for(_mcp_ctx(granted("admin", "global")))
-            == frozenset(TOOL_PERMISSIONS) - INVOKE_PATH_TOOLS
+            == (frozenset(TOOL_PERMISSIONS) - INVOKE_PATH_TOOLS) | SELF_SCOPED_TOOLS
         )
 
 
@@ -614,7 +616,7 @@ class TestTheFrontDoorServesATenantGrantNoControlPlane:
 
         names = {tool.name for tool in (await list_tools(request_ctx, None)).tools}
         assert "refund" in names
-        assert not any(name.startswith("hangar_") for name in names)
+        assert {name for name in names if name.startswith("hangar_")} == SELF_SCOPED_TOOLS
 
         with pytest.raises(Exception) as excinfo:
             await call_tool(request_ctx, SimpleNamespace(name="hangar_list", arguments={}))

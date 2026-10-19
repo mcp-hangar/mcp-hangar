@@ -174,7 +174,8 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Gateway]:
         yield gw
 
 
-CLOSED = {"no_tenant_tools": [], "no_tenant_call": METHOD_NOT_FOUND, "tenant_call": "served"}
+# Only `hangar_whoami`, which every authenticated caller is offered (#1363): no upstream tool.
+CLOSED = {"no_tenant_tools": ["hangar_whoami"], "no_tenant_call": METHOD_NOT_FOUND, "tenant_call": "served"}
 
 
 def test_a_key_without_a_tenant_sees_nothing_before_any_reload(gateway: _Gateway) -> None:

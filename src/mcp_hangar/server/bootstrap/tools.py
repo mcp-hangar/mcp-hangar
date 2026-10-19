@@ -13,6 +13,7 @@ from ..tools import (
     register_mcp_server_tools,
 )
 from ..tools.continuation import register_continuation_tools
+from ..tools.whoami import register_whoami_tools
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,7 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     register_group_tools(mcp_server)
     register_batch_tools(mcp_server)
     register_continuation_tools(mcp_server)
+    register_whoami_tools(mcp_server)
 
     from ...fastmcp_server.interceptors_list import register_interceptors_list
 
