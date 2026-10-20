@@ -15,6 +15,8 @@ from ...domain.contracts.persistence import (
     IAuditRepository,
     IMcpServerConfigRepository,
     McpServerConfigSnapshot,
+    PeerKeyNameRefused,
+    peer_key_claim,
 )
 from ...domain.model import McpServer
 from ...domain.policies.egress_l7 import L7Policy
@@ -114,6 +116,9 @@ class RecoveryService:
 
             # Load all enabled configurations
             configs = await self._config_repo.get_all()
+            # Read before any row is restored: a row the record contradicts is
+            # refused, so a store whose record cannot be read restores nothing.
+            peer_key_names = await self._config_repo.get_peer_key_names()
 
             logger.info(f"Recovery: Found {len(configs)} mcp_server configurations")
 
@@ -130,6 +135,17 @@ class RecoveryService:
                         result.skipped_count += 1
                         logger.debug(f"Recovery: {config.mcp_server_id} already declared in configuration")
                         continue
+
+                    # A row under a recorded name that does not declare the
+                    # recorded key: what an older replica's plain create leaves
+                    # behind. Serving it would serve the name unchecked (ADR-030 §4e).
+                    recorded = peer_key_names.get(config.mcp_server_id)
+                    if recorded is not None and peer_key_claim(config) != recorded:
+                        logger.error("recovery_refused_row_under_peer_key_name", mcp_server_id=config.mcp_server_id)
+                        raise PeerKeyNameRefused(
+                            config.mcp_server_id,
+                            f"the row does not declare the recorded peer identity (key_ref '{recorded}')",
+                        )
 
                     # Create McpServer aggregate from config
                     mcp_server = self._create_mcp_server_from_config(config)

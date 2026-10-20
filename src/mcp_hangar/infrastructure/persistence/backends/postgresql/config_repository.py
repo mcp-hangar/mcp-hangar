@@ -283,6 +283,21 @@ class PostgresMcpServerConfigRepository:
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
 
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record."""
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name, key_ref FROM peer_key_names")
+                        return {name: key_ref for name, key_ref in cur.fetchall()}
+                except Exception:
+                    # See class docstring.
+                    conn.rollback()
+                    raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to read the peer-key name record: {e}") from e
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
 

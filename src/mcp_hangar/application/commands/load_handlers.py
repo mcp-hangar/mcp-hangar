@@ -1,7 +1,7 @@
 """Command handlers for hot-loading mcp_servers from the registry."""
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -94,6 +94,7 @@ class LoadMcpServerHandler(CommandHandler):
         approval_gate_available: Callable[[], bool] | None = None,
         log_buffers: ILogBuffers | None = None,
         trust: Callable[[], HotLoadTrust] | None = None,
+        peer_key_names: Callable[[], Awaitable[dict[str, str]]] | None = None,
     ):
         """Initialize the handler.
 
@@ -124,6 +125,10 @@ class LoadMcpServerHandler(CommandHandler):
                 that is not, and which secrets each may receive. A callable so that a reload applies to
                 the next load. Omitted means the default, which allows nothing:
                 every entry is unverified and no secret is delivered to any server.
+            peer_key_names: Reads the peer-key name record. A hot-loaded server
+                never writes a configuration row, so the record is checked here:
+                a recorded name belongs to a key-pinned server (ADR-030 §9).
+                Omitted means no record, as on a gateway without durable storage.
         """
         self._registry_client = registry_client
         self._package_resolver = package_resolver
@@ -136,6 +141,7 @@ class LoadMcpServerHandler(CommandHandler):
         self._approval_gate_available = approval_gate_available
         self._log_buffers = log_buffers
         self._trust = trust or HotLoadTrust
+        self._peer_key_names = peer_key_names
 
     def _attach_log_buffer(self, mcp_server_id: str, mcp_server: Any) -> None:
         """Give the loaded server the log buffer its output is read from.
@@ -309,6 +315,14 @@ class LoadMcpServerHandler(CommandHandler):
                     status="already_loaded",
                     mcp_server_id=sanitized_name,
                     message=f"McpServer '{command.name}' is already configured (not hot-loaded)",
+                )
+
+            recorded = await self._peer_key_names() if self._peer_key_names is not None else {}
+            if command.name in recorded or sanitized_name in recorded:
+                return LoadResult(
+                    status="failed",
+                    mcp_server_id=sanitized_name,
+                    message=f"McpServer '{command.name}' is in the peer-key name record; it cannot be hot-loaded",
                 )
 
             server = await self._find_server(command.name)

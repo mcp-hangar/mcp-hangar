@@ -103,6 +103,11 @@ class InMemoryMcpServerConfigRepository:
         with self._lock:
             return list(self._configs.values())
 
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record."""
+        with self._lock:
+            return dict(self._peer_key_names)
+
     async def delete(self, mcp_server_id: str) -> bool:
         """Delete mcp_server configuration."""
         with self._lock:
@@ -306,6 +311,15 @@ class SQLiteMcpServerConfigRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record."""
+        try:
+            async with self._db.connection() as conn:
+                cursor = await conn.execute("SELECT name, key_ref FROM peer_key_names")
+                return {name: key_ref for name, key_ref in await cursor.fetchall()}
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to read the peer-key name record: {e}") from e
 
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.

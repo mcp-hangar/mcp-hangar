@@ -296,6 +296,14 @@ class IMcpServerConfigRepository(Protocol):
         """
         ...
 
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record, name to `key_ref` (ADR-030 §9).
+
+        Raises:
+            PersistenceError: If the record cannot be read.
+        """
+        ...
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
 
@@ -516,6 +524,36 @@ def check_peer_key_claim(mcp_server_id: str, key_ref: str | None, entries: list[
             raise PeerKeyNameRefused(mcp_server_id, f"key_ref '{key_ref}' already names the server '{name}'")
     if (mcp_server_id, key_ref) not in entries:
         raise PeerKeyNameRefused(mcp_server_id, "the peer-key name record did not keep the claim")
+
+
+def peer_key_name_conflicts(declared: dict[str, str | None], stored: dict[str, str]) -> list[str]:
+    """What a configuration file contradicts in the stored peer-key name record (ADR-030 §9).
+
+    Args:
+        declared: Every server the file declares, by name, with the `key_ref`
+            of its peer identity or None.
+        stored: The record's entries, name to `key_ref`.
+
+    Returns:
+        One line per conflict; empty when the file agrees with the record. The
+        same name with the same `key_ref` agrees: that is a registered server
+        moved into the file. Two names the file gives one `key_ref` conflict
+        too, because the file's servers are entries of the record (§7).
+    """
+    holders = {ref: name for name, ref in stored.items()}
+    declared_by: dict[str, str] = {}
+    conflicts = []
+    for name, key_ref in sorted(declared.items()):
+        if key_ref is not None and declared_by.setdefault(key_ref, name) != name:
+            conflicts.append(f"'{name}' and '{declared_by[key_ref]}' both declare key_ref '{key_ref}'")
+        if name in stored and key_ref != stored[name]:
+            conflicts.append(
+                f"'{name}' is in the peer-key name record with key_ref '{stored[name]}', "
+                f"and the file declares it {'with key_ref ' + repr(key_ref) if key_ref else 'without a peer identity'}"
+            )
+        elif key_ref is not None and holders.get(key_ref, name) != name:
+            conflicts.append(f"'{name}' declares key_ref '{key_ref}', which the record holds for '{holders[key_ref]}'")
+    return conflicts
 
 
 # legacy aliases

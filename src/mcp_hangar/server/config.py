@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 import yaml
 
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
+from ..domain.contracts.persistence import peer_key_name_conflicts
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.hot_load_trust import HotLoadTrust, parse_hot_load_trust, set_hot_load_trust
@@ -610,6 +611,45 @@ def _reject_or_warn_on_unknown_keys(config: dict[str, Any], source: str) -> None
         logger.warning("unknown_config_key", config_path=source, detail=problem)
 
 
+def _stored_peer_key_names() -> dict[str, str]:
+    """The peer-key name record of the durable configuration store, or nothing without one."""
+    from ..infrastructure.async_bridge import BackgroundLoop
+    from ..infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+
+    repository = getattr(get_runtime(), "config_repository", None)
+    if repository is None or isinstance(repository, InMemoryMcpServerConfigRepository):
+        return {}
+    loop = BackgroundLoop()
+    try:
+        return cast(dict[str, str], loop.run(repository.get_peer_key_names(), 15.0))
+    except Exception as e:  # noqa: BLE001 -- any store failure refuses the file, before anything changed
+        raise ConfigurationUnavailableError(
+            "The peer-key name record could not be read, so the configuration was refused and nothing was "
+            "changed. Load it again once the configuration store is reachable."
+        ) from e
+    finally:
+        loop.close()
+
+
+def _refuse_what_the_record_contradicts(staged: "_StagedConfig") -> None:
+    """Refuse a file that declares a recorded name without its key, or a recorded key under another name.
+
+    Loading and reloading the file write no configuration row, so the record
+    is not checked by a write; it is checked here (ADR-030 §9).
+    """
+    declared: dict[str, str | None] = {}
+    for name, spec in staged.specs.items():
+        identity = PeerIdentity.from_tls(spec.get("tls")) if isinstance(spec, dict) else None
+        declared[name] = identity.key_ref if identity is not None else None
+    conflicts = peer_key_name_conflicts(declared, _stored_peer_key_names())
+    if conflicts:
+        raise ConfigurationError(
+            "The configuration contradicts the peer-key name record: "
+            + "; ".join(conflicts)
+            + ". A recorded name keeps its key_ref, and one key_ref names one server. Nothing was loaded."
+        )
+
+
 def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
     """
     Load mcp_server and group configuration.
@@ -626,7 +666,9 @@ def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
             does not is then gone. Without it the entries are added, as on a
             first load.
     """
-    build_config(config).commit(replace=replace)
+    staged = build_config(config)
+    _refuse_what_the_record_contradicts(staged)
+    staged.commit(replace=replace)
 
 
 def build_config(config: dict[str, Any]) -> _StagedConfig:
@@ -2162,6 +2204,7 @@ class ServerConfigLoader(IConfigLoader):
         stopped. See `build_config` and `_read_stored_policies`.
         """
         prepared = build_config(mcp_servers_config)
+        _refuse_what_the_record_contradicts(prepared)
         prepared.stored_policies = _read_stored_policies()
         return prepared
 

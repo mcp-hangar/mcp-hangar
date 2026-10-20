@@ -8,6 +8,7 @@ from typing import Any, cast
 from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.contracts.fleet import NotTheManagerError
+from ...domain.exceptions import PeerIdentityChangeDenied, PeerKeyNameTaken
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance
 from ...infrastructure.discovery.registry import (
@@ -282,6 +283,11 @@ async def _on_mcp_server_register(mcp_server) -> bool:
             mode=mcp_server_mode,
         )
         return True
+    except PeerKeyNameTaken as e:
+        # The name belongs to a key-pinned server; discovery never creates,
+        # replaces or downgrades one (ADR-030 §4c).
+        logger.warning("discovered_peer_key_upstream", mcp_server_name=mcp_server.name, detail=str(e))
+        return False
     except Exception as e:  # noqa: BLE001 -- fault-barrier: registration failure must not crash discovery cycle
         logger.error(
             "discovery_registration_failed",
@@ -326,6 +332,11 @@ async def _on_mcp_server_deregister(name: str, reason: str):
             mcp_server_name=name,
             reason=reason,
         )
+    except PeerIdentityChangeDenied as e:
+        # Expected, and repeated every cycle, for a server moved from discovery
+        # to a key-pinned registration (ADR-030 §4f): discovery still sees the
+        # old annotated pod go and asks to delete a server it no longer owns.
+        logger.info("discovery_deregistration_refused_peer_key", mcp_server_name=name, detail=str(e))
     except NotTheManagerError as e:
         # Expected in a cluster, and not a failure: this instance decided on the
         # deregistration under a tenure that has since ended, so the fleet it

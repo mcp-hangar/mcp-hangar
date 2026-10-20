@@ -124,7 +124,7 @@ class Gateway:
         return apply_configuration(config, source="test", load_servers=False)
 
     def build(self, hot_loading_config: dict[str, Any] | None = None) -> LoadMcpServerHandler:
-        handler, _ = hot_loading.init_hot_loading(MagicMock(), self.configure(hot_loading_config))
+        handler, _ = hot_loading.init_hot_loading(MagicMock(config_repository=None), self.configure(hot_loading_config))
         assert handler is not None
         return handler
 
