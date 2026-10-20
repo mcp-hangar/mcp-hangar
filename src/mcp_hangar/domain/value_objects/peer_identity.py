@@ -71,3 +71,41 @@ class PeerIdentity:
     def upstream_identity(self) -> str:
         """The identity digest pins are bound to: the key lineage, not the address (ADR-030 §7)."""
         return f"peer-key:{self.key_ref}"
+
+
+#: The connection age a key-pinned server gets when its configuration names none (ADR-030 §8).
+DEFAULT_MAX_CONNECTION_AGE_S = 3600.0
+
+_AGE = re.compile(r"(\d+(?:\.\d+)?)\s*([smh]?)")
+_UNIT_S = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def max_connection_age(tls: Mapping[str, Any] | None) -> float | None:
+    """Seconds one connection pool of a key-pinned server serves, or None for any other server.
+
+    Accepts a number of seconds or a string like ``90s``, ``30m`` or ``1h``. A
+    key-pinned server that names none gets ``DEFAULT_MAX_CONNECTION_AGE_S``.
+
+    Raises:
+        ValueError: for a value that is not a positive duration, or one set on a
+            server without a peer identity, where nothing would act on it.
+    """
+    raw = (tls or {}).get("max_connection_age")
+    if not tls or "peer_identity" not in tls:
+        if raw is not None:
+            raise ValueError("tls.max_connection_age applies only to a server with tls.peer_identity")
+        return None
+    if raw is None:
+        return DEFAULT_MAX_CONNECTION_AGE_S
+    if isinstance(raw, bool):
+        raise ValueError(f"tls.max_connection_age must be a duration such as 90s, 30m or 1h, got {raw!r}")
+    if isinstance(raw, int | float):
+        seconds = float(raw)
+    else:
+        match = _AGE.fullmatch(str(raw).strip().lower())
+        if match is None:
+            raise ValueError(f"tls.max_connection_age must be a duration such as 90s, 30m or 1h, got {raw!r}")
+        seconds = float(match.group(1)) * _UNIT_S[match.group(2)]
+    if seconds <= 0:
+        raise ValueError(f"tls.max_connection_age must be positive, got {raw!r}")
+    return seconds
