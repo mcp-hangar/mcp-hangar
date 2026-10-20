@@ -72,10 +72,6 @@ class RepositoryFleetWriter(IFleetWriter):
         recorded = self._loop.run(self._repository.get_with_version(mcp_server_id), self._timeout_s)
         return cast("tuple[McpServerConfigSnapshot, int] | None", recorded)
 
-    def peer_key_names(self) -> dict[str, str]:
-        """Read the peer-key name record, waiting for the read."""
-        return cast("dict[str, str]", self._loop.run(self._repository.get_peer_key_names(), self._timeout_s))
-
     def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
         """Persist a configuration only if the row is still the one that was read."""
         self._loop.run(self._repository.save_versioned(snapshot, expected_version), self._timeout_s)

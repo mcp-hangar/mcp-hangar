@@ -80,10 +80,6 @@ class IFleetWriter(ABC):
         """
 
     @abstractmethod
-    def peer_key_names(self) -> dict[str, str]:
-        """Read the peer-key name record, name to `key_ref` (ADR-030 §9)."""
-
-    @abstractmethod
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         """Remove a server's configuration.
 

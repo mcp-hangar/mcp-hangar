@@ -537,11 +537,15 @@ def peer_key_name_conflicts(declared: dict[str, str | None], stored: dict[str, s
     Returns:
         One line per conflict; empty when the file agrees with the record. The
         same name with the same `key_ref` agrees: that is a registered server
-        moved into the file.
+        moved into the file. Two names the file gives one `key_ref` conflict
+        too, because the file's servers are entries of the record (§7).
     """
     holders = {ref: name for name, ref in stored.items()}
+    declared_by: dict[str, str] = {}
     conflicts = []
     for name, key_ref in sorted(declared.items()):
+        if key_ref is not None and declared_by.setdefault(key_ref, name) != name:
+            conflicts.append(f"'{name}' and '{declared_by[key_ref]}' both declare key_ref '{key_ref}'")
         if name in stored and key_ref != stored[name]:
             conflicts.append(
                 f"'{name}' is in the peer-key name record with key_ref '{stored[name]}', "

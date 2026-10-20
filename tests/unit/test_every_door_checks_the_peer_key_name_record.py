@@ -71,6 +71,11 @@ class TestTheFileAgainstTheRecord:
     def test_a_recorded_key_ref_under_another_name_is_a_conflict(self) -> None:
         assert peer_key_name_conflicts({"billing": "lineage"}, {"payments": "lineage"})
 
+    def test_two_file_entries_with_one_key_ref_conflict_with_no_record_at_all(self) -> None:
+        assert peer_key_name_conflicts({"a": "lineage", "b": "lineage"}, {}) == [
+            "'b' and 'a' both declare key_ref 'lineage'"
+        ]
+
     def test_a_registered_server_moved_into_the_file_agrees(self) -> None:
         assert peer_key_name_conflicts({"payments": "lineage", "other": None}, {"payments": "lineage"}) == []
 
@@ -99,6 +104,14 @@ class TestLoadAndReload:
         )
 
         server_config._refuse_what_the_record_contradicts(staged)
+
+    def test_two_entries_sharing_a_key_ref_are_refused_at_startup_and_at_reload(self, on_the_store) -> None:
+        twins = {name: {"mode": "remote", "endpoint": ENDPOINT, "tls": _tls("shared")} for name in ("twin-a", "twin-b")}
+
+        with pytest.raises(ConfigurationError, match="both declare key_ref 'shared'"):
+            server_config.load_config(twins)
+        with pytest.raises(ConfigurationError, match="both declare key_ref 'shared'"):
+            server_config.ServerConfigLoader().prepare_mcp_servers(twins)
 
     def test_a_record_that_cannot_be_read_refuses_the_file(self, monkeypatch) -> None:
         broken = MagicMock()
