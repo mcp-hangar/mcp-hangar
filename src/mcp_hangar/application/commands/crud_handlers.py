@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.fleet import IFleetWriter
-from ...domain.contracts.persistence import ConcurrentModificationError, PeerKeyNameRefused
+from ...domain.contracts.persistence import ConcurrentModificationError, PeerKeyClaim, PeerKeyNameRefused
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
@@ -47,6 +47,7 @@ from .crud_commands import (
     CreateMcpServerCommand,
     DeleteGroupCommand,
     DeleteMcpServerCommand,
+    ForgetPeerKeyNameCommand,
     RemoveGroupMemberCommand,
     SetL7PolicyCommand,
     UpdateGroupCommand,
@@ -58,7 +59,7 @@ logger = get_logger(__name__)
 
 def _require_peer_identity_authority(
     authority: IPeerIdentityAuthority | None,
-    command: CreateMcpServerCommand | UpdateMcpServerCommand | DeleteMcpServerCommand,
+    command: CreateMcpServerCommand | UpdateMcpServerCommand | DeleteMcpServerCommand | ForgetPeerKeyNameCommand,
     what: str,
 ) -> None:
     """Refuse a change to a peer identity the command's caller may not make (ADR-030 §9).
@@ -104,7 +105,23 @@ def _command_peer_identity(mcp_server_id: str, tls: Any) -> PeerIdentity | None:
     return identity
 
 
-def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
+def _refuse_a_key_ref_the_fleet_holds(repository: IMcpServerRepository, mcp_server_id: str, key_ref: str) -> None:
+    """Refuse a `key_ref` another server in the fleet holds (ADR-030 §7).
+
+    The record's entries from the configuration file are its servers, which
+    never write a row, so the record's own write cannot see them.
+    """
+    for name, server in repository.get_all().items():
+        held = getattr(server, "_peer_identity", None)
+        if name != mcp_server_id and isinstance(held, PeerIdentity) and held.key_ref == key_ref:
+            raise PeerKeyNameTaken(
+                f"mcp_server '{mcp_server_id}': key_ref '{key_ref}' already names the server '{name}'"
+            )
+
+
+def _record_fields(
+    fleet_writer: IFleetWriter, mcp_server: McpServer, peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM, **fields: Any
+) -> None:
     """Record a change to some fields of a server, on top of the recorded row (#1954).
 
     The row is the base, not this replica's copy: a copy that has not yet seen a
@@ -114,8 +131,13 @@ def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: 
     is recorded from this replica's copy, and only if no row appeared meanwhile.
     """
     recorded = fleet_writer.read(mcp_server.mcp_server_id)
-    base, version = (snapshot_of(mcp_server), 0) if recorded is None else recorded
-    fleet_writer.save_versioned(dataclasses.replace(base, **fields), version)
+    if recorded is None:
+        # A server from the configuration file: its peer-key entries are the
+        # file's, derived at load. A row written for it claims none.
+        fleet_writer.save_versioned(dataclasses.replace(snapshot_of(mcp_server), **fields), 0, PeerKeyClaim.SKIP)
+        return
+    base, version = recorded
+    fleet_writer.save_versioned(dataclasses.replace(base, **fields), version, peer_key)
 
 
 def _get_mcp_server_or_raise(repository: IMcpServerRepository, mcp_server_id: str) -> McpServer:
@@ -208,15 +230,7 @@ class CreateMcpServerHandler(CommandHandler):
                     f"mcp_server '{command.mcp_server_id}': declaring a peer identity needs a durable "
                     "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
                 )
-            # The record's entries from the configuration file are its servers,
-            # which never write a row; a key_ref one of them holds is taken.
-            for name, server in self._repository.get_all().items():
-                held = getattr(server, "_peer_identity", None)
-                if isinstance(held, PeerIdentity) and held.key_ref == peer_identity.key_ref:
-                    raise PeerKeyNameTaken(
-                        f"mcp_server '{command.mcp_server_id}': key_ref '{held.key_ref}' already names the server "
-                        f"'{name}'"
-                    )
+            _refuse_a_key_ref_the_fleet_holds(self._repository, command.mcp_server_id, peer_identity.key_ref)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -318,6 +332,42 @@ class CreateMcpServerHandler(CommandHandler):
         )
 
 
+class ForgetPeerKeyNameHandler(CommandHandler):
+    """Removes a deleted key-pinned server's name from the peer-key name record (ADR-030 §9)."""
+
+    def __init__(
+        self,
+        repository: IMcpServerRepository,
+        fleet_writer: IFleetWriter | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
+    ) -> None:
+        self._repository = repository
+        self._fleet_writer = fleet_writer
+        self._peer_identity_authority = peer_identity_authority
+
+    def handle(self, command: ForgetPeerKeyNameCommand) -> dict[str, Any]:
+        """Forget the name, which only a holder of `mcp_servers:peer_identity` may do.
+
+        Raises:
+            PeerKeyNameTaken: The server is still registered under the name.
+            McpServerNotFoundError: The record holds no entry for it.
+        """
+        name = command.mcp_server_id
+        _require_peer_identity_authority(self._peer_identity_authority, command, "forget the peer-key name")
+        if self._repository.exists(name):
+            raise PeerKeyNameTaken(f"mcp_server '{name}': delete the server before forgetting its peer-key name")
+        if self._fleet_writer is None:
+            raise McpServerNotFoundError(name)
+        try:
+            forgotten = self._fleet_writer.forget_peer_key_name(name)
+        except PeerKeyNameRefused as e:
+            raise PeerKeyNameTaken(str(e)) from e
+        if not forgotten:
+            raise McpServerNotFoundError(name)
+        logger.info("peer_key_name_forgotten", mcp_server_id=name, source=command.source)
+        return {"mcp_server_id": name, "forgotten": True}
+
+
 class UpdateMcpServerHandler(CommandHandler):
     """Handler for UpdateMcpServerCommand.
 
@@ -400,7 +450,7 @@ class UpdateMcpServerHandler(CommandHandler):
                     enforce_ssrf=endpoint is not None,
                 )
             try:
-                _record_fields(self._fleet_writer, mcp_server, **fields)
+                _record_fields(self._fleet_writer, mcp_server, self._peer_key_claim(mcp_server, connection), **fields)
             except PeerKeyNameRefused as e:
                 raise PeerKeyNameTaken(str(e)) from e
 
@@ -424,6 +474,19 @@ class UpdateMcpServerHandler(CommandHandler):
         )
         return {"mcp_server_id": command.mcp_server_id, "updated": True}
 
+    @staticmethod
+    def _peer_key_claim(
+        mcp_server: McpServer, connection: tuple[str | None, dict[str, Any] | None] | None
+    ) -> PeerKeyClaim:
+        """MOVE when the update gives a key-pinned server another `key_ref` (§7), CLAIM otherwise."""
+        old = mcp_server._peer_identity
+        new = PeerIdentity.from_tls(connection[1]) if connection is not None else old
+        return (
+            PeerKeyClaim.MOVE
+            if old is not None and new is not None and new.key_ref != old.key_ref
+            else PeerKeyClaim.CLAIM
+        )
+
     def _connection_change(
         self, mcp_server: McpServer, command: UpdateMcpServerCommand
     ) -> tuple[str | None, dict[str, Any] | None] | None:
@@ -433,7 +496,7 @@ class UpdateMcpServerHandler(CommandHandler):
         a holder of `mcp_servers:peer_identity`. A server the configuration
         declares keeps the file's. One update may rotate keys but not replace
         the whole list under the same `key_ref`, so a single write cannot cut
-        every trusted key at once; `key_ref` itself cannot change yet.
+        every trusted key at once; a new `key_ref` starts a new lineage.
         """
         if command.endpoint is None and command.tls is None:
             return None
@@ -455,11 +518,12 @@ class UpdateMcpServerHandler(CommandHandler):
         _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
         if self._fleet_writer is None:
             raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
+        if new is not None and (old is None or new.key_ref != old.key_ref):
+            _refuse_a_key_ref_the_fleet_holds(self._repository, name, new.key_ref)
         if old is not None and new is None:
             raise PeerKeyNameTaken(f"mcp_server '{name}': a peer identity cannot be removed; the name keeps it")
-        if old is not None and new is not None:
-            if new.key_ref != old.key_ref:
-                raise ValidationError(f"mcp_server '{name}': changing key_ref is not supported yet")
+        if old is not None and new is not None and new.key_ref == old.key_ref:
+            # A new key_ref is a new lineage, whose list need share nothing.
             if not new.spki_sha256 & old.spki_sha256:
                 raise ValidationError(
                     f"mcp_server '{name}': the new key list shares no key with the current one; "
@@ -1016,6 +1080,12 @@ def register_crud_handlers(
             declared_in_config=declared_in_config,
             peer_identity_authority=peer_identity_authority,
             groups=groups,
+        ),
+    )
+    command_bus.register(
+        ForgetPeerKeyNameCommand,
+        ForgetPeerKeyNameHandler(
+            repository=repository, fleet_writer=fleet_writer, peer_identity_authority=peer_identity_authority
         ),
     )
     command_bus.register(

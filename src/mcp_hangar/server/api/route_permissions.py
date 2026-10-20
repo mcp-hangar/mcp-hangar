@@ -148,6 +148,8 @@ def _rule(
 ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # --- MCP servers -------------------------------------------------------
     # L7 egress policy is the enforcement-plane channel: admin-only (ADR-013).
+    # Forgetting a peer-key name lets it be registered plain again (ADR-030 §9).
+    _rule("/mcp_servers/{id}/peer_identity", "DELETE", ("mcp_servers", "peer_identity")),
     _rule("/mcp_servers/{id}/l7_policy", "GET", ("policy", "read")),
     _rule("/mcp_servers/{id}/l7_policy", "POST,PUT,DELETE", ("policy", "write")),
     _rule("/mcp_servers/{id}/start", "POST", ("mcp_servers", "lifecycle")),

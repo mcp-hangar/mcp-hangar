@@ -16,6 +16,7 @@ from ...application.commands.commands import StartMcpServerCommand, StopMcpServe
 from ...application.commands.crud_commands import (
     CreateMcpServerCommand,
     DeleteMcpServerCommand,
+    ForgetPeerKeyNameCommand,
     SetL7PolicyCommand,
     UpdateMcpServerCommand,
 )
@@ -376,6 +377,30 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result, status_code=201)
 
 
+async def forget_peer_key_name(request: Request) -> HangarJSONResponse:
+    """Remove a deleted key-pinned server's name from the peer-key name record.
+
+    Path params:
+        mcp_server_id: The name to forget.
+
+    The name keeps its entry after the server is deleted, so it cannot come
+    back as a plain server (ADR-030 §9). Forgetting it needs
+    `mcp_servers:peer_identity`, and the server must be deleted first.
+
+    Returns:
+        JSON with {"mcp_server_id": ..., "forgotten": true}, status 200.
+    """
+    _check_permission(request, resource_type="mcp_servers", action="peer_identity")
+    result = await dispatch_command(
+        ForgetPeerKeyNameCommand(
+            principal=_principal(request),
+            mcp_server_id=request.path_params["mcp_server_id"],
+            source="api",
+        )
+    )
+    return HangarJSONResponse(result)
+
+
 async def update_mcp_server(request: Request) -> HangarJSONResponse:
     """Update mutable configuration fields on an existing mcp_server.
 
@@ -547,6 +572,7 @@ mcp_server_routes = [
     Route("/{mcp_server_id:str}", get_mcp_server, methods=["GET"]),
     Route("/{mcp_server_id:str}", update_mcp_server, methods=["PUT", "PATCH"]),
     Route("/{mcp_server_id:str}", delete_mcp_server, methods=["DELETE"]),
+    Route("/{mcp_server_id:str}/peer_identity", forget_peer_key_name, methods=["DELETE"]),
     Route("/{mcp_server_id:str}/l7_policy", get_l7_policy, methods=["GET"]),
     Route("/{mcp_server_id:str}/l7_policy", set_l7_policy, methods=["POST", "PUT"]),
     Route("/{mcp_server_id:str}/l7_policy", clear_l7_policy, methods=["DELETE"]),

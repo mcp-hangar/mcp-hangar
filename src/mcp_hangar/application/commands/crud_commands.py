@@ -174,6 +174,22 @@ class DeleteMcpServerCommand(Command):
         return self.mcp_server_id
 
 
+@dataclass(frozen=True)
+class ForgetPeerKeyNameCommand(Command):
+    """Remove a name's entry from the peer-key name record (ADR-030 §9).
+
+    The entry outlives its server, so a deleted key-pinned server cannot come
+    back under its name as a plain one. Forgetting it is the deliberate act
+    that lets the name be used for anything again.
+    """
+
+    mcp_server_id: str
+    source: str = "api"
+    provenance: Provenance = Provenance.HUMAN
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
+
+
 # =============================================================================
 # Group CRUD Commands
 # =============================================================================

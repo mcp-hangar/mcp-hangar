@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from ...domain.contracts.persistence import (
     ConcurrentModificationError,
     McpServerConfigSnapshot,
+    PeerKeyClaim,
     PeerKeyNameRefused,
     PersistenceError,
     check_peer_key_claim,
@@ -67,7 +68,12 @@ class InMemoryMcpServerConfigRepository:
             self._configs[config.mcp_server_id] = new_config
             logger.debug(f"Saved config for mcp_server: {config.mcp_server_id}")
 
-    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
         """Save only if the stored version is still the one the caller read (#1954).
 
         Deletion removes the entry here, so a create over a deleted server is a
@@ -80,6 +86,11 @@ class InMemoryMcpServerConfigRepository:
             # The SQL backends' insert-or-ignore, then the read that checks it.
             name, key_ref = config.mcp_server_id, peer_key_claim(config)
             claimed = dict(self._peer_key_names)
+            if peer_key is PeerKeyClaim.SKIP:
+                await self.save(config)
+                return
+            if peer_key is PeerKeyClaim.MOVE:
+                claimed.pop(name, None)
             if key_ref is not None and name not in claimed and key_ref not in claimed.values():
                 claimed[name] = key_ref
             check_peer_key_claim(name, key_ref, [(n, r) for n, r in claimed.items() if n == name or r == key_ref])
@@ -107,6 +118,13 @@ class InMemoryMcpServerConfigRepository:
         """Every entry of the peer-key name record."""
         with self._lock:
             return dict(self._peer_key_names)
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry, unless the server is still registered under it."""
+        with self._lock:
+            if mcp_server_id in self._configs:
+                raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
+            return self._peer_key_names.pop(mcp_server_id, None) is not None
 
     async def delete(self, mcp_server_id: str) -> bool:
         """Delete mcp_server configuration."""
@@ -225,7 +243,12 @@ class SQLiteMcpServerConfigRepository:
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
 
-    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
         """Save only if the row is still the one the caller read (#1954).
 
         See `IMcpServerConfigRepository.save_versioned`. A live row is matched
@@ -239,14 +262,19 @@ class SQLiteMcpServerConfigRepository:
         try:
             async with self._db.transaction() as conn:
                 key_ref = peer_key_claim(config)
-                if key_ref is not None:
-                    await conn.execute(
-                        "INSERT OR IGNORE INTO peer_key_names (name, key_ref) VALUES (?, ?)", (mcp_server_id, key_ref)
+                if peer_key is PeerKeyClaim.MOVE:
+                    await conn.execute("DELETE FROM peer_key_names WHERE name = ?", (mcp_server_id,))
+                if peer_key is not PeerKeyClaim.SKIP:
+                    if key_ref is not None:
+                        await conn.execute(
+                            "INSERT OR IGNORE INTO peer_key_names (name, key_ref) VALUES (?, ?)",
+                            (mcp_server_id, key_ref),
+                        )
+                    cursor = await conn.execute(
+                        "SELECT name, key_ref FROM peer_key_names WHERE name = ? OR key_ref = ?",
+                        (mcp_server_id, key_ref),
                     )
-                cursor = await conn.execute(
-                    "SELECT name, key_ref FROM peer_key_names WHERE name = ? OR key_ref = ?", (mcp_server_id, key_ref)
-                )
-                check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in await cursor.fetchall()])
+                    check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in await cursor.fetchall()])
                 live = 1
                 if expected_version == 0:
                     # No row of any kind, deleted or live: the caller saw none.
@@ -311,6 +339,22 @@ class SQLiteMcpServerConfigRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry, unless the server is still registered under it."""
+        try:
+            async with self._db.transaction() as conn:
+                cursor = await conn.execute(
+                    "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = ? AND enabled = 1", (mcp_server_id,)
+                )
+                if await cursor.fetchone() is not None:
+                    raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
+                result = await conn.execute("DELETE FROM peer_key_names WHERE name = ?", (mcp_server_id,))
+                return bool(result.rowcount)
+        except PeerKeyNameRefused:
+            raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to update the peer-key name record: {e}") from e
 
     async def get_peer_key_names(self) -> dict[str, str]:
         """Every entry of the peer-key name record."""

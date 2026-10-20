@@ -16,6 +16,7 @@ from typing import Any
 from mcp_hangar.domain.contracts.persistence import (
     ConcurrentModificationError,
     McpServerConfigSnapshot,
+    PeerKeyClaim,
     PeerKeyNameRefused,
     PersistenceError,
     check_peer_key_claim,
@@ -193,7 +194,12 @@ class PostgresMcpServerConfigRepository:
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
 
-    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
         """Save only if the row is still the one the caller read (#1954).
 
         See `IMcpServerConfigRepository.save_versioned`. A live row is matched
@@ -212,16 +218,19 @@ class PostgresMcpServerConfigRepository:
                         # the unique index, then does nothing; the read below runs
                         # after it and sees the winner.
                         key_ref = peer_key_claim(config)
-                        if key_ref is not None:
+                        if peer_key is PeerKeyClaim.MOVE:
+                            cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
+                        if peer_key is not PeerKeyClaim.SKIP:
+                            if key_ref is not None:
+                                cur.execute(
+                                    "INSERT INTO peer_key_names (name, key_ref) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                    (mcp_server_id, key_ref),
+                                )
                             cur.execute(
-                                "INSERT INTO peer_key_names (name, key_ref) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s",
                                 (mcp_server_id, key_ref),
                             )
-                        cur.execute(
-                            "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s",
-                            (mcp_server_id, key_ref),
-                        )
-                        check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in cur.fetchall()])
+                            check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in cur.fetchall()])
                         live = True
                         if expected_version == 0:
                             # No row of any kind, deleted or live: the caller saw none.
@@ -282,6 +291,31 @@ class PostgresMcpServerConfigRepository:
                 raise ConcurrentModificationError(mcp_server_id, 0, 1) from e
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry, unless the server is still registered under it."""
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = %s AND enabled = TRUE FOR UPDATE",
+                            (mcp_server_id,),
+                        )
+                        if cur.fetchone() is not None:
+                            raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
+                        cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
+                        removed = bool(cur.rowcount)
+                    conn.commit()
+                    return removed
+                except Exception:
+                    # See class docstring.
+                    conn.rollback()
+                    raise
+        except PeerKeyNameRefused:
+            raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to update the peer-key name record: {e}") from e
 
     async def get_peer_key_names(self) -> dict[str, str]:
         """Every entry of the peer-key name record."""
