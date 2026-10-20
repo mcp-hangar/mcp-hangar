@@ -1107,6 +1107,17 @@ class HttpClient:
                     logger.info("http_client_get_stream_open", mcp_server=mcp_server_label)
                     backoff = 1.0
                     self._read_stream_events(response, on_message, mcp_server_label)
+            except UpstreamPeerKeyMismatchError as e:
+                # Terminal for this client: every reconnect would end at the same
+                # unlisted key. The stream opens again with the next client.
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+                logger.warning(
+                    "http_client_get_stream_refused",
+                    mcp_server=mcp_server_label,
+                    failure_code=e.failure_code,
+                    observed_peer_spki=e.observed_peer_spki,
+                )
+                return
             except Exception as e:  # noqa: BLE001 -- the channel outlives any single transport failure
                 if not self._sse_running or self._closed:
                     return

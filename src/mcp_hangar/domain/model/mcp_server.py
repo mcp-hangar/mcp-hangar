@@ -1319,6 +1319,11 @@ class McpServer(AggregateRoot):
         )
         try:
             self._perform_mcp_handshake(client)
+        except UpstreamPeerKeyMismatchError:
+            # Not a renegotiation that failed: the new connection ended at a key
+            # outside the key list. Returning the old 404 would bury the reason.
+            self._health.record_failure()
+            raise
         except Exception as exc:  # noqa: BLE001 -- any handshake failure is the same verdict here
             self._health.record_failure()
             logger.error(
@@ -2039,6 +2044,12 @@ class McpServer(AggregateRoot):
                 with self._lock:
                     self._refresh_in_progress = False
 
+                    if isinstance(refresh_error, UpstreamPeerKeyMismatchError):
+                        # The call is refused with the transport's reason, not
+                        # reported as a tool the upstream does not list.
+                        self._health.record_failure()
+                        raise refresh_error
+
                     if refresh_error is None and refresh_result and "result" in refresh_result:
                         tool_list = refresh_result.get("result", {}).get("tools", [])
                         self._tools.update_from_list(tool_list)
@@ -2116,6 +2127,10 @@ class McpServer(AggregateRoot):
                     f"mcp_server={self.mcp_server_id}, tool={tool_name}, error={invocation_error}"
                 )
 
+                if isinstance(invocation_error, UpstreamPeerKeyMismatchError):
+                    # Recorded above like any failed call; raised as itself so the
+                    # executor records `deny` with its reason (ADR-030 §5).
+                    raise invocation_error
                 raise ToolInvocationError(
                     self.mcp_server_id,
                     str(invocation_error),
@@ -2281,6 +2296,10 @@ class McpServer(AggregateRoot):
         try:
             response = client.call(method, params, timeout=timeout)
         except ResponseTooLarge:
+            raise
+        except UpstreamPeerKeyMismatchError:
+            with self._lock:
+                self._health.record_failure()
             raise
         except (OSError, TimeoutError, ClientError) as e:
             raise ToolInvocationError(
