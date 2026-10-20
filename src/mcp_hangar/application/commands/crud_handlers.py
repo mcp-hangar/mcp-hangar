@@ -119,6 +119,16 @@ def _refuse_a_key_ref_the_fleet_holds(repository: IMcpServerRepository, mcp_serv
             )
 
 
+def _refuse_plaintext_for_a_peer_identity(mcp_server_id: str, endpoint: str | None) -> None:
+    """A key is checked in a TLS handshake, so a key-pinned server is reached over https (ADR-030 §4).
+
+    The transport refuses to connect otherwise; refused here, the mistake is
+    the caller's 422 rather than a server that never starts.
+    """
+    if endpoint is not None and not endpoint.lower().startswith("https://"):
+        raise ValidationError(f"mcp_server '{mcp_server_id}': a server with tls.peer_identity needs an https endpoint")
+
+
 def _record_fields(
     fleet_writer: IFleetWriter, mcp_server: McpServer, peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM, **fields: Any
 ) -> None:
@@ -231,6 +241,7 @@ class CreateMcpServerHandler(CommandHandler):
                     "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
                 )
             _refuse_a_key_ref_the_fleet_holds(self._repository, command.mcp_server_id, peer_identity.key_ref)
+            _refuse_plaintext_for_a_peer_identity(command.mcp_server_id, command.endpoint)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -531,6 +542,8 @@ class UpdateMcpServerHandler(CommandHandler):
                 )
         if new is not None and any(g.get_member(name) for g in (self._groups or {}).values()):
             raise ValidationError(f"mcp_server '{name}': a group member cannot be given a peer identity")
+        if new is not None:
+            _refuse_plaintext_for_a_peer_identity(name, endpoint)
         if endpoint is not None:
             # Set over the API, the endpoint is a human's, whatever it was
             # before: a server moved from discovery meets the policy now (§4f).
