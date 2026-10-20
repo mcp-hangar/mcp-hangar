@@ -225,12 +225,6 @@ class TestARotation:
 
         assert gateway.row().tls == _tls(OLD)
 
-    def test_key_ref_does_not_change(self, gateway) -> None:
-        gateway.pinned(OLD)
-
-        with pytest.raises(ValidationError, match="changing key_ref"):
-            gateway.update.handle(_update(tls=_tls(OLD, key_ref="another")))
-
     def test_a_peer_identity_is_not_removed(self, gateway) -> None:
         gateway.pinned(OLD)
 
@@ -404,6 +398,18 @@ class TestTheRestApiWithRealKeys:
 
         assert (refused.status_code, moved.status_code) == (403, 403)
         assert not fleet.exists("other") and fleet.get("payments")._endpoint is None
+
+    def test_only_the_operator_forgets_a_deleted_servers_name(self, served) -> None:
+        client, keys, fleet = served
+        self._register(client, keys)
+        deleted = client.delete("/mcp_servers/payments", headers={"X-API-Key": keys["kubernetes-operator"]})
+
+        refused = client.delete("/mcp_servers/payments/peer_identity", headers={"X-API-Key": keys["developer"]})
+        forgotten = client.delete(
+            "/mcp_servers/payments/peer_identity", headers={"X-API-Key": keys["kubernetes-operator"]}
+        )
+
+        assert (deleted.status_code, refused.status_code, forgotten.status_code) == (200, 403, 200), forgotten.text
 
     def test_a_developer_cannot_turn_off_verification_on_a_plain_server(self, served) -> None:
         client, keys, fleet = served

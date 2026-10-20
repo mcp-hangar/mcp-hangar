@@ -246,6 +246,17 @@ class McpServerConfigSnapshot:
         )
 
 
+class PeerKeyClaim(Enum):
+    """How a configuration write keeps the peer-key name record (ADR-030 §9)."""
+
+    #: Claim the row's name and `key_ref`, or refuse a write the record contradicts.
+    CLAIM = "claim"
+    #: The name's entry takes the row's new `key_ref`; one held by another name is still refused.
+    MOVE = "move"
+    #: Leave the record alone: a server the configuration file declares, whose entries are the file's.
+    SKIP = "skip"
+
+
 class IMcpServerConfigRepository(Protocol):
     """Repository protocol for mcp_server configuration persistence.
 
@@ -266,7 +277,12 @@ class IMcpServerConfigRepository(Protocol):
         """
         ...
 
-    async def save_versioned(self, config: McpServerConfigSnapshot, expected_version: int | None) -> None:
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
         """Save a configuration only if the row is still the one the caller read (#1954).
 
         `save` replaces whatever is there, so a replica whose copy is behind
@@ -284,7 +300,8 @@ class IMcpServerConfigRepository(Protocol):
         configuration with `tls.peer_identity` claims its name and `key_ref`
         there, and one without may not take a name the record holds. An entry
         outlives the row, so a deleted key-pinned server cannot come back as a
-        plain one, and `key_ref` names one server only.
+        plain one, and `key_ref` names one server only. *peer_key* says how
+        the write keeps it.
 
         Raises:
             ConcurrentModificationError: The row changed, was deleted, or (for a
@@ -293,6 +310,18 @@ class IMcpServerConfigRepository(Protocol):
                 `key_ref`, holds the `key_ref` under another name, or holds the
                 name and the configuration declares no peer identity.
             PersistenceError: If the write fails for any other reason.
+        """
+        ...
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry from the peer-key name record, unless a live row still uses it.
+
+        Returns:
+            Whether there was an entry to remove.
+
+        Raises:
+            PeerKeyNameRefused: The server is still registered under the name.
+            PersistenceError: If the write fails.
         """
         ...
 

@@ -21,7 +21,7 @@ from typing import cast
 
 from mcp_hangar.domain.contracts.fleet import IFleetWriter, NotTheManagerError
 from mcp_hangar.domain.contracts.management_lease import Lease
-from mcp_hangar.domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot
+from mcp_hangar.domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot, PeerKeyClaim
 from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.logging_config import get_logger
 
@@ -72,10 +72,19 @@ class RepositoryFleetWriter(IFleetWriter):
         recorded = self._loop.run(self._repository.get_with_version(mcp_server_id), self._timeout_s)
         return cast("tuple[McpServerConfigSnapshot, int] | None", recorded)
 
-    def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
+    def save_versioned(
+        self,
+        snapshot: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
         """Persist a configuration only if the row is still the one that was read."""
-        self._loop.run(self._repository.save_versioned(snapshot, expected_version), self._timeout_s)
+        self._loop.run(self._repository.save_versioned(snapshot, expected_version, peer_key), self._timeout_s)
         logger.debug("fleet_snapshot_saved", mcp_server_id=snapshot.mcp_server_id, expected_version=expected_version)
+
+    def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry from the peer-key name record, waiting for the write."""
+        return cast(bool, self._loop.run(self._repository.forget_peer_key_name(mcp_server_id), self._timeout_s))
 
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         """Remove a server's configuration, waiting for the write.
