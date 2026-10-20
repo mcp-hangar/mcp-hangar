@@ -240,6 +240,22 @@ class TestTheExecutorEndToEnd:
         assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
         assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
 
+    def test_an_unlisted_upstream_key_on_a_warm_call_is_a_deny_logged_as_refused(self, ctx, executor_exporter) -> None:
+        # ADR-030 §5: the warm path raises the refusal as itself, so the
+        # executor records it like the other refusals raised past the gates.
+        from structlog.testing import capture_logs
+
+        gate_decisions._arrange_catalogue()
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError("sha256:" + "a" * 64)
+
+        with capture_logs() as logs:
+            assert _run().error_type == "UpstreamPeerKeyMismatchError"
+
+        span = gate_decisions._call_span(executor_exporter)
+        assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
+        assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
+        assert [entry["event"] for entry in logs if entry["event"].startswith("batch_call_")] == ["batch_call_refused"]
+
     def test_a_failed_cold_start_still_ends_error(self, ctx, executor_exporter) -> None:
         gate_decisions._arrange_catalogue()
         ctx.get_mcp_server.return_value.state.value = "cold"
