@@ -26,6 +26,7 @@ from ...domain.events import (
     McpServerRegistered,
     McpServerStarted,
     McpServerStateChanged,
+    McpServerUpdated,
     SessionSuspended,
     SessionUnsuspended,
     ToolCallRefused,
@@ -207,8 +208,15 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
         runner = BackgroundLoop()
         close_at_shutdown(runner.close)
-        fleet_projection = FleetProjection(runtime.repository, config_repository, runner)
+        from ...infrastructure.async_executor import AsyncExecutor
+
+        fleet_projection = FleetProjection(
+            runtime.repository, config_repository, runner, closer=AsyncExecutor.get_instance()
+        )
         runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        # A key-pinned server's key list or endpoint changed elsewhere: its copy
+        # is replaced on every replica rather than at the next restart (ADR-030 §8).
+        runtime.event_bus.subscribe(McpServerUpdated, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         runtime.event_bus.subscribe(McpServerDeregistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # L7 policy changes have to reach every replica the same way (#991):
         # the setting replica saved the row before publishing, peers re-read it

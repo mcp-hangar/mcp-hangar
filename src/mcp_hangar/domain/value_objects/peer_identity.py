@@ -5,6 +5,7 @@ its listed keys. This is the declaration, parsed and validated; the check
 itself runs in the HTTP client's TLS handshake.
 """
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -71,6 +72,15 @@ class PeerIdentity:
     def upstream_identity(self) -> str:
         """The identity digest pins are bound to: the key lineage, not the address (ADR-030 §7)."""
         return f"peer-key:{self.key_ref}"
+
+
+def connection_declaration(endpoint: str | None, tls: Mapping[str, Any] | None) -> tuple[str | None, str]:
+    """What a remote server's client is built from, in a form two copies compare equal on.
+
+    The row's `tls` has been through JSON and the local one may not have, so
+    both are compared in their JSON form, keys sorted (ADR-030 §8).
+    """
+    return endpoint, json.dumps(dict(tls) if tls else None, sort_keys=True, default=str)
 
 
 #: The connection age a key-pinned server gets when its configuration names none (ADR-030 §8).

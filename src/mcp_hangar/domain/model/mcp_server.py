@@ -58,7 +58,7 @@ from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
-from ..value_objects.peer_identity import PeerIdentity
+from ..value_objects.peer_identity import PeerIdentity, connection_declaration
 from ..value_objects.provenance import Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
@@ -393,6 +393,12 @@ class McpServer(AggregateRoot):
         # to the same declaration (ADR-030 §4).
         self._peer_identity = PeerIdentity.from_tls(tls)
         self._http_config = http
+        # What the live client was built from, read only while there is one, so
+        # an in-place update is not mistaken for what the connection uses (§8).
+        self._starting_with: tuple[str | None, str] | None = None
+        self._connected_with: tuple[str | None, str] | None = None
+        # Set once this copy is replaced in the fleet: it serves nothing again.
+        self._retired = False
 
         # SSRF policy for a remote endpoint, carried to the transport so the
         # connect-time re-check (DNS-rebinding defence) applies the SAME policy
@@ -882,6 +888,8 @@ class McpServer(AggregateRoot):
         ready_event = None
 
         with self._lock:
+            if self._retired:
+                raise McpServerNotReadyError(self.mcp_server_id, "retired")
             # Fast path -- already ready
             if self._state == McpServerState.READY:
                 if self._client and self._client.is_alive():
@@ -962,6 +970,10 @@ class McpServer(AggregateRoot):
 
             # Reacquire lock to finalize state
             with self._lock:
+                if self._retired:
+                    # Replaced while it started: the client is the old
+                    # declaration's, and the failure path closes it.
+                    raise McpServerNotReadyError(self.mcp_server_id, "retired")
                 self._refuse_capability_drift()
                 self._finalize_start(client, start_time)
                 kept = True
@@ -1071,6 +1083,7 @@ class McpServer(AggregateRoot):
 
         launcher: Any = get_launcher(self._mode.value)
         config = self._get_launch_config()
+        self._starting_with = connection_declaration(config.get("endpoint"), config.get("tls_config"))
         client = launcher.launch(**config)
 
         try:
@@ -1608,6 +1621,7 @@ class McpServer(AggregateRoot):
         if self._client is not client:
             self._close_quietly(self._client)
         self._client = client
+        self._connected_with = self._starting_with
         self._meta = {
             "init_result": {},
             "tools_count": self._tools.count(),
@@ -1744,6 +1758,8 @@ class McpServer(AggregateRoot):
             CapabilityBlockedError: The catalogue drifted, and a refusing mode refuses it.
             McpServerNotReadyError: The server is not READY with a client.
         """
+        if self._retired:
+            raise McpServerNotReadyError(self.mcp_server_id, "retired")
         if self._state != McpServerState.READY or self._client is None:
             raise McpServerNotReadyError(self.mcp_server_id, self._state.value)
         mode = self._drift_refused_by()
@@ -2741,6 +2757,45 @@ class McpServer(AggregateRoot):
             if self._http_config:
                 spec["http"] = dict(self._http_config)
         return spec
+
+    def _record_event(self, event: Any) -> None:
+        # A retired copy shares its stream with the copy that replaced it. A
+        # health check or a lost connection on it must not leave that stream
+        # saying the server is DEGRADED or DEAD, which a restart would replay.
+        if getattr(self, "_retired", False):
+            return
+        super()._record_event(event)
+
+    def connection_declaration(self) -> tuple[str | None, str]:
+        """The endpoint and `tls` block the live client was built from, or the declared ones without a client."""
+        with self._lock:
+            if self._client is not None and self._connected_with is not None:
+                return self._connected_with
+            return connection_declaration(self._endpoint, self._tls_config)
+
+    @property
+    def is_retired(self) -> bool:
+        """Whether this copy was replaced and serves nothing again."""
+        return self._retired
+
+    def retire(self) -> Any:
+        """Take this copy out of service for good, and hand back its client for closing.
+
+        For the fleet projection, which replaces a key-pinned server's copy when
+        its key list or endpoint changed elsewhere (ADR-030 §8). The copy then
+        refuses `ensure_ready` and calls; a start already under way refuses too
+        and closes its own client. Nothing is closed here and no event is
+        recorded: the projection does no I/O and publishes nothing, so the
+        caller closes the client off the tail.
+
+        Returns:
+            The client this copy held, or None.
+        """
+        with self._lock:
+            self._retired = True
+            client, self._client = self._client, None
+        logger.info("mcp_server_retired", mcp_server_id=self.mcp_server_id)
+        return client
 
     def update_config(
         self,
