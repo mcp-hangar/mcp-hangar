@@ -34,7 +34,7 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
 from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
-from ...domain.value_objects.peer_identity import PeerIdentity
+from ...domain.value_objects.peer_identity import PeerIdentity, max_connection_age
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
@@ -58,7 +58,7 @@ logger = get_logger(__name__)
 
 def _require_peer_identity_authority(
     authority: IPeerIdentityAuthority | None,
-    command: CreateMcpServerCommand | DeleteMcpServerCommand,
+    command: CreateMcpServerCommand | UpdateMcpServerCommand | DeleteMcpServerCommand,
     what: str,
 ) -> None:
     """Refuse a change to a peer identity the command's caller may not make (ADR-030 §9).
@@ -76,6 +76,32 @@ def _require_peer_identity_authority(
         )
     if authority is None or not authority.may_declare(principal):
         raise PeerIdentityChangeDenied(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
+
+
+#: What a `tls` block may hold when it comes through a command rather than the
+#: configuration file. `verify_ssl` and `ca_cert_path` decide whose certificate
+#: an upstream may present; they stay with whoever writes the file (ADR-021).
+_COMMAND_TLS_KEYS = frozenset({"peer_identity", "max_connection_age"})
+
+
+def _command_peer_identity(mcp_server_id: str, tls: Any) -> PeerIdentity | None:
+    """Check a `tls` block a command carries, and return the peer identity it declares (ADR-030 §4b)."""
+    if tls is None:
+        return None
+    if not isinstance(tls, dict):
+        raise ValidationError(f"mcp_server '{mcp_server_id}': tls must be a mapping")
+    unknown = sorted(set(tls) - _COMMAND_TLS_KEYS)
+    if unknown:
+        raise ValidationError(
+            f"mcp_server '{mcp_server_id}': tls accepts only peer_identity and max_connection_age here; "
+            f"{', '.join(unknown)} can be set only in the configuration file"
+        )
+    try:
+        identity = PeerIdentity.from_tls(tls)
+        max_connection_age(tls)
+    except ValueError as e:
+        raise ValidationError(f"mcp_server '{mcp_server_id}': {e}") from e
+    return identity
 
 
 def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
@@ -171,10 +197,7 @@ class CreateMcpServerHandler(CommandHandler):
 
         # A key list decides which upstream a call may reach: declaring one is
         # its own permission, checked before anything is built (ADR-030 §9).
-        try:
-            peer_identity = PeerIdentity.from_tls(command.tls)
-        except ValueError as e:
-            raise ValidationError(f"mcp_server '{command.mcp_server_id}': {e}") from e
+        peer_identity = _command_peer_identity(command.mcp_server_id, command.tls)
         if peer_identity is not None:
             _require_peer_identity_authority(self._peer_identity_authority, command, "declare a peer identity for")
             # The peer-key name record keeps a deleted key-pinned server from
@@ -307,6 +330,9 @@ class UpdateMcpServerHandler(CommandHandler):
         repository: IMcpServerRepository,
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
+        groups: dict | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -316,10 +342,18 @@ class UpdateMcpServerHandler(CommandHandler):
             fleet_writer: Where the changed configuration is recorded. Without
                 it an update survives only until the process ends, and a restart
                 silently reverts it.
+            declared_in_config: Whether the configuration declares a server,
+                whose endpoint and `tls` the file owns.
+            peer_identity_authority: Who may change a peer identity, or the
+                endpoint of a key-pinned server (ADR-030 §9).
+            groups: The groups, whose members hold a server by reference.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
+        self._declared_in_config = declared_in_config
+        self._peer_identity_authority = peer_identity_authority
+        self._groups = groups
 
     def handle(self, command: UpdateMcpServerCommand) -> dict[str, Any]:
         """Update mcp_server configuration.
@@ -347,6 +381,7 @@ class UpdateMcpServerHandler(CommandHandler):
             IdleTTL(command.idle_ttl_s)
         if command.health_check_interval_s is not None:
             HealthCheckInterval(command.health_check_interval_s)
+        connection = self._connection_change(mcp_server, command)
         if self._fleet_writer is not None:
             changed: dict[str, Any] = {
                 "description": command.description,
@@ -354,8 +389,23 @@ class UpdateMcpServerHandler(CommandHandler):
                 "idle_ttl_s": command.idle_ttl_s,
                 "health_check_interval_s": command.health_check_interval_s,
             }
-            _record_fields(self._fleet_writer, mcp_server, **{k: v for k, v in changed.items() if v is not None})
+            fields = {k: v for k, v in changed.items() if v is not None}
+            if connection is not None:
+                endpoint, tls = connection
+                fields.update(
+                    endpoint=endpoint,
+                    tls=tls,
+                    provenance=Provenance.HUMAN,
+                    runtime_addresses=None,
+                    enforce_ssrf=endpoint is not None,
+                )
+            try:
+                _record_fields(self._fleet_writer, mcp_server, **fields)
+            except PeerKeyNameRefused as e:
+                raise PeerKeyNameTaken(str(e)) from e
 
+        if connection is not None:
+            mcp_server.reconfigure_connection(*connection)
         mcp_server.update_config(
             description=command.description,
             env=command.env,
@@ -373,6 +423,55 @@ class UpdateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "updated": True}
+
+    def _connection_change(
+        self, mcp_server: McpServer, command: UpdateMcpServerCommand
+    ) -> tuple[str | None, dict[str, Any] | None] | None:
+        """Check a change of endpoint or `tls`, and return the server's new pair (ADR-030 §4b, §9).
+
+        A key-pinned server's endpoint, and any peer identity, change only for
+        a holder of `mcp_servers:peer_identity`. A server the configuration
+        declares keeps the file's. One update may rotate keys but not replace
+        the whole list under the same `key_ref`, so a single write cannot cut
+        every trusted key at once; `key_ref` itself cannot change yet.
+        """
+        if command.endpoint is None and command.tls is None:
+            return None
+        name = command.mcp_server_id
+        if self._declared_in_config is not None and self._declared_in_config(name):
+            raise McpServerDeclaredInConfigError(name)
+        if mcp_server.mode != McpServerMode.REMOTE:
+            raise ValidationError(f"mcp_server '{name}': only a remote server has an endpoint and a tls block")
+        endpoint = mcp_server._endpoint if command.endpoint is None else (command.endpoint or None)
+        tls = mcp_server._tls_config if command.tls is None else command.tls
+        new = _command_peer_identity(name, command.tls) if command.tls is not None else mcp_server._peer_identity
+        old = mcp_server._peer_identity
+        if old is None and new is None:
+            # Only a key-pinned server's copy is replaced on the other replicas;
+            # a plain one's would keep the old endpoint until they restart (#1955).
+            raise ValidationError(
+                f"mcp_server '{name}': the endpoint of a server without a peer identity cannot change yet (#1955)"
+            )
+        _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
+        if self._fleet_writer is None:
+            raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
+        if old is not None and new is None:
+            raise PeerKeyNameTaken(f"mcp_server '{name}': a peer identity cannot be removed; the name keeps it")
+        if old is not None and new is not None:
+            if new.key_ref != old.key_ref:
+                raise ValidationError(f"mcp_server '{name}': changing key_ref is not supported yet")
+            if not new.spki_sha256 & old.spki_sha256:
+                raise ValidationError(
+                    f"mcp_server '{name}': the new key list shares no key with the current one; "
+                    "add the next key first, then remove the old one"
+                )
+        if new is not None and any(g.get_member(name) for g in (self._groups or {}).values()):
+            raise ValidationError(f"mcp_server '{name}': a group member cannot be given a peer identity")
+        if endpoint is not None:
+            # Set over the API, the endpoint is a human's, whatever it was
+            # before: a server moved from discovery meets the policy now (§4f).
+            validate_no_ssrf(endpoint, provenance=Provenance.HUMAN)
+        return endpoint, tls
 
 
 class SetL7PolicyHandler(CommandHandler):
@@ -794,6 +893,11 @@ class AddGroupMemberHandler(CommandHandler):
         mcp_server = self._repository.get(command.mcp_server_id)
         if mcp_server is None:
             raise McpServerNotFoundError(command.mcp_server_id)
+        if isinstance(getattr(mcp_server, "_peer_identity", None), PeerIdentity):
+            # A group holds its member by reference, and the fleet projection
+            # replaces a key-pinned server's copy when its key list changes: the
+            # group would go on routing to the retired one (ADR-030 §8).
+            raise ValidationError(f"mcp_server '{command.mcp_server_id}': a key-pinned server cannot join a group")
 
         with self._lock:
             group = self._groups.get(command.group_id)
@@ -905,7 +1009,14 @@ def register_crud_handlers(
     )
     command_bus.register(
         UpdateMcpServerCommand,
-        UpdateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+        UpdateMcpServerHandler(
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            declared_in_config=declared_in_config,
+            peer_identity_authority=peer_identity_authority,
+            groups=groups,
+        ),
     )
     command_bus.register(
         SetL7PolicyCommand,

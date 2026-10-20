@@ -47,6 +47,11 @@ async def get_system_info(request: Request) -> HangarJSONResponse:
         "uptime_seconds": uptime_seconds,
         "version": version,
         "instance": _instance_info(),
+        # What a client may rely on this core to enforce. The operator registers
+        # a key-pinned server only with a core listing `peer_identity`: an older
+        # one would ignore the `tls` block and serve the server unchecked
+        # (ADR-030 §4e).
+        "capabilities": ["peer_identity"],
     }
 
     return HangarJSONResponse({"system": system_data})
