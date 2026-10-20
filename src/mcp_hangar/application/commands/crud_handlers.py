@@ -105,6 +105,20 @@ def _command_peer_identity(mcp_server_id: str, tls: Any) -> PeerIdentity | None:
     return identity
 
 
+def _refuse_a_key_ref_the_fleet_holds(repository: IMcpServerRepository, mcp_server_id: str, key_ref: str) -> None:
+    """Refuse a `key_ref` another server in the fleet holds (ADR-030 §7).
+
+    The record's entries from the configuration file are its servers, which
+    never write a row, so the record's own write cannot see them.
+    """
+    for name, server in repository.get_all().items():
+        held = getattr(server, "_peer_identity", None)
+        if name != mcp_server_id and isinstance(held, PeerIdentity) and held.key_ref == key_ref:
+            raise PeerKeyNameTaken(
+                f"mcp_server '{mcp_server_id}': key_ref '{key_ref}' already names the server '{name}'"
+            )
+
+
 def _record_fields(
     fleet_writer: IFleetWriter, mcp_server: McpServer, peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM, **fields: Any
 ) -> None:
@@ -216,15 +230,7 @@ class CreateMcpServerHandler(CommandHandler):
                     f"mcp_server '{command.mcp_server_id}': declaring a peer identity needs a durable "
                     "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
                 )
-            # The record's entries from the configuration file are its servers,
-            # which never write a row; a key_ref one of them holds is taken.
-            for name, server in self._repository.get_all().items():
-                held = getattr(server, "_peer_identity", None)
-                if isinstance(held, PeerIdentity) and held.key_ref == peer_identity.key_ref:
-                    raise PeerKeyNameTaken(
-                        f"mcp_server '{command.mcp_server_id}': key_ref '{held.key_ref}' already names the server "
-                        f"'{name}'"
-                    )
+            _refuse_a_key_ref_the_fleet_holds(self._repository, command.mcp_server_id, peer_identity.key_ref)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -512,6 +518,8 @@ class UpdateMcpServerHandler(CommandHandler):
         _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
         if self._fleet_writer is None:
             raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
+        if new is not None and (old is None or new.key_ref != old.key_ref):
+            _refuse_a_key_ref_the_fleet_holds(self._repository, name, new.key_ref)
         if old is not None and new is None:
             raise PeerKeyNameTaken(f"mcp_server '{name}': a peer identity cannot be removed; the name keeps it")
         if old is not None and new is not None and new.key_ref == old.key_ref:

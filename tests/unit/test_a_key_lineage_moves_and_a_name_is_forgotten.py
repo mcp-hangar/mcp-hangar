@@ -236,3 +236,32 @@ class TestPostgres:
 
         assert not any("DELETE" in c.args[0] for c in cursor.execute.call_args_list)
         connection.rollback.assert_called_once()
+
+
+class TestAKeyRefAFileServerHolds:
+    """The file's servers write no row, so only the fleet knows their key_refs."""
+
+    @pytest.fixture
+    def with_a_file_server(self, gateway):
+        gateway.fleet.add(
+            "files", McpServer(mcp_server_id="files", mode="remote", endpoint=ENDPOINT, tls=_tls(NEW, "from-file"))
+        )
+        return gateway
+
+    def test_a_new_lineage_cannot_take_it(self, with_a_file_server) -> None:
+        gateway = with_a_file_server
+        gateway.register()
+
+        with pytest.raises(PeerKeyNameTaken, match="already names the server 'files'"):
+            gateway.update.handle(UpdateMcpServerCommand(mcp_server_id="payments", tls=_tls(OLD, "from-file")))
+
+        assert gateway.names() == {"payments": "lineage"}
+
+    def test_a_discovered_server_given_a_peer_identity_cannot_take_it(self, with_a_file_server) -> None:
+        gateway = with_a_file_server
+        gateway.create.handle(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
+
+        with pytest.raises(PeerKeyNameTaken, match="already names the server 'files'"):
+            gateway.update.handle(UpdateMcpServerCommand(mcp_server_id="payments", tls=_tls(OLD, "from-file")))
+
+        assert gateway.names() == {} and asyncio.run(gateway.configs.get("payments")).tls is None
