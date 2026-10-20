@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
+from ..value_objects.peer_identity import PeerIdentity
 from ..value_objects.provenance import Provenance
 
 
@@ -92,6 +93,11 @@ class AuditEntry:
         )
 
 
+#: The stored `mode` of a key-pinned server's row (ADR-030 §4e). Not a member of
+#: `McpServerMode`: the declared mode stays `remote`, and only the row says this.
+PEER_KEY_ROW_MODE = "remote-peer-key"
+
+
 @dataclass(frozen=True)
 class McpServerConfigSnapshot:
     """Immutable snapshot of mcp_server configuration.
@@ -141,6 +147,10 @@ class McpServerConfigSnapshot:
     # (#991). Wire form rather than the dataclass: it is the one shape the
     # operator, the REST route, and L7Policy.from_dict already agree on.
     l7_policy: dict[str, Any] | None = None
+    # The server's `tls` block (it holds no secret), so a server declared with a
+    # peer identity comes back with it after a restart and on a peer replica,
+    # instead of as a plain server whose key nothing checks (ADR-030 §10).
+    tls: dict[str, Any] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -158,11 +168,22 @@ class McpServerConfigSnapshot:
             addrs = frozenset(str(a) for a in addrs)
         object.__setattr__(self, "runtime_addresses", addrs)
 
+        # A key-pinned server's row is stored under a mode the previous release
+        # does not know, so that release declines the row instead of serving
+        # the server as a plain one (ADR-030 §4e). It is read back as `remote`,
+        # and only with the peer identity that gave it the encoding.
+        if self.mode == PEER_KEY_ROW_MODE:
+            if PeerIdentity.from_tls(self.tls) is None:
+                raise ValueError(
+                    f"mcp_server '{self.mcp_server_id}': a {PEER_KEY_ROW_MODE} row without tls.peer_identity"
+                )
+            object.__setattr__(self, "mode", "remote")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
         return {
             "mcp_server_id": self.mcp_server_id,
-            "mode": self.mode,
+            "mode": PEER_KEY_ROW_MODE if self.mode == "remote" and PeerIdentity.from_tls(self.tls) else self.mode,
             "command": self.command,
             "image": self.image,
             "endpoint": self.endpoint,
@@ -184,6 +205,7 @@ class McpServerConfigSnapshot:
             "runtime_addresses": (sorted(self.runtime_addresses) if self.runtime_addresses is not None else None),
             "enforce_ssrf": self.enforce_ssrf,
             "l7_policy": self.l7_policy,
+            "tls": self.tls,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -218,6 +240,7 @@ class McpServerConfigSnapshot:
             runtime_addresses=data.get("runtime_addresses"),
             enforce_ssrf=data.get("enforce_ssrf", False),
             l7_policy=data.get("l7_policy"),
+            tls=data.get("tls"),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )
