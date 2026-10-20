@@ -27,6 +27,7 @@ from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.config import MaxConsecutiveFailures
+from ..domain.value_objects.peer_identity import PeerIdentity
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 from ..metrics import remove_group_series
@@ -1144,6 +1145,53 @@ def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> 
         ) from e
 
 
+def _peer_identity_tls(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
+    """The server's `tls` block, refused when its peer identity cannot be enforced (ADR-030 §4).
+
+    A key list is only a guarantee on a connection that has a TLS handshake to
+    check it in. Each refusal below names both halves, because each is a
+    declaration the server would otherwise appear to honour while it does not.
+    """
+    tls = spec_dict.get("tls")
+    if not isinstance(tls, dict):
+        return tls
+    if "max_connection_age" in tls:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.max_connection_age is not supported by this release"
+        )
+    try:
+        identity = PeerIdentity.from_tls(tls)
+    except ValueError as e:
+        raise ConfigurationError(f"mcp_server '{mcp_server_id}': {e}") from e
+    if identity is None:
+        return tls
+
+    mode = McpServerMode.normalize(spec_dict.get("mode", "subprocess"))
+    if mode is not McpServerMode.REMOTE:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity needs mode: remote, not mode: {mode.value} "
+            "-- there is no connection to bind the key to"
+        )
+    endpoint = str(spec_dict.get("endpoint") or "")
+    if not endpoint.lower().startswith("https://"):
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity needs an https:// endpoint, not {endpoint!r} "
+            "-- a plaintext connection has no handshake to check the key in"
+        )
+    if tls.get("verify_ssl") is False:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity with tls.verify_ssl: false -- the key, not a "
+            "certificate chain, is what is verified; remove verify_ssl"
+        )
+    if tls.get("ca_cert_path"):
+        logger.warning(
+            "peer_identity_ignores_ca_cert_path",
+            mcp_server_id=mcp_server_id,
+            detail="tls.ca_cert_path is not used for a server with tls.peer_identity: no CA is a trust input",
+        )
+    return tls
+
+
 def _subprocess_command(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
     """The command a subprocess server runs: its `command` followed by its `args` (#1658).
 
@@ -1276,7 +1324,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         "tools": tools,
         # HTTP transport configuration
         "auth": auth_config,
-        "tls": spec_dict.get("tls"),
+        "tls": _peer_identity_tls(mcp_server_id, spec_dict),
         "http": spec_dict.get("http"),
         # Capability declarations
         "capabilities": capabilities,
