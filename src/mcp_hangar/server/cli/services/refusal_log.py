@@ -31,6 +31,10 @@ REFUSAL_EVENT_TYPES = (
     "ToolApprovalCancelled",
 )
 
+#: A failed invocation is a refusal when the transport refused the upstream's
+#: key (ADR-030 §5): only rows with this code are read as one.
+PEER_KEY_REFUSAL = "upstream_peer_key_mismatch"
+
 
 class EventStoreNotReadable(Exception):
     """The event store cannot be read here; the message says why and what to do."""
@@ -50,6 +54,8 @@ class Refusal:
     #: The expected and observed digests, for a digest mismatch.
     expected_digest: str | None = None
     observed_digest: str | None = None
+    #: The TLS key a refused upstream presented, for a peer-key refusal (ADR-030 §6).
+    observed_peer_spki: str | None = None
 
 
 @dataclass(frozen=True)
@@ -172,7 +178,10 @@ def read_refusals(
     event_id: str | None = None,
 ) -> list[Refusal]:
     """The newest *last* refusals in the store at *db_path*, newest first; or the one with *event_id*."""
-    rows = _read_rows(db_path, REFUSAL_EVENT_TYPES, order="DESC")
+    # A warm call refused for its upstream's key is recorded as a failed
+    # invocation, not as a ToolCallRefused; it is read here as what it is, and
+    # never re-labelled as a refusal event.
+    rows = _read_rows(db_path, (*REFUSAL_EVENT_TYPES, "ToolInvocationFailed"), order="DESC")
 
     refusals: list[Refusal] = []
     for event_type, raw in rows:
@@ -198,6 +207,8 @@ def _refusal(event_type: str, raw: str) -> Refusal | None:
         return None
     if not isinstance(data, dict):
         return None
+    if event_type == "ToolInvocationFailed" and data.get("failure_code") != PEER_KEY_REFUSAL:
+        return None
     occurred = data.get("occurred_at")
     when = datetime.fromtimestamp(occurred, tz=UTC) if isinstance(occurred, (int, float)) else None
     gate, reason = _gate_and_reason(event_type, data)
@@ -213,6 +224,7 @@ def _refusal(event_type: str, raw: str) -> Refusal | None:
         fields=shown,
         expected_digest=data.get("expected_digest"),
         observed_digest=data.get("observed_digest"),
+        observed_peer_spki=data.get("observed_peer_spki"),
     )
 
 
@@ -221,6 +233,8 @@ def _gate_and_reason(event_type: str, data: dict[str, Any]) -> tuple[str, str]:
         if data.get("l7_verdict"):
             return "l7_egress", f"{data['l7_verdict']} ({data.get('l7_rule_kind') or 'policy'})"
         return str(data.get("gate") or ""), str(data.get("gate_reason") or "")
+    if event_type == "ToolInvocationFailed":
+        return "upstream_tls", PEER_KEY_REFUSAL
     if event_type == "DigestMismatchEvent":
         return "digest_pin", f"digest differs from the pin; enforcement {data.get('enforcement', '')}"
     if event_type == "ToolApprovalDenied":
