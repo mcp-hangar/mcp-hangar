@@ -17,6 +17,8 @@ from .refusal import (
     TOOL_INVOCATION_DENIED,
     caller_cost_data,
     event_type_for_status,
+    peer_key_data,
+    peer_key_wire_fields,
     refusal_data,
     refusal_wire_fields,
 )
@@ -66,6 +68,7 @@ def _format_structured_data(record: AuditRecord) -> str:
         **dict(refusal_wire_fields(data)),
         # SD-PARAMs beside the others, camelCase (#1705). A zero cost is a value.
         **{wire: value for _key, wire, value in caller_cost_data(data)},
+        **{wire: value for _key, wire, value in peer_key_wire_fields(data)},
     }
     params = " ".join(f'{key}="{_escape_sd_value(str(value))}"' for key, value in fields.items() if value is not None)
     return f"[{SD_ID}{(' ' + params) if params else ''}]"
@@ -134,6 +137,7 @@ class SyslogExporter:
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -157,6 +161,7 @@ class SyslogExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        data.update(peer_key_data(peer_key))
         if route_backend:
             data[ROUTE_BACKEND] = route_backend
 

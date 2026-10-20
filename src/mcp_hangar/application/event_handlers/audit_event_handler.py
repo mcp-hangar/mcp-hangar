@@ -105,6 +105,7 @@ class OTLPAuditEventHandler:
                 cost_model=str(cost_record.cost_model) if cost_record.cost_cents else None,
                 cost_input_tokens=cost_record.input_tokens if cost_record.input_tokens else None,
                 cost_output_tokens=cost_record.output_tokens if cost_record.output_tokens else None,
+                peer_key={"upstream_peer_spki": event.upstream_peer_spki},
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, ToolInvocationFailed):
@@ -116,6 +117,11 @@ class OTLPAuditEventHandler:
                 status="error",
                 duration_ms=event.duration_ms,
                 error_type=event.error_type,
+                peer_key={
+                    "upstream_peer_spki": event.upstream_peer_spki,
+                    "failure_code": event.failure_code,
+                    "observed_peer_spki": event.observed_peer_spki,
+                },
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, ToolCallRefused):
@@ -131,6 +137,7 @@ class OTLPAuditEventHandler:
                 status="denied",
                 duration_ms=event.elapsed_ms,
                 refusal=_refusal_fields(event),
+                peer_key={"observed_peer_spki": event.observed_peer_spki},
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, McpServerStateChanged):

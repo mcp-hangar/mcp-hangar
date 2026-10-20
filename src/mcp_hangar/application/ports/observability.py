@@ -260,6 +260,7 @@ class IAuditExporter(Protocol):
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
@@ -270,6 +271,10 @@ class IAuditExporter(Protocol):
         for a group call -- and *route_backend* the server the call was routed
         to, the member (#1594). A standalone call has the same value in both;
         a refusal before a backend was chosen has no *route_backend*.
+
+        *peer_key* holds the upstream's TLS key for a key-pinned server
+        (ADR-030 §6): ``upstream_peer_spki`` for the verified key that served
+        the call, ``failure_code`` and ``observed_peer_spki`` for a refused one.
         """
         ...
 

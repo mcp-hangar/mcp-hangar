@@ -149,6 +149,22 @@ def _caller_cost_extensions(data: Mapping[str, object]) -> list[str]:
     return extensions
 
 
+def _peer_key_extensions(data: Mapping[str, object]) -> list[str]:
+    """The upstream's TLS key on a tool-call record (ADR-030 §6), as the dictionary's `fileHash`.
+
+    A record holds at most one key: the verified key of the connection that
+    served the call, or the key a refused peer presented. `fileType` says which,
+    because the two mean opposite things. The refusal's code is not repeated:
+    `reason` already carries the error type that names it. `fileHash` is free on
+    a tool-call record; a pin record uses it for the digest (`_pin_extensions`).
+    """
+    kinds = (("upstream_peer_spki", "UpstreamTlsKeyVerified"), ("observed_peer_spki", "UpstreamTlsKeyRefused"))
+    for key, kind in kinds:
+        if data.get(key):
+            return [f"fileHash={_escape_extension_value(str(data[key]))}", f"fileType={kind}"]
+    return []
+
+
 def _pin_extensions(event_type: str, data: Mapping[str, object]) -> list[str]:
     """A tool pin's provenance (#1800): the pinned digest, the one it replaced, the approver.
 
@@ -249,6 +265,7 @@ def format_audit_record(record: AuditRecord) -> str:
         extensions.append("flexString1Label=RouteBackend")
 
     extensions.extend(_caller_cost_extensions(data))
+    extensions.extend(_peer_key_extensions(data))
 
     # Tool name from data (common in tool invocation events)
     tool_name = data.get("tool_name")

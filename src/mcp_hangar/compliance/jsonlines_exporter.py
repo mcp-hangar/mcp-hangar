@@ -16,6 +16,8 @@ from .refusal import (
     ROUTE_BACKEND,
     caller_cost_data,
     event_type_for_status,
+    peer_key_data,
+    peer_key_wire_fields,
     refusal_data,
 )
 
@@ -41,6 +43,7 @@ def _record_to_json_line(record: AuditRecord) -> str:
     payload.update({data_key: data.get(data_key) for _key, data_key, _wire in REFUSAL_FIELDS})
     # The caller and cost fields (#1705); a zero cost is kept, only None is left out.
     payload.update({key: value for key, _wire, value in caller_cost_data(data)})
+    payload.update({key: value for key, _wire, value in peer_key_wire_fields(data)})
     return json.dumps({key: value for key, value in payload.items() if value is not None})
 
 
@@ -86,6 +89,7 @@ class JSONLinesExporter:
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -109,6 +113,7 @@ class JSONLinesExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        data.update(peer_key_data(peer_key))
         if route_backend:
             data[ROUTE_BACKEND] = route_backend
 

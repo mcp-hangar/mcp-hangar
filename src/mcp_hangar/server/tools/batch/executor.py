@@ -726,6 +726,9 @@ class _CallPipeline:
     proj_registry: Any
     tracer: Any
 
+    #: Set by _gate_cold_start when the upstream presented a key outside its key
+    #: list: the key pin it presented, for the refusal's record (ADR-030 §6).
+    observed_peer_spki: str | None = None
     #: Set by _gate_global_timeout: what is left of the batch budget.
     effective_timeout: float = 0.0
     #: Set by _gate_resolve_target.
@@ -2565,6 +2568,7 @@ class BatchExecutor:
                 # The upstream's TLS key is not in its key list (ADR-030 §5): a
                 # refusal with its own reason, so no handled failure on the span.
                 cs_span.set_attribute("cold_start.result", "refused")
+                p.observed_peer_spki = e.observed_peer_spki
                 refusal = p.refuse(str(e), "UpstreamPeerKeyMismatchError")
                 return self._report_refusal(p, refusal, cause=e)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
@@ -2993,6 +2997,7 @@ def publish_call_refused(
     reason: str | None = None,
     l7: L7Decision | None = None,
     route_backend: str | None = None,
+    observed_peer_spki: str | None = None,
 ) -> None:
     """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
 
@@ -3017,6 +3022,7 @@ def publish_call_refused(
                 l7_policy_id=l7.policy_id if l7 is not None else None,
                 elapsed_ms=round(elapsed_ms, 2),
                 route_backend=route_backend,
+                observed_peer_spki=observed_peer_spki,
             )
         )
     except Exception as e:  # noqa: BLE001 -- fault barrier: the refusal stands whether or not its record is written
@@ -3035,6 +3041,7 @@ def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> N
             gate=gate,
             reason=reason,
             route_backend=p.route_backend,
+            observed_peer_spki=p.observed_peer_spki,
         )
 
 
