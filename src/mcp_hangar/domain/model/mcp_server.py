@@ -2758,6 +2758,14 @@ class McpServer(AggregateRoot):
                 spec["http"] = dict(self._http_config)
         return spec
 
+    def _record_event(self, event: Any) -> None:
+        # A retired copy shares its stream with the copy that replaced it. A
+        # health check or a lost connection on it must not leave that stream
+        # saying the server is DEGRADED or DEAD, which a restart would replay.
+        if getattr(self, "_retired", False):
+            return
+        super()._record_event(event)
+
     def connection_declaration(self) -> tuple[str | None, str]:
         """The endpoint and `tls` block the live client was built from, or the declared ones without a client."""
         with self._lock:

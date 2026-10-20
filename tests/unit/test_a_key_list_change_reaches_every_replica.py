@@ -15,14 +15,18 @@ from typing import Any
 import pytest
 
 from mcp_hangar.application.event_handlers.fleet_projection import FleetProjection
+from mcp_hangar.application.services.event_tailer import EventTailer
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerUpdated
 from mcp_hangar.domain.exceptions import McpServerNotReadyError, McpServerStartError
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.value_objects.mcp_server import McpServerState
+from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence import Database, DatabaseConfig
 from mcp_hangar.infrastructure.persistence.config_repository import SQLiteMcpServerConfigRepository
+from mcp_hangar.infrastructure.persistence.sqlite_event_store import SQLiteEventStore
 
 ENDPOINT = "https://203.0.113.5:8443"
 OLD, NEW = "sha256:" + "a" * 64, "sha256:" + "b" * 64
@@ -260,3 +264,61 @@ class TestAStartUnderWayWhenRetired:
         assert outcome and isinstance(outcome[0], McpServerStartError)
         assert launched.closed
         assert server._client is None
+
+
+class TestAPeersUpdateArrivesThroughTheTail:
+    """The way a peer actually learns of it: the shared log, the tailer, the bus, as bootstrap wires them."""
+
+    def test_the_tailed_event_replaces_the_copy(self, replica, tmp_path) -> None:
+        fleet, configs, projection, client = replica
+        log = SQLiteEventStore(tmp_path / "events.db")
+        here = EventBus()
+        here.set_event_store(log)
+        here.subscribe(McpServerUpdated, projection.handle, kind=HandlerKind.PROJECTION)
+        tailer = EventTailer(log, here, "gateway-here")
+        old = fleet.get("payments")
+
+        _write(configs, _row(NEW))
+        update = _update()
+        object.__setattr__(update, "produced_by", "gateway-peer")
+        log.append("mcp_server:payments", [update], expected_version=-1)
+        tailer.tick()
+
+        assert fleet.get("payments") is not old and old.is_retired and client.closed
+
+
+class TestARetiredCopyWritesNothingToTheStream:
+    def test_a_health_check_on_it_records_no_event(self, replica) -> None:
+        fleet, configs, projection, _ = replica
+        old = fleet.get("payments")
+        old.collect_events()
+        _write(configs, _row(NEW))
+        projection.handle(_update())
+
+        old.health_check()
+        old.shutdown()
+
+        assert old.collect_events() == []
+
+
+class TestAPlainCopyWhoseRowGainedAKeyIsNotForgotten:
+    def test_an_unreadable_row_is_read_again_and_applied(self, tmp_path) -> None:
+        configs = SQLiteMcpServerConfigRepository(Database(DatabaseConfig(path=str(tmp_path / "fleet.db"))))
+        asyncio.run(configs.save_versioned(_row(tls={}), None))
+        fleet = InMemoryMcpServerRepository()
+        plain = McpServer(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT)
+        fleet.add("payments", plain)
+        store = _Unreadable(configs)
+        projection = FleetProjection(fleet, store, _SyncLoop(), closer=_Closer())
+        # The move of section 4f: the row now declares a key list.
+        store.failing = False
+        _write(configs, _row(NEW))
+        store.failing = True
+
+        projection.handle(_update())
+        assert fleet.get("payments") is plain
+
+        store.failing = False
+        projection.handle(McpServerRegistered(mcp_server_id="unrelated", source="api", mode="remote"))
+
+        assert fleet.get("payments")._peer_identity.spki_sha256 == frozenset({NEW})

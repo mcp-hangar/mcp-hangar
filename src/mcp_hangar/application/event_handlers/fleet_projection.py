@@ -33,6 +33,7 @@ and the record describes configuration, not state.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, cast
 
 from ...domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot, peer_key_claim
@@ -84,11 +85,19 @@ class FleetProjection:
         #: Key-pinned servers whose row could not be read: retired and refusing
         #: calls, read again on each later event until a read succeeds (§8).
         self._unread: set[str] = set()
+        self._serial = threading.Lock()
 
     def handle(self, event: DomainEvent) -> None:
         """Apply a registration, a deregistration or an update to the local fleet."""
+        # The tail and a request thread publishing live can both get here for
+        # one server; two replacements would orphan the first, client and all.
+        with self._serial:
+            self._apply(event)
+
+    def _apply(self, event: DomainEvent) -> None:
         for mcp_server_id in sorted(self._unread - {getattr(event, "mcp_server_id", None)}):
-            self._apply_update(mcp_server_id)
+            if not self._apply_update(mcp_server_id):
+                break  # The store is still unreachable; one failed read is enough per event.
         if isinstance(event, McpServerUpdated):
             self._apply_update(event.mcp_server_id)
         elif isinstance(event, McpServerRegistered):
@@ -170,7 +179,7 @@ class FleetProjection:
         self._repository.add(mcp_server_id, server_from_snapshot(snapshot))
         logger.info("fleet_projection_registered", mcp_server_id=mcp_server_id, produced_by=produced_by)
 
-    def _apply_update(self, mcp_server_id: str) -> None:
+    def _apply_update(self, mcp_server_id: str) -> bool:
         """Replace a key-pinned server's copy whose endpoint or `tls` block changed elsewhere (ADR-030 §8).
 
         Every replica does this, the one that handled the update included: it
@@ -179,35 +188,40 @@ class FleetProjection:
         record contradicts, retires the copy: the tail has moved past the event
         and will not deliver it again, so keeping the old key list is not safe.
         Updates of servers that are key-pinned on neither side are #1955's.
+
+        Returns:
+            False when the store could not be read.
         """
         local = self._repository.get(mcp_server_id)
         if not isinstance(local, McpServer):
             self._unread.discard(mcp_server_id)
-            return
+            return True
         local_pinned = isinstance(local._peer_identity, PeerIdentity)
         try:
             row = self._runner.run(self._configs.get(mcp_server_id), READ_TIMEOUT_S)
             names = self._runner.run(self._configs.get_peer_key_names(), READ_TIMEOUT_S)
         except Exception as error:  # noqa: BLE001 -- fault-barrier: one unreadable row must not stall the tail
-            if local_pinned or mcp_server_id in self._unread:
-                self._unread.add(mcp_server_id)
+            # Remembered whatever the local copy is: the row may be the one that
+            # gives a plain server its key (§4f), and the tail will not repeat it.
+            self._unread.add(mcp_server_id)
+            if local_pinned:
                 self._retire(local)
-                logger.warning(
-                    "fleet_projection_peer_key_row_unreadable", mcp_server_id=mcp_server_id, error=str(error)
-                )
-            return
-        if row is None or not (local_pinned or peer_key_claim(row) is not None or mcp_server_id in self._unread):
+            logger.warning("fleet_projection_update_row_unreadable", mcp_server_id=mcp_server_id, error=str(error))
+            return False
+        pending = mcp_server_id in self._unread
+        if row is None or not (local_pinned or peer_key_claim(row) is not None or pending):
             # No row: the deregistration that follows removes the copy.
-            return
+            return True
         self._unread.discard(mcp_server_id)
         if self._contradicts(mcp_server_id, row, names):
             self._retire(local)
-            return
+            return True
         if not local.is_retired and local.connection_declaration() == connection_declaration(row.endpoint, row.tls):
-            return
+            return True
         self._repository.add(mcp_server_id, server_from_snapshot(row))
         self._retire(local)
         logger.info("fleet_projection_peer_key_server_replaced", mcp_server_id=mcp_server_id)
+        return True
 
     def _retire(self, mcp_server: McpServer) -> None:
         client = mcp_server.retire()
