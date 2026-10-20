@@ -78,6 +78,32 @@ def _require_peer_identity_authority(
         raise PeerIdentityChangeDenied(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
 
 
+#: What a `tls` block may hold when it comes through a command rather than the
+#: configuration file. `verify_ssl` and `ca_cert_path` decide whose certificate
+#: an upstream may present; they stay with whoever writes the file (ADR-021).
+_COMMAND_TLS_KEYS = frozenset({"peer_identity", "max_connection_age"})
+
+
+def _command_peer_identity(mcp_server_id: str, tls: Any) -> PeerIdentity | None:
+    """Check a `tls` block a command carries, and return the peer identity it declares (ADR-030 §4b)."""
+    if tls is None:
+        return None
+    if not isinstance(tls, dict):
+        raise ValidationError(f"mcp_server '{mcp_server_id}': tls must be a mapping")
+    unknown = sorted(set(tls) - _COMMAND_TLS_KEYS)
+    if unknown:
+        raise ValidationError(
+            f"mcp_server '{mcp_server_id}': tls accepts only peer_identity and max_connection_age here; "
+            f"{', '.join(unknown)} can be set only in the configuration file"
+        )
+    try:
+        identity = PeerIdentity.from_tls(tls)
+        max_connection_age(tls)
+    except ValueError as e:
+        raise ValidationError(f"mcp_server '{mcp_server_id}': {e}") from e
+    return identity
+
+
 def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
     """Record a change to some fields of a server, on top of the recorded row (#1954).
 
@@ -171,10 +197,7 @@ class CreateMcpServerHandler(CommandHandler):
 
         # A key list decides which upstream a call may reach: declaring one is
         # its own permission, checked before anything is built (ADR-030 §9).
-        try:
-            peer_identity = PeerIdentity.from_tls(command.tls)
-        except ValueError as e:
-            raise ValidationError(f"mcp_server '{command.mcp_server_id}': {e}") from e
+        peer_identity = _command_peer_identity(command.mcp_server_id, command.tls)
         if peer_identity is not None:
             _require_peer_identity_authority(self._peer_identity_authority, command, "declare a peer identity for")
             # The peer-key name record keeps a deleted key-pinned server from
@@ -421,18 +444,17 @@ class UpdateMcpServerHandler(CommandHandler):
             raise ValidationError(f"mcp_server '{name}': only a remote server has an endpoint and a tls block")
         endpoint = mcp_server._endpoint if command.endpoint is None else (command.endpoint or None)
         tls = mcp_server._tls_config if command.tls is None else command.tls
-        try:
-            new = PeerIdentity.from_tls(tls)
-            max_connection_age(tls)
-        except ValueError as e:
-            raise ValidationError(f"mcp_server '{name}': {e}") from e
+        new = _command_peer_identity(name, command.tls) if command.tls is not None else mcp_server._peer_identity
         old = mcp_server._peer_identity
-        if old is not None or new is not None:
-            _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
-            if self._fleet_writer is None:
-                raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
-            if new is not None and (tls or {}).get("verify_ssl") is False:
-                raise ValidationError(f"mcp_server '{name}': verify_ssl false contradicts tls.peer_identity")
+        if old is None and new is None:
+            # Only a key-pinned server's copy is replaced on the other replicas;
+            # a plain one's would keep the old endpoint until they restart (#1955).
+            raise ValidationError(
+                f"mcp_server '{name}': the endpoint of a server without a peer identity cannot change yet (#1955)"
+            )
+        _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
+        if self._fleet_writer is None:
+            raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
         if old is not None and new is None:
             raise PeerKeyNameTaken(f"mcp_server '{name}': a peer identity cannot be removed; the name keeps it")
         if old is not None and new is not None:
@@ -445,8 +467,6 @@ class UpdateMcpServerHandler(CommandHandler):
                 )
         if new is not None and any(g.get_member(name) for g in (self._groups or {}).values()):
             raise ValidationError(f"mcp_server '{name}': a group member cannot be given a peer identity")
-        if endpoint is None and new is None:
-            raise ValidationError(f"mcp_server '{name}': a remote server without a peer identity needs an endpoint")
         if endpoint is not None:
             # Set over the API, the endpoint is a human's, whatever it was
             # before: a server moved from discovery meets the policy now (§4f).

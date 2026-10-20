@@ -5,3 +5,5 @@ A key-pinned server's configuration row is stored with mode `remote-peer-key`, w
 A configuration file that sets `tls.peer_identity` has no such guard: an older release serves the server as a plain one, without checking its key.
 
 With authentication disabled, any client of the API can set or change a peer identity. `GET /system` now lists `capabilities`, which the operator checks before it registers a key-pinned server.
+
+An endpoint set over the API is a human's, so the SSRF policy applies to it. Before the operator registers key-pinned servers by pod IP, add the pod CIDR to `ssrf.trusted_networks`, or every endpoint it sets is refused with `ssrf_blocked`. That includes a server moved from discovery to a key-pinned registration, which meets the policy for the first time.

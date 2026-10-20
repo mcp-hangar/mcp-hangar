@@ -153,13 +153,58 @@ class TestThePermission:
 
         assert gateway.row().endpoint == ENDPOINT
 
-    def test_a_plain_servers_endpoint_does_not(self, gateway) -> None:
+    def test_a_plain_servers_endpoint_does_not_change_yet(self, gateway) -> None:
+        # Its copy on the other replicas would keep the old endpoint (#1955).
         gateway.create.handle(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
-        gateway.authority.allows = False
 
-        gateway.update.handle(_update(endpoint=MOVED))
+        with pytest.raises(ValidationError, match="#1955"):
+            gateway.update.handle(_update(endpoint=MOVED))
 
-        assert gateway.row().endpoint == MOVED
+        assert gateway.row().endpoint == ENDPOINT
+
+
+class TestATlsBlockFromACommand:
+    """`verify_ssl` and `ca_cert_path` decide whose certificate is accepted; they stay file-only."""
+
+    @pytest.mark.parametrize(
+        "tls",
+        [
+            {"verify_ssl": False},
+            {"ca_cert_path": "/etc/passwd"},
+            {**_tls(OLD), "verify_ssl": False},
+            {"max_connection_age": "1h"},
+            {**_tls(OLD), "max_connection_age": "soon"},
+            "x",
+            ["peer_identity"],
+        ],
+    )
+    def test_anything_but_a_peer_identity_and_its_age_is_refused(self, gateway, tls) -> None:
+        with pytest.raises(ValidationError):
+            gateway.create.handle(
+                CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT, tls=tls)
+            )
+
+        assert gateway.row() is None
+
+    def test_an_update_cannot_set_them_either(self, gateway) -> None:
+        gateway.pinned(OLD)
+
+        with pytest.raises(ValidationError, match="only in the configuration file"):
+            gateway.update.handle(_update(tls={**_tls(OLD), "ca_cert_path": "/tmp/mine.pem"}))
+
+        assert gateway.row().tls == _tls(OLD)
+
+    def test_a_peer_identity_with_its_age_is_accepted(self, gateway) -> None:
+        gateway.create.handle(
+            CreateMcpServerCommand(
+                mcp_server_id="payments",
+                mode="remote",
+                endpoint=ENDPOINT,
+                tls={**_tls(OLD), "max_connection_age": "30m"},
+            )
+        )
+
+        assert gateway.row().tls["max_connection_age"] == "30m"
 
 
 class TestARotation:
@@ -239,12 +284,6 @@ class TestWhatCannotChange:
                 gateway.update.handle(_update(endpoint=MOVED))
         finally:
             gateway.writer.close()
-
-    def test_a_plain_remote_server_without_an_endpoint(self, gateway) -> None:
-        gateway.create.handle(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
-
-        with pytest.raises(ValidationError, match="needs an endpoint"):
-            gateway.update.handle(_update(endpoint=""))
 
     def test_a_group_member_is_not_given_a_peer_identity(self, tmp_path) -> None:
         member = SimpleNamespace(get_member=lambda name: name == "payments")
@@ -365,3 +404,19 @@ class TestTheRestApiWithRealKeys:
 
         assert (refused.status_code, moved.status_code) == (403, 403)
         assert not fleet.exists("other") and fleet.get("payments")._endpoint is None
+
+    def test_a_developer_cannot_turn_off_verification_on_a_plain_server(self, served) -> None:
+        client, keys, fleet = served
+        created = client.post(
+            "/mcp_servers",
+            json={"mcp_server_id": "plain", "mode": "remote", "endpoint": ENDPOINT, "tls": {"verify_ssl": False}},
+            headers={"X-API-Key": keys["developer"]},
+        )
+        malformed = client.post(
+            "/mcp_servers",
+            json={"mcp_server_id": "plain", "mode": "remote", "endpoint": ENDPOINT, "tls": "x"},
+            headers={"X-API-Key": keys["developer"]},
+        )
+
+        assert (created.status_code, malformed.status_code) == (422, 422)
+        assert not fleet.exists("plain")
