@@ -92,6 +92,9 @@ class UpdateMcpServerCommand(Command):
         env: New environment variable dict, replaces existing (optional).
         idle_ttl_s: New idle TTL in seconds (optional).
         health_check_interval_s: New health check interval in seconds (optional).
+        endpoint: New endpoint of a remote server; an empty string clears it,
+            which only a key-pinned server may be left without (optional).
+        tls: New `tls` block of a remote server, replacing the old one (optional).
         source: Who is updating this mcp_server ("api", "config").
     """
 
@@ -100,9 +103,13 @@ class UpdateMcpServerCommand(Command):
     env: dict[str, str] | None = None
     idle_ttl_s: int | None = None
     health_check_interval_s: int | None = None
+    endpoint: str | None = None
+    tls: dict[str, Any] | None = None
     source: str = "api"
     #: The authenticated caller, as on CreateMcpServerCommand.
     principal: Principal | None = None
+    #: Who decided the change, as on CreateMcpServerCommand.
+    provenance: Provenance = Provenance.HUMAN
 
 
 @dataclass(frozen=True)

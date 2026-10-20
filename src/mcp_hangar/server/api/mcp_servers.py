@@ -334,6 +334,8 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
         idle_ttl_s: Idle TTL in seconds (default 300).
         health_check_interval_s: Health check interval in seconds (default 60).
         description: Human-readable description.
+        tls: TLS block (for remote mode); with `peer_identity` the server is
+            key-pinned, needs `mcp_servers:peer_identity`, and may omit `endpoint`.
         volumes: Volume mounts list (for docker mode).
         network: Docker network name (default "none").
         read_only: Read-only filesystem flag (default True).
@@ -361,6 +363,7 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
                 idle_ttl_s=body.get("idle_ttl_s", 300),
                 health_check_interval_s=body.get("health_check_interval_s", 60),
                 description=body.get("description"),
+                tls=body.get("tls"),
                 source="api",
             )
         )
@@ -384,6 +387,9 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
         env: New environment variables dict (replaces existing).
         idle_ttl_s: New idle TTL in seconds.
         health_check_interval_s: New health check interval in seconds.
+        endpoint: New endpoint of a remote server; null clears it.
+        tls: New TLS block of a remote server. Changing either on a key-pinned
+            server, or adding a peer identity, needs `mcp_servers:peer_identity`.
 
     Returns:
         JSON with {"mcp_server_id": ..., "updated": true}, status 200.
@@ -394,17 +400,27 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
     _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
     body = await request.json()
-    result = await dispatch_command(
-        UpdateMcpServerCommand(
-            principal=_principal(request),
-            mcp_server_id=mcp_server_id,
-            description=body.get("description"),
-            env=body.get("env"),
-            idle_ttl_s=body.get("idle_ttl_s"),
-            health_check_interval_s=body.get("health_check_interval_s"),
-            source="api",
+    try:
+        result = await dispatch_command(
+            UpdateMcpServerCommand(
+                principal=_principal(request),
+                mcp_server_id=mcp_server_id,
+                description=body.get("description"),
+                env=body.get("env"),
+                idle_ttl_s=body.get("idle_ttl_s"),
+                health_check_interval_s=body.get("health_check_interval_s"),
+                # An explicit null clears the endpoint; an absent key leaves it.
+                endpoint=(body.get("endpoint") or "") if "endpoint" in body else None,
+                tls=body.get("tls"),
+                source="api",
+            )
         )
-    )
+    except SsrfBlocked:
+        return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
+    except McpServerDeclaredInConfigError as exc:
+        return HangarJSONResponse(
+            {"error": "declared_in_config", "mcp_server_id": mcp_server_id, "detail": exc.message}, status_code=409
+        )
     return HangarJSONResponse(result)
 
 

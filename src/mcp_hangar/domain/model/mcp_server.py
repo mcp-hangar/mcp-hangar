@@ -2797,6 +2797,26 @@ class McpServer(AggregateRoot):
         logger.info("mcp_server_retired", mcp_server_id=self.mcp_server_id)
         return client
 
+    def reconfigure_connection(self, endpoint: str | None, tls: dict[str, Any] | None) -> None:
+        """Change a remote server's endpoint and `tls` block, as an operator declared them (ADR-030 §4b).
+
+        Set over the API, the endpoint is a human's: it is held to the SSRF
+        policy at connect time like any registered one. The start backoff and
+        the failure count start again, so failures against an old address do
+        not hold the new one back. A live client keeps the old declaration
+        until the fleet projection replaces this copy. Records no event:
+        `update_config` records the one update.
+        """
+        identity = PeerIdentity.from_tls(tls)
+        with self._lock:
+            self._endpoint = endpoint
+            self._tls_config = tls
+            self._peer_identity = identity
+            self._provenance = Provenance.HUMAN
+            self._runtime_addresses = None
+            self._enforce_ssrf = endpoint is not None
+            self._health.reset()
+
     def update_config(
         self,
         description: str | None = None,
