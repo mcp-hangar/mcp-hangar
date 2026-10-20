@@ -18,7 +18,8 @@ import threading
 import time
 import uuid
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Queue
@@ -181,6 +182,10 @@ class HttpClientConfig:
     # these keys, checked inside the TLS handshake; `verify_ssl` and
     # `ca_cert_path` are then not used, because no CA is a trust input.
     peer_key_pins: frozenset[str] | None = None
+    # How long, in seconds, one connection pool serves before it is replaced
+    # (ADR-030 §8): every connection then handshakes again against the current
+    # key list. httpcore has no maximum connection age, only an idle expiry.
+    max_connection_age: float | None = None
 
 
 def peer_key_pin(der_certificate: bytes) -> str:
@@ -443,6 +448,17 @@ class HttpClient:
         # Create httpx client with retry transport
         self._client = self._create_client()
 
+        # Connection-pool replacement every `max_connection_age` (ADR-030 §8).
+        # A pool is leased per request so a replaced one is closed only once
+        # its in-flight requests are done; the GET stream is closed outright
+        # and re-opens on the new pool.
+        self._pool_lock = threading.Lock()
+        self._in_flight: dict[int, int] = {}
+        self._retired: list[httpx.Client] = []
+        self._stream_response: httpx.Response | None = None
+        self._stream_replaced = False
+        self._rotation_timer: threading.Timer | None = None
+
         # Request tracking for SSE correlation
         self._pending: dict[str, PendingHttpRequest] = {}
         self._pending_lock = threading.Lock()
@@ -464,6 +480,7 @@ class HttpClient:
 
         # Client state
         self._closed = False
+        self._schedule_pool_replacement()
 
         # The key pin of the connection that served this thread's last call
         # (ADR-030 §6). Per thread, because a client serves concurrent calls and
@@ -635,7 +652,8 @@ class HttpClient:
         for attempt in range(attempts):
             reason: str
             try:
-                response = self._client.post(url, json=request_body, headers=headers, timeout=timeout)
+                with self._lease() as pool:
+                    response = pool.post(url, json=request_body, headers=headers, timeout=timeout)
                 if response.status_code not in retry_statuses or attempt == attempts - 1:
                     return response
                 reason = str(response.status_code)
@@ -913,6 +931,55 @@ class HttpClient:
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="request_failed")
             raise ClientError(f"request_failed: {e}") from e
 
+    def _schedule_pool_replacement(self) -> None:
+        age = self._http_config.max_connection_age
+        if age is None or self._closed:
+            return
+        if self._rotation_timer is not None:
+            # One schedule at a time: a replacement made early restarts the clock.
+            self._rotation_timer.cancel()
+        timer = threading.Timer(age, self._replace_pool)
+        timer.daemon = True
+        timer.name = f"mcp-pool-age-{self._mcp_server_id or self._host}"
+        self._rotation_timer = timer
+        timer.start()
+
+    def _replace_pool(self) -> None:
+        """Swap in a new connection pool; the MCP session lives here, not in the pool, so it is kept."""
+        with self._pool_lock:
+            if self._closed:
+                return
+            self._retired.append(self._client)
+            self._client = self._create_client()
+            stream = self._stream_response
+            self._stream_replaced = stream is not None
+            self._close_idle_retired()
+        if stream is not None:
+            stream.close()
+        logger.info("http_client_pool_replaced", mcp_server=self._mcp_server_id or self._host)
+        self._schedule_pool_replacement()
+
+    @contextmanager
+    def _lease(self) -> Iterator[httpx.Client]:
+        """The current pool, held for one request so a replacement does not close it underneath."""
+        with self._pool_lock:
+            pool = self._client
+            self._in_flight[id(pool)] = self._in_flight.get(id(pool), 0) + 1
+        try:
+            yield pool
+        finally:
+            with self._pool_lock:
+                self._in_flight[id(pool)] -= 1
+                if not self._in_flight[id(pool)]:
+                    del self._in_flight[id(pool)]
+                self._close_idle_retired()
+
+    def _close_idle_retired(self) -> None:
+        """Close every replaced pool with no request in flight. Called under `_pool_lock`."""
+        for pool in [p for p in self._retired if not self._in_flight.get(id(p))]:
+            self._retired.remove(pool)
+            pool.close()
+
     def served_peer_spki(self) -> str | None:
         """The key pin of the connection that served this thread's last call, for a key-pinned upstream."""
         return cast("str | None", getattr(self._served, "peer_spki", None))
@@ -1055,12 +1122,13 @@ class HttpClient:
                 sent_params, headers = self._outbound_carriers(params)
                 body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
-                response = self._client.post(
-                    self._endpoint,
-                    json=body,
-                    headers=headers or None,
-                    timeout=self._http_config.read_timeout,
-                )
+                with self._lease() as pool:
+                    response = pool.post(
+                        self._endpoint,
+                        json=body,
+                        headers=headers or None,
+                        timeout=self._http_config.read_timeout,
+                    )
                 if response.status_code >= 300:
                     record_upstream_outcome(span, http_status=response.status_code)
         except UpstreamPeerKeyMismatchError:
@@ -1121,6 +1189,7 @@ class HttpClient:
                 # read=None: this stream is MEANT to sit idle between events.
                 timeout = httpx.Timeout(connect=self._http_config.connect_timeout, read=None, write=None, pool=None)
                 with self._client.stream("GET", self._endpoint, headers=headers, timeout=timeout) as response:
+                    self._stream_response = response
                     if response.status_code in (404, 405):
                         logger.info(
                             "http_client_get_stream_unsupported",
@@ -1147,6 +1216,11 @@ class HttpClient:
             except Exception as e:  # noqa: BLE001 -- the channel outlives any single transport failure
                 if not self._sse_running or self._closed:
                     return
+                if self._stream_replaced:
+                    # Closed by a pool replacement, not by a failure: re-open on
+                    # the new pool at once, without the failure backoff.
+                    self._stream_replaced = False
+                    continue
                 logger.warning(
                     "http_client_get_stream_error",
                     mcp_server=mcp_server_label,
@@ -1258,11 +1332,18 @@ class HttpClient:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: teardown must not fail a shutdown
                 logger.warning("http_client_session_delete_failed", error=str(e))
 
-        # Close httpx client
-        try:
-            self._client.close()
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: close cleanup must not propagate
-            logger.debug("http_client_close_error", error=str(e))
+        if self._rotation_timer is not None:
+            self._rotation_timer.cancel()
+
+        # Close httpx client, and any replaced pool still finishing a request
+        with self._pool_lock:
+            pools = [self._client, *self._retired]
+            self._retired.clear()
+        for pool in pools:
+            try:
+                pool.close()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: close cleanup must not propagate
+                logger.debug("http_client_close_error", error=str(e))
 
         # Clean up pending requests
         with self._pending_lock:

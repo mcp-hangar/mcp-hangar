@@ -61,9 +61,16 @@ class TestADeclarationThatCannotBeEnforcedIsRefused:
         with pytest.raises(ConfigurationError, match="verify_ssl: false"):
             _peer_identity_tls("payments", _spec(tls={"peer_identity": dict(IDENTITY), "verify_ssl": False}))
 
-    def test_max_connection_age_is_refused_until_it_does_something(self) -> None:
-        with pytest.raises(ConfigurationError, match="max_connection_age is not supported"):
-            _peer_identity_tls("payments", _spec(tls={"peer_identity": dict(IDENTITY), "max_connection_age": "1h"}))
+    @pytest.mark.parametrize("age", ["soon", "-5m", 0, "1d", True, "h"])
+    def test_a_max_connection_age_that_is_not_a_positive_duration(self, age) -> None:
+        with pytest.raises(ConfigurationError, match="max_connection_age"):
+            _peer_identity_tls("payments", _spec(tls={"peer_identity": dict(IDENTITY), "max_connection_age": age}))
+
+    def test_a_max_connection_age_without_a_peer_identity(self) -> None:
+        with pytest.raises(ConfigurationError, match="applies only to a server with tls.peer_identity"):
+            _peer_identity_tls(
+                "plain", {"mode": "remote", "endpoint": "https://x:1", "tls": {"max_connection_age": "1h"}}
+            )
 
     def test_a_ca_cert_path_is_ignored_with_a_warning(self) -> None:
         from structlog.testing import capture_logs
@@ -188,3 +195,24 @@ class TestTheDeclarationIsEnforcedOnARealConnection:
             upstream.stop()
 
         assert upstream.received == b""
+
+
+class TestTheConnectionAgeReachesTheClient:
+    @pytest.mark.parametrize(
+        ("age", "seconds"),
+        [(None, 3600.0), ("1h", 3600.0), ("30m", 1800.0), ("90s", 90.0), (45, 45.0), ("2.5m", 150.0)],
+    )
+    def test_named_or_defaulted(self, age, seconds: float) -> None:
+        tls = {"peer_identity": dict(IDENTITY)}
+        if age is not None:
+            tls["max_connection_age"] = age
+        with patch("mcp_hangar.http_client.HttpClient") as client:
+            HttpLauncher().launch(endpoint="https://10.244.3.17:8443", tls_config=tls, http_config={"read_timeout": 9})
+
+        assert client.call_args.kwargs["http_config"].max_connection_age == seconds
+
+    def test_a_server_without_a_peer_identity_gets_none(self) -> None:
+        with patch("mcp_hangar.http_client.HttpClient") as client:
+            HttpLauncher().launch(endpoint="https://upstream:8443", tls_config={"verify_ssl": True})
+
+        assert client.call_args.kwargs["http_config"].max_connection_age is None
