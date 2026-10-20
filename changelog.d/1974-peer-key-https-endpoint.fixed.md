@@ -1,0 +1,1 @@
+**core:** creating or updating a server with `tls.peer_identity` over the API now refuses an endpoint that is not `https` with 422. The key is checked in a TLS handshake, and the transport already refused to connect such a server, so it was accepted and then never started.
