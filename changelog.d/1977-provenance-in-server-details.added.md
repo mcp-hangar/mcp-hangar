@@ -1,0 +1,1 @@
+**core:** `GET /api/mcp_servers/{id}` and `hangar_details` report the server's `provenance`: `human` for a server registered through the API or the configuration file, `discovery` for one a discovery source found. A client can then tell whether a name came from discovery; the operator uses this when it moves a discovered server to a key-pinned registration (ADR-030 §4f).
