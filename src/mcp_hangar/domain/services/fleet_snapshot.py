@@ -73,6 +73,9 @@ def snapshot_of(mcp_server: McpServer, *, enabled: bool = True) -> McpServerConf
         # reported enforcement (#991) -- the same class of hole enforce_ssrf
         # above was added to close.
         l7_policy=(mcp_server._l7_policy.to_wire() if mcp_server._l7_policy is not None else None),
+        # The whole `tls` block, peer identity included (ADR-030 §10). It holds
+        # no secret: a CA path, a flag, public key pins and a connection age.
+        tls=dict(mcp_server._tls_config) if mcp_server._tls_config else None,
     )
 
 
@@ -177,4 +180,7 @@ def server_from_snapshot(config: McpServerConfigSnapshot) -> McpServer:
         # stored payload raises from from_dict and fails the restore loudly
         # rather than reviving the server unguarded.
         l7_policy=(L7Policy.from_dict(config.l7_policy) if config.l7_policy is not None else None),
+        # Restored as stored. A row whose peer identity is malformed never gets
+        # here: the snapshot refuses it, and the constructor would too.
+        tls=config.tls,
     )
