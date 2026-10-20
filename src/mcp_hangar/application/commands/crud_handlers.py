@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.fleet import IFleetWriter
-from ...domain.contracts.persistence import ConcurrentModificationError
+from ...domain.contracts.persistence import ConcurrentModificationError, PeerKeyNameRefused
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
@@ -174,6 +174,14 @@ class CreateMcpServerHandler(CommandHandler):
             raise ValidationError(f"mcp_server '{command.mcp_server_id}': {e}") from e
         if peer_identity is not None:
             _require_peer_identity_authority(self._peer_identity_authority, command, "declare a peer identity for")
+            # The peer-key name record keeps a deleted key-pinned server from
+            # coming back as a plain one. Without durable storage there is no
+            # record, so the declaration is refused rather than served unguarded.
+            if self._fleet_writer is None:
+                raise ValidationError(
+                    f"mcp_server '{command.mcp_server_id}': declaring a peer identity needs a durable "
+                    "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
+                )
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -221,6 +229,8 @@ class CreateMcpServerHandler(CommandHandler):
                 self._fleet_writer.save_versioned(snapshot_of(mcp_server), None)
             except ConcurrentModificationError as e:
                 raise ValidationError(f"McpServer already exists: {command.mcp_server_id}") from e
+            except PeerKeyNameRefused as e:
+                raise ValidationError(str(e)) from e
 
         # Before it joins the repository, so nothing can start it -- and write
         # output -- with no buffer attached.

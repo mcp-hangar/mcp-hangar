@@ -8,7 +8,14 @@ import sqlite3
 import threading
 from datetime import UTC, datetime
 
-from ...domain.contracts.persistence import ConcurrentModificationError, McpServerConfigSnapshot, PersistenceError
+from ...domain.contracts.persistence import (
+    ConcurrentModificationError,
+    McpServerConfigSnapshot,
+    PeerKeyNameRefused,
+    PersistenceError,
+    check_peer_key_claim,
+    peer_key_claim,
+)
 from ...logging_config import get_logger
 from .database import Database
 from .sqlite_management_lease import FLEET_MANAGEMENT
@@ -27,6 +34,7 @@ class InMemoryMcpServerConfigRepository:
         """Initialize empty in-memory repository."""
         self._configs: dict[str, McpServerConfigSnapshot] = {}
         self._versions: dict[str, int] = {}
+        self._peer_key_names: dict[str, str] = {}
         self._lock = threading.RLock()
 
     async def save(self, config: McpServerConfigSnapshot) -> None:
@@ -69,6 +77,13 @@ class InMemoryMcpServerConfigRepository:
             current = self._versions.get(config.mcp_server_id)
             if (current or 0) != (expected_version or 0):
                 raise ConcurrentModificationError(config.mcp_server_id, expected_version or 0, current or 0)
+            # The SQL backends' insert-or-ignore, then the read that checks it.
+            name, key_ref = config.mcp_server_id, peer_key_claim(config)
+            claimed = dict(self._peer_key_names)
+            if key_ref is not None and name not in claimed and key_ref not in claimed.values():
+                claimed[name] = key_ref
+            check_peer_key_claim(name, key_ref, [(n, r) for n, r in claimed.items() if n == name or r == key_ref])
+            self._peer_key_names = claimed
             # `save` never suspends, so the re-entrant lock covers check and write.
             await self.save(config)
 
@@ -218,6 +233,15 @@ class SQLiteMcpServerConfigRepository:
         now = datetime.now(UTC).isoformat()
         try:
             async with self._db.transaction() as conn:
+                key_ref = peer_key_claim(config)
+                if key_ref is not None:
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO peer_key_names (name, key_ref) VALUES (?, ?)", (mcp_server_id, key_ref)
+                    )
+                cursor = await conn.execute(
+                    "SELECT name, key_ref FROM peer_key_names WHERE name = ? OR key_ref = ?", (mcp_server_id, key_ref)
+                )
+                check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in await cursor.fetchall()])
                 live = 1
                 if expected_version == 0:
                     # No row of any kind, deleted or live: the caller saw none.
@@ -274,7 +298,7 @@ class SQLiteMcpServerConfigRepository:
                     current = await cursor.fetchone()
                     raise ConcurrentModificationError(mcp_server_id, expected_version, current[0] if current else 0)
 
-        except ConcurrentModificationError:
+        except (ConcurrentModificationError, PeerKeyNameRefused):
             raise
         except sqlite3.IntegrityError as e:
             # Two creates raced past the SELECT; the primary key decided.
