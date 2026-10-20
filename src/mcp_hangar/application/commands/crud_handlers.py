@@ -492,8 +492,9 @@ class UpdateMcpServerHandler(CommandHandler):
     ) -> tuple[str | None, dict[str, Any] | None] | None:
         """Check a change of endpoint or `tls`, and return the server's new pair (ADR-030 §4b, §9).
 
-        A key-pinned server's endpoint, and any peer identity, change only for
-        a holder of `mcp_servers:peer_identity`. A server the configuration
+        Any server's endpoint may change where the fleet projection applies it;
+        a key-pinned server's, and any peer identity, only for a holder of
+        `mcp_servers:peer_identity`. A server the configuration
         declares keeps the file's. One update may rotate keys but not replace
         the whole list under the same `key_ref`, so a single write cannot cut
         every trusted key at once; a new `key_ref` starts a new lineage.
@@ -509,15 +510,17 @@ class UpdateMcpServerHandler(CommandHandler):
         tls = mcp_server._tls_config if command.tls is None else command.tls
         new = _command_peer_identity(name, command.tls) if command.tls is not None else mcp_server._peer_identity
         old = mcp_server._peer_identity
-        if old is None and new is None:
-            # Only a key-pinned server's copy is replaced on the other replicas;
-            # a plain one's would keep the old endpoint until they restart (#1955).
-            raise ValidationError(
-                f"mcp_server '{name}': the endpoint of a server without a peer identity cannot change yet (#1955)"
-            )
-        _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
         if self._fleet_writer is None:
-            raise ValidationError(f"mcp_server '{name}': a peer identity needs a durable configuration store")
+            # The fleet projection replaces a copy whose connection changed, on
+            # every replica and this one; without durable storage none runs,
+            # and the live client would keep the old endpoint (#1955).
+            raise ValidationError(
+                f"mcp_server '{name}': changing an endpoint or tls block needs a durable configuration store"
+            )
+        if old is None and new is None and endpoint is None:
+            raise ValidationError(f"mcp_server '{name}': a remote server without a peer identity needs an endpoint")
+        if old is not None or new is not None:
+            _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
         if new is not None and (old is None or new.key_ref != old.key_ref):
             _refuse_a_key_ref_the_fleet_holds(self._repository, name, new.key_ref)
         if old is not None and new is None:
