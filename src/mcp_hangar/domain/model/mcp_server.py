@@ -624,6 +624,11 @@ class McpServer(AggregateRoot):
         return f"image:{self._image or ''}"
 
     @property
+    def provenance(self) -> Provenance:
+        """How the server reached the fleet: registered by a human, or found by discovery."""
+        return self._provenance
+
+    @property
     def mode(self) -> McpServerMode:
         """McpServer mode enum."""
         return self._mode

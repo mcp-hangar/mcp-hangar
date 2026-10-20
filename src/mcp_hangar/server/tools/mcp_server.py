@@ -350,6 +350,7 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 mcp_server_id: str,
                 state: str,
                 mode: str,
+                provenance: str,
                 alive: bool,
                 tools: [{name, description, inputSchema}],
                 withheld_tools?: [{name, reason, digest, pinned_digest?}],

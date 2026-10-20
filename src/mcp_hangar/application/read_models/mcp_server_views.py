@@ -201,6 +201,10 @@ class McpServerDetails:
     idle_time: float
     meta: dict[str, Any] = field(default_factory=dict)
     dead: DeadInfo | None = None  # why it is dead, while it is
+    #: `human` or `discovery`. A client deciding whether a server under a name
+    #: was discovered -- the operator moving one to a key-pinned registration,
+    #: ADR-030 §4f -- reads it here rather than guessing.
+    provenance: str = "human"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -208,6 +212,7 @@ class McpServerDetails:
             "mcp_server_id": self.mcp_server_id,
             "state": self.state,
             "mode": self.mode,
+            "provenance": self.provenance,
             "alive": self.is_alive,
             "tools": [t.to_dict() for t in self.tools],
             "health": self.health.to_dict(),
