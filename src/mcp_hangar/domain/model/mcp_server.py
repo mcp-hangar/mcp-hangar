@@ -58,6 +58,7 @@ from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
+from ..value_objects.peer_identity import PeerIdentity
 from ..value_objects.provenance import Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
@@ -381,6 +382,9 @@ class McpServer(AggregateRoot):
         # HTTP transport configuration (for remote mode)
         self._auth_config = auth
         self._tls_config = tls
+        # Parsed here as well as at load, so a server built any other way is held
+        # to the same declaration (ADR-030 §4).
+        self._peer_identity = PeerIdentity.from_tls(tls)
         self._http_config = http
 
         # SSRF policy for a remote endpoint, carried to the transport so the
@@ -586,6 +590,10 @@ class McpServer(AggregateRoot):
         subprocess (the hash keeps secrets in arguments out of config and logs).
         A pin bound to it is not honoured by a server that points somewhere else.
         """
+        if self._mode == McpServerMode.REMOTE and self._peer_identity is not None:
+            # The key lineage, not the address: a rescheduled pod keeps its digest
+            # pins, a different key behind the same address does not (ADR-030 §7).
+            return self._peer_identity.upstream_identity
         if self._mode == McpServerMode.REMOTE:
             from urllib.parse import urlsplit
 

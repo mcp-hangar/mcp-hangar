@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
+from mcp_hangar.domain.value_objects.peer_identity import PeerIdentity
 from mcp_hangar.domain.value_objects.provenance import Provenance
 from mcp_hangar.logging_config import get_logger
 
@@ -173,12 +174,14 @@ class HttpLauncher(McpServerLauncher):
         )
 
         if tls_config:
+            identity = PeerIdentity.from_tls(tls_config)
             http_cfg = HttpClientConfig(
                 connect_timeout=http_cfg.connect_timeout,
                 read_timeout=http_cfg.read_timeout,
                 max_retries=http_cfg.max_retries,
                 verify_ssl=cast(bool, tls_config.get("verify_ssl", True)),
                 ca_cert_path=cast(str | None, tls_config.get("ca_cert_path")),
+                peer_key_pins=identity.spki_sha256 if identity is not None else None,
             )
 
         if http_config:
@@ -190,6 +193,9 @@ class HttpLauncher(McpServerLauncher):
                 retry_status_codes=self._retry_status_codes(http_config.get("retry_status_codes"), http_cfg),
                 verify_ssl=http_cfg.verify_ssl,
                 ca_cert_path=http_cfg.ca_cert_path,
+                # Carried over like the two above: dropping it would build a
+                # client that verifies no key at all (ADR-030 §4).
+                peer_key_pins=http_cfg.peer_key_pins,
                 extra_headers=cast(dict[str, str], http_config.get("headers", {})),
             )
 
