@@ -207,6 +207,33 @@ class TestATlsBlockFromACommand:
         assert gateway.row().tls["max_connection_age"] == "30m"
 
 
+class TestAKeyIsCheckedOnlyOverHttps:
+    def test_a_plaintext_endpoint_is_refused_on_create(self, gateway) -> None:
+        with pytest.raises(ValidationError, match="needs an https endpoint"):
+            gateway.create.handle(
+                CreateMcpServerCommand(
+                    mcp_server_id="payments", mode="remote", endpoint="http://203.0.113.5:8080", tls=_tls(OLD)
+                )
+            )
+
+        assert gateway.row() is None
+
+    def test_a_plaintext_endpoint_is_refused_on_update(self, gateway) -> None:
+        gateway.pinned(OLD)
+
+        with pytest.raises(ValidationError, match="needs an https endpoint"):
+            gateway.update.handle(_update(endpoint="http://203.0.113.9:8080"))
+
+        assert gateway.row().endpoint == ENDPOINT
+
+    def test_a_plain_server_keeps_http(self, gateway) -> None:
+        gateway.create.handle(
+            CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint="http://203.0.113.5:8080")
+        )
+
+        assert gateway.row().endpoint == "http://203.0.113.5:8080"
+
+
 class TestARotation:
     def test_the_next_key_is_added_then_the_old_one_removed(self, gateway) -> None:
         server = gateway.pinned(OLD)
