@@ -17,7 +17,7 @@ from mcp_hangar.observability.health import ComplianceExportStatus
 
 from .cef_formatter import format_audit_record
 from .file_output import FileOutput
-from .refusal import CALLER_ROLES, ROUTE_BACKEND, event_type_for_status, refusal_data
+from .refusal import CALLER_ROLES, ROUTE_BACKEND, event_type_for_status, peer_key_data, refusal_data
 
 
 class CEFExporter:
@@ -86,6 +86,7 @@ class CEFExporter:
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         """Export a tool invocation event as a CEF log line.
 
@@ -119,6 +120,7 @@ class CEFExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        data.update(peer_key_data(peer_key))
         if route_backend:
             data[ROUTE_BACKEND] = route_backend
 

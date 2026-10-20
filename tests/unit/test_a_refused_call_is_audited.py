@@ -136,6 +136,7 @@ class TestEveryGate:
             global_timeout=60.0,
             batch_start_time=time.perf_counter(),
             route_backend=None if gate in _BEFORE_A_BACKEND else _SERVER,
+            observed_peer_spki=None,
         )
         refusal = getattr(BatchExecutor, f"_gate_{gate}")(BatchExecutor(), p)
         _publish_gate_refusal(p, gate, refusal)  # type: ignore[arg-type]

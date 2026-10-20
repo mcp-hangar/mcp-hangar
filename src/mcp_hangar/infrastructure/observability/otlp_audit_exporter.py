@@ -15,7 +15,7 @@ from typing import Any
 from ...domain.events import current_instance_id
 from ...logging_config import env_length_limit, get_logger, truncate_text
 from ...metrics import record_otlp_audit_export_failure
-from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer, Route
+from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer, Route, Upstream
 from ...observability.tracing import OtlpExporterSettings, _build_resource, resolve_otlp_exporter_settings
 
 logger = get_logger(__name__)
@@ -276,6 +276,20 @@ def _logger_provider_registered() -> bool:
     return not isinstance(get_logger_provider(), ProxyLoggerProvider)
 
 
+#: The peer-key fields of a tool-call record, under their OpenTelemetry names (ADR-030 §6).
+_PEER_KEY_ATTRIBUTES = (
+    ("upstream_peer_spki", Upstream.PEER_SPKI),
+    ("observed_peer_spki", Upstream.OBSERVED_PEER_SPKI),
+    ("failure_code", Upstream.FAILURE_CODE),
+)
+
+
+def _peer_key_attributes(peer_key: Mapping[str, str | None] | None) -> dict[str, str]:
+    """The set peer-key fields of *peer_key*, keyed by their attribute names."""
+    given = peer_key or {}
+    return {attribute: str(given[key]) for key, attribute in _PEER_KEY_ATTRIBUTES if given.get(key)}
+
+
 class OTLPAuditExporter:
     """Exports security-relevant events as OTLP log records.
 
@@ -341,6 +355,7 @@ class OTLPAuditExporter:
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
@@ -400,6 +415,7 @@ class OTLPAuditExporter:
             if route_backend is not None:
                 attributes[Route.BACKEND] = route_backend
             attributes.update(refusal or {})
+            attributes.update(_peer_key_attributes(peer_key))
 
             self._emit_log_record(attributes)
 

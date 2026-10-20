@@ -16,6 +16,8 @@ from .refusal import (
     TOOL_INVOCATION_DENIED,
     caller_cost_data,
     event_type_for_status,
+    peer_key_data,
+    peer_key_wire_fields,
     refusal_data,
     refusal_wire_fields,
 )
@@ -82,6 +84,7 @@ def _format_record(record: AuditRecord) -> str:
     extensions.extend(f"{key}={_escape_value(value)}" for key, value in refusal_wire_fields(data))
     # LEEF 2.0 predefines none of these: custom keys, camelCase as the others (#1705).
     extensions.extend(f"{wire}={_escape_value(str(value))}" for _key, wire, value in caller_cost_data(data))
+    extensions.extend(f"{wire}={_escape_value(value)}" for _key, wire, value in peer_key_wire_fields(data))
     if record.provider_id:
         extensions.append(f"src={_escape_value(record.provider_id)}")
     route_backend = data.get(ROUTE_BACKEND)
@@ -136,6 +139,7 @@ class LEEFExporter:
         tenant_id: str | None = None,
         refusal: Mapping[str, str] | None = None,
         route_backend: str | None = None,
+        peer_key: Mapping[str, str | None] | None = None,
     ) -> None:
         data: dict[str, str | float | int] = {
             "tool_name": tool_name,
@@ -158,6 +162,7 @@ class LEEFExporter:
         if cost_output_tokens is not None:
             data["cost_output_tokens"] = cost_output_tokens
         data.update(refusal_data(refusal))
+        data.update(peer_key_data(peer_key))
         if route_backend:
             data[ROUTE_BACKEND] = route_backend
 

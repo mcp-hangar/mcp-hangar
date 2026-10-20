@@ -457,6 +457,11 @@ class HttpClient:
         # Client state
         self._closed = False
 
+        # The key pin of the connection that served this thread's last call
+        # (ADR-030 §6). Per thread, because a client serves concurrent calls and
+        # each reads its own straight after it returns.
+        self._served = threading.local()
+
         logger.info(
             "http_client_initialized",
             endpoint=self._endpoint,
@@ -722,6 +727,7 @@ class HttpClient:
                 sent_params, extra_headers = self._outbound_carriers(params)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
+                self._served.peer_spki = None
                 response = self._post_with_retry(
                     url,
                     request_body,
@@ -729,6 +735,7 @@ class HttpClient:
                     timeout,
                     mcp_server_label,
                 )
+                self._remember_served_key(response)
 
                 duration_s = time.time() - start_time
                 duration_ms = duration_s * 1000
@@ -897,6 +904,15 @@ class HttpClient:
             # Record generic error
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="request_failed")
             raise ClientError(f"request_failed: {e}") from e
+
+    def served_peer_spki(self) -> str | None:
+        """The key pin of the connection that served this thread's last call, for a key-pinned upstream."""
+        return cast("str | None", getattr(self._served, "peer_spki", None))
+
+    def _remember_served_key(self, response: httpx.Response) -> None:
+        stream = (getattr(response, "extensions", None) or {}).get("network_stream")
+        sock = stream.get_extra_info("socket") if stream is not None else None
+        self._served.peer_spki = getattr(sock, "observed_peer_spki", None)
 
     def _parse_sse_body(self, body: str, request_id: str) -> dict[str, Any]:
         """

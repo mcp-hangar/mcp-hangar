@@ -199,6 +199,13 @@ def _rpc_error_code(error: dict[str, Any]) -> int | None:
     return code if type(code) is int else None
 
 
+def _served_peer_spki(client: Any) -> str | None:
+    """The key pin of the connection that served *client*'s last call on this thread, if it has one (ADR-030 §6)."""
+    served = getattr(client, "served_peer_spki", None)
+    value = served() if callable(served) else None
+    return value if isinstance(value, str) else None
+
+
 def _rpc_error_type(error: dict[str, Any]) -> str:
     """``ToolInvocationFailed.error_type`` for an upstream JSON-RPC error: its code, or ``_OTHER``.
 
@@ -2127,6 +2134,8 @@ class McpServer(AggregateRoot):
                         error_type=type(invocation_error).__name__,
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        failure_code=getattr(invocation_error, "failure_code", None),
+                        observed_peer_spki=getattr(invocation_error, "observed_peer_spki", None),
                     )
                 )
 
@@ -2163,6 +2172,7 @@ class McpServer(AggregateRoot):
                         error_type=_rpc_error_type(response["error"]),
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        upstream_peer_spki=_served_peer_spki(client),
                     )
                 )
 
@@ -2210,6 +2220,7 @@ class McpServer(AggregateRoot):
                         error_type="tool_error",
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        upstream_peer_spki=_served_peer_spki(client),
                     )
                 )
 
@@ -2241,6 +2252,7 @@ class McpServer(AggregateRoot):
                     result_size_bytes=len(str(result)),
                     identity_context=identity_context_dict,
                     logical_target=logical_target,
+                    upstream_peer_spki=_served_peer_spki(client),
                 )
             )
 

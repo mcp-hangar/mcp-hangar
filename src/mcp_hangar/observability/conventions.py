@@ -184,6 +184,18 @@ class Gate:
     REFUSAL_REASON = "hangar.refusal.reason"
 
 
+class Upstream:
+    """The upstream's TLS key on a call (ADR-030 §6).
+
+    `PEER_SPKI` is the key pin of the connection that served the call, read from
+    its socket; the other two are set when a key-pinned upstream was refused.
+    """
+
+    PEER_SPKI = "hangar.upstream.peer_spki"
+    OBSERVED_PEER_SPKI = "hangar.upstream.observed_peer_spki"
+    FAILURE_CODE = "hangar.upstream.failure_code"
+
+
 class Route:
     """Which backend served a call, and why (#1286, ADR-029 s5).
 

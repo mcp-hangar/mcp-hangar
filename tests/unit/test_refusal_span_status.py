@@ -256,6 +256,22 @@ class TestTheExecutorEndToEnd:
         assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
         assert [entry["event"] for entry in logs if entry["event"].startswith("batch_call_")] == ["batch_call_refused"]
 
+    def test_the_cold_start_refusal_record_names_the_key_the_peer_presented(self, ctx, executor_exporter) -> None:
+        from mcp_hangar.domain.events import ToolCallRefused
+
+        observed = "sha256:" + "2" * 64
+        gate_decisions._arrange_catalogue()
+        ctx.get_mcp_server.return_value.state.value = "cold"
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError(observed)
+
+        _run()
+
+        published = [c.args[0] for c in ctx.event_bus.publish.call_args_list]
+        refused = [event for event in published if isinstance(event, ToolCallRefused)]
+        assert [(r.gate, r.gate_reason, r.observed_peer_spki) for r in refused] == [
+            ("cold_start", "upstream_peer_key_mismatch", observed)
+        ]
+
     def test_a_failed_cold_start_still_ends_error(self, ctx, executor_exporter) -> None:
         gate_decisions._arrange_catalogue()
         ctx.get_mcp_server.return_value.state.value = "cold"
