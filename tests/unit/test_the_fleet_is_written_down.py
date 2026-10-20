@@ -59,6 +59,9 @@ class _RefusingWriter(IFleetWriter):
     def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
         raise RuntimeError("the database is unreachable")
 
+    def peer_key_names(self) -> dict[str, str]:
+        raise RuntimeError("the database is unreachable")
+
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         raise RuntimeError("the database is unreachable")
 

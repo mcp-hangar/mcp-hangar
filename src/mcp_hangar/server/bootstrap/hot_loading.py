@@ -105,6 +105,7 @@ def init_hot_loading(
             # The getter, not its value: `apply_process_config` replaces the
             # trust on every reload, and each load asks for the one in force.
             trust=hot_load_trust,
+            peer_key_names=runtime.config_repository.get_peer_key_names if runtime.config_repository else None,
         )
 
         unload_handler = UnloadMcpServerHandler(

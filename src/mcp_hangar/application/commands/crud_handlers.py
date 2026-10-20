@@ -22,9 +22,10 @@ from ...domain.events import (
     McpServerRegistered,
 )
 from ...domain.exceptions import (
-    AccessDeniedError,
     McpServerDeclaredInConfigError,
     McpServerNotFoundError,
+    PeerIdentityChangeDenied,
+    PeerKeyNameTaken,
     ValidationError,
 )
 from ...domain.model.mcp_server import McpServer
@@ -70,9 +71,11 @@ def _require_peer_identity_authority(
     principal = command.principal
     who = str(principal.id) if principal is not None else "(no principal)"
     if command.provenance is Provenance.DISCOVERY:
-        raise AccessDeniedError(who, what, command.mcp_server_id, "a discovery source does not declare peer identities")
+        raise PeerIdentityChangeDenied(
+            who, what, command.mcp_server_id, "a discovery source does not declare peer identities"
+        )
     if authority is None or not authority.may_declare(principal):
-        raise AccessDeniedError(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
+        raise PeerIdentityChangeDenied(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
 
 
 def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
@@ -182,6 +185,15 @@ class CreateMcpServerHandler(CommandHandler):
                     f"mcp_server '{command.mcp_server_id}': declaring a peer identity needs a durable "
                     "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
                 )
+            # The record's entries from the configuration file are its servers,
+            # which never write a row; a key_ref one of them holds is taken.
+            for name, server in self._repository.get_all().items():
+                held = getattr(server, "_peer_identity", None)
+                if isinstance(held, PeerIdentity) and held.key_ref == peer_identity.key_ref:
+                    raise PeerKeyNameTaken(
+                        f"mcp_server '{command.mcp_server_id}': key_ref '{held.key_ref}' already names the server "
+                        f"'{name}'"
+                    )
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -230,7 +242,7 @@ class CreateMcpServerHandler(CommandHandler):
             except ConcurrentModificationError as e:
                 raise ValidationError(f"McpServer already exists: {command.mcp_server_id}") from e
             except PeerKeyNameRefused as e:
-                raise ValidationError(str(e)) from e
+                raise PeerKeyNameTaken(str(e)) from e
 
         # Before it joins the repository, so nothing can start it -- and write
         # output -- with no buffer attached.

@@ -515,6 +515,10 @@ class ValidationError(MCPError):
         self.value = value
 
 
+class PeerKeyNameTaken(ValidationError):
+    """The peer-key name record holds this name or `key_ref` for another declaration (ADR-030 §9)."""
+
+
 class ConfigurationError(MCPError):
     """Raised when configuration is invalid.
 
@@ -838,6 +842,10 @@ class AccessDeniedError(AuthorizationError):
             details={"reason": reason} if reason else None,
         )
         self.reason = reason
+
+
+class PeerIdentityChangeDenied(AccessDeniedError):
+    """The caller may not set, change or remove a peer identity (ADR-030 §9)."""
 
 
 class RoleNotFoundError(AuthorizationError):
