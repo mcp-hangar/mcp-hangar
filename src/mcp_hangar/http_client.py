@@ -879,6 +879,12 @@ class HttpClient:
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="connection_refused")
             raise ClientError(f"connection_failed: {e}") from e
 
+        except UpstreamPeerKeyMismatchError:
+            # A refusal, not a failure to wrap: the type is what the start path
+            # and the gates read the reason from (ADR-030 §5).
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+            raise
+
         except Exception as e:  # noqa: BLE001 -- infra-boundary: unexpected HTTP errors wrapped as ClientError
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
@@ -1031,6 +1037,9 @@ class HttpClient:
                 )
                 if response.status_code >= 300:
                     record_upstream_outcome(span, http_status=response.status_code)
+        except UpstreamPeerKeyMismatchError:
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+            raise
         except Exception as e:  # noqa: BLE001 -- infra-boundary: transport failure wrapped as ClientError
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="notify_failed")
             logger.error("http_client_notify_failed", method=method, error=str(e))

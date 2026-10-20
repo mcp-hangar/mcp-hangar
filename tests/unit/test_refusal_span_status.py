@@ -25,6 +25,7 @@ from mcp_hangar.domain.exceptions import (
     EgressPolicyDeniedError,
     RateLimitExceeded,
     ToolTimeoutError,
+    UpstreamPeerKeyMismatchError,
 )
 from mcp_hangar.errors import ExpectedRefusal
 from mcp_hangar.observability.conventions import Dispatch, Gate
@@ -220,6 +221,24 @@ class TestTheExecutorEndToEnd:
         assert span.attributes[Gate.REFUSAL_GATE] == "withdrawal"
         assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
         assert span.attributes[ERROR_TYPE] == "ToolWithdrawnError", "what refused is still named"
+
+    def test_an_unlisted_upstream_key_at_cold_start_is_a_deny_not_a_failed_start(self, ctx, executor_exporter) -> None:
+        # ADR-030 §5: the start path carries the refusal as itself, and the
+        # cold-start gate reports it with its own reason.
+        gate_decisions._arrange_catalogue()
+        ctx.get_mcp_server.return_value.state.value = "cold"
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError("sha256:" + "a" * 64)
+
+        assert _run().error_type == "UpstreamPeerKeyMismatchError"
+
+        assert gate_decisions._by_name(executor_exporter)["cold_start"] == (
+            Gate.DENY,
+            "upstream_peer_key_mismatch",
+            None,
+        )
+        span = gate_decisions._call_span(executor_exporter)
+        assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
+        assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
 
     def test_a_failed_cold_start_still_ends_error(self, ctx, executor_exporter) -> None:
         gate_decisions._arrange_catalogue()

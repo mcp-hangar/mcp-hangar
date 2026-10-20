@@ -52,6 +52,7 @@ from ..exceptions import (
     ResponseTooLarge,
     ToolInvocationError,
     ToolNotFoundError,
+    UpstreamPeerKeyMismatchError,
 )
 from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
@@ -913,6 +914,10 @@ class McpServer(AggregateRoot):
                     "startup_timeout: timed out waiting for mcp_server to start",
                     30.0,
                 )
+            if isinstance(self._start_error, UpstreamPeerKeyMismatchError):
+                # A waiter learns the same refusal the starter did, not a
+                # generic start failure.
+                raise self._start_error
             if self._start_error:
                 raise McpServerStartError(
                     mcp_server_id=self.mcp_server_id,
@@ -953,6 +958,16 @@ class McpServer(AggregateRoot):
             # it in McpServerStartError sent the caller a 500 about a gateway
             # behaving exactly as designed. Recorded and re-raised as itself so
             # the API can answer 409 and name the instance to ask instead.
+            with self._lock:
+                self._end_cold_start_tracking(cold_start_time, success=False)
+                self._handle_start_failure(e)
+                self._start_error = e
+                self._ready_event.set()  # Wake waiters: failure
+            raise
+        except UpstreamPeerKeyMismatchError as e:
+            # A refusal the transport decided, kept as itself so the gate can
+            # report its reason. Still a failed start for backoff and the
+            # circuit breaker, as McpServerNotHereError above is recorded.
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
                 self._handle_start_failure(e)
@@ -1454,6 +1469,11 @@ class McpServer(AggregateRoot):
 
         try:
             notify("notifications/initialized")
+        except UpstreamPeerKeyMismatchError:
+            # Not a mishandled notification: the connection that would carry it
+            # ended at a key outside the key list, so the start fails rather
+            # than finishing READY (ADR-030 §5).
+            raise
         except Exception as exc:  # noqa: BLE001 -- fault-barrier: a missed notification must not fail a start
             logger.warning(
                 "mcp_initialized_notification_failed",

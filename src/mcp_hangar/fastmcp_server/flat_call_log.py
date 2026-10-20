@@ -126,6 +126,8 @@ DENIAL_CODES = SESSION_REFUSALS | frozenset(
         "ApprovalRevalidationError",
         # Over its tenant's execution budget, or with no budget (#1445).
         "TenantQuotaExceeded",
+        # The upstream's TLS key is not in its key list (ADR-030 §5).
+        "UpstreamPeerKeyMismatchError",
     }
 )
 

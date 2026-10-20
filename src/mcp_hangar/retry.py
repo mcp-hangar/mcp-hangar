@@ -40,7 +40,7 @@ from .domain.exceptions import (
     ToolAccessDeniedError,
     ValidationError,
 )
-from .errors import is_retryable
+from .errors import ExpectedRefusal, is_retryable
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -261,7 +261,7 @@ def should_retry(error: Exception, policy: RetryPolicy) -> bool:
     Returns:
         True if the error matches retry criteria
     """
-    if isinstance(error, _NEVER_RETRY):
+    if isinstance(error, (*_NEVER_RETRY, ExpectedRefusal)):
         return False
 
     # Check if it's a known retryable HangarError

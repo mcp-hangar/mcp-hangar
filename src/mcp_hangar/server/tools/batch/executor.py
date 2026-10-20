@@ -36,7 +36,7 @@ from ....domain.events import (
     ToolCallRefused,
     ToolWithdrawnRejected,
 )
-from ....domain.exceptions import CannotStartMcpServerError
+from ....domain.exceptions import CannotStartMcpServerError, UpstreamPeerKeyMismatchError
 from ....domain.model.mcp_server import (
     DEAD_NOT_REVIVED_BY_CALLS,
     START_REFUSED_IN_BACKOFF,
@@ -124,6 +124,7 @@ _GATE_REASONS = {
     "CircuitBreakerOpen": "circuit_open",
     "CannotStartMcpServerError": "not_revived_by_calls",
     "McpServerStartError": "start_failed",
+    "UpstreamPeerKeyMismatchError": "upstream_peer_key_mismatch",
     "ValidatorDenied": "validator_denied",
     "TenantQuotaExceeded": "tenant_quota_exceeded",
     "ApprovalDenied": "approval_denied",
@@ -2560,6 +2561,12 @@ class BatchExecutor:
                 # was blocked in between. Not a failed start (#1446).
                 cs_span.set_attribute("cold_start.result", "refused")
                 return self._report_refusal(p, self._refused_start(p, e))
+            except UpstreamPeerKeyMismatchError as e:
+                # The upstream's TLS key is not in its key list (ADR-030 §5): a
+                # refusal with its own reason, so no handled failure on the span.
+                cs_span.set_attribute("cold_start.result", "refused")
+                refusal = p.refuse(str(e), "UpstreamPeerKeyMismatchError")
+                return self._report_refusal(p, refusal, cause=e)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)
