@@ -16,7 +16,11 @@ import pytest
 
 from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from mcp_hangar.application.commands.crud_handlers import CreateMcpServerHandler, DeleteMcpServerHandler
-from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot, PeerKeyNameRefused
+from mcp_hangar.domain.contracts.persistence import (
+    ConcurrentModificationError,
+    McpServerConfigSnapshot,
+    PeerKeyNameRefused,
+)
 from mcp_hangar.domain.exceptions import ValidationError
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.infrastructure.persistence import Database, DatabaseConfig
@@ -132,6 +136,22 @@ class TestAKeyRefNamesOneServer:
         assert asyncio.run(repository.get("billing")) is not None
 
 
+class TestAClaimWhoseRowIsRefusedIsNotKept:
+    def test_a_key_pinned_create_over_a_peers_live_plain_server(self, store) -> None:
+        repository, writer = store
+        # A peer created it plain; this gateway has not tailed that yet.
+        _Gateway(writer).create("payments")
+
+        with pytest.raises(ValidationError, match="already exists"):
+            _Gateway(writer).create("payments", "lineage")
+
+        recorded = asyncio.run(repository.get_with_version("payments"))
+        assert recorded is not None
+        snapshot, version = recorded
+        asyncio.run(repository.save_versioned(snapshot, version))
+        _Gateway(writer).create("billing", "lineage")
+
+
 def test_the_record_survives_a_restart(tmp_path) -> None:
     writer = RepositoryFleetWriter(_sqlite(tmp_path))
     gateway = _Gateway(writer)
@@ -230,6 +250,17 @@ class TestThePostgresClaimIsInTheRowsTransaction:
             asyncio.run(repository.save_versioned(_pinned("billing"), 0))
 
         assert not any("mcp_server_configs" in c.args[0] for c in cursor.execute.call_args_list)
+        connection.rollback.assert_called_once()
+        connection.commit.assert_not_called()
+
+    def test_a_row_write_that_fails_after_the_claim_rolls_the_claim_back(self) -> None:
+        repository, connection, cursor = _postgres()
+        cursor.fetchall.return_value = [("payments", "lineage")]
+        cursor.rowcount = 0
+
+        with pytest.raises(ConcurrentModificationError):
+            asyncio.run(repository.save_versioned(_pinned(), 3))
+
         connection.rollback.assert_called_once()
         connection.commit.assert_not_called()
 
