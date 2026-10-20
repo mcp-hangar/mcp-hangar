@@ -149,7 +149,8 @@ class TestAChangedKeyListReplacesTheCopy:
 
         assert fleet.get("payments") is not old and client.closed
 
-    def test_an_update_of_a_plain_server_is_left_to_its_own_issue(self, tmp_path) -> None:
+    def test_a_plain_servers_new_endpoint_replaces_its_copy_too(self, tmp_path) -> None:
+        # #1955: the same rule for every server, not only a key-pinned one.
         configs = SQLiteMcpServerConfigRepository(Database(DatabaseConfig(path=str(tmp_path / "fleet.db"))))
         asyncio.run(configs.save_versioned(_row(tls={}), None))
         fleet = InMemoryMcpServerRepository()
@@ -158,7 +159,8 @@ class TestAChangedKeyListReplacesTheCopy:
 
         FleetProjection(fleet, configs, _SyncLoop(), closer=_Closer()).handle(_update())
 
-        assert fleet.get("payments") is plain
+        assert fleet.get("payments") is not plain and plain.is_retired
+        assert fleet.get("payments")._endpoint == ENDPOINT
 
 
 class _Unreadable:

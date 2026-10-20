@@ -34,12 +34,13 @@ and the record describes configuration, not state.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ...domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot, peer_key_claim
 from ...domain.events import DomainEvent, McpServerDeregistered, McpServerRegistered, McpServerUpdated
 from ...domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
-from ...domain.model import McpServer
+from ...domain.model import McpServer, McpServerGroup
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot
@@ -63,6 +64,8 @@ class FleetProjection:
         config_repository: IMcpServerConfigRepository,
         runner: IBlockingAsyncRunner,
         closer: IAsyncTaskSubmitter | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
+        groups: Mapping[str, McpServerGroup] | None = None,
     ) -> None:
         """Bind to the fleet this replica serves from and the shared record.
 
@@ -77,11 +80,18 @@ class FleetProjection:
             closer: Closes the client of a copy the projection retired, off the
                 tail: the projection itself does no I/O beyond its reads. None
                 closes nothing, which leaves the connection to the process.
+            declared_in_config: Whether the configuration file declares a
+                server. Such a server changes on each replica when it reloads
+                the file, never from another replica's row (ADR-030 §8).
+            groups: This replica's groups, whose members hold a server by
+                reference and follow a replaced copy.
         """
         self._repository = repository
         self._configs = config_repository
         self._runner = runner
         self._closer = closer
+        self._declared_in_config = declared_in_config
+        self._groups = groups
         #: Key-pinned servers whose row could not be read: retired and refusing
         #: calls, read again on each later event until a read succeeds (§8).
         self._unread: set[str] = set()
@@ -180,20 +190,24 @@ class FleetProjection:
         logger.info("fleet_projection_registered", mcp_server_id=mcp_server_id, produced_by=produced_by)
 
     def _apply_update(self, mcp_server_id: str) -> bool:
-        """Replace a key-pinned server's copy whose endpoint or `tls` block changed elsewhere (ADR-030 §8).
+        """Apply a server's update made on another replica, or on this one (ADR-030 §8, #1955).
 
-        Every replica does this, the one that handled the update included: it
-        compares against what the live client was built from, not against its
-        updated aggregate. A row that cannot be read, or that the peer-key name
-        record contradicts, retires the copy: the tail has moved past the event
-        and will not deliver it again, so keeping the old key list is not safe.
-        Updates of servers that are key-pinned on neither side are #1955's.
+        A changed endpoint or `tls` block replaces the copy with a COLD one
+        built from the row, and the old copy is retired; every replica does
+        this, the one that handled the update included, because it compares
+        against what the live client was built from, not against its updated
+        aggregate. Other fields are taken in place. A key-pinned server whose
+        row cannot be read, or that the peer-key name record contradicts, is
+        retired: the tail has moved past the event and will not deliver it
+        again, so keeping the old key list is not safe. A plain one keeps its
+        copy until a later read succeeds.
 
         Returns:
             False when the store could not be read.
         """
         local = self._repository.get(mcp_server_id)
-        if not isinstance(local, McpServer):
+        declared = self._declared_in_config is not None and self._declared_in_config(mcp_server_id)
+        if not isinstance(local, McpServer) or declared:
             self._unread.discard(mcp_server_id)
             return True
         local_pinned = isinstance(local._peer_identity, PeerIdentity)
@@ -208,8 +222,7 @@ class FleetProjection:
                 self._retire(local)
             logger.warning("fleet_projection_update_row_unreadable", mcp_server_id=mcp_server_id, error=str(error))
             return False
-        pending = mcp_server_id in self._unread
-        if row is None or not (local_pinned or peer_key_claim(row) is not None or pending):
+        if row is None:
             # No row: the deregistration that follows removes the copy.
             return True
         self._unread.discard(mcp_server_id)
@@ -217,10 +230,16 @@ class FleetProjection:
             self._retire(local)
             return True
         if not local.is_retired and local.connection_declaration() == connection_declaration(row.endpoint, row.tls):
+            local.adopt_config(row.description, row.env, row.idle_ttl_s, row.health_check_interval_s)
             return True
-        self._repository.add(mcp_server_id, server_from_snapshot(row))
+        replacement = server_from_snapshot(row)
+        self._repository.add(mcp_server_id, replacement)
+        for group in (self._groups or {}).values():
+            group.replace_member_server(mcp_server_id, replacement)
         self._retire(local)
-        logger.info("fleet_projection_peer_key_server_replaced", mcp_server_id=mcp_server_id)
+        logger.info(
+            "fleet_projection_server_replaced", mcp_server_id=mcp_server_id, key_pinned=peer_key_claim(row) is not None
+        )
         return True
 
     def _retire(self, mcp_server: McpServer) -> None:

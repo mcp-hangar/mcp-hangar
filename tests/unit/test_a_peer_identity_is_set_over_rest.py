@@ -153,14 +153,24 @@ class TestThePermission:
 
         assert gateway.row().endpoint == ENDPOINT
 
-    def test_a_plain_servers_endpoint_does_not_change_yet(self, gateway) -> None:
-        # Its copy on the other replicas would keep the old endpoint (#1955).
+    def test_a_plain_servers_endpoint_does_not(self, gateway) -> None:
+        # The fleet projection applies it on every replica (#1955).
         gateway.create.handle(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
+        gateway.authority.allows = False
 
-        with pytest.raises(ValidationError, match="#1955"):
-            gateway.update.handle(_update(endpoint=MOVED))
+        gateway.update.handle(_update(endpoint=MOVED))
 
-        assert gateway.row().endpoint == ENDPOINT
+        assert gateway.row().endpoint == MOVED
+
+    def test_without_durable_storage_no_endpoint_changes(self) -> None:
+        fleet = InMemoryMcpServerRepository()
+        create = CreateMcpServerHandler(fleet, _Bus())
+        create.handle(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
+
+        with pytest.raises(ValidationError, match="needs a durable configuration store"):
+            UpdateMcpServerHandler(fleet, _Bus()).handle(_update(endpoint=MOVED))
+
+        assert fleet.get("payments")._endpoint == ENDPOINT
 
 
 class TestATlsBlockFromACommand:

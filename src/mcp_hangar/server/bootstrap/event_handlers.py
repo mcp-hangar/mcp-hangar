@@ -209,9 +209,16 @@ def init_event_handlers(runtime: "Runtime") -> None:
         runner = BackgroundLoop()
         close_at_shutdown(runner.close)
         from ...infrastructure.async_executor import AsyncExecutor
+        from ..config import declared_in_config
+        from ..state import GROUPS
 
         fleet_projection = FleetProjection(
-            runtime.repository, config_repository, runner, closer=AsyncExecutor.get_instance()
+            runtime.repository,
+            config_repository,
+            runner,
+            closer=AsyncExecutor.get_instance(),
+            declared_in_config=declared_in_config,
+            groups=GROUPS,
         )
         runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # A key-pinned server's key list or endpoint changed elsewhere: its copy

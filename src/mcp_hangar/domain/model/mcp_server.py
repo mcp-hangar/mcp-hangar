@@ -2822,6 +2822,25 @@ class McpServer(AggregateRoot):
             self._enforce_ssrf = endpoint is not None
             self._health.reset()
 
+    def adopt_config(
+        self,
+        description: str | None,
+        env: dict[str, str] | None,
+        idle_ttl_s: int,
+        health_check_interval_s: int,
+    ) -> None:
+        """Take the fields another replica changed, as the shared row records them (#1955).
+
+        The projection's half of `update_config`: the change was decided and
+        recorded where it was made, so nothing is recorded here, or every
+        replica would echo it back.
+        """
+        with self._lock:
+            self._description = description
+            self._env = dict(env or {})
+            self._idle_ttl = IdleTTL(idle_ttl_s)
+            self._health_check_interval = HealthCheckInterval(health_check_interval_s)
+
     def update_config(
         self,
         description: str | None = None,
