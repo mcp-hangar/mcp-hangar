@@ -66,6 +66,7 @@ PERMISSION_POLICY_WRITE = core_security.PERMISSION_POLICY_WRITE
 PERMISSION_PROVIDERS_READ = core_security.PERMISSION_PROVIDERS_READ
 PERMISSION_PROVIDERS_WRITE = core_security.PERMISSION_PROVIDERS_WRITE
 PERMISSION_PROVIDERS_LIFECYCLE = core_security.PERMISSION_PROVIDERS_LIFECYCLE
+PERMISSION_MCP_SERVERS_PEER_IDENTITY = core_security.PERMISSION_MCP_SERVERS_PEER_IDENTITY
 PERMISSION_CONFIG_RELOAD = core_security.PERMISSION_CONFIG_RELOAD
 
 # Admin wildcard permission
@@ -115,6 +116,7 @@ PERMISSIONS: dict[str, Permission] = {
     "providers:read": PERMISSION_PROVIDERS_READ,
     "providers:write": PERMISSION_PROVIDERS_WRITE,
     "providers:lifecycle": PERMISSION_PROVIDERS_LIFECYCLE,
+    "mcp_servers:peer_identity": PERMISSION_MCP_SERVERS_PEER_IDENTITY,
     "config:reload": PERMISSION_CONFIG_RELOAD,
     # Admin
     "admin:*": PERMISSION_ADMIN_ALL,
@@ -190,6 +192,9 @@ ROLE_KUBERNETES_OPERATOR = Role(
             PERMISSION_PROVIDERS_LIFECYCLE,
             PERMISSION_POLICY_READ,
             PERMISSION_POLICY_WRITE,
+            # The operator registers the key-pinned servers its CRs declare
+            # (ADR-030 §9); `developer` holds write and lifecycle but not this.
+            PERMISSION_MCP_SERVERS_PEER_IDENTITY,
         ]
     ),
 )

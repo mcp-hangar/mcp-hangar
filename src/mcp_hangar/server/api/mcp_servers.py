@@ -39,6 +39,11 @@ from .serializers import HangarJSONResponse
 from .tenant_scope import confined_tenant
 
 
+def _principal(request: Request) -> Any:
+    """The authenticated caller, for a command that needs it; never read from the body (ADR-030 §9)."""
+    return getattr(getattr(request.state, "auth", None), "principal", None)
+
+
 def _check_permission(request: Request, resource_type: str, action: str) -> None:
     """Authorize a REST call, or allow it outright when auth is disabled.
 
@@ -346,6 +351,7 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
     try:
         result = await dispatch_command(
             CreateMcpServerCommand(
+                principal=_principal(request),
                 mcp_server_id=body["mcp_server_id"],
                 mode=body["mode"],
                 command=body.get("command"),
@@ -390,6 +396,7 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
     body = await request.json()
     result = await dispatch_command(
         UpdateMcpServerCommand(
+            principal=_principal(request),
             mcp_server_id=mcp_server_id,
             description=body.get("description"),
             env=body.get("env"),
@@ -421,6 +428,7 @@ async def delete_mcp_server(request: Request) -> HangarJSONResponse:
     try:
         result = await dispatch_command(
             DeleteMcpServerCommand(
+                principal=_principal(request),
                 mcp_server_id=mcp_server_id,
                 source="api",
             )

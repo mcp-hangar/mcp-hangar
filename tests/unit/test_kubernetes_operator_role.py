@@ -62,6 +62,9 @@ def test_the_permission_set_is_pinned():
         ("mcp_servers", "lifecycle"),
         ("policy", "read"),
         ("policy", "write"),
+        # ADR-030 §9: the operator registers the key-pinned servers its CRs
+        # declare. `developer` holds write and lifecycle, and not this.
+        ("mcp_servers", "peer_identity"),
     }
 
 

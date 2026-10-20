@@ -98,6 +98,7 @@ def init_cqrs(
             discovery source management handlers.
     """
     from ...application.commands.crud_handlers import register_crud_handlers
+    from .peer_identity_authority import ContextPeerIdentityAuthority
 
     repository = get_runtime().repository
 
@@ -131,6 +132,9 @@ def init_cqrs(
         # A delete of a server the configuration declares would last until the
         # next reload; it is refused instead (#1744).
         declared_in_config=declared_in_config,
+        # Declaring or removing a peer identity needs `mcp_servers:peer_identity`
+        # (ADR-030 §9), decided as the REST routes decide.
+        peer_identity_authority=ContextPeerIdentityAuthority(),
     )
 
     if discovery_registry is not None:

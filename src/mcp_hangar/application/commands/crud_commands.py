@@ -5,10 +5,12 @@ a single intent to mutate state. Handlers receive these via the command bus.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
 from ...domain.value_objects.provenance import Provenance
+from ...domain.value_objects.security import Principal
 from .commands import Command
 
 # =============================================================================
@@ -70,6 +72,12 @@ class CreateMcpServerCommand(Command):
     source: str = "api"
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
+    #: The server's `tls` block, a peer identity included (ADR-030 §4).
+    tls: dict[str, Any] | None = None
+    #: The authenticated caller, filled by the route from the request and never
+    #: from its body; None for a path with no caller. A peer identity is
+    #: declared only by a principal holding `mcp_servers:peer_identity` (§9).
+    principal: Principal | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +101,8 @@ class UpdateMcpServerCommand(Command):
     idle_ttl_s: int | None = None
     health_check_interval_s: int | None = None
     source: str = "api"
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
 
 
 @dataclass(frozen=True)
@@ -133,17 +143,21 @@ class DeleteMcpServerCommand(Command):
     mcp_server_id: str
     source: str = "api"
     provenance: Provenance = Provenance.HUMAN
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
 
     def __init__(
         self,
         mcp_server_id: str | None = None,
         source: str = "api",
         provenance: Provenance = Provenance.HUMAN,
+        principal: Principal | None = None,
         **kwargs: object,
     ):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "provenance", provenance)
+        object.__setattr__(self, "principal", principal)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")

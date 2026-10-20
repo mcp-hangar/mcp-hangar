@@ -21,18 +21,25 @@ from ...domain.events import (
     McpServerDeregistered,
     McpServerRegistered,
 )
-from ...domain.exceptions import McpServerDeclaredInConfigError, McpServerNotFoundError, ValidationError
+from ...domain.exceptions import (
+    AccessDeniedError,
+    McpServerDeclaredInConfigError,
+    McpServerNotFoundError,
+    ValidationError,
+)
 from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
 from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects.peer_identity import PeerIdentity
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
 from ..group_events import publish_group_events
 from ..ports.log_buffers import ILogBuffers
+from ..ports.peer_identity import IPeerIdentityAuthority
 from .crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -46,6 +53,26 @@ from .crud_commands import (
 )
 
 logger = get_logger(__name__)
+
+
+def _require_peer_identity_authority(
+    authority: IPeerIdentityAuthority | None,
+    command: CreateMcpServerCommand | DeleteMcpServerCommand,
+    what: str,
+) -> None:
+    """Refuse a change to a peer identity the command's caller may not make (ADR-030 §9).
+
+    A discovery source never may, in any authentication mode: it reports what
+    runs, and a key list is a declaration about which upstream may answer. Any
+    other caller needs `mcp_servers:peer_identity`, decided by *authority*; a
+    handler wired without one refuses, so a missing wire fails closed.
+    """
+    principal = command.principal
+    who = str(principal.id) if principal is not None else "(no principal)"
+    if command.provenance is Provenance.DISCOVERY:
+        raise AccessDeniedError(who, what, command.mcp_server_id, "a discovery source does not declare peer identities")
+    if authority is None or not authority.may_declare(principal):
+        raise AccessDeniedError(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
 
 
 def _record_fields(fleet_writer: IFleetWriter, mcp_server: McpServer, **fields: Any) -> None:
@@ -95,6 +122,7 @@ class CreateMcpServerHandler(CommandHandler):
         fleet_writer: IFleetWriter | None = None,
         coordinated: Callable[[], bool] | None = None,
         log_buffers: ILogBuffers | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -119,6 +147,7 @@ class CreateMcpServerHandler(CommandHandler):
         self._fleet_writer = fleet_writer
         self._coordinated = coordinated or (lambda: False)
         self._log_buffers = log_buffers
+        self._peer_identity_authority = peer_identity_authority
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -136,6 +165,15 @@ class CreateMcpServerHandler(CommandHandler):
             raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
 
         self._refuse_local_mode_when_coordinating(command.mode)
+
+        # A key list decides which upstream a call may reach: declaring one is
+        # its own permission, checked before anything is built (ADR-030 §9).
+        try:
+            peer_identity = PeerIdentity.from_tls(command.tls)
+        except ValueError as e:
+            raise ValidationError(f"mcp_server '{command.mcp_server_id}': {e}") from e
+        if peer_identity is not None:
+            _require_peer_identity_authority(self._peer_identity_authority, command, "declare a peer identity for")
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -156,6 +194,7 @@ class CreateMcpServerHandler(CommandHandler):
             description=command.description,
             volumes=command.volumes,
             read_only=command.read_only,
+            tls=command.tls,
             # The same policy inputs `validate_no_ssrf` used just above, carried
             # onto the aggregate so the transport's connect-time re-check (DNS
             # rebinding) applies them too. `validate_no_ssrf` guards registration;
@@ -436,6 +475,7 @@ class DeleteMcpServerHandler(CommandHandler):
         fleet_writer: IFleetWriter | None = None,
         log_buffers: ILogBuffers | None = None,
         declared_in_config: Callable[[str], bool] | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -455,6 +495,7 @@ class DeleteMcpServerHandler(CommandHandler):
         self._fleet_writer = fleet_writer
         self._log_buffers = log_buffers
         self._declared_in_config = declared_in_config
+        self._peer_identity_authority = peer_identity_authority
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -477,6 +518,12 @@ class DeleteMcpServerHandler(CommandHandler):
         # discovery source whose name collides with a declared one -- is told.
         if self._declared_in_config is not None and self._declared_in_config(command.mcp_server_id):
             raise McpServerDeclaredInConfigError(command.mcp_server_id)
+
+        # Removing a key-pinned server is a change to its peer identity: without
+        # this, a delete and a plain re-create under the same name would
+        # downgrade it with `lifecycle` and `write` alone (ADR-030 §9).
+        if isinstance(getattr(mcp_server, "_peer_identity", None), PeerIdentity):
+            _require_peer_identity_authority(self._peer_identity_authority, command, "remove the peer identity of")
 
         # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
         # may still hold its connection (#1361). I/O (shutdown) is done outside
@@ -800,6 +847,7 @@ def register_crud_handlers(
     log_buffers: ILogBuffers | None = None,
     restore_gap: str | None = None,
     declared_in_config: Callable[[str], bool] | None = None,
+    peer_identity_authority: IPeerIdentityAuthority | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -818,6 +866,8 @@ def register_crud_handlers(
             when it will; reported by the L7 policy push (#1306).
         declared_in_config: Whether the configuration declares a server, which
             the delete handler then refuses (#1744).
+        peer_identity_authority: Who may declare or remove a peer identity
+            (ADR-030 §9). None refuses every such change.
     """
     # McpServer handlers
     command_bus.register(
@@ -828,6 +878,7 @@ def register_crud_handlers(
             fleet_writer=fleet_writer,
             coordinated=coordinated,
             log_buffers=log_buffers,
+            peer_identity_authority=peer_identity_authority,
         ),
     )
     command_bus.register(
@@ -848,6 +899,7 @@ def register_crud_handlers(
             fleet_writer=fleet_writer,
             log_buffers=log_buffers,
             declared_in_config=declared_in_config,
+            peer_identity_authority=peer_identity_authority,
         ),
     )
 
