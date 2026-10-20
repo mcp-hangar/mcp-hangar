@@ -16,7 +16,10 @@ from typing import Any
 from mcp_hangar.domain.contracts.persistence import (
     ConcurrentModificationError,
     McpServerConfigSnapshot,
+    PeerKeyNameRefused,
     PersistenceError,
+    check_peer_key_claim,
+    peer_key_claim,
 )
 from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.logging_config import get_logger
@@ -40,6 +43,12 @@ CREATE TABLE IF NOT EXISTS mcp_server_configs (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_server_configs_enabled
     ON mcp_server_configs(enabled);
+
+-- The peer-key name record (ADR-030 §9); it outlives the configuration row.
+CREATE TABLE IF NOT EXISTS peer_key_names (
+    name TEXT PRIMARY KEY,
+    key_ref TEXT NOT NULL UNIQUE
+);
 """
 
 
@@ -199,6 +208,20 @@ class PostgresMcpServerConfigRepository:
             with self._connections.get_connection() as conn:
                 try:
                     with conn.cursor() as cur:
+                        # A concurrent claim of the same name or key_ref waits on
+                        # the unique index, then does nothing; the read below runs
+                        # after it and sees the winner.
+                        key_ref = peer_key_claim(config)
+                        if key_ref is not None:
+                            cur.execute(
+                                "INSERT INTO peer_key_names (name, key_ref) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                (mcp_server_id, key_ref),
+                            )
+                        cur.execute(
+                            "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s",
+                            (mcp_server_id, key_ref),
+                        )
+                        check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in cur.fetchall()])
                         live = True
                         if expected_version == 0:
                             # No row of any kind, deleted or live: the caller saw none.
@@ -251,7 +274,7 @@ class PostgresMcpServerConfigRepository:
                     conn.rollback()
                     raise
 
-        except ConcurrentModificationError:
+        except (ConcurrentModificationError, PeerKeyNameRefused):
             raise
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             if getattr(e, "pgcode", None) == "23505":

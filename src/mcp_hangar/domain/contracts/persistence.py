@@ -280,9 +280,18 @@ class IMcpServerConfigRepository(Protocol):
                 None for a create, which may replace a deleted (disabled) row
                 but never a live one.
 
+        The same transaction keeps the peer-key name record (ADR-030 §9): a
+        configuration with `tls.peer_identity` claims its name and `key_ref`
+        there, and one without may not take a name the record holds. An entry
+        outlives the row, so a deleted key-pinned server cannot come back as a
+        plain one, and `key_ref` names one server only.
+
         Raises:
             ConcurrentModificationError: The row changed, was deleted, or (for a
                 create) already exists, since the caller read it.
+            PeerKeyNameRefused: The record holds the name under another
+                `key_ref`, holds the `key_ref` under another name, or holds the
+                name and the configuration declares no peer identity.
             PersistenceError: If the write fails for any other reason.
         """
         ...
@@ -464,6 +473,49 @@ class ConcurrentModificationError(PersistenceError):
             f"Concurrent modification on mcp_server '{mcp_server_id}': "
             f"expected version {expected_version}, actual {actual_version}"
         )
+
+
+class PeerKeyNameRefused(PersistenceError):
+    """A write would contradict the peer-key name record (ADR-030 §9)."""
+
+    def __init__(self, mcp_server_id: str, reason: str):
+        self.mcp_server_id = mcp_server_id
+        self.reason = reason
+        super().__init__(f"mcp_server '{mcp_server_id}': {reason}")
+
+
+def peer_key_claim(config: McpServerConfigSnapshot) -> str | None:
+    """The `key_ref` a configuration claims in the peer-key name record, if any."""
+    identity = PeerIdentity.from_tls(config.tls)
+    return identity.key_ref if identity is not None else None
+
+
+def check_peer_key_claim(mcp_server_id: str, key_ref: str | None, entries: list[tuple[str, str]]) -> None:
+    """Refuse a write the record contradicts.
+
+    Args:
+        mcp_server_id: The name being written.
+        key_ref: The `key_ref` it declares, or None for a server without a peer identity.
+        entries: The record's entries whose name is `mcp_server_id` or whose
+            `key_ref` is `key_ref`, read after the claim was inserted, so a
+            concurrent claim that won is among them.
+    """
+    if key_ref is None:
+        held = [ref for name, ref in entries if name == mcp_server_id]
+        if held:
+            raise PeerKeyNameRefused(
+                mcp_server_id,
+                f"the name is in the peer-key name record with key_ref '{held[0]}'; "
+                "a server without that peer identity cannot take it",
+            )
+        return
+    for name, ref in entries:
+        if name == mcp_server_id and ref != key_ref:
+            raise PeerKeyNameRefused(mcp_server_id, f"the name is in the peer-key name record with key_ref '{ref}'")
+        if name != mcp_server_id and ref == key_ref:
+            raise PeerKeyNameRefused(mcp_server_id, f"key_ref '{key_ref}' already names the server '{name}'")
+    if (mcp_server_id, key_ref) not in entries:
+        raise PeerKeyNameRefused(mcp_server_id, "the peer-key name record did not keep the claim")
 
 
 # legacy aliases

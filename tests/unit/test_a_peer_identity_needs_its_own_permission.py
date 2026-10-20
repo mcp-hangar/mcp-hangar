@@ -28,6 +28,8 @@ from mcp_hangar.domain.exceptions import AccessDeniedError, AuthorizationError, 
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.value_objects.provenance import Provenance
+from mcp_hangar.infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+from mcp_hangar.infrastructure.persistence.fleet_writer import RepositoryFleetWriter
 from mcp_hangar.server.bootstrap.peer_identity_authority import ContextPeerIdentityAuthority
 
 PIN = "sha256:" + "a" * 64
@@ -65,9 +67,15 @@ def _pinned() -> McpServer:
 class TestTheCreateHandler:
     def test_a_permitted_caller_declares_a_peer_identity(self) -> None:
         repository = InMemoryMcpServerRepository()
-        handler = CreateMcpServerHandler(repository, _Bus(), peer_identity_authority=_Authority(True))
+        writer = RepositoryFleetWriter(InMemoryMcpServerConfigRepository())
+        handler = CreateMcpServerHandler(
+            repository, _Bus(), fleet_writer=writer, peer_identity_authority=_Authority(True)
+        )
 
-        handler.handle(_create())
+        try:
+            handler.handle(_create())
+        finally:
+            writer.close()
 
         assert repository.get("payments").upstream_identity() == "peer-key:lineage"
 

@@ -329,6 +329,18 @@ MIGRATIONS: list[tuple[str, str]] = [
             WHERE caller_agent_id IS NOT NULL;
         """,
     ),
+    (
+        "005_peer_key_names",
+        """
+        -- The peer-key name record (ADR-030 §9). Not a column of
+        -- mcp_server_configs: a deletion only disables that row and the next
+        -- create of the name rewrites it, and the record must outlive both.
+        CREATE TABLE IF NOT EXISTS peer_key_names (
+            name TEXT PRIMARY KEY,
+            key_ref TEXT NOT NULL UNIQUE
+        );
+        """,
+    ),
 ]
 
 

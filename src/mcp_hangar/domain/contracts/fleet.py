@@ -76,6 +76,7 @@ class IFleetWriter(ABC):
 
         Raises:
             ConcurrentModificationError: The row changed since it was read.
+            PeerKeyNameRefused: The peer-key name record contradicts the write.
         """
 
     @abstractmethod
