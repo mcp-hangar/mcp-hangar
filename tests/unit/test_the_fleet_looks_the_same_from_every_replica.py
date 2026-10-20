@@ -225,8 +225,9 @@ class TestTheProjectionIsWiredThatWay:
 
         # Registered/Deregistered plus EgressPolicySet/Cleared (#991): an L7
         # change applied as an effect would enforce on one replica only, which
-        # is the bug the two new subscriptions close.
-        assert len(lines) == 4
+        # is the bug the two new subscriptions close. And McpServerUpdated, for
+        # a key-pinned server's key list (ADR-030 §8).
+        assert len(lines) == 5
         for line in lines:
             assert "HandlerKind.PROJECTION" in line, line
 
