@@ -1,5 +1,35 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.32.0
+
+### Giving a server a peer identity re-records its digest pins
+
+A server with `tls.peer_identity` gets the upstream identity `peer-key:<key_ref>` instead of `remote:<scheme>://<host>:<port>`, and digest pins are bound to that identity (#1802). Adding a peer identity to a server that already has digest pins changes its identity, so those pins no longer match. Under `block` the server's tools are refused until the pins are recorded again. Re-record them after adding the declaration (`mcp-hangar pin --write`). Changing `key_ref` later has the same effect. A key rotation within the same `key_ref` does not.
+
+A configuration file that declares `tls.peer_identity` needs a release that knows the key. An older release ignores the declaration and serves the server as a plain one, without checking its key.
+
+### Deleting a key-pinned server needs `mcp_servers:peer_identity`
+
+Deleting a server that declares `tls.peer_identity` now needs the `mcp_servers:peer_identity` permission, which only `admin` and `kubernetes-operator` hold. A custom role that deletes such servers needs the permission added. Under OPA authorization, the gateway asks for action `peer_identity` on resource type `mcp_servers`; a policy that does not know the action denies it, so allow it for the principals that manage key-pinned servers, including the operator's service account. Servers without a peer identity are unaffected.
+
+### Declare a peer identity over REST only once every replica runs this release
+
+A key-pinned server's configuration row is stored with mode `remote-peer-key`, which the previous release declines rather than reads. While a replica of the previous release still runs, it does not serve that server. It can still write a plain row under the server's name through its old create, and this release then refuses that row at recovery and in the projection. So do not declare a peer identity over REST, or from the operator, until no replica of the previous release runs. For key-pinned rows, and for this one release, this relaxes the high-availability rule that a row written by a new release stays readable by the old one.
+
+A configuration file that sets `tls.peer_identity` has no such guard: an older release serves the server as a plain one, without checking its key.
+
+With authentication disabled, any client of the API can set or change a peer identity. `GET /system` now lists `capabilities`, which the operator checks before it registers a key-pinned server.
+
+An endpoint set over the API is a human's, so the SSRF policy applies to it. Before the operator registers key-pinned servers by pod IP, add the pod CIDR to `ssrf.trusted_networks`, or every endpoint it sets is refused with `ssrf_blocked`. That includes a server moved from discovery to a key-pinned registration, which meets the policy for the first time.
+
+### A configuration write that lost a race between replicas is now refused
+
+Updates and L7 policy deliveries for a server are now compare-and-set writes on its stored configuration row. A write is refused when another replica changed or deleted that row after this replica read it. The refusal is a `ConcurrentModificationError`, which the REST API answers as a 500. This is deliberate: the operator's client retries 5xx, so a refused policy delivery is retried and applied on top of the newer row. Other clients should retry a refused update the same way.
+
+A create now refuses a name whose row is live, even on a replica that has not yet heard of that server. It answers "already exists" instead of overwriting the row.
+
+During a rolling upgrade, replicas on the previous release still write unversioned and can still overwrite the row. The protection holds once every replica runs this release. Single-replica deployments are not affected.
+
 ## Upgrade to 2.31.0
 
 ### a front door lists `hangar_whoami` to every authenticated caller
