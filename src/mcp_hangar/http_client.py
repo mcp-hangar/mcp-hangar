@@ -33,7 +33,7 @@ from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMis
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
-from .observability.conventions import Retry
+from .observability.conventions import Retry, Upstream
 from .observability.tracing import (
     inject_trace_context,
     record_retry_attempt,
@@ -202,6 +202,8 @@ class _PeerKeyCheckedSocket(ssl.SSLSocket):
 
     #: The key list this socket accepts; set per context by `_peer_key_context`.
     _key_pins: frozenset[str] = frozenset()
+    #: The server label its handshakes are counted under.
+    _metric_server: str = ""
     #: The key pin the peer presented, kept for the audit record.
     observed_peer_spki: str | None = None
 
@@ -209,7 +211,11 @@ class _PeerKeyCheckedSocket(ssl.SSLSocket):
         super().do_handshake(block)
         certificate = self.getpeercert(binary_form=True)
         self.observed_peer_spki = peer_key_pin(certificate) if certificate else None
-        if self.observed_peer_spki in self._key_pins:
+        verified = self.observed_peer_spki in self._key_pins
+        prometheus_metrics.UPSTREAM_PEER_KEY_CONNECTIONS_TOTAL.inc(
+            mcp_server=self._metric_server, outcome="verified" if verified else "refused"
+        )
+        if verified:
             return
         # `SSLSocket._create` closes the socket only for OSError and ValueError,
         # and this refusal is deliberately neither: close it here.
@@ -217,7 +223,7 @@ class _PeerKeyCheckedSocket(ssl.SSLSocket):
         raise UpstreamPeerKeyMismatchError(self.observed_peer_spki)
 
 
-def _peer_key_context(key_pins: frozenset[str]) -> ssl.SSLContext:
+def _peer_key_context(key_pins: frozenset[str], metric_server: str = "") -> ssl.SSLContext:
     """A TLS 1.3 client context whose handshake accepts only a peer in *key_pins*.
 
     TLS 1.3 binds the certificate and its CertificateVerify to the handshake
@@ -229,7 +235,9 @@ def _peer_key_context(key_pins: frozenset[str]) -> ssl.SSLContext:
     context.minimum_version = ssl.TLSVersion.TLSv1_3
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
-    context.sslsocket_class = type("_PinnedSocket", (_PeerKeyCheckedSocket,), {"_key_pins": key_pins})
+    context.sslsocket_class = type(
+        "_PinnedSocket", (_PeerKeyCheckedSocket,), {"_key_pins": key_pins, "_metric_server": metric_server}
+    )
     return context
 
 
@@ -500,7 +508,7 @@ class HttpClient:
                 raise ClientError("a key-pinned upstream needs a non-empty key list", self._mcp_server_id or "")
             if self._scheme != "https":
                 raise ClientError("a key-pinned upstream must be reached over https", self._mcp_server_id or "")
-            verify = _peer_key_context(config.peer_key_pins)
+            verify = _peer_key_context(config.peer_key_pins, self._mcp_server_id or self._host)
 
         # Timeout configuration
         timeout = httpx.Timeout(
@@ -735,7 +743,7 @@ class HttpClient:
                     timeout,
                     mcp_server_label,
                 )
-                self._remember_served_key(response)
+                self._remember_served_key(response, span)
 
                 duration_s = time.time() - start_time
                 duration_ms = duration_s * 1000
@@ -909,10 +917,12 @@ class HttpClient:
         """The key pin of the connection that served this thread's last call, for a key-pinned upstream."""
         return cast("str | None", getattr(self._served, "peer_spki", None))
 
-    def _remember_served_key(self, response: httpx.Response) -> None:
+    def _remember_served_key(self, response: httpx.Response, span: Any) -> None:
         stream = (getattr(response, "extensions", None) or {}).get("network_stream")
         sock = stream.get_extra_info("socket") if stream is not None else None
         self._served.peer_spki = getattr(sock, "observed_peer_spki", None)
+        if self._served.peer_spki is not None:
+            span.set_attribute(Upstream.PEER_SPKI, self._served.peer_spki)
 
     def _parse_sse_body(self, body: str, request_id: str) -> dict[str, Any]:
         """
