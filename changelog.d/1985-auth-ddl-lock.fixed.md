@@ -1,1 +1,0 @@
-**core:** replicas starting together on an empty PostgreSQL database no longer lose one of their number to the auth tables. The API key and role stores created their tables without the schema lock every other PostgreSQL table takes, so a second replica could exit with `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` on first boot.
