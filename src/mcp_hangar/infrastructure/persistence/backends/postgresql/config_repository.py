@@ -216,7 +216,9 @@ class PostgresMcpServerConfigRepository:
                     with conn.cursor() as cur:
                         # A concurrent claim of the same name or key_ref waits on
                         # the unique index, then does nothing; the read below runs
-                        # after it and sees the winner.
+                        # after it and sees the winner. The read holds the entries
+                        # it saw `FOR SHARE` until the row is written, so a forget
+                        # cannot delete an entry this claim relies on (#1986).
                         key_ref = peer_key_claim(config)
                         if peer_key is PeerKeyClaim.MOVE:
                             cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
@@ -227,7 +229,7 @@ class PostgresMcpServerConfigRepository:
                                     (mcp_server_id, key_ref),
                                 )
                             cur.execute(
-                                "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s",
+                                "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s FOR SHARE",
                                 (mcp_server_id, key_ref),
                             )
                             check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in cur.fetchall()])
@@ -298,14 +300,19 @@ class PostgresMcpServerConfigRepository:
             with self._connections.get_connection() as conn:
                 try:
                     with conn.cursor() as cur:
+                        # The entry first, then the check (#1986). The delete
+                        # waits for a create holding the entry `FOR SHARE`, so
+                        # the check then sees the row that create wrote. Checked
+                        # first, a create that had read the entry but not yet
+                        # written its row passed the check and lost its entry.
+                        cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
+                        removed = bool(cur.rowcount)
                         cur.execute(
                             "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = %s AND enabled = TRUE FOR UPDATE",
                             (mcp_server_id,),
                         )
                         if cur.fetchone() is not None:
                             raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
-                        cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
-                        removed = bool(cur.rowcount)
                     conn.commit()
                     return removed
                 except Exception:
