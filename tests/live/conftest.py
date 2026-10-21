@@ -9,8 +9,8 @@ Everything here is opt-in: a fixture that cannot meet its prerequisites
 interpreter running pytest, never the first one on PATH, and a missing one, or
 one that does not import this checkout, fails the test
 (``tests/_hangar_executable.py``, #1416). See ``tests/live/README.md`` and the tier markers
-(``live``/``t0``/``t1``/``t2``) registered in ``pyproject.toml``; ``t3`` is
-registered below, with the only tier that uses it.
+(``live``/``t0``/``t1``/``t2``) registered in ``pyproject.toml``; ``t3`` and
+``t4`` are registered below, each with the only tier that uses it.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ _OPT_IN_ENV = "MCP_HANGAR_LIVE_VERIFY"
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "t3: live tier 3 -- trace and audit export to a real OTLP receiver")
+    config.addinivalue_line("markers", "t4: live tier 4 -- two gateways over one PostgreSQL")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -92,7 +93,9 @@ class RunningHangar:
 
 
 @contextmanager
-def running_hangar(workdir: Path, config_text: str, env: dict[str, str] | None = None) -> Iterator[RunningHangar]:
+def running_hangar(
+    workdir: Path, config_text: str, env: dict[str, str] | None = None, binary: str | None = None
+) -> Iterator[RunningHangar]:
     """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
@@ -102,8 +105,10 @@ def running_hangar(workdir: Path, config_text: str, env: dict[str, str] | None =
     nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
     (never fails) if the server does not become healthy within the startup
     budget; fails if the executable is missing or is not this checkout's.
+    ``binary``, when given, is another `mcp-hangar` to run instead: a published
+    release, for a replica set that mixes versions.
     """
-    binary = hangar_executable()
+    binary = binary or hangar_executable()
 
     config_path = workdir / "config.yaml"
     config_path.write_text(config_text)
