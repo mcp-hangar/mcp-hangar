@@ -344,12 +344,15 @@ class SQLiteMcpServerConfigRepository:
         """Remove a name's entry, unless the server is still registered under it."""
         try:
             async with self._db.transaction() as conn:
+                # The delete first, as on PostgreSQL (#1986): it takes the write
+                # lock, so no claim can write between the check and the delete.
+                result = await conn.execute("DELETE FROM peer_key_names WHERE name = ?", (mcp_server_id,))
                 cursor = await conn.execute(
                     "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = ? AND enabled = 1", (mcp_server_id,)
                 )
                 if await cursor.fetchone() is not None:
+                    await conn.rollback()
                     raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
-                result = await conn.execute("DELETE FROM peer_key_names WHERE name = ?", (mcp_server_id,))
                 return bool(result.rowcount)
         except PeerKeyNameRefused:
             raise
