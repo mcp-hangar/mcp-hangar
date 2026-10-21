@@ -291,6 +291,18 @@ def get_builtin_role(name: str) -> Role | None:
     return BUILTIN_ROLES.get(name)
 
 
+def role_as_enforced(name: str, description: str, permissions: frozenset[Permission]) -> Role:
+    """A role read from a store, as this release enforces it (#1988).
+
+    A built-in name resolves to this release's definition, whatever the stored
+    row says. Replicas sharing an auth store each seed their own release's
+    built-in roles at startup, so the row holds whichever replica started last:
+    an older one would take a permission away from every replica, or give back
+    one a later release removed.
+    """
+    return BUILTIN_ROLES.get(name) or Role(name=name, description=description, permissions=permissions)
+
+
 def get_permission(key: str) -> Permission | None:
     """Get a predefined permission by key.
 
