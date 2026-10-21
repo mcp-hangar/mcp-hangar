@@ -364,9 +364,8 @@ class Published:
 def published(fleet: Fleet, tmp_path_factory: pytest.TempPathFactory) -> Published:
     """2.31.0 over the same database, started after this checkout's replicas.
 
-    The servers are registered first: a 2.31.0 replica's start rewrites the
-    built-in roles every replica reads (#1988), and the operator's key loses
-    the permission to declare a peer identity.
+    The servers are registered first, so they exist before the published
+    replica rewrites the stored built-in roles at its start (#1988).
     """
     uv = shutil.which("uv")
     if uv is None:
@@ -417,7 +416,6 @@ def test_mixed_version_a_create_on_the_published_replica_cannot_downgrade_the_ro
     assert old.state(OP, server) is None, "the published replica serves the name without its key"
 
 
-@pytest.mark.xfail(reason="#1988: each replica's start rewrites the built-in roles every replica reads", strict=True)
 def test_mixed_version_the_published_replica_leaves_the_built_in_roles_alone(
     fleet: Fleet, published: Published
 ) -> None:
