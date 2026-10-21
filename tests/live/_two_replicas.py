@@ -7,9 +7,7 @@ servers over HTTPS on a host address (``_peer_key_server.py``), each with its
 own key; the gateways pin them by that key (ADR-030).
 
 The replicas are `mcp-hangar serve --http` processes started one after the
-other. Started at the same instant on an empty database, the second can die
-creating the auth tables, which is the defect a replica set starting together
-hits rather than this tier's subject.
+other; replicas booting together is `tests/integration/test_replicas_do_not_race_to_create_schema.py`.
 """
 
 from __future__ import annotations
