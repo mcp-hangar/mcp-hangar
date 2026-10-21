@@ -27,7 +27,6 @@ from typing import Any, cast
 
 import httpx
 from cryptography import x509
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMismatchError
@@ -188,11 +187,43 @@ class HttpClientConfig:
     max_connection_age: float | None = None
 
 
+def _der_element(data: bytes, offset: int) -> tuple[int, int]:
+    """Where the content of the DER element at ``offset`` starts, and where the element ends."""
+    if offset + 2 > len(data):
+        raise ValueError("truncated DER element")
+    length, content = data[offset + 1], offset + 2
+    if length & 0x80:
+        size = length & 0x7F
+        if not 0 < size <= 4:
+            raise ValueError("unsupported DER length")
+        length, content = int.from_bytes(data[content : content + size], "big"), content + size
+    if content + length > len(data):
+        raise ValueError("truncated DER element")
+    return content, content + length
+
+
+def _certificate_spki(der_certificate: bytes) -> bytes:
+    """The SubjectPublicKeyInfo exactly as the certificate encodes it (#1982).
+
+    Not ``public_key().public_bytes(...)``: that re-encodes the key, and an EC
+    key with explicit curve parameters comes back on its named curve, so its
+    digest differs from the one taken over the certificate's own bytes.
+    """
+    tbs = x509.load_der_x509_certificate(der_certificate).tbs_certificate_bytes
+    position, _ = _der_element(tbs, 0)
+    if tbs[position] == 0xA0:  # [0] EXPLICIT version
+        position = _der_element(tbs, position)[1]
+    # serialNumber, signature, issuer, validity, subject; then the key.
+    for _ in range(5):
+        position = _der_element(tbs, position)[1]
+    if position >= len(tbs) or tbs[position] != 0x30:
+        raise ValueError("no SubjectPublicKeyInfo where TBSCertificate places it")
+    return tbs[position : _der_element(tbs, position)[1]]
+
+
 def peer_key_pin(der_certificate: bytes) -> str:
-    """The canonical key pin of a DER certificate: SHA-256 over its DER SubjectPublicKeyInfo."""
-    public_key = x509.load_der_x509_certificate(der_certificate).public_key()
-    spki = public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
-    return "sha256:" + hashlib.sha256(spki).hexdigest()
+    """The canonical key pin of a DER certificate: SHA-256 over its DER SubjectPublicKeyInfo, as encoded."""
+    return "sha256:" + hashlib.sha256(_certificate_spki(der_certificate)).hexdigest()
 
 
 class _PeerKeyCheckedSocket(ssl.SSLSocket):
