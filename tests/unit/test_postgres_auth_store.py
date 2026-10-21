@@ -617,14 +617,14 @@ class TestPostgresRoleStore:
     def test_get_role_found(self):
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "viewer",
+            "reader",
             "Read-only access",
             json.dumps([{"resource_type": "provider", "action": "read", "resource_id": "*"}]),
         )
 
-        role = store.get_role("viewer")
+        role = store.get_role("reader")
         assert role is not None
-        assert role.name == "viewer"
+        assert role.name == "reader"
         assert len(role.permissions) == 1
 
     def test_get_role_not_found(self):
@@ -638,11 +638,11 @@ class TestPostgresRoleStore:
         store, mock_conn, mock_cursor = self._make_store()
         # permissions_json as a raw string (needs json.loads)
         mock_cursor.fetchone.return_value = (
-            "admin",
+            "everything",
             "Full access",
             '[{"resource_type": "*", "action": "*", "resource_id": "*"}]',
         )
-        role = store.get_role("admin")
+        role = store.get_role("everything")
         assert role is not None
         assert len(role.permissions) == 1
 
