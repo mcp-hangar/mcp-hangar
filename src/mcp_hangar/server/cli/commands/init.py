@@ -41,6 +41,8 @@ from ..services import (
     get_mcp_servers_by_category_filtered,
     run_smoke_test,
 )
+from ..services.client_import import ImportReport, import_client_servers
+from ..services.client_servers import ClientServers, read_client_servers
 from ..services.init_manifest import restore
 from ..services.mcp_clients import McpClient, client_by_key, detect_clients, write_hangar_entry
 
@@ -313,6 +315,42 @@ def _show_completion_summary(
     console.print("\n[dim]Need help? Visit https://mcp-hangar.io/docs[/dim]")
 
 
+def _read_existing_servers(clients: list[McpClient]) -> list[ClientServers]:
+    """What the selected clients already list (#1770); printed, and returned for the import."""
+    found = [read_client_servers(client) for client in clients]
+    for result in found:
+        for server in result.servers:
+            console.print(f"  [green]Has:[/green] {server.name} ({result.client.label})")
+        for problem in result.problems:
+            console.print(f"  [yellow]Not read:[/yellow] {problem}")
+    return found
+
+
+def _prompt_import_opt_out(found: list[ClientServers]) -> frozenset[tuple[str, str]]:
+    """The servers the user leaves in their client: everything starts checked (#1770 decision 1)."""
+    pairs = [(result.client.key, server.name, result.client.label) for result in found for server in result.servers]
+    choices = [questionary.Choice(f"{name}  ({label})", value=(key, name), checked=True) for key, name, label in pairs]
+    picked = questionary.checkbox("Put these servers behind Hangar:", choices=choices).ask()
+    if picked is None:
+        raise typer.Abort()
+    kept = {(str(value[0]), str(value[1])) for value in picked}
+    return frozenset((key, name) for key, name, _ in pairs if (key, name) not in kept)
+
+
+def _import_existing_servers(
+    config_path: Path, found: list[ClientServers], skip: frozenset[tuple[str, str]]
+) -> ImportReport:
+    """Start, pin and write the clients' own servers into the Hangar config, and say what happened."""
+    console.print("\n[bold]Step 6b:[/bold] Moving your servers behind Hangar...")
+    console.print("  [dim]Each is started once, its tools are pinned, and only a server that answers moves[/dim]\n")
+    report = import_client_servers(config_path, found, skip=skip)
+    for imported in report.imported:
+        console.print(f"  [green]Moved:[/green] {imported.name} -- {imported.tools} tool(s) pinned")
+    for left in report.not_imported:
+        console.print(f"  [yellow]Left in {left.client_key}:[/yellow] {left.name} -- {left.reason}")
+    return report
+
+
 def _undo_init(*, force: bool) -> None:
     """Restore the client configs `init` changed (#1771), or say why not."""
     result = restore(force=force)
@@ -514,6 +552,18 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     elif not skip_clients:
         console.print("  [yellow]No MCP client config found - you can point one at Hangar yourself[/yellow]")
 
+    # The servers the user already has move behind Hangar (#1770); the default
+    # bundle is for a client with none.
+    existing = _read_existing_servers(clients) if clients and not skip_clients else []
+    has_own_servers = any(result.servers for result in existing)
+    import_skip: frozenset[tuple[str, str]] = frozenset()
+    if has_own_servers and skip_test:
+        console.print(
+            "  [yellow]--skip-test: your servers stay in your clients; moving one needs its first start[/yellow]"
+        )
+    elif has_own_servers and not non_interactive:
+        import_skip = _prompt_import_opt_out(existing)
+
     # Step 3: McpServer selection
     console.print("\n[bold]Step 3:[/bold] Selecting MCP servers...")
 
@@ -558,6 +608,9 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
         if unavailable:
             console.print(f"  [yellow]Skipping from bundle ({', '.join(unavailable)}) - missing dependencies[/yellow]")
 
+    elif has_own_servers:
+        console.print("  Your clients already have servers; they move behind Hangar instead of a default bundle")
+
     elif non_interactive:
         available, unavailable = filter_bundle_by_availability("starter", deps)
         selected_mcp_servers = available
@@ -570,7 +623,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     else:
         selected_mcp_servers = _prompt_mcp_server_selection(deps)
 
-    if not selected_mcp_servers:
+    if not selected_mcp_servers and not has_own_servers:
         console.print("  [yellow]No MCP servers selected[/yellow]")
         if not non_interactive:
             proceed = questionary.confirm("Continue with empty configuration?", default=False).ask()
@@ -706,6 +759,15 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     elif pins and merged_mcp_servers:
         console.print("  [dim]Existing config merged - run 'mcp-hangar pin --write' to pin its tools[/dim]")
 
+    # After the bundle's pins: that step rewrites the file from the wizard's
+    # inputs, and would drop servers written into it before.
+    report = ImportReport()
+    if has_own_servers and not skip_test:
+        report = _import_existing_servers(config_mgr.config_path, existing, import_skip)
+        pinned_tools += sum(imported.tools for imported in report.imported)
+        if report.imported and smoke_test_status == "skipped":
+            smoke_test_status = "failed" if any("did not start" in r.reason for r in report.not_imported) else "passed"
+
     # Step 7: Point the selected clients at Hangar
     client_backup_path = None
     written_clients: list[McpClient] = []
@@ -714,7 +776,8 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
 
         for client in clients:
             try:
-                backup = write_hangar_entry(client, config_mgr.config_path)
+                moved = [imported.name for imported in report.imported if imported.client_key == client.key]
+                backup = write_hangar_entry(client, config_mgr.config_path, remove=moved)
             except OSError as e:
                 raise PermissionError(str(client.path), "write") from e
             except ValueError as e:
@@ -730,7 +793,7 @@ def init_command(  # noqa: C901 -- baseline CC=49; split before extending
             console.print("  [dim]To put the client configs back as they were: mcp-hangar init --undo[/dim]")
 
     _show_completion_summary(
-        mcp_servers=selected_mcp_servers,
+        mcp_servers=[*selected_mcp_servers, *(imported.name for imported in report.imported)],
         hangar_config_path=config_mgr.config_path,
         client_paths=[client.path for client in written_clients],
         backup_path=client_backup_path or backup_path,
