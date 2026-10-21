@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.32.1...v2.33.0) (2026-10-21)
+
+### Added
+
+- **core:** a key-pinned server may declare where its keys come from, `tls.peer_identity.issuance: kbs-attested` (ADR-030 §2). The value is one of a closed set, and anything else is refused at load. A call to such a server records it as `declared_key_issuance` on `ToolInvocationCompleted` and `ToolInvocationFailed`. The JSON-lines, LEEF, syslog and OTLP exports carry it; CEF has no free field for it. It is a declaration that Hangar records and does not verify. It changes neither the identity digest pins bind to nor the keys the handshake accepts. `GET /api/system/` lists the `declared_key_issuance` capability. ([#1998](https://github.com/mcp-hangar/mcp-hangar/pull/1998))
+
 ## [2.32.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.32.0...v2.32.1) (2026-10-21)
 
 ### Fixed
