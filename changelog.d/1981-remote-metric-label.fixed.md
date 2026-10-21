@@ -1,0 +1,1 @@
+**core:** a remote server's HTTP metrics are labelled with its id in `mcp_server`, not with its endpoint's host. The HTTP launcher built the client without the id, so `mcp_hangar_upstream_peer_key_connections_total`, `mcp_hangar_http_errors_total` and the other HTTP client series carried the host, two servers on one host shared a series, and a query on the id found nothing.

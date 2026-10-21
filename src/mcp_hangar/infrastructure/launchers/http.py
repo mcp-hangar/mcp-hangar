@@ -110,6 +110,10 @@ class HttpLauncher(McpServerLauncher):
             )
         return tuple(cast(list[int], configured))
 
+    #: The id labels the client's metrics, the peer-key handshake count among
+    #: them; without it they fell back to the endpoint's host (#1981).
+    _launch_takes_server_id = True
+
     def _launch(
         self,
         endpoint: str,
@@ -119,6 +123,7 @@ class HttpLauncher(McpServerLauncher):
         provenance: Provenance = Provenance.HUMAN,
         runtime_addresses: frozenset[str] | None = None,
         enforce_ssrf: bool = False,
+        mcp_server_id: str | None = None,
     ):
         """
         Create an HTTP client for a remote MCP mcp_server.
@@ -257,11 +262,12 @@ class HttpLauncher(McpServerLauncher):
                 endpoint=endpoint,
                 auth_config=auth,
                 http_config=http_cfg,
+                mcp_server_id=mcp_server_id,
             )
             return client
         except (OSError, ConnectionError, TimeoutError) as e:
             raise McpServerStartError(
-                mcp_server_id="unknown",
+                mcp_server_id=mcp_server_id or "unknown",
                 reason=f"Failed to connect to HTTP mcp_server: {e}",
                 details={"endpoint": endpoint},
             ) from e
