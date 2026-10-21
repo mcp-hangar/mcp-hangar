@@ -593,6 +593,11 @@ class McpServer(AggregateRoot):
         """McpServer identifier as string (for backward compatibility)."""
         return str(self._id)
 
+    def _declared_key_issuance(self) -> str | None:
+        """The `issuance` this server's peer identity declares, read at the time of the call (ADR-030 §6)."""
+        identity = self._peer_identity
+        return identity.issuance if isinstance(identity, PeerIdentity) else None
+
     def upstream_identity(self) -> str:
         """What this server's upstream is, as a stable string a pin can be bound to (#1802).
 
@@ -2157,6 +2162,7 @@ class McpServer(AggregateRoot):
                         logical_target=logical_target,
                         failure_code=getattr(invocation_error, "failure_code", None),
                         observed_peer_spki=getattr(invocation_error, "observed_peer_spki", None),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2194,6 +2200,7 @@ class McpServer(AggregateRoot):
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
                         upstream_peer_spki=_served_peer_spki(client),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2242,6 +2249,7 @@ class McpServer(AggregateRoot):
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
                         upstream_peer_spki=_served_peer_spki(client),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2274,6 +2282,7 @@ class McpServer(AggregateRoot):
                     identity_context=identity_context_dict,
                     logical_target=logical_target,
                     upstream_peer_spki=_served_peer_spki(client),
+                    declared_key_issuance=self._declared_key_issuance(),
                 )
             )
 

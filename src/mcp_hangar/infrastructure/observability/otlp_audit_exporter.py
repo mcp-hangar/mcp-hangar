@@ -281,6 +281,7 @@ _PEER_KEY_ATTRIBUTES = (
     ("upstream_peer_spki", Upstream.PEER_SPKI),
     ("observed_peer_spki", Upstream.OBSERVED_PEER_SPKI),
     ("failure_code", Upstream.FAILURE_CODE),
+    ("declared_key_issuance", Upstream.DECLARED_KEY_ISSUANCE),
 )
 
 

@@ -105,7 +105,10 @@ class OTLPAuditEventHandler:
                 cost_model=str(cost_record.cost_model) if cost_record.cost_cents else None,
                 cost_input_tokens=cost_record.input_tokens if cost_record.input_tokens else None,
                 cost_output_tokens=cost_record.output_tokens if cost_record.output_tokens else None,
-                peer_key={"upstream_peer_spki": event.upstream_peer_spki},
+                peer_key={
+                    "upstream_peer_spki": event.upstream_peer_spki,
+                    "declared_key_issuance": event.declared_key_issuance,
+                },
                 **_caller_fields(event.identity_context),
             )
         elif isinstance(event, ToolInvocationFailed):
@@ -121,6 +124,7 @@ class OTLPAuditEventHandler:
                     "upstream_peer_spki": event.upstream_peer_spki,
                     "failure_code": event.failure_code,
                     "observed_peer_spki": event.observed_peer_spki,
+                    "declared_key_issuance": event.declared_key_issuance,
                 },
                 **_caller_fields(event.identity_context),
             )

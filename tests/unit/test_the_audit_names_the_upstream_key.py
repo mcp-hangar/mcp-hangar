@@ -150,7 +150,8 @@ class TestTheAuditHandlerPassesTheFieldsOn:
         exporter = MagicMock()
         OTLPAuditEventHandler(audit_exporter=exporter).handle(event)
 
-        assert exporter.export_tool_invocation.call_args.kwargs["peer_key"] == expected
+        given = exporter.export_tool_invocation.call_args.kwargs["peer_key"]
+        assert {k: v for k, v in given.items() if v is not None} == {k: v for k, v in expected.items() if v is not None}
 
 
 def _line(exporter_cls, peer_key) -> str:

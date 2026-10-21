@@ -76,12 +76,15 @@ ERROR_TYPE_CONTRACT = "the event's error_type, written as given"
 #: The peer-key fields of a tool-call record (ADR-030 §6): the ``AuditRecord.data``
 #: key and its camelCase wire key in LEEF and syslog. A JSON-lines record keeps
 #: the data key. Present only when set: the verified key of the connection that
-#: served the call, or the code and the key a refused peer presented. CEF writes
-#: the one key a record has as ``fileHash`` (``cef_formatter``).
+#: served the call, or the code and the key a refused peer presented, and the
+#: key issuance the server's configuration declares. CEF writes the one key a
+#: record has as ``fileHash`` (``cef_formatter``); it has no free field for the
+#: declared issuance, which the other formats carry.
 PEER_KEY_FIELDS: tuple[tuple[str, str], ...] = (
     ("upstream_peer_spki", "upstreamPeerSpki"),
     ("failure_code", "failureCode"),
     ("observed_peer_spki", "observedPeerSpki"),
+    ("declared_key_issuance", "declaredKeyIssuance"),
 )
 
 

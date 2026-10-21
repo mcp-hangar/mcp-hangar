@@ -50,8 +50,9 @@ async def get_system_info(request: Request) -> HangarJSONResponse:
         # What a client may rely on this core to enforce. The operator registers
         # a key-pinned server only with a core listing `peer_identity`: an older
         # one would ignore the `tls` block and serve the server unchecked
-        # (ADR-030 §4e).
-        "capabilities": ["peer_identity"],
+        # (ADR-030 §4e). `declared_key_issuance`: it accepts and records
+        # `tls.peer_identity.issuance` (#1953); an older core refuses the key.
+        "capabilities": ["peer_identity", "declared_key_issuance"],
     }
 
     return HangarJSONResponse({"system": system_data})
