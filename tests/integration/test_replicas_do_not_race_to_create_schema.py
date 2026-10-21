@@ -28,6 +28,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore, PostgresRoleStore
 from mcp_hangar.infrastructure.persistence.backends.postgresql.event_store import PostgresEventStore
 from mcp_hangar.infrastructure.persistence.backends.postgresql.management_lease import PostgresManagementLease
 
@@ -44,7 +45,16 @@ if not DSN:
 #: and a wider fan-out overlaps more reliably on a loaded runner.
 RACERS = 8
 
-TABLES = ("events", "streams", "snapshots", "management_lease")
+TABLES = (
+    "events",
+    "streams",
+    "snapshots",
+    "management_lease",
+    "api_keys",
+    "initial_admin_bootstrap",
+    "role_assignments",
+    "roles",
+)
 
 
 class _DirectFactory:
@@ -118,7 +128,24 @@ class TestAColdStartWithSeveralReplicas:
             failures = [exc for exc in pool.map(create, range(RACERS)) if exc is not None]
 
         assert not failures, f"{len(failures)} of {RACERS} mixed creators failed; first: {failures[0]}"
-        assert set(TABLES) <= _existing_tables()
+        assert {"events", "streams", "snapshots", "management_lease"} <= _existing_tables()
+
+    def test_the_auth_stores_take_the_same_lock(self, empty_database) -> None:
+        # They live outside the backend package, ran their schema bare, and a
+        # replica set booting on an empty database lost a pod to them (#1985).
+        def create(index: int) -> BaseException | None:
+            try:
+                store = PostgresApiKeyStore(_DirectFactory()) if index % 2 else PostgresRoleStore(_DirectFactory())
+                store.initialize()
+            except BaseException as exc:  # noqa: BLE001 -- the failure IS the subject
+                return exc
+            return None
+
+        with ThreadPoolExecutor(max_workers=RACERS) as pool:
+            failures = [exc for exc in pool.map(create, range(RACERS)) if exc is not None]
+
+        assert not failures, f"{len(failures)} of {RACERS} auth store creators failed; first: {failures[0]}"
+        assert {"api_keys", "initial_admin_bootstrap", "roles", "role_assignments"} <= _existing_tables()
 
     def test_a_second_start_against_the_full_schema_is_still_free(self, empty_database) -> None:
         # The lock must not turn every restart into a queue: it is taken, found

@@ -333,9 +333,6 @@ def test_t24_a_list_sharing_no_key_is_refused_on_another_replica_unless_the_key_
 # --- forget racing a re-create (#1975 review) ------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="#1986: the forget checks for a live row before deleting the entry the claim read", strict=False
-)
 def test_a_forget_racing_a_re_create_never_leaves_a_live_key_pinned_row_unrecorded(fleet: Fleet) -> None:
     """A forget on A and a key-pinned re-create on B, at once: a recorded key-pinned row keeps its entry."""
     a, b, served = fleet.a, fleet.b, fleet.served

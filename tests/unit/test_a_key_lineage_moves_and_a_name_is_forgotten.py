@@ -227,6 +227,35 @@ class TestPostgres:
         assert "ON CONFLICT DO NOTHING" in statements[1]
         connection.commit.assert_called_once()
 
+    def test_a_claim_holds_the_entries_it_read_until_the_row_is_written(self) -> None:
+        # A forget's delete then waits for this claim's commit (#1986).
+        repository, _connection, cursor = _postgres()
+        cursor.fetchall.return_value = [("payments", "lineage")]
+        cursor.fetchone.return_value = None
+        cursor.rowcount = 1
+        row = McpServerConfigSnapshot(
+            mcp_server_id="payments", mode="remote", endpoint=ENDPOINT, tls=_tls(OLD, "lineage")
+        )
+
+        asyncio.run(repository.save_versioned(row, 0))
+
+        reads = [c.args[0] for c in cursor.execute.call_args_list if c.args[0].startswith("SELECT name, key_ref")]
+        assert reads and all(read.rstrip().endswith("FOR SHARE") for read in reads)
+
+    def test_forgetting_deletes_the_entry_before_it_looks_for_a_live_row(self) -> None:
+        # Checked first, a create that had read the entry but not yet written
+        # its row passed the check, and its entry was deleted under it (#1986).
+        repository, connection, cursor = _postgres()
+        cursor.fetchone.return_value = None
+        cursor.rowcount = 1
+
+        assert asyncio.run(repository.forget_peer_key_name("payments")) is True
+
+        statements = [c.args[0] for c in cursor.execute.call_args_list]
+        assert statements[0].startswith("DELETE FROM peer_key_names")
+        assert "FROM mcp_server_configs" in statements[1]
+        connection.commit.assert_called_once()
+
     def test_forgetting_a_live_servers_name_rolls_back(self) -> None:
         repository, connection, cursor = _postgres()
         cursor.fetchone.return_value = (1,)
@@ -234,7 +263,7 @@ class TestPostgres:
         with pytest.raises(PeerKeyNameRefused):
             asyncio.run(repository.forget_peer_key_name("payments"))
 
-        assert not any("DELETE" in c.args[0] for c in cursor.execute.call_args_list)
+        connection.commit.assert_not_called()
         connection.rollback.assert_called_once()
 
 
