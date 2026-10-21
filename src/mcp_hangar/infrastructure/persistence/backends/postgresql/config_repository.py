@@ -50,6 +50,36 @@ CREATE TABLE IF NOT EXISTS peer_key_names (
     name TEXT PRIMARY KEY,
     key_ref TEXT NOT NULL UNIQUE
 );
+
+-- A live row under a recorded name carries the recorded key_ref (#1987). This
+-- release's writes already do; the trigger binds a release that predates the
+-- record, which writes the same table and runs none of its checks.
+CREATE OR REPLACE FUNCTION peer_key_row_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    recorded TEXT;
+BEGIN
+    IF NEW.enabled THEN
+        SELECT key_ref INTO recorded FROM peer_key_names WHERE name = NEW.mcp_server_id;
+        IF FOUND AND (NEW.config_json -> 'tls' -> 'peer_identity' ->> 'key_ref') IS DISTINCT FROM recorded THEN
+            RAISE EXCEPTION 'mcp_server %: the name is in the peer-key name record with key_ref %',
+                NEW.mcp_server_id, recorded USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'peer_key_row_guard' AND tgrelid = 'mcp_server_configs'::regclass
+    ) THEN
+        CREATE TRIGGER peer_key_row_guard BEFORE INSERT OR UPDATE ON mcp_server_configs
+            FOR EACH ROW EXECUTE FUNCTION peer_key_row_guard();
+    END IF;
+END
+$$;
 """
 
 

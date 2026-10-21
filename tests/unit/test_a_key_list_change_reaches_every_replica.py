@@ -9,6 +9,7 @@ The old copy is retired: it refuses calls, and its client is closed off the tail
 """
 
 import asyncio
+import sqlite3
 import threading
 from typing import Any
 
@@ -213,7 +214,11 @@ class TestAnUnreadableRowFailsClosed:
 
 class TestAPlainRowUnderARecordedName:
     def _plain_row_past_the_record(self, configs) -> None:
-        # An older replica's create: the old upsert, which never reads the record.
+        # An older replica's create: the old upsert, which never reads the record,
+        # in a database from before the row guard (#1987).
+        with sqlite3.connect(configs._db.config.path) as conn:
+            conn.execute("DROP TRIGGER IF EXISTS peer_key_row_guard_insert")
+            conn.execute("DROP TRIGGER IF EXISTS peer_key_row_guard_update")
         asyncio.run(configs.save(_row(tls={})))
 
     def test_an_update_to_it_retires_the_key_pinned_copy(self, replica) -> None:

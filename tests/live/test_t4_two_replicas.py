@@ -407,9 +407,6 @@ def test_mixed_version_the_published_replica_never_serves_a_key_pinned_server(
     assert tr.recorded_pins(fleet.database.row(server)) == [fleet.served.pin]
 
 
-@pytest.mark.xfail(
-    reason="#1987: 2.31.0 runs no name record check, and nothing in the database refuses it", strict=True
-)
 def test_mixed_version_a_create_on_the_published_replica_cannot_downgrade_the_row(
     fleet: Fleet, published: Published
 ) -> None:

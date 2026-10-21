@@ -341,6 +341,35 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "006_peer_key_row_guard",
+        """
+        -- A live row under a recorded name carries the recorded key_ref
+        -- (#1987). This release's writes already do; the triggers bind a
+        -- release that predates the record and writes the same file.
+        CREATE TRIGGER IF NOT EXISTS peer_key_row_guard_insert
+        BEFORE INSERT ON mcp_server_configs
+        WHEN NEW.enabled AND EXISTS (
+            SELECT 1 FROM peer_key_names
+            WHERE name = NEW.mcp_server_id
+              AND key_ref IS NOT json_extract(NEW.config_json, '$.tls.peer_identity.key_ref')
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'the name is in the peer-key name record with another key_ref');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS peer_key_row_guard_update
+        BEFORE UPDATE ON mcp_server_configs
+        WHEN NEW.enabled AND EXISTS (
+            SELECT 1 FROM peer_key_names
+            WHERE name = NEW.mcp_server_id
+              AND key_ref IS NOT json_extract(NEW.config_json, '$.tls.peer_identity.key_ref')
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'the name is in the peer-key name record with another key_ref');
+        END;
+        """,
+    ),
 ]
 
 
