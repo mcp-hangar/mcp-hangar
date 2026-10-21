@@ -1,0 +1,1 @@
+**cli:** `mcp-hangar pin` and the `init` smoke test start a subprocess server with its `args`, as `serve` does. They used to start the bare `command`, so the pins were taken from a different process than the one served.

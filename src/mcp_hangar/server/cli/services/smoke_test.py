@@ -85,10 +85,14 @@ def build_mcp_server(mcp_server_id: str, mcp_server_config: dict[str, Any]) -> M
     pinned digests would then be taken from a server configured slightly
     differently than the one `serve` runs.
     """
+    from ...config import _subprocess_command
+
     return McpServer(
         mcp_server_id=mcp_server_id,
         mode=mcp_server_config.get("mode", "subprocess"),
-        command=mcp_server_config.get("command"),
+        # `command` followed by `args`, as `serve` runs it (#1658): pinning a
+        # server without its arguments digests a different process.
+        command=_subprocess_command(mcp_server_id, mcp_server_config),
         image=mcp_server_config.get("image"),
         endpoint=mcp_server_config.get("endpoint"),
         env=mcp_server_config.get("env"),
