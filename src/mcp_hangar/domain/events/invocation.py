@@ -78,6 +78,10 @@ class ToolInvocationCompleted(DomainEvent):
     #: The key pin of the connection that served the call, read from its socket,
     #: for a key-pinned server (ADR-030 §6); None for any other server.
     upstream_peer_spki: str | None = None
+    #: The server's `tls.peer_identity.issuance` at the time of the call, as the
+    #: configuration declares it (ADR-030 §2, §6); None when it declares none.
+    #: A declaration, never a verification.
+    declared_key_issuance: str | None = None
 
 
 @accepts_legacy_provider_id
@@ -103,6 +107,8 @@ class ToolInvocationFailed(DomainEvent):
     failure_code: str | None = None
     #: The key pin a refused peer presented; None when it presented none.
     observed_peer_spki: str | None = None
+    #: As on ToolInvocationCompleted.
+    declared_key_issuance: str | None = None
 
 
 @dataclass

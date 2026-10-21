@@ -194,6 +194,9 @@ class Upstream:
     PEER_SPKI = "hangar.upstream.peer_spki"
     OBSERVED_PEER_SPKI = "hangar.upstream.observed_peer_spki"
     FAILURE_CODE = "hangar.upstream.failure_code"
+    #: The key issuance the server's configuration declares (ADR-030 §2). A
+    #: declaration: nothing in Hangar verifies it.
+    DECLARED_KEY_ISSUANCE = "hangar.upstream.declared_key_issuance"
 
 
 class Route:

@@ -14,19 +14,21 @@ from typing import Any
 #: The one form a key pin has: SHA-256 over the DER SubjectPublicKeyInfo, lowercase hex.
 _KEY_PIN = re.compile(r"sha256:[0-9a-f]{64}")
 
-#: Keys ADR-030 names that this release does not act on yet. Refused rather than
-#: accepted and ignored, so a declaration never claims more than it does.
-_NOT_YET = {
-    "issuance": "the declared issuance of the keys",
-}
+#: The declared sources of the keys (ADR-030 §2), a closed set. A declaration,
+#: never a verification: Hangar records it and checks none of it.
+KEY_ISSUANCES = frozenset({"kbs-attested"})
 
 
 @dataclass(frozen=True)
 class PeerIdentity:
-    """A key lineage (`key_ref`) and the key pins it may present (`spki_sha256`)."""
+    """A key lineage (`key_ref`), the key pins it may present (`spki_sha256`), and their declared `issuance`."""
 
     key_ref: str
     spki_sha256: frozenset[str]
+    #: Where the operator says the keys come from, or None. Recorded on the
+    #: invocation events as `declared_key_issuance`; it changes neither the
+    #: identity digest pins bind to nor what the handshake accepts.
+    issuance: str | None = None
 
     @classmethod
     def from_mapping(cls, raw: object) -> "PeerIdentity":
@@ -39,10 +41,7 @@ class PeerIdentity:
         """
         if not isinstance(raw, Mapping):
             raise ValueError("tls.peer_identity must be a mapping with key_ref and spki_sha256")
-        for key, what in _NOT_YET.items():
-            if key in raw:
-                raise ValueError(f"tls.peer_identity.{key} ({what}) is not supported by this release")
-        unknown = set(raw) - {"key_ref", "spki_sha256"}
+        unknown = set(raw) - {"key_ref", "spki_sha256", "issuance"}
         if unknown:
             raise ValueError(f"tls.peer_identity has unknown keys: {', '.join(sorted(map(str, unknown)))}")
 
@@ -59,7 +58,13 @@ class PeerIdentity:
                     f"tls.peer_identity.spki_sha256 entry {pin!r} is not a key pin: expected "
                     "'sha256:' and 64 lowercase hex characters, the SHA-256 of the DER SubjectPublicKeyInfo"
                 )
-        return cls(key_ref=key_ref, spki_sha256=frozenset(pins))
+        issuance = raw.get("issuance")
+        if issuance is not None and (not isinstance(issuance, str) or issuance not in KEY_ISSUANCES):
+            raise ValueError(
+                f"tls.peer_identity.issuance {issuance!r} is not a declared key issuance; "
+                f"expected one of: {', '.join(sorted(KEY_ISSUANCES))}"
+            )
+        return cls(key_ref=key_ref, spki_sha256=frozenset(pins), issuance=issuance)
 
     @classmethod
     def from_tls(cls, tls: Mapping[str, Any] | None) -> "PeerIdentity | None":
