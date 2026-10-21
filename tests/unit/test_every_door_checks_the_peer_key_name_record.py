@@ -7,6 +7,7 @@ them is checked here against a record on a real SQLite file.
 """
 
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -18,7 +19,11 @@ from mcp_hangar.application.commands.commands import LoadMcpServerCommand
 from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand
 from mcp_hangar.application.commands.crud_handlers import CreateMcpServerHandler, DeleteMcpServerHandler
 from mcp_hangar.application.commands.load_handlers import LoadMcpServerHandler
-from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot, peer_key_name_conflicts
+from mcp_hangar.domain.contracts.persistence import (
+    McpServerConfigSnapshot,
+    PersistenceError,
+    peer_key_name_conflicts,
+)
 from mcp_hangar.domain.exceptions import ConfigurationError, ConfigurationUnavailableError, PeerKeyNameTaken
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
@@ -49,6 +54,13 @@ class _Bus:
 
     def publish_aggregate_events(self, *args: Any, **kwargs: Any) -> int:
         return 0
+
+
+def _past_the_row_guard(database: Database) -> None:
+    """Drop the row guard (#1987), as in a database a 2.32.0 replica created and an older release then wrote to."""
+    with sqlite3.connect(database.config.path) as conn:
+        conn.execute("DROP TRIGGER IF EXISTS peer_key_row_guard_insert")
+        conn.execute("DROP TRIGGER IF EXISTS peer_key_row_guard_update")
 
 
 @pytest.fixture
@@ -135,8 +147,19 @@ class TestRecovery:
         asyncio.run(service.recover_mcp_servers())
         return fleet, service._last_recovery
 
+    def test_an_older_releases_upsert_is_refused_by_the_database(self, recorded) -> None:
+        # What an older replica's create does: the old upsert, which never reads the record (#1987).
+        with pytest.raises(PersistenceError, match="peer-key name record"):
+            asyncio.run(
+                recorded.save(McpServerConfigSnapshot(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
+            )
+
+        kept = asyncio.run(recorded.get("payments"))
+        assert kept is not None and kept.tls is not None and kept.tls["peer_identity"]["key_ref"] == "lineage"
+
     def test_a_plain_row_under_a_recorded_name_is_not_restored(self, recorded) -> None:
-        # What an older replica's create leaves: the old upsert, past the record.
+        # What that upsert left in a database from before the row guard.
+        _past_the_row_guard(recorded._db)
         asyncio.run(recorded.save(McpServerConfigSnapshot(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT)))
 
         with capture_logs() as logs:
