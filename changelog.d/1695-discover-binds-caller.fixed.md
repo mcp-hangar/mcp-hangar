@@ -1,1 +1,0 @@
-**core:** `server/discover` on a front door lists the same tools as the caller's `tools/list`. It answered every authenticated caller with `tools: []`: the route got the authenticated request but never bound the caller from it, so the projection saw no one. It also left out the `hangar_*` tools the caller may call, which a front door's `tools/list` has carried since #904.

@@ -1,5 +1,17 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.32.1
+
+### Remote servers' HTTP metrics are labelled with the server id
+
+The `mcp_server` label of a remote server's HTTP client metrics now holds the server's id, the name in `mcp_servers`, instead of its endpoint's host. This covers `mcp_hangar_upstream_peer_key_connections_total`, `mcp_hangar_http_errors_total` and the other `mcp_hangar_http_*` series. A dashboard or alert that selected these series by host, for example `mcp_server="10.244.3.17"`, selects nothing after the upgrade. Select by the server id instead. The old series stop growing, and new ones start under the id.
+
+### Built-in roles are enforced as the running release defines them
+
+A gateway now ignores the stored permissions of a built-in role (`admin`, `provider-admin`, `kubernetes-operator`, `developer`, `viewer`, `auditor`, `service-account`) and enforces its own release's definition. The `roles` table in a SQLite or PostgreSQL auth store keeps its rows for older replicas, which still read them. If you edited a built-in role's row in the database to change what it grants, that edit no longer has an effect. Create a custom role with the permissions you want and assign it instead.
+
+`POST /api/auth/roles` with a built-in role's name is now refused with 403 (`CannotModifyBuiltinRoleError`). It used to overwrite the built-in row.
+
 ## Upgrade to 2.32.0
 
 ### Giving a server a peer identity re-records its digest pins
