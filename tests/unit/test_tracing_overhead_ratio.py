@@ -39,6 +39,7 @@ def test_sdk_recording_stays_within_three_times_tracing_off(monkeypatch):
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     import mcp_hangar.server.context as server_context
+    from mcp_hangar.domain.services import tool_access_resolver
     from mcp_hangar.observability import tracing
     from tests.benchmark.tracing_workload import TracingWorkload
 
@@ -53,7 +54,19 @@ def test_sdk_recording_stays_within_three_times_tracing_off(monkeypatch):
 
     workload = TracingWorkload()
     monkeypatch.setattr(server_context, "_context", workload.ctx)
-    workload.run(CALLS)  # the call path imports some modules lazily
+    # hangar_call's access gate reads the process-wide resolver. A test that
+    # ran earlier in this worker can leave it in front-door mode with a
+    # tenant-scoped policy, and every call here is then denied for want of a
+    # tenant -- so the workload gets a resolver of its own.
+    monkeypatch.setattr(tool_access_resolver, "_resolver", tool_access_resolver.ToolAccessResolver())
+    try:
+        workload.run(CALLS)  # the call path imports some modules lazily
+    except BaseException:
+        # Closed here too, or a failure leaves the client's reader thread
+        # running and the leak check reports a second, misleading error.
+        workload.close()
+        provider.shutdown()
+        raise
     original = tracing.get_tracer
     for module in [m for name, m in sys.modules.items() if name.startswith("mcp_hangar")]:
         if getattr(module, "get_tracer", None) is original:
