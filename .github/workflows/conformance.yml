@@ -20,6 +20,10 @@ on:
     paths:
       - "src/mcp_hangar/fastmcp_server/**"
       - "src/mcp_hangar/server/**"
+      # Hangar's side of a connection to an upstream, which the client run judges.
+      - "src/mcp_hangar/http_client.py"
+      - "src/mcp_hangar/stdio_client.py"
+      - "scripts/conformance_pass_table.py"
       - "tests/conformance/**"
       - ".github/workflows/conformance.yml"
       - "pyproject.toml"
@@ -148,6 +152,60 @@ jobs:
       - name: Gateway log on failure
         if: failure()
         run: tail -100 gateway.log
+
+  # Hangar as the CLIENT under test (#1902). Hangar meets every upstream as an
+  # MCP client, so the suite's reference servers judge what it sends them:
+  # tests/conformance/hangar_client.py puts the scenario's test server in a
+  # config as a remote server and drives the gateway the way a caller would.
+  # Both revisions, each against its own baseline; every entry there names the
+  # issue that tracks it.
+  conformance-client:
+    name: Client conformance ${{ matrix.revision }} (baselined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - revision: "2026-07-28"
+            select: "--requirements 2026-07-28"
+          - revision: "2025-11-25"
+            select: "--spec-version 2025-11-25 --suite all"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+
+      - name: Install the gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run the conformance suite against Hangar as a client
+        env:
+          SELECT: ${{ matrix.select }}
+          REVISION: ${{ matrix.revision }}
+        run: |
+          # shellcheck disable=SC2086 # SELECT is a list of flags
+          npx -y @modelcontextprotocol/conformance@0.2.0-alpha.12 client \
+            --command "python tests/conformance/hangar_client.py" \
+            $SELECT \
+            --expected-failures "tests/conformance/baseline-client-${REVISION}.yml" \
+            --output-dir conformance-results
+
+      - name: Pass table
+        if: always()
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          if [ -d conformance-results ]; then
+            python scripts/conformance_pass_table.py conformance-results \
+              "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
   # Gate E is blocked on the ecosystem, not on us: the 2026-07-28 server vectors
   # do not exist yet, and no released MCP client speaks that generation either
