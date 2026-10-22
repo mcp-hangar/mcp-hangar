@@ -1,0 +1,14 @@
+### An endpoint in `fc00::/7` or `100.64.0.0/10` needs `ssrf.trusted_networks`
+
+The strict SSRF policy now treats IPv6 unique local addresses (`fc00::/7`) and RFC 6598 shared address space (`100.64.0.0/10`) as private, like `10.0.0.0/8`. A server registered in config or over the API whose endpoint resolves into either range is refused at registration, and an existing one is refused at its next connection.
+
+This includes the Kubernetes operator's registrations on a cluster whose pods or Services use these ranges.
+
+If such an endpoint is meant, trust its network:
+
+```yaml
+ssrf:
+  trusted_networks: ["fd00:10:96::/112", "100.64.0.0/10"]
+```
+
+Servers found by discovery are not affected.
