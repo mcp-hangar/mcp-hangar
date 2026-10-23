@@ -215,18 +215,6 @@ PREDICATES: tuple[Predicate, ...] = (
         },
         scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
-    # What `hangar_tools` and `hangar_details` show the caller: the server's tools,
-    # filtered by the tool-access policy under the caller's tenant.
-    Predicate(
-        ToolAccessResolver.filter_tools,
-        paths=_each((HANGAR_TOOLS, FRONT_DOOR_HANGAR_TOOLS)),
-        scope={"mcp_server_id": "server", "member_id": "tenant"},
-    ),
-    Predicate(
-        ToolAccessResolver.filter_tool_dicts,
-        paths=_each((HANGAR_DETAILS, FRONT_DOOR_HANGAR_DETAILS)),
-        scope={"mcp_server_id": "server", "member_id": "tenant"},
-    ),
     # Withdrawal: the overlay `decide()` reads through `withdrawal_status`. A
     # prompt or a resource has no projection, so its status is `is_withdrawn`;
     # a tool's comes off its projection (`is_withdrawn_for`, below).
@@ -238,20 +226,27 @@ PREDICATES: tuple[Predicate, ...] = (
     ),
     Predicate(
         ToolProjection.is_withdrawn_for,
-        paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS),
+        paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _LISTING_TOOL_PATHS),
         scope={"tenant_id": "tenant"},
     ),
     # The one decision every surface makes (#1784): the executor's access and
-    # withdrawal gates, and each front-door listing and fetch through
-    # `is_governed_allowed`. Every scope the target names, then every id a
-    # withdrawal can hold under, read through the overlay port.
-    Predicate(decide, paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS)),
+    # withdrawal gates, each front-door listing and fetch through
+    # `is_governed_allowed`, and each name `hangar_tools` and `hangar_details`
+    # show. Every scope the target names, then every id a withdrawal can hold
+    # under, read through the overlay port.
+    Predicate(
+        decide,
+        paths=_each(
+            _INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _LISTING_TOOL_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS
+        ),
+    ),
     Predicate(
         ToolProjectionRegistry.withdrawal_status,
         by="kind",
         paths={
             **_each(_INVOKE_PATHS, "tool"),
             **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_LISTING_TOOL_PATHS, "tool"),
             **_each(_PROMPT_PATHS, "prompt"),
             **_each(_RESOURCE_PATHS, "resource"),
         },
