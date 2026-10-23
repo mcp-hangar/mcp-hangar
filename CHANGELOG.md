@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.33.0...v2.34.0) (2026-10-23)
+
+### Added
+
+- **cli:** `mcp-hangar init` moves the MCP servers your clients already have behind Hangar. For Claude Code (user and project files) and Cursor, it does three things. It reads the `mcpServers` you already list. It starts each server once and pins every tool it serves. It writes each server that answered into the Hangar config under its own name, with its `args` and `env`. In the client file, the moved entries are then replaced by the single `mcp-hangar` entry. A server that does not start stays in its client file, and the summary names it with the reason. Interactively, you can leave any server where it is; `-y` moves every server that starts. The default bundle is installed only when no client lists servers. A config holding `env` values is readable by its owner only. `init --undo` restores the client files as they were. With `--skip-test`, nothing moves, because moving a server needs its first start. ([#2003](https://github.com/mcp-hangar/mcp-hangar/pull/2003))
+
+### Fixed
+
+- **core:** the front door's `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list` and `server/discover` decide each name on the member a call would be routed to, through the `decide()` a call makes. A member of one group was listed when its own policy allowed a name, whichever member a call then selected; a name is now listed only when every member a call for this tenant may select allows it (the pinned or canary member alone for a routed tenant), and a group with no member in rotation lists nothing, as a call to it is refused. A prompt or a resource of a group was decided under the group alone, so a member's own policy never applied, and was relayed to a member chosen without the tenant; it is now decided on the members a call may select, a fetch selects its member as a tool call does, and a listing is answered by a running member without advancing the strategy or starting a member. ([#2022](https://github.com/mcp-hangar/mcp-hangar/pull/2022))
+- **cli:** `mcp-hangar pin` and the `init` smoke test start a subprocess server with its `args`, as `serve` does. They used to start the bare `command`, so the pins were taken from a different process than the one served. ([#2001](https://github.com/mcp-hangar/mcp-hangar/pull/2001))
+- **repo:** `scripts/setup-branch-protection.sh` only raises main's protection. It starts from the current required checks and admin rule, adds what `--add` and `--mode community` ask for, and refuses a check that did not report on the last merged PR. It used to write a fixed list of six checks, two of which no job reports, and solo mode turned `enforce_admins` off. ([#2005](https://github.com/mcp-hangar/mcp-hangar/pull/2005))
+
+### Security
+
+- **deps:** the `opentelemetry` extra requires `opentelemetry-api`, `-sdk` and `-exporter-otlp` 1.45.1 or newer. The API below 1.45.1 carries CVE-2026-114603, and the old floor of 1.35.0 let an install resolve to it. ([#2006](https://github.com/mcp-hangar/mcp-hangar/pull/2006))
+- **security:** the strict SSRF policy refuses IPv6 unique local addresses (`fc00::/7`) and RFC 6598 shared address space (`100.64.0.0/10`) for an endpoint registered over the API, at registration and at connect time. Both are ranges a cluster's own pods and Services commonly use, so an API caller could register an in-cluster endpoint there. Discovery is unchanged: it still reaches the addresses its runtime reported. ([#2004](https://github.com/mcp-hangar/mcp-hangar/pull/2004))
+
 ## [2.33.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.32.1...v2.33.0) (2026-10-21)
 
 ### Added

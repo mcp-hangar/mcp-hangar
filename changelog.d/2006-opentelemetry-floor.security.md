@@ -1,1 +1,0 @@
-**deps:** the `opentelemetry` extra requires `opentelemetry-api`, `-sdk` and `-exporter-otlp` 1.45.1 or newer. The API below 1.45.1 carries CVE-2026-114603, and the old floor of 1.35.0 let an install resolve to it.
