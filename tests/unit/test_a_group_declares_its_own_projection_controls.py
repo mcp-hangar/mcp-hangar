@@ -31,6 +31,18 @@ _DIGEST = "b" * 64
 
 
 @pytest.fixture(autouse=True)
+def _every_member_is_selectable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The groups here never start a member, so none is in rotation; this is about overlays, not routing.
+
+    A front-door listing decides on the members a call may be routed to
+    (#1784), which is none for a group with nothing in rotation.
+    """
+    from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
+
+    monkeypatch.setattr(McpServerGroup, "_selectable", staticmethod(lambda member: True))
+
+
+@pytest.fixture(autouse=True)
 def _clean_state():
     from mcp_hangar.server.state import GROUPS
 

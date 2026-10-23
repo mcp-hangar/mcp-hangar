@@ -23,6 +23,7 @@ from mcp_hangar.domain.policies.header_exposure import (
     set_header_exposure_policy,
 )
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.fastmcp_server import flat_tool_projection as ftp
 from mcp_hangar.server.state import GROUPS
@@ -34,7 +35,9 @@ TENANT, OTHER = "tenant-a", "tenant-b"
 
 
 def _group(group_id: str, member: str) -> SimpleNamespace:
-    return SimpleNamespace(id=group_id, members=[SimpleNamespace(id=member)])
+    """A group of one member, which every call may be routed to."""
+    server = SimpleNamespace(id=member)
+    return SimpleNamespace(id=group_id, members=[server], route_candidates=lambda tenant_id: (server,))
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +79,9 @@ def test_a_member_of_one_group_routes_through_it_and_a_member_of_several_to_itse
     assert SHARED not in routes
 
 
-def test_the_listing_asks_the_scopes_hangar_call_asks_for_the_member(order) -> None:
-    assert ftp._policy_scopes(SHARED) == executor.member_policy_scopes(SHARED, order)
+def test_the_listing_decides_on_the_target_hangar_call_resolves_for_the_member(order) -> None:
+    """A member of several groups routes to itself: one target, the server with every owner (#1784)."""
+    assert ftp._targets_of_a_call(SHARED, TENANT, "tool") == (Target.server(SHARED, owning_groups=order),)
 
 
 @pytest.mark.parametrize("tool", ["a_denied", "b_denied"])
@@ -106,7 +110,7 @@ def test_a_prompt_on_the_member_is_governed_by_each_group(order) -> None:
 
 
 def test_a_member_of_one_group_is_governed_by_that_group_alone(order) -> None:
-    assert ftp._policy_scopes(SINGLE) == [(POOL_C, POOL_C, SINGLE)]
+    assert ftp._targets_of_a_call(SINGLE, TENANT, "tool") == (Target.group(POOL_C, member_server=SINGLE),)
     assert not _allowed(SINGLE, "c_denied")
     assert (_allowed(SINGLE, "a_denied"), _allowed(SINGLE, "b_denied")) == (True, True)
 

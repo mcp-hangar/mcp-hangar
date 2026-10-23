@@ -351,17 +351,6 @@ def _groups_owning(server_id: str) -> tuple[str, ...]:
     return owners_by_member().get(server_id, ())
 
 
-def member_policy_scopes(server_id: str, owning_groups: tuple[str, ...]) -> list[tuple[str, str | None, str | None]]:
-    """Every ``(server id, group id, member server id)`` a call naming *server_id* is resolved under.
-
-    The server's own scope, and one scope per group that owns it, asked as a
-    call naming that group and routed to this member is asked. A tool is
-    allowed only when every scope allows it. The front door asks these same
-    scopes for a member of several groups, which it routes to the member.
-    """
-    return [(server_id, None, None), *((group_id, group_id, server_id) for group_id in owning_groups)]
-
-
 #: What a call refused by tool access is told. A task's follow-up is told the same (#1473).
 _TOOL_ACCESS_DENIED = "Tool not available for this mcp_server"
 

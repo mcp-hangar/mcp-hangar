@@ -95,8 +95,10 @@ from ..context import (
     predates_param_validation,
 )
 from ..domain.services import progress_relay
+from ..domain.services.access_decision import decide
 from ..domain.services.governance_overlays import read_as_one_set
 from ..domain.services.tool_access_resolver import PolicyKind, get_tool_access_resolver
+from ..domain.value_objects.access import Caller, Target
 from ..logging_config import should_log_now
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
@@ -205,43 +207,41 @@ def _withdrawal_scopes(mcp_server: str) -> tuple[str, ...]:
     return (mcp_server, *_member_to_groups().get(mcp_server, ()))
 
 
-def _policy_scopes(mcp_server: str) -> list[tuple[str, str | None, str | None]]:
-    """Every ``(server id, group id, member server id)`` the access policy is asked under for *mcp_server*.
+def _targets_of_a_call(mcp_server: str, tenant_id: str | None, kind: PolicyKind) -> tuple[Target, ...]:
+    """Every target a call naming *mcp_server* for *tenant_id* may resolve to, typed for `decide()` (#1784).
 
-    The scopes of the call the front door makes for it, so a tool shown here is
-    one that call is allowed:
+    The front door lists a name only when the call it routes to would be
+    allowed, so this is that call's resolution, not the listing's:
 
-    * a member of one group routes through its group: the group's scope, with
-      this member as the one the group routes to;
-    * a member of several groups routes to itself: the scopes ``hangar_call``
-      asks for a member named directly, its own and one per owning group;
-    * a group id (what `_upstream_ids` hands the prompts and resources
-      surfaces, having collapsed the member) is the group's scope. Which member
-      answers is not known yet, so a member policy cannot be applied (#1036);
-    * anything else is its own scope.
+    * a member of one group routes through its group (#857), and a group id
+      (what `_upstream_ids` hands the prompts and resources surfaces) is the
+      group: the group, and each member a call for this tenant may be routed
+      to -- the pinned or canary member alone, else every selectable member,
+      since the strategy may pick any of them (decision 1 on #1763). No
+      member selectable means no target: that call is refused, so nothing is
+      listed (decision 2). Nothing is selected or started here;
+    * a member of several groups routes to itself: the server and every group
+      that owns it, as ``hangar_call`` governs a member named directly;
+    * anything else is itself.
     """
     owners = _member_to_groups().get(mcp_server, ())
-    if len(owners) > 1:
-        from ..server.tools.batch.executor import member_policy_scopes
-
-        return member_policy_scopes(mcp_server, owners)
-    if owners:
-        return [(owners[0], owners[0], mcp_server)]
-    if mcp_server in _groups():
-        return [(mcp_server, mcp_server, None)]
-    return [(mcp_server, None, None)]
+    group_id = owners[0] if owners else mcp_server
+    group = _groups().get(group_id) if len(owners) < 2 else None
+    if group is None:
+        return (Target.server(mcp_server, owning_groups=owners, kind=kind),)
+    return tuple(
+        Target.group(group_id, member_server=str(member.id), kind=kind) for member in group.route_candidates(tenant_id)
+    )
 
 
 def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_id: str | None) -> bool:
     """May *tenant_id* see and use *name* on *mcp_server*? (#1028)
 
     The single decision behind every projected surface -- tools, prompts and
-    resources alike. Both halves of the tool answer, applied per kind:
-
-    * the withdrawal overlay (config or runtime, per tenant or for all), and
-    * the effective access policy from the one resolver, asked under every
-      scope `_policy_scopes` names. A group member is checked against each
-      group that owns it, and deny wins, as ``hangar_call`` checks it.
+    resources alike: `decide()`, the one a call makes, on every target the
+    call the front door routes to may resolve to (`_targets_of_a_call`), and
+    every one must allow it. A group member is checked against each group
+    that owns it, and deny wins, as ``hangar_call`` checks it.
 
     Listing and fetching call this same function, so a thing that was not shown
     cannot be fetched and a thing that was shown can be -- and neither surface
@@ -252,20 +252,11 @@ def is_governed_allowed(mcp_server: str, name: str, *, kind: PolicyKind, tenant_
     For resources, *name* is the UPSTREAM URI -- see
     :func:`resource_link_read_through._deliverable` for why.
     """
-    registry = get_tool_projection_registry()
-    for scope in _withdrawal_scopes(mcp_server):
-        if registry.is_withdrawn(scope, name, kind=kind, tenant_id=tenant_id):
-            if scope != mcp_server:
-                logger.debug(
-                    "withdrawn_by_group_member scope=%s asked_as=%s kind=%s name=%s", scope, mcp_server, kind, name
-                )
-            return False
-    resolver = get_tool_access_resolver()
-    return all(
-        resolver.is_allowed(
-            server_id, name, kind=kind, group_id=group_id, member_id=tenant_id, member_server_id=member_server_id
-        )
-        for server_id, group_id, member_server_id in _policy_scopes(mcp_server)
+    targets = _targets_of_a_call(mcp_server, tenant_id, kind)
+    caller = Caller(tenant_id=tenant_id or None)
+    resolver, registry = get_tool_access_resolver(), get_tool_projection_registry()
+    return bool(targets) and all(
+        decide(target, name, caller, resolver=resolver, withdrawals=registry).allowed for target in targets
     )
 
 
@@ -290,8 +281,11 @@ def _flat_map_now(
     """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*. Through `_build_flat_map`.
 
     Rules applied:
-    1. Only tools that are active (not withdrawn) for *tenant_id*.
-    2. Only tools the resolver allows for *tenant_id* (member-scope policy).
+    1. Only tools the call this entry routes to would be allowed for
+       *tenant_id*: not withdrawn, and allowed by every policy in its path
+       (`is_governed_allowed`).
+    2. Only tools whose pin, header annotations and header exposure let them
+       be served.
     3. On flat-name collision across two servers: both entries are dropped and
        a ``flat_tool_name_collision`` warning is emitted.  See module docstring.
 
@@ -321,15 +315,11 @@ def _flat_map_now(
         if resolved is None:
             continue
 
-        # Drop withdrawn tools for this tenant (covers both config and runtime overlays).
-        if resolved.is_withdrawn_for(tenant_id):
-            continue
-
-        # Drop tools denied by policy. A group member is checked against every
-        # group that owns it -- the same checks `_gate_tool_access` applies to
-        # the call this entry routes to, so a tool shown here is the tool that
-        # check will allow. Shared with the prompts and resources surfaces
-        # since #1028.
+        # Drop tools the call this entry routes to would be refused: withdrawn
+        # for this tenant, or denied by a policy in the call's path. Decided
+        # on the member a call would select, through the `decide()` the
+        # executor's gates make, so a tool shown here is one that call allows
+        # (#1784). Shared with the prompts and resources surfaces since #1028.
         owner_group = group_of.get(mcp_server)
         if not is_governed_allowed(mcp_server, tool_name, kind="tool", tenant_id=tenant_id):
             continue

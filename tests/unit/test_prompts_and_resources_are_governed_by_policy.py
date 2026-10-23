@@ -88,7 +88,13 @@ def _groups():
     """Make ``_GROUP`` a real group id for the duration of a test."""
     return patch.dict(
         "mcp_hangar.server.bootstrap.composition.GROUPS",
-        {_GROUP: SimpleNamespace(id=_GROUP, members=[SimpleNamespace(id="member_1")])},
+        {
+            _GROUP: SimpleNamespace(
+                id=_GROUP,
+                members=[SimpleNamespace(id="member_1")],
+                route_candidates=lambda tenant_id: (SimpleNamespace(id="member_1"),),
+            )
+        },
         clear=True,
     )
 
@@ -300,9 +306,12 @@ class TestPromptsAreFilteredAtBothSurfaces:
         """The #857 rule, unchanged for prompts: members are one logical server."""
         get_tool_access_resolver().set_group_policy("group_g", ToolAccessPolicy(deny_list=("draft_*",)), kind="prompt")
 
-        with patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
-            return_value={"member_1": ("group_g",)},
+        with (
+            _groups(),
+            patch(
+                "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+                return_value={"member_1": (_GROUP,)},
+            ),
         ):
             assert not is_governed_allowed("member_1", "draft_email", kind="prompt", tenant_id=_TENANT)
             assert is_governed_allowed("member_1", "greet", kind="prompt", tenant_id=_TENANT)
