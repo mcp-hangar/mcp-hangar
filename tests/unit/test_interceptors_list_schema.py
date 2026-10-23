@@ -3,7 +3,7 @@
 Validates our response against a JSON Schema derived from the SEP-1763
 Interceptor interface definition at:
 
-    modelcontextprotocol/experimental-ext-interceptors @ 2f66b9b
+    modelcontextprotocol/experimental-ext-interceptors @ faf1583
 
 Re-pinned 5bd7ab4 -> 99bc7c9 for issue #401 (6 commits ahead). The notable
 drift then was upstream #25 ("Align capability key to SEP-2133 extensions
@@ -55,6 +55,22 @@ and one doc comment on ``failOpen`` renamed from "Enforce mode" to "Active
 mode" so the prose matches the ``mode`` enum the Go SDK aligned to in
 ``bd57572``. The ``Interceptor`` interface, and the ``mode?: "active" | "audit"``
 enum this schema already allows, are unchanged.
+
+Re-pinned 2f66b9b -> faf1583 for issue #1928, after reviewing the two
+intervening commits. **The schema below is unchanged, deliberately** -- the pin
+moves to record what was reviewed, not because anything drifted:
+
+* ``b604598`` adds a talk link to the README.
+* ``faf1583`` aligns ``docs/sep.md`` with working-group decisions. Interceptors
+  are invoked only over an MCP transport (no in-process API); a server hosting
+  them is an "Interceptor Server" that SHOULD NOT also expose tools, prompts
+  or resources -- a deployment recommendation, and co-hosting stays permitted;
+  ``config`` is passed per invocation, and an interceptor MAY omit
+  ``configSchema``, which this schema already allows; the method is spelled
+  ``interceptors/list`` throughout, as Hangar serves it; and the invoker-side
+  ``ChainExecutionParams`` context gains optional ``claims``, ``spanId`` and
+  ``sessionId``, which Hangar, serving ``interceptors/list``, does not send.
+  The ``Interceptor`` interface this schema mirrors is unchanged.
 
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
