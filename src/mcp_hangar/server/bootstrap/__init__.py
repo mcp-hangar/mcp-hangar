@@ -553,8 +553,9 @@ def bootstrap(
     # And the withdrawals decided before this replica existed. After the tailer
     # for the same head-then-snapshot reason, and after the fleet so the servers
     # a withdrawal names are already here (#1165).
-    from .withdrawals import restore_runtime_withdrawals
+    from .withdrawals import restore_runtime_withdrawals, wire_withdrawal_overlay
 
+    wire_withdrawal_overlay()
     restore_runtime_withdrawals(runtime)
 
     # And the pins the configuration declares, recorded in the log (#1800): what

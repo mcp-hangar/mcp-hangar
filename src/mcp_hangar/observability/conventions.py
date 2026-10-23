@@ -31,6 +31,8 @@ References:
     - PRODUCT_ARCHITECTURE.md Section 2: "MCP-aware OTEL semantic conventions"
 """
 
+from collections.abc import Mapping
+
 
 class McpServer:
     """Attributes describing an MCP mcp_server instance."""
@@ -159,8 +161,8 @@ class Gate:
     NAME = "hangar.gate.name"
     #: `allow`, `deny`, `skip`, `deferred` or `error`.
     OUTCOME = "hangar.gate.outcome"
-    #: A bounded code (see `executor._GATE_REASONS` and the gates that name
-    #: their own); never free text. Omitted when the gate cannot say why.
+    #: A bounded code (see `GATE_REASONS` below and the gates that name their
+    #: own); never free text. Omitted when the gate cannot say why.
     REASON = "hangar.gate.reason"
     #: The pinned digest a pin gate checked. Omitted for every gate without a
     #: revision source (ADR-029 s6); never fabricated.
@@ -182,6 +184,46 @@ class Gate:
     #: The first gate that refused the call, and its reason.
     REFUSAL_GATE = "hangar.refusal.gate"
     REFUSAL_REASON = "hangar.refusal.reason"
+
+    #: The two stages a listing decides as a call does (#1784). Each is a stage
+    #: of the executor's `_GATES` without its `_gate_` prefix. The domain's
+    #: `Decision.gate` spells the same two in `domain/value_objects/access.py`,
+    #: since ADR-027 keeps the domain from importing this module; a test keeps
+    #: the three spellings equal.
+    TOOL_ACCESS = "tool_access"
+    WITHDRAWAL = "withdrawal"
+
+
+#: A refusing gate's `hangar.gate.reason`, keyed by the refusal's bounded
+#: `error_type`, never by its message (#1285). A refusal whose type is not here
+#: records no reason rather than an invented one. A gate that knows more than
+#: its `error_type` says -- a tenant budget's `no_budget`/`concurrency`/`rate`,
+#: an unverifiable pin -- names its reason itself with `_CallPipeline.note`.
+#: Beside `Gate` rather than beside the executor's gates because the domain's
+#: `Decision.reason` carries two of these codes too (#1784), and a test holds
+#: its spelling to this table.
+GATE_REASONS: Mapping[str, str] = {
+    "CancellationError": "cancelled",
+    "TimeoutError": "batch_timeout",
+    "NoAvailableMemberError": "no_available_member",
+    "McpServerNotFoundError": "server_not_found",
+    "ToolAccessDeniedError": "tool_not_in_access_policy",
+    "ToolAccessDenied": "tool_not_in_access_policy",
+    "ToolWithdrawnError": "tool_withdrawn",
+    "ToolDigestMismatchError": "digest_mismatch",
+    "CircuitBreakerOpen": "circuit_open",
+    "CannotStartMcpServerError": "not_revived_by_calls",
+    "McpServerStartError": "start_failed",
+    "UpstreamPeerKeyMismatchError": "upstream_peer_key_mismatch",
+    "ValidatorDenied": "validator_denied",
+    "TenantQuotaExceeded": "tenant_quota_exceeded",
+    "ApprovalDenied": "approval_denied",
+    "approval_denied": "approval_denied",
+    "approval_timeout": "approval_timeout",
+    "ApprovalNoLongerValid": "approval_no_longer_valid",
+    "ApprovalGateError": "approval_gate_error",
+    "ApprovalRevalidationError": "approval_revalidation_error",
+}
 
 
 class Upstream:

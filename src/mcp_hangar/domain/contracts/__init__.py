@@ -56,6 +56,7 @@ from .persistence import (
 from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary, TransportInfo
 from .response_cache import CacheRetrievalResult, IResponseCache, NullResponseCache
 from .runtime_store import IRuntimeMcpServerStore
+from .withdrawals import IWithdrawalOverlay
 
 __all__ = [
     # Authentication contracts
@@ -127,6 +128,7 @@ __all__ = [
     "IMcpServerLogBuffer",
     # Runtime store
     "IRuntimeMcpServerStore",
+    "IWithdrawalOverlay",
 ]
 
 import sys
