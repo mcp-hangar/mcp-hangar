@@ -10,6 +10,8 @@ These tests ask the question the production surfaces ask: tenant AND selected
 member, not the resolver's internal vocabulary.
 """
 
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -118,20 +120,43 @@ def test_a_policy_set_after_a_resolve_invalidates_the_cached_verdict():
     )
 
 
-def test_the_front_door_applies_the_member_policy_to_a_member_keyed_tool():
-    """`is_governed_allowed` is asked with the member id; the group owns it."""
-    _configured_pool()
+def test_the_front_door_decides_a_groups_tool_on_the_members_a_call_may_select():
+    """`is_governed_allowed` is asked with a member id; the call goes to the group, which selects (#1784, D4).
 
-    with (
-        patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
-            return_value={_MEMBER: (_GROUP,), _OTHER_MEMBER: (_GROUP,)},
-        ),
-        patch("mcp_hangar.fastmcp_server.flat_tool_projection._groups", return_value={_GROUP: object()}),
-    ):
+    The listing used to keep a name when the member whose projection carried
+    it allowed it, whichever member a call then selected. It now lists a name
+    only when every member a call for this tenant may be routed to allows it.
+    """
+    _configured_pool()
+    servers = {_MEMBER: SimpleNamespace(id=_MEMBER), _OTHER_MEMBER: SimpleNamespace(id=_OTHER_MEMBER)}
+
+    def pool(*selectable: str) -> dict[str, Any]:
+        group = SimpleNamespace(
+            id=_GROUP,
+            members=list(servers.values()),
+            route_candidates=lambda tenant_id: tuple(servers[member] for member in selectable),
+        )
+        return {_GROUP: group}
+
+    owners = patch(
+        "mcp_hangar.fastmcp_server.flat_tool_projection._member_to_groups",
+        return_value={_MEMBER: (_GROUP,), _OTHER_MEMBER: (_GROUP,)},
+    )
+    groups = "mcp_hangar.fastmcp_server.flat_tool_projection._groups"
+    with owners, patch(groups, return_value=pool(_MEMBER, _OTHER_MEMBER)):
         assert not is_governed_allowed(_MEMBER, "admin_reset", kind="tool", tenant_id=_TENANT)
+        assert not is_governed_allowed(_OTHER_MEMBER, "admin_reset", kind="tool", tenant_id=_TENANT), (
+            "either member may answer the call, and one of them denies it"
+        )
         assert is_governed_allowed(_MEMBER, "query_rows", kind="tool", tenant_id=_TENANT)
-        assert is_governed_allowed(_OTHER_MEMBER, "admin_reset", kind="tool", tenant_id=_TENANT)
+    with owners, patch(groups, return_value=pool(_OTHER_MEMBER)):
+        assert is_governed_allowed(_OTHER_MEMBER, "admin_reset", kind="tool", tenant_id=_TENANT), (
+            "only the member that allows it can answer"
+        )
+    with owners, patch(groups, return_value=pool()):
+        assert not is_governed_allowed(_MEMBER, "query_rows", kind="tool", tenant_id=_TENANT), (
+            "no member to route to: the call is refused, so nothing is listed"
+        )
 
 
 def test_the_resolvers_own_vocabulary_still_resolves():

@@ -227,17 +227,13 @@ PREDICATES: tuple[Predicate, ...] = (
         paths=_each((HANGAR_DETAILS, FRONT_DOOR_HANGAR_DETAILS)),
         scope={"mcp_server_id": "server", "member_id": "tenant"},
     ),
-    # Withdrawal: the overlay the governed surfaces read, and the check the
-    # executor's withdrawal gate makes.
+    # Withdrawal: the overlay `decide()` reads through `withdrawal_status`. A
+    # prompt or a resource has no projection, so its status is `is_withdrawn`;
+    # a tool's comes off its projection (`is_withdrawn_for`, below).
     Predicate(
         ToolProjectionRegistry.is_withdrawn,
         by="kind",
-        paths={
-            FLAT_TOOL_CALL: "tool",
-            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
-            **_each(_PROMPT_PATHS, "prompt"),
-            **_each(_RESOURCE_PATHS, "resource"),
-        },
+        paths={**_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
         scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
     Predicate(
@@ -245,12 +241,22 @@ PREDICATES: tuple[Predicate, ...] = (
         paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS),
         scope={"tenant_id": "tenant"},
     ),
-    # The one decision the executor's access and withdrawal gates act on
-    # (#1784): every scope the target names, then every id a withdrawal can
-    # hold under, read through the overlay port. The front door's flat call
-    # dispatches through the same executor, so both run there.
-    Predicate(decide, paths=_each(_INVOKE_PATHS)),
-    Predicate(ToolProjectionRegistry.withdrawal_status, paths=_each(_INVOKE_PATHS), scope={"tenant_id": "tenant"}),
+    # The one decision every surface makes (#1784): the executor's access and
+    # withdrawal gates, and each front-door listing and fetch through
+    # `is_governed_allowed`. Every scope the target names, then every id a
+    # withdrawal can hold under, read through the overlay port.
+    Predicate(decide, paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS)),
+    Predicate(
+        ToolProjectionRegistry.withdrawal_status,
+        by="kind",
+        paths={
+            **_each(_INVOKE_PATHS, "tool"),
+            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+        },
+        scope={"tenant_id": "tenant"},
+    ),
     # The executor's digest-pin and approval gates. `_enforce_digest_pins`
     # applies every pin a call must match, a member's group pins included,
     # and `_enforce_digest_pin` checks one of them.

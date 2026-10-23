@@ -797,9 +797,11 @@ class TestFlatCallToolHandler:
 
 
 def _fake_group(group_id: str, member_ids: list[str]):
+    """A group every member of which a call may be routed to."""
     from types import SimpleNamespace
 
-    return SimpleNamespace(id=group_id, members=[SimpleNamespace(id=m) for m in member_ids])
+    members = [SimpleNamespace(id=m) for m in member_ids]
+    return SimpleNamespace(id=group_id, members=members, route_candidates=lambda tenant_id: tuple(members))
 
 
 class TestGroupsBehindFrontDoor:

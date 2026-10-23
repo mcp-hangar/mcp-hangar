@@ -128,8 +128,6 @@ def _overlays() -> tuple[Any, ...]:
         registry.is_withdrawn(SERVER, "w"),
         pin.sha256 if pin is not None else None,
         exposure.deny_annotated if exposure is not None else None,
-        is_governed_allowed(MEMBER, "ga", kind="tool", tenant_id=TENANT),
-        is_governed_allowed(MEMBER, "gb", kind="tool", tenant_id=TENANT),
     )
 
 
@@ -149,6 +147,8 @@ def _decisions() -> tuple[Any, ...]:
     mover = _tool_call(MOVER, "ga")
     return (
         *overlays,
+        is_governed_allowed(MEMBER, "ga", kind="tool", tenant_id=TENANT),
+        is_governed_allowed(MEMBER, "gb", kind="tool", tenant_id=TENANT),
         (call.allowed, call.withdrawn),
         tuple(pin.sha256 for _scope, pin, _mode in pinned.pins),
         member.allowed,
@@ -156,6 +156,18 @@ def _decisions() -> tuple[Any, ...]:
         (mover.owning_groups, mover.allowed, mover.l7_policy is not None),
         is_governed_allowed(MOVER, "ga", kind="tool", tenant_id=TENANT),
     )
+
+
+@pytest.fixture(autouse=True)
+def _every_member_is_selectable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The groups here never start a member, so none is in rotation; this is about overlays, not routing.
+
+    A front-door listing decides on the members a call may be routed to
+    (#1784), which is none for a group with nothing in rotation.
+    """
+    from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
+
+    monkeypatch.setattr(McpServerGroup, "_selectable", staticmethod(lambda member: True))
 
 
 def _reset() -> None:
