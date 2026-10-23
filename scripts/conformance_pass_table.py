@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Render the pass table of an official-conformance run as Markdown.
 
-The suite writes one ``checks.json`` per scenario under its ``-o`` directory.
+The suite writes one ``checks.json`` per scenario under its ``-o`` directory:
+``server-<scenario>-<time>/`` in server mode, ``<scenario>-<time>/`` in client
+mode, where an ``auth/`` scenario sits one directory deeper.
 This reads them and the baseline, and prints a table of what passed, what did
 not, and which non-passes are known. It is generated from the run so the table
 cannot drift from the result; nothing in it is written by hand.
@@ -21,13 +23,14 @@ _PASSING = {"SUCCESS", "INFO"}
 
 
 def _baseline(path: Path) -> set[str]:
-    return set(re.findall(r"^\s*-\s+([A-Za-z0-9_.\-]+)", path.read_text(), flags=re.MULTILINE))
+    return set(re.findall(r"^\s*-\s+([A-Za-z0-9_./\-]+)", path.read_text(), flags=re.MULTILINE))
 
 
 def _scenarios(results: Path) -> dict[str, list[dict]]:
     found: dict[str, list[dict]] = {}
-    for checks in sorted(results.glob("server-*/checks.json")):
-        found[_RUN_SUFFIX.sub("", checks.parent.name)] = json.loads(checks.read_text())
+    for checks in sorted(results.glob("**/checks.json")):
+        name = checks.parent.relative_to(results).as_posix()
+        found[_RUN_SUFFIX.sub("", name)] = json.loads(checks.read_text())
     return found
 
 
