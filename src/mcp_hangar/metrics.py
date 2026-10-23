@@ -902,6 +902,15 @@ HTTP_ERRORS_TOTAL = Counter(
     labels=["mcp_server", "error_type"],  # error_type: connection_refused, timeout, auth_failed, ssl_error
 )
 
+UPSTREAM_PEER_KEY_CONNECTIONS_TOTAL = Counter(
+    name="mcp_hangar_upstream_peer_key_connections",
+    description=(
+        "TLS handshakes with a key-pinned upstream (ADR-030), by outcome: verified when the peer's key "
+        "is in the server's key list, refused when it is not. Every connection counts, the GET stream's too."
+    ),
+    labels=["mcp_server", "outcome"],
+)
+
 HTTP_RETRIES_TOTAL = Counter(
     name="mcp_hangar_http_retries",
     description="Total number of HTTP request retries",
@@ -1462,6 +1471,7 @@ def _register_all_metrics():
         HTTP_REQUESTS_TOTAL,
         HTTP_REQUEST_DURATION_SECONDS,
         HTTP_ERRORS_TOTAL,
+        UPSTREAM_PEER_KEY_CONNECTIONS_TOTAL,
         HTTP_RETRIES_TOTAL,
         # Batch invocation metrics
         BATCH_CALLS_TOTAL,

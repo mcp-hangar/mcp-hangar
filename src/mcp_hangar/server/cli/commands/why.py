@@ -28,6 +28,25 @@ from ..services.refusal_log import (
 console = Console()
 
 
+def _config(global_opts: GlobalOptions) -> dict:
+    """The configuration file as a mapping, or an empty one when it cannot be read."""
+    resolved = resolve_config_path(global_opts.config).path
+    try:
+        loaded = yaml.safe_load(resolved.read_text(encoding="utf-8")) if resolved.is_file() else None
+    except (OSError, yaml.YAMLError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _listed_keys(config: dict, server: str) -> list[str] | None:
+    """The key list *server* declares in the configuration file now, or None when it declares none."""
+    spec = (config.get("mcp_servers") or {}).get(server)
+    tls = spec.get("tls") if isinstance(spec, dict) else None
+    identity = tls.get("peer_identity") if isinstance(tls, dict) else None
+    pins = identity.get("spki_sha256") if isinstance(identity, dict) else None
+    return [str(pin) for pin in pins] if isinstance(pins, list) else None
+
+
 def _store_path(db: Path | None, global_opts: GlobalOptions) -> Path:
     """The event store to read: --db, else the one the config names, else where init puts it."""
     if db is not None:
@@ -56,7 +75,7 @@ def _show_one(refusal: Refusal) -> None:
         console.print(f"  {key}: {value}")
 
 
-def _show_table(refusals: list[Refusal]) -> None:
+def _show_table(refusals: list[Refusal], config: dict | None = None) -> None:
     table = Table(show_header=True, header_style="bold")
     for column in ("Time (UTC)", "Event", "Server", "Tool", "Gate", "Reason"):
         table.add_column(column, overflow="fold")
@@ -75,6 +94,14 @@ def _show_table(refusals: list[Refusal]) -> None:
             console.print(
                 f"  {refusal.event_id[:8]}  expected {refusal.expected_digest or '(no pin entry)'}"
                 f"  observed {refusal.observed_digest or '(none)'}"
+            )
+        if refusal.reason == "upstream_peer_key_mismatch":
+            # The event records the key the upstream presented; the key list is
+            # the configuration's now, which may have changed since.
+            listed = _listed_keys(config or {}, refusal.server)
+            console.print(
+                f"  {refusal.event_id[:8]}  upstream presented {refusal.observed_peer_spki or '(no certificate)'}"
+                f"  listed now {', '.join(listed) if listed else '(no key list in this config)'}"
             )
 
 
@@ -153,7 +180,7 @@ def why_command(
         for refusal in refusals:
             _show_one(refusal)
         return
-    _show_table(refusals)
+    _show_table(refusals, _config(global_opts))
 
 
 __all__ = ["why_command"]

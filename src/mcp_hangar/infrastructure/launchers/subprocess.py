@@ -112,20 +112,29 @@ class SubprocessLauncher(McpServerLauncher):
                 details={"errors": [e.to_dict() for e in result.errors]},
             )
 
-    def _prepare_env(self, mcp_server_env: dict[str, str] | None = None) -> dict[str, str]:
+    def _prepare_env(
+        self,
+        mcp_server_env: dict[str, str] | None = None,
+        inherit_only: frozenset[str] | None = None,
+    ) -> dict[str, str]:
         """
         Prepare secure environment for subprocess.
 
         Args:
             mcp_server_env: McpServer-specific environment variables
+            inherit_only: When set, the only names taken from the gateway's
+                environment, in place of the launcher's own inheritance rules.
+                A server loaded from the registry is launched this way.
 
         Returns:
             Sanitized environment dictionary
         """
         result_env: dict[str, str] = {}
 
+        if inherit_only is not None:
+            result_env.update({key: value for key, value in os.environ.items() if key in inherit_only})
         # Start with inherited env if configured
-        if self._inherit_env:
+        elif self._inherit_env:
             for key, value in os.environ.items():
                 # Apply whitelist
                 if self._env_whitelist is not None:
@@ -166,6 +175,7 @@ class SubprocessLauncher(McpServerLauncher):
         self,
         command: list[str],
         env: dict[str, str] | None = None,
+        inherit_only: frozenset[str] | None = None,
     ) -> StdioClient:
         """
         Launch a subprocess mcp_server with security validation.
@@ -173,6 +183,8 @@ class SubprocessLauncher(McpServerLauncher):
         Args:
             command: Command and arguments to execute
             env: Additional environment variables
+            inherit_only: When set, the only names taken from the gateway's
+                environment (see `_prepare_env`).
 
         Returns:
             StdioClient connected to the subprocess
@@ -191,7 +203,7 @@ class SubprocessLauncher(McpServerLauncher):
         self._validate_env(env)
 
         # Prepare secure environment
-        process_env = self._prepare_env(env)
+        process_env = self._prepare_env(env, inherit_only)
 
         # Resolve interpreter robustly (tests often pass "python" which may not exist on macOS)
         resolved_command = list(command)

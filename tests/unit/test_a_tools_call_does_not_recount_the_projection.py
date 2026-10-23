@@ -63,7 +63,7 @@ def _patch_builders(monkeypatch, builds: list[str | None] | None = None) -> None
         "_build_flat_map",
         lambda tenant_id: ((builds.append(tenant_id) if builds is not None else None), {})[1],
     )
-    monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map: [])
+    monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map, _tenant: [])
     monkeypatch.setattr(
         "mcp_hangar.server.tools.tool_permissions.management_tools_for",
         lambda _ctx: set(),
@@ -127,7 +127,7 @@ class TestThePreDispatchListingSeesTheCallersPrincipal:
             return {}
 
         monkeypatch.setattr(flat_tool_projection, "_build_flat_map", _build)
-        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map: [])
+        monkeypatch.setattr(flat_tool_projection, "_build_mcp_tool_list", lambda _map, _tenant: [])
         monkeypatch.setattr(
             "mcp_hangar.server.tools.tool_permissions.management_tools_for",
             lambda _ctx: set(),

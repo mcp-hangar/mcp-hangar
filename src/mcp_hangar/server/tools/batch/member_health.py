@@ -53,7 +53,9 @@ class MemberOutcome(Enum):
 #: Refusal codes the executor writes that report the selected member's own state:
 #: its per-server circuit is open, it is DEAD in its backoff or for a capability
 #: block, or its start failed (#1361, #1446).
-MEMBER_HEALTH_REFUSALS = frozenset({"CircuitBreakerOpen", "CannotStartMcpServerError", "McpServerStartError"})
+MEMBER_HEALTH_REFUSALS = frozenset(
+    {"CircuitBreakerOpen", "CannotStartMcpServerError", "McpServerStartError", "UpstreamPeerKeyMismatchError"}
+)
 
 #: Refusal codes the executor writes that say nothing about the member. Every code
 #: the executor writes is in exactly one of these two sets, so a new one has to be

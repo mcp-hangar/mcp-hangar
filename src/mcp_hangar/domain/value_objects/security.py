@@ -245,6 +245,8 @@ class Role:
 PERMISSION_PROVIDERS_READ = Permission(resource_type="mcp_servers", action="read")
 PERMISSION_PROVIDERS_WRITE = Permission(resource_type="mcp_servers", action="write")
 PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="mcp_servers", action="lifecycle")
+#: Declare, change or remove an upstream's peer identity, its key list (ADR-030 §9).
+PERMISSION_MCP_SERVERS_PEER_IDENTITY = Permission(resource_type="mcp_servers", action="peer_identity")
 PERMISSION_POLICY_READ = Permission(resource_type="policy", action="read")
 PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
 PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")

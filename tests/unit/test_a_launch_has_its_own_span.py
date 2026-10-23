@@ -76,7 +76,7 @@ def _stubbed(
     ("cls", "mode", "receives_id"),
     [
         (SubprocessLauncher, "subprocess", False),
-        (HttpLauncher, "remote", False),
+        (HttpLauncher, "remote", True),  # the id labels its client's metrics (#1981)
         (DockerLauncher, "docker", True),
         (ContainerLauncher, "podman", True),
     ],

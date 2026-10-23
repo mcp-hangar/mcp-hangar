@@ -36,11 +36,14 @@ _TOOL = "add"
 
 
 class _Mutator:
-    """A mutator for `tools/call` that rewrites the payload, leaves it, or fails."""
+    """A mutator, for `tools/call` by default, that rewrites the payload, leaves it, or fails."""
 
-    def __init__(self, *, rewrite: dict[str, Any] | None = None, fail: bool = False) -> None:
+    def __init__(
+        self, *, rewrite: dict[str, Any] | None = None, fail: bool = False, method: str = "tools/call"
+    ) -> None:
         self._rewrite = rewrite
         self._fail = fail
+        self._method = method
 
     @property
     def priority_hint(self) -> int:
@@ -48,7 +51,7 @@ class _Mutator:
 
     @property
     def applies_to(self) -> frozenset[str]:
-        return frozenset({"tools/call"})
+        return frozenset({self._method})
 
     def mutate(self, context: MutationContext) -> MutationResult:
         if self._fail:
@@ -152,6 +155,28 @@ def test_request_and_response_mutation_each_record_an_event(exporter: Any, upstr
     assert all(e[Shaping.DURATION_MS] >= 0 for e in events)
     # Timing and a flag only: nothing from either payload reaches the span.
     assert all(set(e) == {Shaping.DIRECTION, Shaping.CHANGED, Shaping.DURATION_MS} for e in events)
+
+
+def test_a_mutator_for_another_method_records_no_mutation_on_a_tool_call(exporter: Any, upstream: Mock) -> None:
+    """A mutator registered only for `resources/read` never runs for `tools/call`, so nothing is recorded."""
+    pipeline = MutatorPipeline()
+    pipeline.register(_Mutator(rewrite={"rewritten": True}, method="resources/read"))
+
+    result = _run(BatchExecutor(mutator_pipeline=pipeline))
+
+    assert result.succeeded == 1
+    [span] = _call_spans(exporter)
+    assert _events(span, Shaping.MUTATION_EVENT) == []
+
+
+def test_has_mutators_for_matches_the_methods_execute_would_run() -> None:
+    pipeline = MutatorPipeline()
+    assert pipeline.has_mutators_for("tools/call") is False
+
+    pipeline.register(_Mutator(method="resources/read"))
+
+    assert pipeline.has_mutators_for("resources/read") is True
+    assert pipeline.has_mutators_for("tools/call") is False
 
 
 def test_a_mutator_that_leaves_the_payload_says_so(exporter: Any, upstream: Mock) -> None:

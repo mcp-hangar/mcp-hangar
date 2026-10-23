@@ -116,8 +116,6 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "EgressPolicyViolationObserved": 1,
     "McpServerCapabilityQuarantined": 1,
     "McpServerCapabilityQuarantineReleased": 1,
-    # Policy push
-    "PolicyPushRejected": 1,
     # Approval Gate
     "ToolApprovalRequested": 1,
     "ToolApprovalGranted": 1,

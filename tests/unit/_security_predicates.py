@@ -348,6 +348,9 @@ EXEMPT: dict[str, str] = {
     "auth/bootstrap.py::NullAuthComponents.__init__.<locals>.NullAuthorizer.authorize": (
         "The auth-off authorizer. It allows by design."
     ),
+    "auth/infrastructure/middleware.py::AuthorizationMiddleware.authorizer": (
+        "A read-only accessor returning the backend, so hangar_whoami can show its role bindings. It decides nothing."
+    ),
     "domain/contracts/session_suspension.py::ISessionSuspensionRegistry.is_suspended": (
         "An interface. Its implementation, InMemorySessionSuspensionRegistry.is_suspended, is registered."
     ),
@@ -368,5 +371,9 @@ EXEMPT: dict[str, str] = {
     ),
     "auth/infrastructure/jwt_authenticator.py::JWTAuthenticator._enforce_tenant_audience": (
         "Bearer-token validation during authentication. The probes authenticate with API keys."
+    ),
+    "auth/stdio_principal.py::authorizer_over_declared_roles": (
+        "Builds the RBAC middleware for the declared stdio principal; it decides nothing itself. The "
+        "gates that use it -- authorize_tool, the batch check, ResolveApprovalHandler -- are tested where they run."
     ),
 }

@@ -25,6 +25,7 @@ from mcp_hangar.domain.exceptions import (
     EgressPolicyDeniedError,
     RateLimitExceeded,
     ToolTimeoutError,
+    UpstreamPeerKeyMismatchError,
 )
 from mcp_hangar.errors import ExpectedRefusal
 from mcp_hangar.observability.conventions import Dispatch, Gate
@@ -220,6 +221,56 @@ class TestTheExecutorEndToEnd:
         assert span.attributes[Gate.REFUSAL_GATE] == "withdrawal"
         assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
         assert span.attributes[ERROR_TYPE] == "ToolWithdrawnError", "what refused is still named"
+
+    def test_an_unlisted_upstream_key_at_cold_start_is_a_deny_not_a_failed_start(self, ctx, executor_exporter) -> None:
+        # ADR-030 §5: the start path carries the refusal as itself, and the
+        # cold-start gate reports it with its own reason.
+        gate_decisions._arrange_catalogue()
+        ctx.get_mcp_server.return_value.state.value = "cold"
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError("sha256:" + "a" * 64)
+
+        assert _run().error_type == "UpstreamPeerKeyMismatchError"
+
+        assert gate_decisions._by_name(executor_exporter)["cold_start"] == (
+            Gate.DENY,
+            "upstream_peer_key_mismatch",
+            None,
+        )
+        span = gate_decisions._call_span(executor_exporter)
+        assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
+        assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
+
+    def test_an_unlisted_upstream_key_on_a_warm_call_is_a_deny_logged_as_refused(self, ctx, executor_exporter) -> None:
+        # ADR-030 §5: the warm path raises the refusal as itself, so the
+        # executor records it like the other refusals raised past the gates.
+        from structlog.testing import capture_logs
+
+        gate_decisions._arrange_catalogue()
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError("sha256:" + "a" * 64)
+
+        with capture_logs() as logs:
+            assert _run().error_type == "UpstreamPeerKeyMismatchError"
+
+        span = gate_decisions._call_span(executor_exporter)
+        assert span.attributes[Gate.CALL_OUTCOME] == Gate.DENY
+        assert span.status.status_code.name == "UNSET", "a refusal is not an error trace"
+        assert [entry["event"] for entry in logs if entry["event"].startswith("batch_call_")] == ["batch_call_refused"]
+
+    def test_the_cold_start_refusal_record_names_the_key_the_peer_presented(self, ctx, executor_exporter) -> None:
+        from mcp_hangar.domain.events import ToolCallRefused
+
+        observed = "sha256:" + "2" * 64
+        gate_decisions._arrange_catalogue()
+        ctx.get_mcp_server.return_value.state.value = "cold"
+        ctx.command_bus.send.side_effect = UpstreamPeerKeyMismatchError(observed)
+
+        _run()
+
+        published = [c.args[0] for c in ctx.event_bus.publish.call_args_list]
+        refused = [event for event in published if isinstance(event, ToolCallRefused)]
+        assert [(r.gate, r.gate_reason, r.observed_peer_spki) for r in refused] == [
+            ("cold_start", "upstream_peer_key_mismatch", observed)
+        ]
 
     def test_a_failed_cold_start_still_ends_error(self, ctx, executor_exporter) -> None:
         gate_decisions._arrange_catalogue()

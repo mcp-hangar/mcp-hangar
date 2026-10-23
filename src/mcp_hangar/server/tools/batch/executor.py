@@ -36,7 +36,7 @@ from ....domain.events import (
     ToolCallRefused,
     ToolWithdrawnRejected,
 )
-from ....domain.exceptions import CannotStartMcpServerError
+from ....domain.exceptions import CannotStartMcpServerError, UpstreamPeerKeyMismatchError
 from ....domain.model.mcp_server import (
     DEAD_NOT_REVIVED_BY_CALLS,
     START_REFUSED_IN_BACKOFF,
@@ -124,6 +124,7 @@ _GATE_REASONS = {
     "CircuitBreakerOpen": "circuit_open",
     "CannotStartMcpServerError": "not_revived_by_calls",
     "McpServerStartError": "start_failed",
+    "UpstreamPeerKeyMismatchError": "upstream_peer_key_mismatch",
     "ValidatorDenied": "validator_denied",
     "TenantQuotaExceeded": "tenant_quota_exceeded",
     "ApprovalDenied": "approval_denied",
@@ -139,12 +140,20 @@ _GATE_REASONS = {
 _GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalRevalidationError"})
 
 #: Refusals raised past the gates rather than returned by one: the aggregate's
-#: L7 policy (#1295) and a spent command-bus rate-limit budget. A call they end
+#: L7 policy (#1295), a spent command-bus rate-limit budget, and an upstream
+#: whose TLS key is not in its key list (ADR-030 §5). A call they end
 #: is `deny`, not `error` -- each is the gateway answering on purpose, which is
 #: what `ExpectedRefusal` marks. `tests/unit/test_refusal_span_status.py` holds
 #: this set to the exceptions carrying that marker, so a new one cannot be
 #: recorded as a failure here while the tracer treats it as a refusal.
-_REFUSED_AT_DISPATCH = frozenset({"EgressPolicyDeniedError", "EgressPolicyApprovalRequiredError", "RateLimitExceeded"})
+_REFUSED_AT_DISPATCH = frozenset(
+    {
+        "EgressPolicyDeniedError",
+        "EgressPolicyApprovalRequiredError",
+        "RateLimitExceeded",
+        "UpstreamPeerKeyMismatchError",
+    }
+)
 
 #: The dispatch refusals the aggregate's L7 policy raises (#1295). Their log line
 #: carries the verdict's bounded fields, not the policy's joined reasons.
@@ -717,6 +726,9 @@ class _CallPipeline:
     proj_registry: Any
     tracer: Any
 
+    #: Set by _gate_cold_start when the upstream presented a key outside its key
+    #: list: the key pin it presented, for the refusal's record (ADR-030 §6).
+    observed_peer_spki: str | None = None
     #: Set by _gate_global_timeout: what is left of the batch budget.
     effective_timeout: float = 0.0
     #: Set by _gate_resolve_target.
@@ -1398,9 +1410,9 @@ class BatchExecutor:
         )
         started = time.perf_counter()
         result = self._mutator_pipeline.execute(ctx)
-        # Only a pipeline with mutators is observed: the default one does nothing,
-        # and an event on every call saying so would be noise (#1298).
-        if self._mutator_pipeline.has_mutators:
+        # Only a pipeline with a mutator for this method is observed: otherwise
+        # none ran, and an event on every call saying so would be noise (#1298).
+        if self._mutator_pipeline.has_mutators_for(method):
             record_mutation(direction, result.changed, round((time.perf_counter() - started) * 1000, 3))
         return result.payload
 
@@ -2552,6 +2564,13 @@ class BatchExecutor:
                 # was blocked in between. Not a failed start (#1446).
                 cs_span.set_attribute("cold_start.result", "refused")
                 return self._report_refusal(p, self._refused_start(p, e))
+            except UpstreamPeerKeyMismatchError as e:
+                # The upstream's TLS key is not in its key list (ADR-030 §5): a
+                # refusal with its own reason, so no handled failure on the span.
+                cs_span.set_attribute("cold_start.result", "refused")
+                p.observed_peer_spki = e.observed_peer_spki
+                refusal = p.refuse(str(e), "UpstreamPeerKeyMismatchError")
+                return self._report_refusal(p, refusal, cause=e)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                 cs_span.set_attribute("cold_start.result", "error")
                 record_handled_failure(cs_span, e)
@@ -2978,6 +2997,7 @@ def publish_call_refused(
     reason: str | None = None,
     l7: L7Decision | None = None,
     route_backend: str | None = None,
+    observed_peer_spki: str | None = None,
 ) -> None:
     """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
 
@@ -3002,6 +3022,7 @@ def publish_call_refused(
                 l7_policy_id=l7.policy_id if l7 is not None else None,
                 elapsed_ms=round(elapsed_ms, 2),
                 route_backend=route_backend,
+                observed_peer_spki=observed_peer_spki,
             )
         )
     except Exception as e:  # noqa: BLE001 -- fault barrier: the refusal stands whether or not its record is written
@@ -3020,6 +3041,7 @@ def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> N
             gate=gate,
             reason=reason,
             route_backend=p.route_backend,
+            observed_peer_spki=p.observed_peer_spki,
         )
 
 

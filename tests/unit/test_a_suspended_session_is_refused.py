@@ -542,6 +542,22 @@ class TestTheManagementTools:
         with pytest.raises(SessionSuspendedError):
             authorize_tool("hangar_stop", ctx)
 
+    def test_a_suspension_outranks_the_self_scoped_whoami(self, registry, monkeypatch) -> None:
+        """It needs no grant, so it is checked with auth on and no role at all (#1363)."""
+        components = SimpleNamespace(
+            enabled=True, authz_middleware=AuthorizationMiddleware(RBACAuthorizer(InMemoryRoleStore()))
+        )
+        monkeypatch.setattr(
+            "mcp_hangar.server.context.get_context", lambda: SimpleNamespace(auth_components=components)
+        )
+        ctx = _tool_ctx(_principal("svc:nobody"), session="s-1")
+        authorize_tool("hangar_whoami", ctx)
+
+        registry.suspend("s-1")
+
+        with pytest.raises(SessionSuspendedError):
+            authorize_tool("hangar_whoami", ctx)
+
     @pytest.mark.parametrize(
         ("tool", "arguments"),
         [

@@ -228,6 +228,18 @@ class CombinedAuthorizer:
         self._opa = opa_authorizer
         self._require_both = require_both
 
+    @property
+    def rbac(self) -> RBACAuthorizer:
+        """The RBAC authorizer consulted first."""
+        return self._rbac
+
+    @property
+    def opa_effect(self) -> str | None:
+        """How OPA can change an RBAC verdict: ``"may_refuse_more"``, ``"may_admit_more"``, or None."""
+        if self._opa is None:
+            return None
+        return "may_refuse_more" if self._require_both else "may_admit_more"
+
     def authorize(self, request: AuthorizationRequest) -> AuthorizationResult:
         """Check authorization with combined strategy.
 

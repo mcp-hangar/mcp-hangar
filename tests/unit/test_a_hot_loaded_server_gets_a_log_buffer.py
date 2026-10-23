@@ -24,6 +24,7 @@ from mcp_hangar.application.commands.crud_handlers import DeleteMcpServerHandler
 from mcp_hangar.application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from mcp_hangar.domain.contracts.installer import InstalledPackage
 from mcp_hangar.domain.contracts.registry import PackageInfo, ServerDetails, TransportInfo
+from mcp_hangar.domain.security.hot_load_trust import HotLoadTrust
 from mcp_hangar.domain.value_objects import McpServerMode, McpServerState
 from mcp_hangar.infrastructure.persistence.log_buffer import (
     McpServerLogBuffer,
@@ -87,7 +88,7 @@ class _Events:
 class _FakeRegistry:
     server: ServerDetails
 
-    async def get_server(self, server_id: str) -> ServerDetails | None:
+    async def get_server(self, server_id: str, *, fresh: bool = False) -> ServerDetails | None:
         return self.server if server_id in (self.server.id, self.server.name) else None
 
     async def search(self, query: str, limit: int = 10) -> list[Any]:
@@ -150,7 +151,7 @@ def _details() -> ServerDetails:
         description="a hot-loaded server",
         vendor=None,
         source_url=None,
-        is_official=True,
+        is_published=True,
         packages=[PACKAGE],
         required_env_vars=[],
     )
@@ -181,8 +182,16 @@ def _load_handler(log_buffers: Any, order: list[str] | None = None) -> tuple[Loa
         mcp_server_factory=factory,
         mcp_server_repository=repository,
         log_buffers=log_buffers,
+        trust=_TrustsEveryName,
     )
     return handler, store
+
+
+class _TrustsEveryName(HotLoadTrust):
+    """`hot-one` is in no namespace, and trust is not what this file tests."""
+
+    def is_trusted(self, server_name: str) -> bool:
+        return True
 
 
 @pytest.fixture(autouse=True)

@@ -1,5 +1,218 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.32.1
+
+### Remote servers' HTTP metrics are labelled with the server id
+
+The `mcp_server` label of a remote server's HTTP client metrics now holds the server's id, the name in `mcp_servers`, instead of its endpoint's host. This covers `mcp_hangar_upstream_peer_key_connections_total`, `mcp_hangar_http_errors_total` and the other `mcp_hangar_http_*` series. A dashboard or alert that selected these series by host, for example `mcp_server="10.244.3.17"`, selects nothing after the upgrade. Select by the server id instead. The old series stop growing, and new ones start under the id.
+
+### Built-in roles are enforced as the running release defines them
+
+A gateway now ignores the stored permissions of a built-in role (`admin`, `provider-admin`, `kubernetes-operator`, `developer`, `viewer`, `auditor`, `service-account`) and enforces its own release's definition. The `roles` table in a SQLite or PostgreSQL auth store keeps its rows for older replicas, which still read them. If you edited a built-in role's row in the database to change what it grants, that edit no longer has an effect. Create a custom role with the permissions you want and assign it instead.
+
+`POST /api/auth/roles` with a built-in role's name is now refused with 403 (`CannotModifyBuiltinRoleError`). It used to overwrite the built-in row.
+
+## Upgrade to 2.32.0
+
+### Giving a server a peer identity re-records its digest pins
+
+A server with `tls.peer_identity` gets the upstream identity `peer-key:<key_ref>` instead of `remote:<scheme>://<host>:<port>`, and digest pins are bound to that identity (#1802). Adding a peer identity to a server that already has digest pins changes its identity, so those pins no longer match. Under `block` the server's tools are refused until the pins are recorded again. Re-record them after adding the declaration (`mcp-hangar pin --write`). Changing `key_ref` later has the same effect. A key rotation within the same `key_ref` does not.
+
+A configuration file that declares `tls.peer_identity` needs a release that knows the key. An older release ignores the declaration and serves the server as a plain one, without checking its key.
+
+### Deleting a key-pinned server needs `mcp_servers:peer_identity`
+
+Deleting a server that declares `tls.peer_identity` now needs the `mcp_servers:peer_identity` permission, which only `admin` and `kubernetes-operator` hold. A custom role that deletes such servers needs the permission added. Under OPA authorization, the gateway asks for action `peer_identity` on resource type `mcp_servers`; a policy that does not know the action denies it, so allow it for the principals that manage key-pinned servers, including the operator's service account. Servers without a peer identity are unaffected.
+
+### Declare a peer identity over REST only once every replica runs this release
+
+A key-pinned server's configuration row is stored with mode `remote-peer-key`, which the previous release declines rather than reads. While a replica of the previous release still runs, it does not serve that server. It can still write a plain row under the server's name through its old create, and this release then refuses that row at recovery and in the projection. So do not declare a peer identity over REST, or from the operator, until no replica of the previous release runs. For key-pinned rows, and for this one release, this relaxes the high-availability rule that a row written by a new release stays readable by the old one.
+
+A configuration file that sets `tls.peer_identity` has no such guard: an older release serves the server as a plain one, without checking its key.
+
+With authentication disabled, any client of the API can set or change a peer identity. `GET /system` now lists `capabilities`, which the operator checks before it registers a key-pinned server.
+
+An endpoint set over the API is a human's, so the SSRF policy applies to it. Before the operator registers key-pinned servers by pod IP, add the pod CIDR to `ssrf.trusted_networks`, or every endpoint it sets is refused with `ssrf_blocked`. That includes a server moved from discovery to a key-pinned registration, which meets the policy for the first time.
+
+### A configuration write that lost a race between replicas is now refused
+
+Updates and L7 policy deliveries for a server are now compare-and-set writes on its stored configuration row. A write is refused when another replica changed or deleted that row after this replica read it. The refusal is a `ConcurrentModificationError`, which the REST API answers as a 500. This is deliberate: the operator's client retries 5xx, so a refused policy delivery is retried and applied on top of the newer row. Other clients should retry a refused update the same way.
+
+A create now refuses a name whose row is live, even on a replica that has not yet heard of that server. It answers "already exists" instead of overwriting the row.
+
+During a rolling upgrade, replicas on the previous release still write unversioned and can still overwrite the row. The protection holds once every replica runs this release. Single-replica deployments are not affected.
+
+### Changing a server's endpoint over the API needs durable storage
+
+`PUT /mcp_servers/{id}` with `endpoint` or `tls` now works for a server without a peer identity too. Every replica, including the one that handled the request, replaces its copy of the server from the shared configuration row. A gateway without durable storage (`persistence.backend` unset) has no shared row, and no projection to apply the change, so it refuses the change with 422 instead of keeping the old connection open.
+
+## Upgrade to 2.31.0
+
+### a front door lists `hangar_whoami` to every authenticated caller
+
+On a `front_door` gateway with auth on, `tools/list` used to hold no `hangar_*`
+name for a caller holding no management permission, such as an agent key with
+only `tool:invoke` or a key with no role at all. That list now also holds
+`hangar_whoami`, which reports the caller's own identity and needs no
+permission. Upstream tools are unchanged, and with auth off, or for an
+anonymous caller, the list is as before.
+
+A client or test that expects such a caller's list to contain only upstream
+names should allow `hangar_whoami`, or drop names that start with `hangar_`.
+
+### `PolicyPushRejected` is removed
+
+`from mcp_hangar.domain.events import PolicyPushRejected` now fails with an
+`ImportError`. Delete the import and any handler subscribed to it: nothing has
+published the event since the `POST /agent/policy` endpoint was retired in
+1.5.x, so such a handler has never been called and removing it changes no
+behaviour. To observe a refused policy push, subscribe to `AuthorizationDenied`,
+which is published when the authorizer refuses the `policy:write` request.
+
+No event store needs migrating. The event was only ever delivered, never
+persisted, so no stored stream contains one.
+
+## Upgrade to 2.30.0
+
+### `hangar_load` loads only what the operator trusts, with only the environment and secrets bound to it
+
+Before, any server published in the registry could be loaded with
+`hangar_load`, because the registry marks every published entry
+`status: active` and that status was read as "verified". The variables its
+entry named were looked up in the gateway's environment and in the secrets
+directory and passed to it. It also inherited the gateway's whole environment,
+minus the names a heuristic called sensitive. A caller could load an entry
+that was not active by passing `force_unverified=True`.
+
+Now four `hot_loading` keys decide, and each defaults to refusing:
+
+- `trusted_namespaces`: a list of registry name prefixes. An entry is
+  verified when its name is under one of them **and** the registry lists it
+  as active. Anything else is refused with `status: unverified`. With the
+  default, an empty list, every `hangar_load` is refused until a namespace is
+  listed. Every namespace ends in `/`, one is added if it is left out, and
+  matching is case-sensitive by whole segment, so list each sub-namespace you
+  trust.
+- `allow_force_unverified`: `false` by default, and `force_unverified` is
+  then ignored. Set it to `true` only to let callers load entries that are
+  not verified, a deprecated entry in a trusted namespace included.
+- `secrets.allow`: the exact registry name of a server mapped to the
+  variables it may receive. A variable not listed is answered with
+  `status: missing_secrets`, even when the gateway has it set. Two keys that
+  differ only in case are refused.
+- `inherit_env`: names a hot-loaded server takes from the gateway's
+  environment, in addition to a fixed base: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `TMP`, `TEMP`,
+  and on Windows `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `APPDATA`,
+  `LOCALAPPDATA`, `USERPROFILE`. Hangar passes it nothing else from its
+  environment. A server that
+  needs a proxy (`HTTPS_PROXY`), a CA bundle (`SSL_CERT_FILE`) or `UV_*` and
+  `npm_config_*` settings to install needs them listed here. Statically
+  configured servers inherit as before.
+
+What Hangar hands the server is bounded; a hot-loaded server is code running
+as the gateway's user, so `trusted_namespaces` is the boundary. It can read
+whatever files that user can, the secrets directory and `~/.aws/credentials`
+included, on its own.
+
+To keep loading a server as before, add its namespace, its variables and
+anything its runtime needs from the environment:
+
+```yaml
+hot_loading:
+  trusted_namespaces: ["io.github.acme/"]
+  inherit_env: [HTTPS_PROXY]
+  secrets:
+    allow:
+      "io.github.acme/weather": [WEATHER_API_KEY]
+```
+
+A per-server secrets file is still read from
+`~/.config/mcp-hangar/secrets/<registry name>/<NAME>`, one directory per `/`
+segment of the name (`secrets/io.github.acme/weather/WEATHER_API_KEY`). A
+name with a segment outside `[A-Za-z0-9._-]`, or equal to `.` or `..`, has no
+per-server directory. A variable name that is not an environment variable
+name, or a file whose resolved path leaves the secrets directory, reads
+nothing.
+
+#### Changed signatures
+
+- `ServerSummary.is_official` and `ServerDetails.is_official` are now
+  `is_published`. It means only that the registry lists the entry as active.
+- `SecretsResolver.resolve(required, mcp_server_name)` is now
+  `SecretsResolver.resolve(required, mcp_server_name, *, allowed)`: `allowed`,
+  the names the server may receive, is a required keyword argument.
+- `SecretsResolver.get_missing_instructions(missing: list[str], mcp_server_name)`
+  is now `get_missing_instructions(result: SecretsResult, mcp_server_name)`.
+- `LoadMcpServerHandler` takes `trust`, a callable returning the
+  `HotLoadTrust` in force. Omitted, nothing is trusted or delivered.
+- `UnverifiedMcpServerError` takes the keyword arguments `force_ignored`,
+  `published` and `trusted`, and its message no longer suggests
+  `force_unverified`.
+
+### a tool that drifted from its pin disappears from the listing
+
+A pinned tool whose definition no longer matches its pin, under
+`digest_enforcement: block` (the default), used to stay in `tools/list` and
+`hangar_tools` and be refused when called with `Tool '<name>' schema does not
+match its pinned digest`. It is now withheld: it is not listed, and on the
+front door a call of it is answered `-32601 Tool '<name>' not found`, as for a
+tool that does not exist. `hangar_call` still answers `ToolDigestMismatchError`.
+
+What to do:
+
+- Anything that waited for the digest-mismatch refusal on the front door to
+  learn about drift should read `hangar_details <server>` (`withheld_tools`,
+  reason `digest_drift`), the `withheld` field on `GET /api/tools` and
+  `GET /api/mcp_servers/{id}/tools`, the `tool_digest_pin_drift_detected` log
+  line, or the `DigestMismatchEvent`. Both are emitted once when the drift is
+  first seen, whether or not the interval re-check is on.
+- REST no longer returns a withheld tool's description or input schema, to any
+  role: a withheld entry is its name, `digest`, `pinned_digest` and `withheld`
+  only. A tool withheld from any tenant, or by a pin on a group that owns the
+  server, is shown withheld there. Review the new definition at the upstream
+  itself before re-pinning; `mcp-hangar pin --check` shows both digests.
+- To bring the tool back after reviewing the change, re-pin it
+  (`mcp-hangar pin --write`) and reload; clients are sent
+  `notifications/tools/list_changed`.
+- A server pinned under `warn` or `audit` is unchanged: its drifted tools stay
+  listed and callable.
+
+### a pinned tool is served without its title, annotations, icons and `_meta`
+
+A tool under a digest pin in `block` mode (the default `digest_enforcement`)
+is now served with only `name`, `description`, `inputSchema` and
+`outputSchema`, the fields the pin covers. Its `title`, `annotations`,
+`execution`, `icons` and `_meta` are left out of the front door's
+`tools/list`, `server/discover`, `hangar_tools`, `hangar_details` and the REST
+server and tool routes. Hangar's own fields (`digest`, `pinned_digest`,
+`withheld`) are unchanged. The cut does not depend on where the fields came
+from: a `title` or `annotations` you wrote yourself for a server's predefined
+`tools` in the configuration is stripped too while the tool is under a `block`
+pin.
+
+What a client sees:
+
+- The display name falls back to `name`.
+- With no `annotations`, the spec's defaults apply: `readOnlyHint: false`,
+  `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: true`. A
+  client that skipped confirmation for a pinned read-only tool will ask again.
+- `execution` is left out on every protocol version, but only a handshake-era
+  client (2025-11-25 and earlier) reads `execution.taskSupport` to decide
+  whether to call a tool as a task. Such a client no longer sees a pinned tool
+  that declared `taskSupport: "required"` as a task tool, and calls it without
+  one. On 2026-07-28, task use is negotiated through the tasks extension
+  instead.
+
+What to do:
+
+- Nothing, if the pinned tools' metadata is not load-bearing for your clients.
+- A tool left unpinned, or a server pinned with `digest_enforcement: warn` or
+  `audit`, is served whole as before. Both also give up the protection: an
+  unpinned tool is not checked, and `warn`/`audit` let a drifted call through.
+  A follow-up is planned to let a pin approve these fields explicitly.
+- The digest is unchanged: existing pins stay valid and need no `pin --write`.
+
 ## Upgrade to 2.29.1
 
 ### A failing `hangar_*` tool now returns `isError: true`

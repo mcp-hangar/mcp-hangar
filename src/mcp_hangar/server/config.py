@@ -20,12 +20,15 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 import yaml
 
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
+from ..domain.contracts.persistence import peer_key_name_conflicts
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
+from ..domain.security.hot_load_trust import HotLoadTrust, parse_hot_load_trust, set_hot_load_trust
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.config import MaxConsecutiveFailures
+from ..domain.value_objects.peer_identity import PeerIdentity, max_connection_age
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 from ..metrics import remove_group_series
@@ -608,6 +611,45 @@ def _reject_or_warn_on_unknown_keys(config: dict[str, Any], source: str) -> None
         logger.warning("unknown_config_key", config_path=source, detail=problem)
 
 
+def _stored_peer_key_names() -> dict[str, str]:
+    """The peer-key name record of the durable configuration store, or nothing without one."""
+    from ..infrastructure.async_bridge import BackgroundLoop
+    from ..infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+
+    repository = getattr(get_runtime(), "config_repository", None)
+    if repository is None or isinstance(repository, InMemoryMcpServerConfigRepository):
+        return {}
+    loop = BackgroundLoop()
+    try:
+        return cast(dict[str, str], loop.run(repository.get_peer_key_names(), 15.0))
+    except Exception as e:  # noqa: BLE001 -- any store failure refuses the file, before anything changed
+        raise ConfigurationUnavailableError(
+            "The peer-key name record could not be read, so the configuration was refused and nothing was "
+            "changed. Load it again once the configuration store is reachable."
+        ) from e
+    finally:
+        loop.close()
+
+
+def _refuse_what_the_record_contradicts(staged: "_StagedConfig") -> None:
+    """Refuse a file that declares a recorded name without its key, or a recorded key under another name.
+
+    Loading and reloading the file write no configuration row, so the record
+    is not checked by a write; it is checked here (ADR-030 §9).
+    """
+    declared: dict[str, str | None] = {}
+    for name, spec in staged.specs.items():
+        identity = PeerIdentity.from_tls(spec.get("tls")) if isinstance(spec, dict) else None
+        declared[name] = identity.key_ref if identity is not None else None
+    conflicts = peer_key_name_conflicts(declared, _stored_peer_key_names())
+    if conflicts:
+        raise ConfigurationError(
+            "The configuration contradicts the peer-key name record: "
+            + "; ".join(conflicts)
+            + ". A recorded name keeps its key_ref, and one key_ref names one server. Nothing was loaded."
+        )
+
+
 def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
     """
     Load mcp_server and group configuration.
@@ -624,7 +666,9 @@ def load_config(config: dict[str, Any], *, replace: bool = False) -> None:
             does not is then gone. Without it the entries are added, as on a
             first load.
     """
-    build_config(config).commit(replace=replace)
+    staged = build_config(config)
+    _refuse_what_the_record_contradicts(staged)
+    staged.commit(replace=replace)
 
 
 def build_config(config: dict[str, Any]) -> _StagedConfig:
@@ -1143,6 +1187,50 @@ def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> 
         ) from e
 
 
+def _peer_identity_tls(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
+    """The server's `tls` block, refused when its peer identity cannot be enforced (ADR-030 §4).
+
+    A key list is only a guarantee on a connection that has a TLS handshake to
+    check it in. Each refusal below names both halves, because each is a
+    declaration the server would otherwise appear to honour while it does not.
+    """
+    tls = spec_dict.get("tls")
+    if not isinstance(tls, dict):
+        return tls
+    try:
+        identity = PeerIdentity.from_tls(tls)
+        max_connection_age(tls)
+    except ValueError as e:
+        raise ConfigurationError(f"mcp_server '{mcp_server_id}': {e}") from e
+    if identity is None:
+        return tls
+
+    mode = McpServerMode.normalize(spec_dict.get("mode", "subprocess"))
+    if mode is not McpServerMode.REMOTE:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity needs mode: remote, not mode: {mode.value} "
+            "-- there is no connection to bind the key to"
+        )
+    endpoint = str(spec_dict.get("endpoint") or "")
+    if not endpoint.lower().startswith("https://"):
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity needs an https:// endpoint, not {endpoint!r} "
+            "-- a plaintext connection has no handshake to check the key in"
+        )
+    if tls.get("verify_ssl") is False:
+        raise ConfigurationError(
+            f"mcp_server '{mcp_server_id}': tls.peer_identity with tls.verify_ssl: false -- the key, not a "
+            "certificate chain, is what is verified; remove verify_ssl"
+        )
+    if tls.get("ca_cert_path"):
+        logger.warning(
+            "peer_identity_ignores_ca_cert_path",
+            mcp_server_id=mcp_server_id,
+            detail="tls.ca_cert_path is not used for a server with tls.peer_identity: no CA is a trust input",
+        )
+    return tls
+
+
 def _subprocess_command(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
     """The command a subprocess server runs: its `command` followed by its `args` (#1658).
 
@@ -1275,7 +1363,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         "tools": tools,
         # HTTP transport configuration
         "auth": auth_config,
-        "tls": spec_dict.get("tls"),
+        "tls": _peer_identity_tls(mcp_server_id, spec_dict),
         "http": spec_dict.get("http"),
         # Capability declarations
         "capabilities": capabilities,
@@ -1872,6 +1960,43 @@ def _trusted_networks(full_config: dict[str, Any]) -> tuple[TrustedNetwork, ...]
         raise ConfigurationError(str(e)) from e
 
 
+def _init_hot_load_trust_from_config(full_config: dict[str, Any]) -> None:
+    """Put the `hot_loading` trust keys in force.
+
+    ::
+
+        hot_loading:
+          trusted_namespaces: ["io.github.acme/"]
+          allow_force_unverified: false
+          secrets:
+            allow:
+              "io.github.acme/weather": [WEATHER_API_KEY]
+
+    Which registry entries are verified, whether a caller's `force_unverified`
+    may load one that is not, and what a server loaded from the registry may
+    receive. Its registry entry names the variables it wants, and
+    only the ones listed here for its exact registry name are looked up. Read
+    by the load handler on every load, so a reload that narrows either list
+    applies to the next load; an absent section trusts and binds nothing.
+    """
+    trust = _hot_load_trust(full_config)
+    set_hot_load_trust(trust)
+    if trust.trusted_namespaces:
+        logger.info("hot_loading_trusted_namespaces_configured", namespaces=list(trust.trusted_namespaces))
+    if trust.allow_force_unverified:
+        logger.warning("hot_loading_force_unverified_allowed")
+    if trust.secrets_allow:
+        logger.info("hot_loading_secrets_allowlist_configured", servers=sorted(trust.secrets_allow))
+
+
+def _hot_load_trust(full_config: dict[str, Any]) -> HotLoadTrust:
+    """The checked trust keys of ``hot_loading``, the default when there are none."""
+    try:
+        return parse_hot_load_trust(full_config.get("hot_loading"))
+    except ValueError as e:
+        raise ConfigurationError(str(e)) from e
+
+
 def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     """Register opt-in built-in interceptors (validators) from configuration.
 
@@ -1984,6 +2109,7 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
     _init_interceptors_from_config,
     _init_ui_resources_from_config,
     _init_ssrf_from_config,
+    _init_hot_load_trust_from_config,
 )
 
 
@@ -2009,6 +2135,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
     _max_response_bytes(full_config)
     _ui_resource_policies(full_config)
     _trusted_networks(full_config)
+    _hot_load_trust(full_config)
     # Checked, not applied: `run_http` reads it when the server starts (#1447).
     http_graceful_shutdown_timeout(full_config)
     try:
@@ -2030,7 +2157,7 @@ def apply_process_config(full_config: dict[str, Any]) -> None:
 
     `tool_access.mode`, `tool_access.required_catalogue`, `execution`,
     `headers.param_validation`, `resource_links`, `interceptors`,
-    `ui_resources` and `ssrf`. A section that is absent is put back to its default, so
+    `ui_resources`, `ssrf` and the trust keys of `hot_loading`. A section that is absent is put back to its default, so
     deleting a block and reloading removes it. Checked first, so nothing is
     applied unless all of it can be.
     """
@@ -2077,6 +2204,7 @@ class ServerConfigLoader(IConfigLoader):
         stopped. See `build_config` and `_read_stored_policies`.
         """
         prepared = build_config(mcp_servers_config)
+        _refuse_what_the_record_contradicts(prepared)
         prepared.stored_policies = _read_stored_policies()
         return prepared
 

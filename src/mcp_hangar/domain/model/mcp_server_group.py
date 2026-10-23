@@ -480,6 +480,25 @@ class McpServerGroup(AggregateRoot):
         if need_start:
             self._try_start_member_unlocked(member, member_id)
 
+    def replace_member_server(self, member_id: str, mcp_server: McpServer) -> bool:
+        """Point a member at a new copy of its server, keeping its place in the group.
+
+        For the fleet projection, which replaces a server's copy when its
+        connection changed on another replica: a member holds its server by
+        reference, so without this the group would go on routing to the retired
+        copy. Weight, priority and rotation state are kept, and nothing is
+        recorded, because the membership did not change.
+
+        Returns:
+            Whether the group has the member.
+        """
+        with self._lock:
+            member = self._members.get(member_id)
+            if member is None:
+                return False
+            member.mcp_server = mcp_server
+            return True
+
     def remove_member(self, member_id: str) -> bool:
         """
         Remove a mcp_server from the group.

@@ -165,6 +165,7 @@ class GetMcpServerHandler(BaseQueryHandler):
             idle_time=mcp_server.idle_time,
             meta=mcp_server.meta,
             dead=dead_info(mcp_server, state),
+            provenance=mcp_server.provenance.value,
         )
 
 

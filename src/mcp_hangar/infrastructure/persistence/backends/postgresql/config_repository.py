@@ -16,7 +16,11 @@ from typing import Any
 from mcp_hangar.domain.contracts.persistence import (
     ConcurrentModificationError,
     McpServerConfigSnapshot,
+    PeerKeyClaim,
+    PeerKeyNameRefused,
     PersistenceError,
+    check_peer_key_claim,
+    peer_key_claim,
 )
 from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.logging_config import get_logger
@@ -40,6 +44,42 @@ CREATE TABLE IF NOT EXISTS mcp_server_configs (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_server_configs_enabled
     ON mcp_server_configs(enabled);
+
+-- The peer-key name record (ADR-030 §9); it outlives the configuration row.
+CREATE TABLE IF NOT EXISTS peer_key_names (
+    name TEXT PRIMARY KEY,
+    key_ref TEXT NOT NULL UNIQUE
+);
+
+-- A live row under a recorded name carries the recorded key_ref (#1987). This
+-- release's writes already do; the trigger binds a release that predates the
+-- record, which writes the same table and runs none of its checks.
+CREATE OR REPLACE FUNCTION peer_key_row_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    recorded TEXT;
+BEGIN
+    IF NEW.enabled THEN
+        SELECT key_ref INTO recorded FROM peer_key_names WHERE name = NEW.mcp_server_id;
+        IF FOUND AND (NEW.config_json -> 'tls' -> 'peer_identity' ->> 'key_ref') IS DISTINCT FROM recorded THEN
+            RAISE EXCEPTION 'mcp_server %: the name is in the peer-key name record with key_ref %',
+                NEW.mcp_server_id, recorded USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'peer_key_row_guard' AND tgrelid = 'mcp_server_configs'::regclass
+    ) THEN
+        CREATE TRIGGER peer_key_row_guard BEFORE INSERT OR UPDATE ON mcp_server_configs
+            FOR EACH ROW EXECUTE FUNCTION peer_key_row_guard();
+    END IF;
+END
+$$;
 """
 
 
@@ -183,6 +223,151 @@ class PostgresMcpServerConfigRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to save mcp_server config: {e}")
             raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
+        """Save only if the row is still the one the caller read (#1954).
+
+        See `IMcpServerConfigRepository.save_versioned`. A live row is matched
+        on `enabled = TRUE` as well as the version, because a deletion disables
+        the row without changing its version: a write read before the deletion
+        must not bring the server back.
+        """
+        mcp_server_id = config.mcp_server_id
+        config_json = json.dumps(config.to_dict())
+        now = datetime.now(UTC).isoformat()
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        # A concurrent claim of the same name or key_ref waits on
+                        # the unique index, then does nothing; the read below runs
+                        # after it and sees the winner. The read holds the entries
+                        # it saw `FOR SHARE` until the row is written, so a forget
+                        # cannot delete an entry this claim relies on (#1986).
+                        key_ref = peer_key_claim(config)
+                        if peer_key is PeerKeyClaim.MOVE:
+                            cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
+                        if peer_key is not PeerKeyClaim.SKIP:
+                            if key_ref is not None:
+                                cur.execute(
+                                    "INSERT INTO peer_key_names (name, key_ref) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                    (mcp_server_id, key_ref),
+                                )
+                            cur.execute(
+                                "SELECT name, key_ref FROM peer_key_names WHERE name = %s OR key_ref = %s FOR SHARE",
+                                (mcp_server_id, key_ref),
+                            )
+                            check_peer_key_claim(mcp_server_id, key_ref, [tuple(row) for row in cur.fetchall()])
+                        live = True
+                        if expected_version == 0:
+                            # No row of any kind, deleted or live: the caller saw none.
+                            cur.execute(
+                                """
+                                INSERT INTO mcp_server_configs
+                                (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                                VALUES (%s, %s, %s, %s, 1, %s, %s)
+                                """,
+                                (mcp_server_id, config.mode, config_json, config.enabled, now, now),
+                            )
+                            conn.commit()
+                            return
+                        if expected_version is None:
+                            cur.execute(
+                                "SELECT version, enabled FROM mcp_server_configs WHERE mcp_server_id = %s",
+                                (mcp_server_id,),
+                            )
+                            row = cur.fetchone()
+                            if row is None:
+                                cur.execute(
+                                    """
+                                    INSERT INTO mcp_server_configs
+                                    (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
+                                    VALUES (%s, %s, %s, %s, 1, %s, %s)
+                                    """,
+                                    (mcp_server_id, config.mode, config_json, config.enabled, now, now),
+                                )
+                                conn.commit()
+                                return
+                            if row[1]:
+                                raise ConcurrentModificationError(mcp_server_id, 0, row[0])
+                            # A deleted server is created again over its disabled row.
+                            expected_version, live = row[0], False
+
+                        cur.execute(
+                            """
+                            UPDATE mcp_server_configs
+                            SET mode = %s, config_json = %s, enabled = %s, version = version + 1, updated_at = %s
+                            WHERE mcp_server_id = %s AND version = %s AND enabled = %s
+                            """,
+                            (config.mode, config_json, config.enabled, now, mcp_server_id, expected_version, live),
+                        )
+                        if cur.rowcount == 0:
+                            raise ConcurrentModificationError(mcp_server_id, expected_version, expected_version + 1)
+                    conn.commit()
+                except Exception:
+                    # See class docstring: never hand a pooled connection back
+                    # in an aborted transaction.
+                    conn.rollback()
+                    raise
+
+        except (ConcurrentModificationError, PeerKeyNameRefused):
+            raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            if getattr(e, "pgcode", None) == "23505":
+                # Two creates raced past the SELECT; the primary key decided.
+                raise ConcurrentModificationError(mcp_server_id, 0, 1) from e
+            logger.error(f"Failed to save mcp_server config: {e}")
+            raise PersistenceError(f"Failed to save mcp_server config: {e}") from e
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry, unless the server is still registered under it."""
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        # The entry first, then the check (#1986). The delete
+                        # waits for a create holding the entry `FOR SHARE`, so
+                        # the check then sees the row that create wrote. Checked
+                        # first, a create that had read the entry but not yet
+                        # written its row passed the check and lost its entry.
+                        cur.execute("DELETE FROM peer_key_names WHERE name = %s", (mcp_server_id,))
+                        removed = bool(cur.rowcount)
+                        cur.execute(
+                            "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = %s AND enabled = TRUE FOR UPDATE",
+                            (mcp_server_id,),
+                        )
+                        if cur.fetchone() is not None:
+                            raise PeerKeyNameRefused(mcp_server_id, "the server is still registered under the name")
+                    conn.commit()
+                    return removed
+                except Exception:
+                    # See class docstring.
+                    conn.rollback()
+                    raise
+        except PeerKeyNameRefused:
+            raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to update the peer-key name record: {e}") from e
+
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record."""
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name, key_ref FROM peer_key_names")
+                        return {name: key_ref for name, key_ref in cur.fetchall()}
+                except Exception:
+                    # See class docstring.
+                    conn.rollback()
+                    raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to read the peer-key name record: {e}") from e
 
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
@@ -409,14 +594,17 @@ class PostgresMcpServerConfigRepository:
             mcp_server_id: McpServer identifier
 
         Returns:
-            Tuple of (config, version) if found, None otherwise
+            Tuple of (config, version) for a live row, None otherwise. A deleted
+            (disabled) row is not returned: a change built on it would bring
+            the server back.
         """
         try:
             with self._connections.get_connection() as conn:
                 try:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "SELECT config_json, version FROM mcp_server_configs WHERE mcp_server_id = %s",
+                            "SELECT config_json, version FROM mcp_server_configs"
+                            " WHERE mcp_server_id = %s AND enabled = TRUE",
                             (mcp_server_id,),
                         )
                         row = cur.fetchone()

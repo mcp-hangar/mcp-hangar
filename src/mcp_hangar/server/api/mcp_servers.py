@@ -16,6 +16,7 @@ from ...application.commands.commands import StartMcpServerCommand, StopMcpServe
 from ...application.commands.crud_commands import (
     CreateMcpServerCommand,
     DeleteMcpServerCommand,
+    ForgetPeerKeyNameCommand,
     SetL7PolicyCommand,
     UpdateMcpServerCommand,
 )
@@ -27,7 +28,7 @@ from ...application.queries.queries import (
     GetToolInvocationHistoryQuery,
     ListMcpServersQuery,
 )
-from ...application.read_models.tool_projection import get_tool_projection_registry
+from ...application.read_models.tool_projection import WITHHELD_DIGEST_DRIFT, get_tool_projection_registry
 from ...domain.exceptions import McpServerDeclaredInConfigError, MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
@@ -37,6 +38,11 @@ from .middleware import dispatch_command, dispatch_query
 from .request_body import missing_fields
 from .serializers import HangarJSONResponse
 from .tenant_scope import confined_tenant
+
+
+def _principal(request: Request) -> Any:
+    """The authenticated caller, for a command that needs it; never read from the body (ADR-030 §9)."""
+    return getattr(getattr(request.state, "auth", None), "principal", None)
 
 
 def _check_permission(request: Request, resource_type: str, action: str) -> None:
@@ -107,12 +113,25 @@ async def get_mcp_server(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with mcp_server details including tools and health, and `dead`:
         null unless its state is dead, then why, since when and what starts it
-        again (`DeadInfo` in `application.read_models`, #1418).
+        again (`DeadInfo` in `application.read_models`, #1418). A tool withheld
+        for drift is shown as on the `/tools` route: name, digests and reason,
+        without its description (#1776). Any other tool under a blocking pin
+        shows only the fields the pin covers.
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
-    result = await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse(result.to_dict())
+    result = (await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))).to_dict()
+    registry = get_tool_projection_registry()
+    scopes = _pin_scopes(mcp_server_id)
+    # A withheld tool shows its name, digests and reason only; any other tool under a
+    # blocking pin shows only the fields the pin covers, as on every listing.
+    result["tools"] = [
+        shown
+        if "withheld" in (shown := tool_with_digest(tool, mcp_server_id))
+        else registry.served_definition(tool, None, scopes, any_tenant=True)
+        for tool in result["tools"]
+    ]
+    return HangarJSONResponse(result)
 
 
 async def start_mcp_server(request: Request) -> HangarJSONResponse:
@@ -178,22 +197,45 @@ async def get_mcp_server_tools(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with {"tools": [...]} array of tool info. Each tool carries its
-        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528).
+        ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528);
+        one that drifted from a pin in block mode, which ``tools/list`` and
+        ``hangar_tools`` withhold, is ``{name, digest, pinned_digest?,
+        withheld: "digest_drift"}``, without its description (#1776).
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
     result = await dispatch_query(GetMcpServerToolsQuery(mcp_server_id=mcp_server_id))
-    return HangarJSONResponse({"tools": [_with_digest(t.to_dict(), mcp_server_id) for t in result]})
+    return HangarJSONResponse({"tools": [tool_with_digest(t.to_dict(), mcp_server_id) for t in result]})
 
 
-def _with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]:
+def tool_with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]:
     """*tool* with its digest and its all-tenants pin, if any (#1528).
 
     This route admits only a fleet-wide grant (it is not ``tenant_aware``), so
     the pin shown is the all-tenants one: the block ``mcp-hangar pin --check``
     compares. A per-tenant pin is shown on ``hangar_tools`` to that tenant.
+
+    A tool that drifted from a blocking pin -- for any tenant, on the server or
+    a group that owns it -- is withheld from every listing a model reads, and
+    is shown here as its name, digests and ``withheld`` reason only (#1776).
+    Every role that can read this route sees it, a service account included,
+    so the drifted description is not. A tool under a blocking pin for any
+    tenant is shown with only the fields the pin covers.
     """
-    return {**tool, **get_tool_projection_registry().digest_fields(tool, named=mcp_server_id)}
+    registry = get_tool_projection_registry()
+    fields = registry.digest_fields(tool, named=mcp_server_id)
+    fields.pop("withheld", None)
+    scopes = _pin_scopes(mcp_server_id)
+    if registry.drifted_for_any_tenant(str(tool.get("name", "")), fields["digest"], scopes):
+        return {"name": tool.get("name", ""), **fields, "withheld": WITHHELD_DIGEST_DRIFT}
+    return {**registry.served_definition(tool, None, scopes, any_tenant=True), **fields}
+
+
+def _pin_scopes(mcp_server_id: str) -> tuple[str, ...]:
+    """The ids whose pins hold *mcp_server_id*'s tools: itself and the groups that own it."""
+    from ..tools.batch.executor import owners_by_member
+
+    return (mcp_server_id, *owners_by_member().get(mcp_server_id, ()))
 
 
 async def get_mcp_server_health(request: Request) -> HangarJSONResponse:
@@ -293,6 +335,8 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
         idle_ttl_s: Idle TTL in seconds (default 300).
         health_check_interval_s: Health check interval in seconds (default 60).
         description: Human-readable description.
+        tls: TLS block (for remote mode); with `peer_identity` the server is
+            key-pinned, needs `mcp_servers:peer_identity`, and may omit `endpoint`.
         volumes: Volume mounts list (for docker mode).
         network: Docker network name (default "none").
         read_only: Read-only filesystem flag (default True).
@@ -310,6 +354,7 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
     try:
         result = await dispatch_command(
             CreateMcpServerCommand(
+                principal=_principal(request),
                 mcp_server_id=body["mcp_server_id"],
                 mode=body["mode"],
                 command=body.get("command"),
@@ -319,6 +364,7 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
                 idle_ttl_s=body.get("idle_ttl_s", 300),
                 health_check_interval_s=body.get("health_check_interval_s", 60),
                 description=body.get("description"),
+                tls=body.get("tls"),
                 source="api",
             )
         )
@@ -329,6 +375,30 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
         # the 400 it already knew how to produce.
         return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
     return HangarJSONResponse(result, status_code=201)
+
+
+async def forget_peer_key_name(request: Request) -> HangarJSONResponse:
+    """Remove a deleted key-pinned server's name from the peer-key name record.
+
+    Path params:
+        mcp_server_id: The name to forget.
+
+    The name keeps its entry after the server is deleted, so it cannot come
+    back as a plain server (ADR-030 §9). Forgetting it needs
+    `mcp_servers:peer_identity`, and the server must be deleted first.
+
+    Returns:
+        JSON with {"mcp_server_id": ..., "forgotten": true}, status 200.
+    """
+    _check_permission(request, resource_type="mcp_servers", action="peer_identity")
+    result = await dispatch_command(
+        ForgetPeerKeyNameCommand(
+            principal=_principal(request),
+            mcp_server_id=request.path_params["mcp_server_id"],
+            source="api",
+        )
+    )
+    return HangarJSONResponse(result)
 
 
 async def update_mcp_server(request: Request) -> HangarJSONResponse:
@@ -342,6 +412,9 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
         env: New environment variables dict (replaces existing).
         idle_ttl_s: New idle TTL in seconds.
         health_check_interval_s: New health check interval in seconds.
+        endpoint: New endpoint of a remote server; null clears it.
+        tls: New TLS block of a remote server. Changing either on a key-pinned
+            server, or adding a peer identity, needs `mcp_servers:peer_identity`.
 
     Returns:
         JSON with {"mcp_server_id": ..., "updated": true}, status 200.
@@ -352,16 +425,27 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
     _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
     body = await request.json()
-    result = await dispatch_command(
-        UpdateMcpServerCommand(
-            mcp_server_id=mcp_server_id,
-            description=body.get("description"),
-            env=body.get("env"),
-            idle_ttl_s=body.get("idle_ttl_s"),
-            health_check_interval_s=body.get("health_check_interval_s"),
-            source="api",
+    try:
+        result = await dispatch_command(
+            UpdateMcpServerCommand(
+                principal=_principal(request),
+                mcp_server_id=mcp_server_id,
+                description=body.get("description"),
+                env=body.get("env"),
+                idle_ttl_s=body.get("idle_ttl_s"),
+                health_check_interval_s=body.get("health_check_interval_s"),
+                # An explicit null clears the endpoint; an absent key leaves it.
+                endpoint=(body.get("endpoint") or "") if "endpoint" in body else None,
+                tls=body.get("tls"),
+                source="api",
+            )
         )
-    )
+    except SsrfBlocked:
+        return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
+    except McpServerDeclaredInConfigError as exc:
+        return HangarJSONResponse(
+            {"error": "declared_in_config", "mcp_server_id": mcp_server_id, "detail": exc.message}, status_code=409
+        )
     return HangarJSONResponse(result)
 
 
@@ -385,6 +469,7 @@ async def delete_mcp_server(request: Request) -> HangarJSONResponse:
     try:
         result = await dispatch_command(
             DeleteMcpServerCommand(
+                principal=_principal(request),
                 mcp_server_id=mcp_server_id,
                 source="api",
             )
@@ -487,6 +572,7 @@ mcp_server_routes = [
     Route("/{mcp_server_id:str}", get_mcp_server, methods=["GET"]),
     Route("/{mcp_server_id:str}", update_mcp_server, methods=["PUT", "PATCH"]),
     Route("/{mcp_server_id:str}", delete_mcp_server, methods=["DELETE"]),
+    Route("/{mcp_server_id:str}/peer_identity", forget_peer_key_name, methods=["DELETE"]),
     Route("/{mcp_server_id:str}/l7_policy", get_l7_policy, methods=["GET"]),
     Route("/{mcp_server_id:str}/l7_policy", set_l7_policy, methods=["POST", "PUT"]),
     Route("/{mcp_server_id:str}/l7_policy", clear_l7_policy, methods=["DELETE"]),

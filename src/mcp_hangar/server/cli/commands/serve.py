@@ -14,9 +14,6 @@ import typer
 from ..config_path import DEFAULT_RULE_HELP, MissingConfigFileError, require_config_file, resolve_config_path
 from ..errors import CLIError
 
-#: What `MCP_MODE` may say to serve HTTP: the documented `http`, and the bool spellings the option took.
-_HTTP_MODE_VALUES = frozenset({"http", "1", "true", "yes", "on"})
-
 
 def serve_command(
     ctx: typer.Context,
@@ -111,13 +108,13 @@ def serve_command(
         raise CLIError(message=e.message, exit_code=1) from e
 
     # Build CLIConfig for backward compatibility with existing server code
-    from ..cli_compat import CLIConfig
+    from ..cli_compat import CLIConfig, env_enables_http_mode
 
     # Resolve http mode from environment if flag not set
     http_mode = http
     # Read here, not bound to the flag: a bool option refuses `MCP_MODE=http` (#1660).
     # The bool spellings the flag used to take stay accepted.
-    if not http_mode and os.getenv("MCP_MODE", "").strip().lower() in _HTTP_MODE_VALUES:
+    if not http_mode and env_enables_http_mode(os.getenv("MCP_MODE")):
         http_mode = True
 
     cli_config = CLIConfig(

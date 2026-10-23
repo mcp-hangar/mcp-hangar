@@ -10,8 +10,8 @@ from ...application.queries import (
     GetMcpServerToolsQuery,
     ListMcpServersQuery,
 )
-from ...application.read_models.tool_projection import get_tool_projection_registry
 from ...logging_config import get_logger
+from .mcp_servers import tool_with_digest
 from .middleware import dispatch_query
 from .serializers import HangarJSONResponse
 
@@ -24,25 +24,23 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"tools": [...]} where each tool includes mcp_server_id,
         tool_name, description, input_schema and digest, and pinned_digest
-        when the tool has an all-tenants pin (#1528).
+        when the tool has an all-tenants pin (#1528). A tool that drifted from
+        a pin in block mode, withheld from every listing a model reads, has
+        ``withheld: "digest_drift"`` and no description or input_schema (#1776).
     """
     mcp_servers = await dispatch_query(ListMcpServersQuery(state_filter=None))
-    registry = get_tool_projection_registry()
     all_tools = []
     for p in mcp_servers:
         try:
             tools = await dispatch_query(GetMcpServerToolsQuery(mcp_server_id=p.mcp_server_id))
             for t in tools:
-                td = t.to_dict()
-                all_tools.append(
-                    {
-                        "mcp_server_id": p.mcp_server_id,
-                        "tool_name": td.get("name", ""),
-                        "description": td.get("description", ""),
-                        "input_schema": td.get("inputSchema") or {},
-                        **registry.digest_fields(td, named=p.mcp_server_id),
-                    }
-                )
+                td = tool_with_digest(t.to_dict(), p.mcp_server_id)
+                entry = {"mcp_server_id": p.mcp_server_id, "tool_name": td.get("name", "")}
+                if "withheld" not in td:  # a withheld tool's description is not shown (#1776)
+                    entry["description"] = td.get("description", "")
+                    entry["input_schema"] = td.get("inputSchema") or {}
+                entry.update({key: td[key] for key in ("digest", "pinned_digest", "withheld") if key in td})
+                all_tools.append(entry)
         except (RuntimeError, OSError, ValueError, TimeoutError):
             logger.debug("tools_fetch_skipped", mcp_server_id=p.mcp_server_id)
     return HangarJSONResponse({"tools": all_tools})

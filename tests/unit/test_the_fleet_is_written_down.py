@@ -53,6 +53,15 @@ class _RefusingWriter(IFleetWriter):
     def save(self, snapshot: McpServerConfigSnapshot) -> None:
         raise RuntimeError("the database is unreachable")
 
+    def read(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        raise RuntimeError("the database is unreachable")
+
+    def save_versioned(self, snapshot: McpServerConfigSnapshot, expected_version: int | None) -> None:
+        raise RuntimeError("the database is unreachable")
+
+    def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        raise RuntimeError("the database is unreachable")
+
     def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         raise RuntimeError("the database is unreachable")
 
@@ -333,20 +342,29 @@ class TestTheUpgradeCoversTheRowsAlreadyWrittenDown:
                 runtime_addresses=restored._runtime_addresses,
             )
 
-    def test_a_pod_address_outside_the_refused_ranges_is_guarded_and_still_reachable(self) -> None:
-        # 100.64.0.0/10 is a common Kubernetes pod and service range and is
-        # deliberately not in the strict policy's refused list. Deriving the
-        # guard for it is therefore safe -- the question the derivation asks is
-        # "would the guard refuse this address", not "does it look private".
-        restored = server_from_snapshot(self._row_written_by_2_5_0(endpoint="http://100.64.3.9:8080"))
+    def test_an_address_outside_the_refused_ranges_is_guarded_and_still_reachable(self) -> None:
+        # The question the derivation asks is "would the guard refuse this
+        # address", not "does it look private": an address the strict policy
+        # passes gets the guard, and the guard lets it through.
+        restored = server_from_snapshot(self._row_written_by_2_5_0(endpoint="http://203.0.113.9:8080"))
 
         assert restored._enforce_ssrf is True
-        with _resolves_to("100.64.3.9"):
+        with _resolves_to("203.0.113.9"):
             assert resolve_validated_addresses(
-                "http://100.64.3.9:8080",
+                "http://203.0.113.9:8080",
                 provenance=restored._provenance,
                 runtime_addresses=restored._runtime_addresses,
-            ) == ["100.64.3.9"]
+            ) == ["203.0.113.9"]
+
+    @pytest.mark.parametrize("pod_ip", ["100.64.3.9", "fd00:10:244::9"])
+    def test_a_pod_address_in_a_range_refused_since_1754_is_not_newly_refused(self, pod_ip: str) -> None:
+        # 100.64.0.0/10 and fc00::/7 are common pod ranges, refused for a human
+        # endpoint since #1754. A discovered row holding one is left unguarded,
+        # like a 10/8 pod address, rather than refused on every call.
+        host = f"[{pod_ip}]" if ":" in pod_ip else pod_ip
+        restored = server_from_snapshot(self._row_written_by_2_5_0(endpoint=f"http://{host}:8080"))
+
+        assert restored._enforce_ssrf is False
 
     def test_a_loopback_endpoint_a_container_published_is_left_alone(self) -> None:
         # Docker discovery prefers a container's published host binding, and
@@ -486,7 +504,9 @@ class TestTheSyncWriterOverAnAsyncRepository:
         # A registration that returns before its row exists is the failure this
         # writer is for. The read happens immediately after the call returns.
         repository = _RecordingRepository()
-        RepositoryFleetWriter(repository).save(McpServerConfigSnapshot(mcp_server_id="math", mode="subprocess"))
+        writer = RepositoryFleetWriter(repository)
+        writer.save(McpServerConfigSnapshot(mcp_server_id="math", mode="subprocess"))
+        writer.close()
 
         assert [snapshot.mcp_server_id for snapshot in repository.saved] == ["math"]
 
@@ -498,8 +518,10 @@ class TestTheSyncWriterOverAnAsyncRepository:
             async def delete(self, mcp_server_id: str) -> bool:
                 raise RuntimeError("disk full")
 
+        writer = RepositoryFleetWriter(_Failing())
         with pytest.raises(RuntimeError, match="disk full"):
-            RepositoryFleetWriter(_Failing()).save(McpServerConfigSnapshot(mcp_server_id="math", mode="subprocess"))
+            writer.save(McpServerConfigSnapshot(mcp_server_id="math", mode="subprocess"))
+        writer.close()
 
     def test_the_loop_survives_more_than_one_write(self) -> None:
         # It is reused across calls on purpose: aiosqlite starts a thread per

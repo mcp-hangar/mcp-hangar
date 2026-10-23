@@ -52,11 +52,13 @@ from ..exceptions import (
     ResponseTooLarge,
     ToolInvocationError,
     ToolNotFoundError,
+    UpstreamPeerKeyMismatchError,
 )
 from ..security.argument_redaction import redact_arguments
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
+from ..value_objects.peer_identity import PeerIdentity, connection_declaration
 from ..value_objects.provenance import Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
@@ -197,6 +199,13 @@ def _rpc_error_code(error: dict[str, Any]) -> int | None:
     return code if type(code) is int else None
 
 
+def _served_peer_spki(client: Any) -> str | None:
+    """The key pin of the connection that served *client*'s last call on this thread, if it has one (ADR-030 §6)."""
+    served = getattr(client, "served_peer_spki", None)
+    value = served() if callable(served) else None
+    return value if isinstance(value, str) else None
+
+
 def _rpc_error_type(error: dict[str, Any]) -> str:
     """``ToolInvocationFailed.error_type`` for an upstream JSON-RPC error: its code, or ``_OTHER``.
 
@@ -327,6 +336,10 @@ class McpServer(AggregateRoot):
         # handler); off for config-file / directly-built servers so an
         # intentionally private endpoint is not newly refused at connect.
         enforce_ssrf: bool = False,
+        # The only names a subprocess server takes from the gateway's own
+        # environment; None inherits it as the launcher's filters allow. Set for
+        # a server loaded from the registry, whose author is not the operator.
+        inherit_env_names: frozenset[str] | None = None,
     ):
         super().__init__()
 
@@ -343,6 +356,7 @@ class McpServer(AggregateRoot):
         self._image = image
         self._endpoint = endpoint
         self._env = env or {}
+        self._inherit_env_names = None if inherit_env_names is None else frozenset(inherit_env_names)
         self._max_response_bytes = max_response_bytes
 
         # Idle TTL - normalize to value object
@@ -375,7 +389,16 @@ class McpServer(AggregateRoot):
         # HTTP transport configuration (for remote mode)
         self._auth_config = auth
         self._tls_config = tls
+        # Parsed here as well as at load, so a server built any other way is held
+        # to the same declaration (ADR-030 §4).
+        self._peer_identity = PeerIdentity.from_tls(tls)
         self._http_config = http
+        # What the live client was built from, read only while there is one, so
+        # an in-place update is not mistaken for what the connection uses (§8).
+        self._starting_with: tuple[str | None, str] | None = None
+        self._connected_with: tuple[str | None, str] | None = None
+        # Set once this copy is replaced in the fleet: it serves nothing again.
+        self._retired = False
 
         # SSRF policy for a remote endpoint, carried to the transport so the
         # connect-time re-check (DNS-rebinding defence) applies the SAME policy
@@ -570,6 +593,11 @@ class McpServer(AggregateRoot):
         """McpServer identifier as string (for backward compatibility)."""
         return str(self._id)
 
+    def _declared_key_issuance(self) -> str | None:
+        """The `issuance` this server's peer identity declares, read at the time of the call (ADR-030 §6)."""
+        identity = self._peer_identity
+        return identity.issuance if isinstance(identity, PeerIdentity) else None
+
     def upstream_identity(self) -> str:
         """What this server's upstream is, as a stable string a pin can be bound to (#1802).
 
@@ -580,6 +608,10 @@ class McpServer(AggregateRoot):
         subprocess (the hash keeps secrets in arguments out of config and logs).
         A pin bound to it is not honoured by a server that points somewhere else.
         """
+        if self._mode == McpServerMode.REMOTE and self._peer_identity is not None:
+            # The key lineage, not the address: a rescheduled pod keeps its digest
+            # pins, a different key behind the same address does not (ADR-030 §7).
+            return self._peer_identity.upstream_identity
         if self._mode == McpServerMode.REMOTE:
             from urllib.parse import urlsplit
 
@@ -595,6 +627,11 @@ class McpServer(AggregateRoot):
             digest = hashlib.sha256("\0".join(argv).encode("utf-8")).hexdigest()[:16]
             return f"stdio:{PurePath(argv[0]).name if argv else ''}:{digest}"
         return f"image:{self._image or ''}"
+
+    @property
+    def provenance(self) -> Provenance:
+        """How the server reached the fleet: registered by a human, or found by discovery."""
+        return self._provenance
 
     @property
     def mode(self) -> McpServerMode:
@@ -861,6 +898,8 @@ class McpServer(AggregateRoot):
         ready_event = None
 
         with self._lock:
+            if self._retired:
+                raise McpServerNotReadyError(self.mcp_server_id, "retired")
             # Fast path -- already ready
             if self._state == McpServerState.READY:
                 if self._client and self._client.is_alive():
@@ -908,6 +947,10 @@ class McpServer(AggregateRoot):
                     "startup_timeout: timed out waiting for mcp_server to start",
                     30.0,
                 )
+            if isinstance(self._start_error, UpstreamPeerKeyMismatchError):
+                # A waiter learns the same refusal the starter did, not a
+                # generic start failure.
+                raise self._start_error
             if self._start_error:
                 raise McpServerStartError(
                     mcp_server_id=self.mcp_server_id,
@@ -937,6 +980,10 @@ class McpServer(AggregateRoot):
 
             # Reacquire lock to finalize state
             with self._lock:
+                if self._retired:
+                    # Replaced while it started: the client is the old
+                    # declaration's, and the failure path closes it.
+                    raise McpServerNotReadyError(self.mcp_server_id, "retired")
                 self._refuse_capability_drift()
                 self._finalize_start(client, start_time)
                 kept = True
@@ -948,6 +995,16 @@ class McpServer(AggregateRoot):
             # it in McpServerStartError sent the caller a 500 about a gateway
             # behaving exactly as designed. Recorded and re-raised as itself so
             # the API can answer 409 and name the instance to ask instead.
+            with self._lock:
+                self._end_cold_start_tracking(cold_start_time, success=False)
+                self._handle_start_failure(e)
+                self._start_error = e
+                self._ready_event.set()  # Wake waiters: failure
+            raise
+        except UpstreamPeerKeyMismatchError as e:
+            # A refusal the transport decided, kept as itself so the gate can
+            # report its reason. Still a failed start for backoff and the
+            # circuit breaker, as McpServerNotHereError above is recorded.
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
                 self._handle_start_failure(e)
@@ -1036,6 +1093,7 @@ class McpServer(AggregateRoot):
 
         launcher: Any = get_launcher(self._mode.value)
         config = self._get_launch_config()
+        self._starting_with = connection_declaration(config.get("endpoint"), config.get("tls_config"))
         client = launcher.launch(**config)
 
         try:
@@ -1155,9 +1213,23 @@ class McpServer(AggregateRoot):
         return {"mcp_server_id": self.mcp_server_id, "mcp_server_mode": self._mode.value}
 
     def _get_launch_config(self) -> dict[str, Any]:
-        """Get launch configuration for the current mode."""
+        """Get launch configuration for the current mode.
+
+        Raises:
+            ValueError: When `inherit_env_names` is set for a mode other than
+                subprocess. Only the subprocess launcher can honour it, and
+                ignoring it would launch with an environment nobody restricted.
+        """
+        if self._inherit_env_names is not None and self._mode != McpServerMode.SUBPROCESS:
+            raise ValueError(
+                f"inherit_env_names restricts a subprocess's inherited environment; mode {self._mode.value!r} "
+                "cannot honour it, so the server is not launched"
+            )
         if self._mode == McpServerMode.SUBPROCESS:
-            return {"command": self._command, "env": self._env, **self._span_labels()}
+            config: dict[str, Any] = {"command": self._command, "env": self._env, **self._span_labels()}
+            if self._inherit_env_names is not None:
+                config["inherit_only"] = self._inherit_env_names
+            return config
 
         if self._mode == McpServerMode.DOCKER:
             return {
@@ -1285,6 +1357,11 @@ class McpServer(AggregateRoot):
         )
         try:
             self._perform_mcp_handshake(client)
+        except UpstreamPeerKeyMismatchError:
+            # Not a renegotiation that failed: the new connection ended at a key
+            # outside the key list. Returning the old 404 would bury the reason.
+            self._health.record_failure()
+            raise
         except Exception as exc:  # noqa: BLE001 -- any handshake failure is the same verdict here
             self._health.record_failure()
             logger.error(
@@ -1435,6 +1512,11 @@ class McpServer(AggregateRoot):
 
         try:
             notify("notifications/initialized")
+        except UpstreamPeerKeyMismatchError:
+            # Not a mishandled notification: the connection that would carry it
+            # ended at a key outside the key list, so the start fails rather
+            # than finishing READY (ADR-030 §5).
+            raise
         except Exception as exc:  # noqa: BLE001 -- fault-barrier: a missed notification must not fail a start
             logger.warning(
                 "mcp_initialized_notification_failed",
@@ -1549,6 +1631,7 @@ class McpServer(AggregateRoot):
         if self._client is not client:
             self._close_quietly(self._client)
         self._client = client
+        self._connected_with = self._starting_with
         self._meta = {
             "init_result": {},
             "tools_count": self._tools.count(),
@@ -1685,6 +1768,8 @@ class McpServer(AggregateRoot):
             CapabilityBlockedError: The catalogue drifted, and a refusing mode refuses it.
             McpServerNotReadyError: The server is not READY with a client.
         """
+        if self._retired:
+            raise McpServerNotReadyError(self.mcp_server_id, "retired")
         if self._state != McpServerState.READY or self._client is None:
             raise McpServerNotReadyError(self.mcp_server_id, self._state.value)
         mode = self._drift_refused_by()
@@ -2000,6 +2085,12 @@ class McpServer(AggregateRoot):
                 with self._lock:
                     self._refresh_in_progress = False
 
+                    if isinstance(refresh_error, UpstreamPeerKeyMismatchError):
+                        # The call is refused with the transport's reason, not
+                        # reported as a tool the upstream does not list.
+                        self._health.record_failure()
+                        raise refresh_error
+
                     if refresh_error is None and refresh_result and "result" in refresh_result:
                         tool_list = refresh_result.get("result", {}).get("tools", [])
                         self._tools.update_from_list(tool_list)
@@ -2069,6 +2160,9 @@ class McpServer(AggregateRoot):
                         error_type=type(invocation_error).__name__,
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        failure_code=getattr(invocation_error, "failure_code", None),
+                        observed_peer_spki=getattr(invocation_error, "observed_peer_spki", None),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2077,6 +2171,10 @@ class McpServer(AggregateRoot):
                     f"mcp_server={self.mcp_server_id}, tool={tool_name}, error={invocation_error}"
                 )
 
+                if isinstance(invocation_error, UpstreamPeerKeyMismatchError):
+                    # Recorded above like any failed call; raised as itself so the
+                    # executor records `deny` with its reason (ADR-030 §5).
+                    raise invocation_error
                 raise ToolInvocationError(
                     self.mcp_server_id,
                     str(invocation_error),
@@ -2101,6 +2199,8 @@ class McpServer(AggregateRoot):
                         error_type=_rpc_error_type(response["error"]),
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        upstream_peer_spki=_served_peer_spki(client),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2148,6 +2248,8 @@ class McpServer(AggregateRoot):
                         error_type="tool_error",
                         identity_context=identity_context_dict,
                         logical_target=logical_target,
+                        upstream_peer_spki=_served_peer_spki(client),
+                        declared_key_issuance=self._declared_key_issuance(),
                     )
                 )
 
@@ -2179,6 +2281,8 @@ class McpServer(AggregateRoot):
                     result_size_bytes=len(str(result)),
                     identity_context=identity_context_dict,
                     logical_target=logical_target,
+                    upstream_peer_spki=_served_peer_spki(client),
+                    declared_key_issuance=self._declared_key_issuance(),
                 )
             )
 
@@ -2242,6 +2346,10 @@ class McpServer(AggregateRoot):
         try:
             response = client.call(method, params, timeout=timeout)
         except ResponseTooLarge:
+            raise
+        except UpstreamPeerKeyMismatchError:
+            with self._lock:
+                self._health.record_failure()
             raise
         except (OSError, TimeoutError, ClientError) as e:
             raise ToolInvocationError(
@@ -2663,6 +2771,84 @@ class McpServer(AggregateRoot):
             if self._http_config:
                 spec["http"] = dict(self._http_config)
         return spec
+
+    def _record_event(self, event: Any) -> None:
+        # A retired copy shares its stream with the copy that replaced it. A
+        # health check or a lost connection on it must not leave that stream
+        # saying the server is DEGRADED or DEAD, which a restart would replay.
+        if getattr(self, "_retired", False):
+            return
+        super()._record_event(event)
+
+    def connection_declaration(self) -> tuple[str | None, str]:
+        """The endpoint and `tls` block the live client was built from, or the declared ones without a client."""
+        with self._lock:
+            if self._client is not None and self._connected_with is not None:
+                return self._connected_with
+            return connection_declaration(self._endpoint, self._tls_config)
+
+    @property
+    def is_retired(self) -> bool:
+        """Whether this copy was replaced and serves nothing again."""
+        return self._retired
+
+    def retire(self) -> Any:
+        """Take this copy out of service for good, and hand back its client for closing.
+
+        For the fleet projection, which replaces a key-pinned server's copy when
+        its key list or endpoint changed elsewhere (ADR-030 §8). The copy then
+        refuses `ensure_ready` and calls; a start already under way refuses too
+        and closes its own client. Nothing is closed here and no event is
+        recorded: the projection does no I/O and publishes nothing, so the
+        caller closes the client off the tail.
+
+        Returns:
+            The client this copy held, or None.
+        """
+        with self._lock:
+            self._retired = True
+            client, self._client = self._client, None
+        logger.info("mcp_server_retired", mcp_server_id=self.mcp_server_id)
+        return client
+
+    def reconfigure_connection(self, endpoint: str | None, tls: dict[str, Any] | None) -> None:
+        """Change a remote server's endpoint and `tls` block, as an operator declared them (ADR-030 §4b).
+
+        Set over the API, the endpoint is a human's: it is held to the SSRF
+        policy at connect time like any registered one. The start backoff and
+        the failure count start again, so failures against an old address do
+        not hold the new one back. A live client keeps the old declaration
+        until the fleet projection replaces this copy. Records no event:
+        `update_config` records the one update.
+        """
+        identity = PeerIdentity.from_tls(tls)
+        with self._lock:
+            self._endpoint = endpoint
+            self._tls_config = tls
+            self._peer_identity = identity
+            self._provenance = Provenance.HUMAN
+            self._runtime_addresses = None
+            self._enforce_ssrf = endpoint is not None
+            self._health.reset()
+
+    def adopt_config(
+        self,
+        description: str | None,
+        env: dict[str, str] | None,
+        idle_ttl_s: int,
+        health_check_interval_s: int,
+    ) -> None:
+        """Take the fields another replica changed, as the shared row records them (#1955).
+
+        The projection's half of `update_config`: the change was decided and
+        recorded where it was made, so nothing is recorded here, or every
+        replica would echo it back.
+        """
+        with self._lock:
+            self._description = description
+            self._env = dict(env or {})
+            self._idle_ttl = IdleTTL(idle_ttl_s)
+            self._health_check_interval = HealthCheckInterval(health_check_interval_s)
 
     def update_config(
         self,

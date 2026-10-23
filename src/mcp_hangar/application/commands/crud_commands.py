@@ -5,10 +5,12 @@ a single intent to mutate state. Handlers receive these via the command bus.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
 from ...domain.value_objects.provenance import Provenance
+from ...domain.value_objects.security import Principal
 from .commands import Command
 
 # =============================================================================
@@ -70,6 +72,12 @@ class CreateMcpServerCommand(Command):
     source: str = "api"
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
+    #: The server's `tls` block, a peer identity included (ADR-030 §4).
+    tls: dict[str, Any] | None = None
+    #: The authenticated caller, filled by the route from the request and never
+    #: from its body; None for a path with no caller. A peer identity is
+    #: declared only by a principal holding `mcp_servers:peer_identity` (§9).
+    principal: Principal | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,9 @@ class UpdateMcpServerCommand(Command):
         env: New environment variable dict, replaces existing (optional).
         idle_ttl_s: New idle TTL in seconds (optional).
         health_check_interval_s: New health check interval in seconds (optional).
+        endpoint: New endpoint of a remote server; an empty string clears it,
+            which only a key-pinned server may be left without (optional).
+        tls: New `tls` block of a remote server, replacing the old one (optional).
         source: Who is updating this mcp_server ("api", "config").
     """
 
@@ -92,7 +103,13 @@ class UpdateMcpServerCommand(Command):
     env: dict[str, str] | None = None
     idle_ttl_s: int | None = None
     health_check_interval_s: int | None = None
+    endpoint: str | None = None
+    tls: dict[str, Any] | None = None
     source: str = "api"
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
+    #: Who decided the change, as on CreateMcpServerCommand.
+    provenance: Provenance = Provenance.HUMAN
 
 
 @dataclass(frozen=True)
@@ -133,17 +150,21 @@ class DeleteMcpServerCommand(Command):
     mcp_server_id: str
     source: str = "api"
     provenance: Provenance = Provenance.HUMAN
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
 
     def __init__(
         self,
         mcp_server_id: str | None = None,
         source: str = "api",
         provenance: Provenance = Provenance.HUMAN,
+        principal: Principal | None = None,
         **kwargs: object,
     ):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "provenance", provenance)
+        object.__setattr__(self, "principal", principal)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
@@ -151,6 +172,22 @@ class DeleteMcpServerCommand(Command):
     @property
     def provider_id(self) -> str:
         return self.mcp_server_id
+
+
+@dataclass(frozen=True)
+class ForgetPeerKeyNameCommand(Command):
+    """Remove a name's entry from the peer-key name record (ADR-030 §9).
+
+    The entry outlives its server, so a deleted key-pinned server cannot come
+    back under its name as a plain one. Forgetting it is the deliberate act
+    that lets the name be used for anything again.
+    """
+
+    mcp_server_id: str
+    source: str = "api"
+    provenance: Provenance = Provenance.HUMAN
+    #: The authenticated caller, as on CreateMcpServerCommand.
+    principal: Principal | None = None
 
 
 # =============================================================================

@@ -22,7 +22,7 @@ from typing import Any, cast
 
 import structlog
 
-from mcp_hangar.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES, role_as_enforced
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
@@ -721,10 +721,19 @@ class SQLiteRoleStore(IRoleStore):
             for p in permissions_list
         )
 
-        return Role(name=row["name"], description=row["description"] or "", permissions=permissions)
+        return role_as_enforced(row["name"], row["description"] or "", permissions)
 
     def add_role(self, role: Role) -> None:
-        """Add a custom role."""
+        """Add a custom role.
+
+        Raises:
+            CannotModifyBuiltinRoleError: The name is a built-in role's; the
+                upsert would rewrite its row (#1988).
+        """
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
+
+        if role.name in BUILTIN_ROLES:
+            raise CannotModifyBuiltinRoleError(role.name)
         conn = self._get_connection()
 
         permissions_json = json.dumps(
@@ -793,7 +802,7 @@ class SQLiteRoleStore(IRoleStore):
                 )
                 for p in permissions_list
             )
-            roles.append(Role(name=row["name"], description=row["description"] or "", permissions=permissions))
+            roles.append(role_as_enforced(row["name"], row["description"] or "", permissions))
 
         return roles
 

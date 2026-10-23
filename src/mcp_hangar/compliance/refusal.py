@@ -73,6 +73,32 @@ CALLER_COST_FIELDS: tuple[tuple[str, str], ...] = (
 ERROR_TYPE_CONTRACT = "the event's error_type, written as given"
 
 
+#: The peer-key fields of a tool-call record (ADR-030 §6): the ``AuditRecord.data``
+#: key and its camelCase wire key in LEEF and syslog. A JSON-lines record keeps
+#: the data key. Present only when set: the verified key of the connection that
+#: served the call, or the code and the key a refused peer presented, and the
+#: key issuance the server's configuration declares. CEF writes the one key a
+#: record has as ``fileHash`` (``cef_formatter``); it has no free field for the
+#: declared issuance, which the other formats carry.
+PEER_KEY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("upstream_peer_spki", "upstreamPeerSpki"),
+    ("failure_code", "failureCode"),
+    ("observed_peer_spki", "observedPeerSpki"),
+    ("declared_key_issuance", "declaredKeyIssuance"),
+)
+
+
+def peer_key_data(peer_key: Mapping[str, str | None] | None) -> dict[str, str]:
+    """*peer_key* under its ``AuditRecord.data`` keys; unset and unknown keys are left out."""
+    given = peer_key or {}
+    return {key: str(given[key]) for key, _wire in PEER_KEY_FIELDS if given.get(key)}
+
+
+def peer_key_wire_fields(data: Mapping[str, object]) -> list[tuple[str, str, str]]:
+    """The peer-key fields held in *data*, as (data key, wire key, value)."""
+    return [(key, wire, str(data[key])) for key, wire in PEER_KEY_FIELDS if data.get(key)]
+
+
 def caller_cost_data(data: Mapping[str, object]) -> list[tuple[str, str, object]]:
     """The caller and cost fields held in *data*, as (data key, wire key, value), zero kept."""
     return [(key, wire, data[key]) for key, wire in CALLER_COST_FIELDS if data.get(key) is not None]

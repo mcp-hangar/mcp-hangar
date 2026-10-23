@@ -104,6 +104,14 @@ class RBACAuthorizer(IAuthorizer):
 
         return AuthorizationResult.deny(reason="no_matching_permission")
 
+    def role_bindings(self, principal: Principal) -> list[tuple[str, Role]]:
+        """The ``(scope, role)`` bindings :meth:`authorize` decides *principal* on.
+
+        Public so a caller can be shown the roles it is judged by (``hangar_whoami``,
+        #1363) from this lookup rather than from a second one that could drift.
+        """
+        return self._collect_roles(principal)
+
     def _collect_roles(self, principal: Principal) -> list[tuple[str, Role]]:
         """Collect every role binding that applies to a principal, with its scope.
 

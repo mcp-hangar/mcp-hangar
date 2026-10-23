@@ -7,36 +7,47 @@ All handlers:
 - Are thread-safe (mutations guarded via repository or injected lock)
 """
 
+import dataclasses
 import threading
 from collections.abc import Callable
 from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.fleet import IFleetWriter
+from ...domain.contracts.persistence import ConcurrentModificationError, PeerKeyClaim, PeerKeyNameRefused
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
     McpServerDeregistered,
     McpServerRegistered,
 )
-from ...domain.exceptions import McpServerDeclaredInConfigError, McpServerNotFoundError, ValidationError
+from ...domain.exceptions import (
+    McpServerDeclaredInConfigError,
+    McpServerNotFoundError,
+    PeerIdentityChangeDenied,
+    PeerKeyNameTaken,
+    ValidationError,
+)
 from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
-from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects.peer_identity import PeerIdentity, max_connection_age
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
 from ..group_events import publish_group_events
 from ..ports.log_buffers import ILogBuffers
+from ..ports.peer_identity import IPeerIdentityAuthority
 from .crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
     CreateMcpServerCommand,
     DeleteGroupCommand,
     DeleteMcpServerCommand,
+    ForgetPeerKeyNameCommand,
     RemoveGroupMemberCommand,
     SetL7PolicyCommand,
     UpdateGroupCommand,
@@ -44,6 +55,99 @@ from .crud_commands import (
 )
 
 logger = get_logger(__name__)
+
+
+def _require_peer_identity_authority(
+    authority: IPeerIdentityAuthority | None,
+    command: CreateMcpServerCommand | UpdateMcpServerCommand | DeleteMcpServerCommand | ForgetPeerKeyNameCommand,
+    what: str,
+) -> None:
+    """Refuse a change to a peer identity the command's caller may not make (ADR-030 §9).
+
+    A discovery source never may, in any authentication mode: it reports what
+    runs, and a key list is a declaration about which upstream may answer. Any
+    other caller needs `mcp_servers:peer_identity`, decided by *authority*; a
+    handler wired without one refuses, so a missing wire fails closed.
+    """
+    principal = command.principal
+    who = str(principal.id) if principal is not None else "(no principal)"
+    if command.provenance is Provenance.DISCOVERY:
+        raise PeerIdentityChangeDenied(
+            who, what, command.mcp_server_id, "a discovery source does not declare peer identities"
+        )
+    if authority is None or not authority.may_declare(principal):
+        raise PeerIdentityChangeDenied(who, what, command.mcp_server_id, "requires mcp_servers:peer_identity")
+
+
+#: What a `tls` block may hold when it comes through a command rather than the
+#: configuration file. `verify_ssl` and `ca_cert_path` decide whose certificate
+#: an upstream may present; they stay with whoever writes the file (ADR-021).
+_COMMAND_TLS_KEYS = frozenset({"peer_identity", "max_connection_age"})
+
+
+def _command_peer_identity(mcp_server_id: str, tls: Any) -> PeerIdentity | None:
+    """Check a `tls` block a command carries, and return the peer identity it declares (ADR-030 §4b)."""
+    if tls is None:
+        return None
+    if not isinstance(tls, dict):
+        raise ValidationError(f"mcp_server '{mcp_server_id}': tls must be a mapping")
+    unknown = sorted(set(tls) - _COMMAND_TLS_KEYS)
+    if unknown:
+        raise ValidationError(
+            f"mcp_server '{mcp_server_id}': tls accepts only peer_identity and max_connection_age here; "
+            f"{', '.join(unknown)} can be set only in the configuration file"
+        )
+    try:
+        identity = PeerIdentity.from_tls(tls)
+        max_connection_age(tls)
+    except ValueError as e:
+        raise ValidationError(f"mcp_server '{mcp_server_id}': {e}") from e
+    return identity
+
+
+def _refuse_a_key_ref_the_fleet_holds(repository: IMcpServerRepository, mcp_server_id: str, key_ref: str) -> None:
+    """Refuse a `key_ref` another server in the fleet holds (ADR-030 §7).
+
+    The record's entries from the configuration file are its servers, which
+    never write a row, so the record's own write cannot see them.
+    """
+    for name, server in repository.get_all().items():
+        held = getattr(server, "_peer_identity", None)
+        if name != mcp_server_id and isinstance(held, PeerIdentity) and held.key_ref == key_ref:
+            raise PeerKeyNameTaken(
+                f"mcp_server '{mcp_server_id}': key_ref '{key_ref}' already names the server '{name}'"
+            )
+
+
+def _refuse_plaintext_for_a_peer_identity(mcp_server_id: str, endpoint: str | None) -> None:
+    """A key is checked in a TLS handshake, so a key-pinned server is reached over https (ADR-030 §4).
+
+    The transport refuses to connect otherwise; refused here, the mistake is
+    the caller's 422 rather than a server that never starts.
+    """
+    if endpoint is not None and not endpoint.lower().startswith("https://"):
+        raise ValidationError(f"mcp_server '{mcp_server_id}': a server with tls.peer_identity needs an https endpoint")
+
+
+def _record_fields(
+    fleet_writer: IFleetWriter, mcp_server: McpServer, peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM, **fields: Any
+) -> None:
+    """Record a change to some fields of a server, on top of the recorded row (#1954).
+
+    The row is the base, not this replica's copy: a copy that has not yet seen a
+    peer's change would otherwise write every other field back as it was -- an
+    older L7 policy included -- and win. The write is refused if the row changed
+    after it was read. A server with no row (one from the configuration file)
+    is recorded from this replica's copy, and only if no row appeared meanwhile.
+    """
+    recorded = fleet_writer.read(mcp_server.mcp_server_id)
+    if recorded is None:
+        # A server from the configuration file: its peer-key entries are the
+        # file's, derived at load. A row written for it claims none.
+        fleet_writer.save_versioned(dataclasses.replace(snapshot_of(mcp_server), **fields), 0, PeerKeyClaim.SKIP)
+        return
+    base, version = recorded
+    fleet_writer.save_versioned(dataclasses.replace(base, **fields), version, peer_key)
 
 
 def _get_mcp_server_or_raise(repository: IMcpServerRepository, mcp_server_id: str) -> McpServer:
@@ -79,6 +183,7 @@ class CreateMcpServerHandler(CommandHandler):
         fleet_writer: IFleetWriter | None = None,
         coordinated: Callable[[], bool] | None = None,
         log_buffers: ILogBuffers | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -103,6 +208,7 @@ class CreateMcpServerHandler(CommandHandler):
         self._fleet_writer = fleet_writer
         self._coordinated = coordinated or (lambda: False)
         self._log_buffers = log_buffers
+        self._peer_identity_authority = peer_identity_authority
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -120,6 +226,22 @@ class CreateMcpServerHandler(CommandHandler):
             raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
 
         self._refuse_local_mode_when_coordinating(command.mode)
+
+        # A key list decides which upstream a call may reach: declaring one is
+        # its own permission, checked before anything is built (ADR-030 §9).
+        peer_identity = _command_peer_identity(command.mcp_server_id, command.tls)
+        if peer_identity is not None:
+            _require_peer_identity_authority(self._peer_identity_authority, command, "declare a peer identity for")
+            # The peer-key name record keeps a deleted key-pinned server from
+            # coming back as a plain one. Without durable storage there is no
+            # record, so the declaration is refused rather than served unguarded.
+            if self._fleet_writer is None:
+                raise ValidationError(
+                    f"mcp_server '{command.mcp_server_id}': declaring a peer identity needs a durable "
+                    "configuration store (persistence.backend sqlite or postgresql); this gateway keeps none"
+                )
+            _refuse_a_key_ref_the_fleet_holds(self._repository, command.mcp_server_id, peer_identity.key_ref)
+            _refuse_plaintext_for_a_peer_identity(command.mcp_server_id, command.endpoint)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -140,6 +262,7 @@ class CreateMcpServerHandler(CommandHandler):
             description=command.description,
             volumes=command.volumes,
             read_only=command.read_only,
+            tls=command.tls,
             # The same policy inputs `validate_no_ssrf` used just above, carried
             # onto the aggregate so the transport's connect-time re-check (DNS
             # rebinding) applies them too. `validate_no_ssrf` guards registration;
@@ -159,8 +282,15 @@ class CreateMcpServerHandler(CommandHandler):
         # told the registration did not happen. The other order gives a running
         # server, a published event, and no record -- which is what a restart
         # then quietly resolves by forgetting the server.
+        # Insert-only: another replica may have created it already, before this
+        # one heard of it (#1954). Its row is refused rather than overwritten.
         if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(mcp_server))
+            try:
+                self._fleet_writer.save_versioned(snapshot_of(mcp_server), None)
+            except ConcurrentModificationError as e:
+                raise ValidationError(f"McpServer already exists: {command.mcp_server_id}") from e
+            except PeerKeyNameRefused as e:
+                raise PeerKeyNameTaken(str(e)) from e
 
         # Before it joins the repository, so nothing can start it -- and write
         # output -- with no buffer attached.
@@ -213,6 +343,42 @@ class CreateMcpServerHandler(CommandHandler):
         )
 
 
+class ForgetPeerKeyNameHandler(CommandHandler):
+    """Removes a deleted key-pinned server's name from the peer-key name record (ADR-030 §9)."""
+
+    def __init__(
+        self,
+        repository: IMcpServerRepository,
+        fleet_writer: IFleetWriter | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
+    ) -> None:
+        self._repository = repository
+        self._fleet_writer = fleet_writer
+        self._peer_identity_authority = peer_identity_authority
+
+    def handle(self, command: ForgetPeerKeyNameCommand) -> dict[str, Any]:
+        """Forget the name, which only a holder of `mcp_servers:peer_identity` may do.
+
+        Raises:
+            PeerKeyNameTaken: The server is still registered under the name.
+            McpServerNotFoundError: The record holds no entry for it.
+        """
+        name = command.mcp_server_id
+        _require_peer_identity_authority(self._peer_identity_authority, command, "forget the peer-key name")
+        if self._repository.exists(name):
+            raise PeerKeyNameTaken(f"mcp_server '{name}': delete the server before forgetting its peer-key name")
+        if self._fleet_writer is None:
+            raise McpServerNotFoundError(name)
+        try:
+            forgotten = self._fleet_writer.forget_peer_key_name(name)
+        except PeerKeyNameRefused as e:
+            raise PeerKeyNameTaken(str(e)) from e
+        if not forgotten:
+            raise McpServerNotFoundError(name)
+        logger.info("peer_key_name_forgotten", mcp_server_id=name, source=command.source)
+        return {"mcp_server_id": name, "forgotten": True}
+
+
 class UpdateMcpServerHandler(CommandHandler):
     """Handler for UpdateMcpServerCommand.
 
@@ -225,6 +391,9 @@ class UpdateMcpServerHandler(CommandHandler):
         repository: IMcpServerRepository,
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
+        groups: dict | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -234,10 +403,18 @@ class UpdateMcpServerHandler(CommandHandler):
             fleet_writer: Where the changed configuration is recorded. Without
                 it an update survives only until the process ends, and a restart
                 silently reverts it.
+            declared_in_config: Whether the configuration declares a server,
+                whose endpoint and `tls` the file owns.
+            peer_identity_authority: Who may change a peer identity, or the
+                endpoint of a key-pinned server (ADR-030 §9).
+            groups: The groups, whose members hold a server by reference.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
+        self._declared_in_config = declared_in_config
+        self._peer_identity_authority = peer_identity_authority
+        self._groups = groups
 
     def handle(self, command: UpdateMcpServerCommand) -> dict[str, Any]:
         """Update mcp_server configuration.
@@ -256,18 +433,46 @@ class UpdateMcpServerHandler(CommandHandler):
         """
         mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
+        # Recorded first, and only the fields this command changes (#1954). An
+        # update that is not recorded is reverted by the next restart; one that
+        # is recorded from this replica's whole copy reverts whatever a peer
+        # changed meanwhile. Validated before the write, so a bad value cannot
+        # leave the record changed and the server not.
+        if command.idle_ttl_s is not None:
+            IdleTTL(command.idle_ttl_s)
+        if command.health_check_interval_s is not None:
+            HealthCheckInterval(command.health_check_interval_s)
+        connection = self._connection_change(mcp_server, command)
+        if self._fleet_writer is not None:
+            changed: dict[str, Any] = {
+                "description": command.description,
+                "env": dict(command.env) if command.env is not None else None,
+                "idle_ttl_s": command.idle_ttl_s,
+                "health_check_interval_s": command.health_check_interval_s,
+            }
+            fields = {k: v for k, v in changed.items() if v is not None}
+            if connection is not None:
+                endpoint, tls = connection
+                fields.update(
+                    endpoint=endpoint,
+                    tls=tls,
+                    provenance=Provenance.HUMAN,
+                    runtime_addresses=None,
+                    enforce_ssrf=endpoint is not None,
+                )
+            try:
+                _record_fields(self._fleet_writer, mcp_server, self._peer_key_claim(mcp_server, connection), **fields)
+            except PeerKeyNameRefused as e:
+                raise PeerKeyNameTaken(str(e)) from e
+
+        if connection is not None:
+            mcp_server.reconfigure_connection(*connection)
         mcp_server.update_config(
             description=command.description,
             env=command.env,
             idle_ttl_s=command.idle_ttl_s,
             health_check_interval_s=command.health_check_interval_s,
         )
-
-        # After the aggregate has changed, not before: the record is of what the
-        # server now is. An update that is not recorded is reverted by the next
-        # restart, which reads a snapshot describing the server as it used to be.
-        if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(mcp_server))
 
         # Collect the McpServerUpdated event recorded by update_config() and
         # append it to the aggregate's stream, which also delivers it.
@@ -279,6 +484,74 @@ class UpdateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "updated": True}
+
+    @staticmethod
+    def _peer_key_claim(
+        mcp_server: McpServer, connection: tuple[str | None, dict[str, Any] | None] | None
+    ) -> PeerKeyClaim:
+        """MOVE when the update gives a key-pinned server another `key_ref` (§7), CLAIM otherwise."""
+        old = mcp_server._peer_identity
+        new = PeerIdentity.from_tls(connection[1]) if connection is not None else old
+        return (
+            PeerKeyClaim.MOVE
+            if old is not None and new is not None and new.key_ref != old.key_ref
+            else PeerKeyClaim.CLAIM
+        )
+
+    def _connection_change(
+        self, mcp_server: McpServer, command: UpdateMcpServerCommand
+    ) -> tuple[str | None, dict[str, Any] | None] | None:
+        """Check a change of endpoint or `tls`, and return the server's new pair (ADR-030 §4b, §9).
+
+        Any server's endpoint may change where the fleet projection applies it;
+        a key-pinned server's, and any peer identity, only for a holder of
+        `mcp_servers:peer_identity`. A server the configuration
+        declares keeps the file's. One update may rotate keys but not replace
+        the whole list under the same `key_ref`, so a single write cannot cut
+        every trusted key at once; a new `key_ref` starts a new lineage.
+        """
+        if command.endpoint is None and command.tls is None:
+            return None
+        name = command.mcp_server_id
+        if self._declared_in_config is not None and self._declared_in_config(name):
+            raise McpServerDeclaredInConfigError(name)
+        if mcp_server.mode != McpServerMode.REMOTE:
+            raise ValidationError(f"mcp_server '{name}': only a remote server has an endpoint and a tls block")
+        endpoint = mcp_server._endpoint if command.endpoint is None else (command.endpoint or None)
+        tls = mcp_server._tls_config if command.tls is None else command.tls
+        new = _command_peer_identity(name, command.tls) if command.tls is not None else mcp_server._peer_identity
+        old = mcp_server._peer_identity
+        if self._fleet_writer is None:
+            # The fleet projection replaces a copy whose connection changed, on
+            # every replica and this one; without durable storage none runs,
+            # and the live client would keep the old endpoint (#1955).
+            raise ValidationError(
+                f"mcp_server '{name}': changing an endpoint or tls block needs a durable configuration store"
+            )
+        if old is None and new is None and endpoint is None:
+            raise ValidationError(f"mcp_server '{name}': a remote server without a peer identity needs an endpoint")
+        if old is not None or new is not None:
+            _require_peer_identity_authority(self._peer_identity_authority, command, "change the peer identity of")
+        if new is not None and (old is None or new.key_ref != old.key_ref):
+            _refuse_a_key_ref_the_fleet_holds(self._repository, name, new.key_ref)
+        if old is not None and new is None:
+            raise PeerKeyNameTaken(f"mcp_server '{name}': a peer identity cannot be removed; the name keeps it")
+        if old is not None and new is not None and new.key_ref == old.key_ref:
+            # A new key_ref is a new lineage, whose list need share nothing.
+            if not new.spki_sha256 & old.spki_sha256:
+                raise ValidationError(
+                    f"mcp_server '{name}': the new key list shares no key with the current one; "
+                    "add the next key first, then remove the old one"
+                )
+        if new is not None and any(g.get_member(name) for g in (self._groups or {}).values()):
+            raise ValidationError(f"mcp_server '{name}': a group member cannot be given a peer identity")
+        if new is not None:
+            _refuse_plaintext_for_a_peer_identity(name, endpoint)
+        if endpoint is not None:
+            # Set over the API, the endpoint is a human's, whatever it was
+            # before: a server moved from discovery meets the policy now (§4f).
+            validate_no_ssrf(endpoint, provenance=Provenance.HUMAN)
+        return endpoint, tls
 
 
 class SetL7PolicyHandler(CommandHandler):
@@ -321,14 +594,21 @@ class SetL7PolicyHandler(CommandHandler):
         if mcp_server is None:
             raise McpServerNotFoundError(command.mcp_server_id)
 
-        cast(McpServer, mcp_server).set_l7_policy(command.policy)
-
-        # Record it, like every other configuration change (#991). Unrecorded,
-        # the policy lived only in this replica's RAM: a restart dropped it and
-        # peer replicas never had it, so denied tools ran while the CR reported
-        # enforcement. The save also gives the peer projection a row to read.
+        # Record it, like every other configuration change (#991), and before
+        # the server takes it. Unrecorded, the policy lived only in this
+        # replica's RAM: a restart dropped it and peer replicas never had it, so
+        # denied tools ran while the CR reported enforcement. The save also gives
+        # the peer projection a row to read. Only the policy is written, on top
+        # of the recorded row, so a replica that has not yet seen a peer's change
+        # does not write the rest of its stale copy back (#1954).
         if self._fleet_writer is not None:
-            self._fleet_writer.save(snapshot_of(cast(McpServer, mcp_server)))
+            _record_fields(
+                self._fleet_writer,
+                cast(McpServer, mcp_server),
+                l7_policy=command.policy.to_wire() if command.policy is not None else None,
+            )
+
+        cast(McpServer, mcp_server).set_l7_policy(command.policy)
 
         # Changing this policy changes what the enforcement plane blocks, so
         # the change belongs in the audit trail and not only in a log line.
@@ -396,6 +676,7 @@ class DeleteMcpServerHandler(CommandHandler):
         fleet_writer: IFleetWriter | None = None,
         log_buffers: ILogBuffers | None = None,
         declared_in_config: Callable[[str], bool] | None = None,
+        peer_identity_authority: IPeerIdentityAuthority | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -415,6 +696,7 @@ class DeleteMcpServerHandler(CommandHandler):
         self._fleet_writer = fleet_writer
         self._log_buffers = log_buffers
         self._declared_in_config = declared_in_config
+        self._peer_identity_authority = peer_identity_authority
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -437,6 +719,12 @@ class DeleteMcpServerHandler(CommandHandler):
         # discovery source whose name collides with a declared one -- is told.
         if self._declared_in_config is not None and self._declared_in_config(command.mcp_server_id):
             raise McpServerDeclaredInConfigError(command.mcp_server_id)
+
+        # Removing a key-pinned server is a change to its peer identity: without
+        # this, a delete and a plain re-create under the same name would
+        # downgrade it with `lifecycle` and `write` alone (ADR-030 §9).
+        if isinstance(getattr(mcp_server, "_peer_identity", None), PeerIdentity):
+            _require_peer_identity_authority(self._peer_identity_authority, command, "remove the peer identity of")
 
         # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
         # may still hold its connection (#1361). I/O (shutdown) is done outside
@@ -685,6 +973,11 @@ class AddGroupMemberHandler(CommandHandler):
         mcp_server = self._repository.get(command.mcp_server_id)
         if mcp_server is None:
             raise McpServerNotFoundError(command.mcp_server_id)
+        if isinstance(getattr(mcp_server, "_peer_identity", None), PeerIdentity):
+            # A group holds its member by reference, and the fleet projection
+            # replaces a key-pinned server's copy when its key list changes: the
+            # group would go on routing to the retired one (ADR-030 §8).
+            raise ValidationError(f"mcp_server '{command.mcp_server_id}': a key-pinned server cannot join a group")
 
         with self._lock:
             group = self._groups.get(command.group_id)
@@ -760,6 +1053,7 @@ def register_crud_handlers(
     log_buffers: ILogBuffers | None = None,
     restore_gap: str | None = None,
     declared_in_config: Callable[[str], bool] | None = None,
+    peer_identity_authority: IPeerIdentityAuthority | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -778,6 +1072,8 @@ def register_crud_handlers(
             when it will; reported by the L7 policy push (#1306).
         declared_in_config: Whether the configuration declares a server, which
             the delete handler then refuses (#1744).
+        peer_identity_authority: Who may declare or remove a peer identity
+            (ADR-030 §9). None refuses every such change.
     """
     # McpServer handlers
     command_bus.register(
@@ -788,11 +1084,25 @@ def register_crud_handlers(
             fleet_writer=fleet_writer,
             coordinated=coordinated,
             log_buffers=log_buffers,
+            peer_identity_authority=peer_identity_authority,
         ),
     )
     command_bus.register(
         UpdateMcpServerCommand,
-        UpdateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+        UpdateMcpServerHandler(
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            declared_in_config=declared_in_config,
+            peer_identity_authority=peer_identity_authority,
+            groups=groups,
+        ),
+    )
+    command_bus.register(
+        ForgetPeerKeyNameCommand,
+        ForgetPeerKeyNameHandler(
+            repository=repository, fleet_writer=fleet_writer, peer_identity_authority=peer_identity_authority
+        ),
     )
     command_bus.register(
         SetL7PolicyCommand,
@@ -808,6 +1118,7 @@ def register_crud_handlers(
             fleet_writer=fleet_writer,
             log_buffers=log_buffers,
             declared_in_config=declared_in_config,
+            peer_identity_authority=peer_identity_authority,
         ),
     )
 

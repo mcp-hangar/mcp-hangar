@@ -5,6 +5,184 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.32.1...v2.33.0) (2026-10-21)
+
+### Added
+
+- **core:** a key-pinned server may declare where its keys come from, `tls.peer_identity.issuance: kbs-attested` (ADR-030 §2). The value is one of a closed set, and anything else is refused at load. A call to such a server records it as `declared_key_issuance` on `ToolInvocationCompleted` and `ToolInvocationFailed`. The JSON-lines, LEEF, syslog and OTLP exports carry it; CEF has no free field for it. It is a declaration that Hangar records and does not verify. It changes neither the identity digest pins bind to nor the keys the handshake accepts. `GET /api/system/` lists the `declared_key_issuance` capability. ([#1998](https://github.com/mcp-hangar/mcp-hangar/pull/1998))
+
+## [2.32.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.32.0...v2.32.1) (2026-10-21)
+
+### Fixed
+
+- **core:** on a shared auth store, the built-in roles in force no longer depend on which replica started last. Each replica seeded its own release's built-in roles over the stored ones at startup and authorized from the stored ones, so a 2.31.0 replica took `mcp_servers:peer_identity` away from `kubernetes-operator` on every 2.32.0 replica, and an older replica would give back a permission a later release removed. A built-in role is now enforced as the running release defines it, and a custom role can no longer take a built-in name. ([#1994](https://github.com/mcp-hangar/mcp-hangar/pull/1994))
+- **core:** a replica on a release from before the peer-key name record (2.31.0 or older) can no longer rewrite a key-pinned server's row as a plain one. Its create under the name of a key-pinned server, sent to it during a rolling upgrade, replaced the row with one without `tls` and served the name unpinned. Both storage backends now install a database trigger that refuses a live configuration row under a recorded name unless it carries the recorded `key_ref`, which binds a release that never reads the record. The trigger is installed when a replica of this release first starts. ([#1995](https://github.com/mcp-hangar/mcp-hangar/pull/1995))
+- **core:** forgetting a deleted key-pinned server's name (`DELETE /api/mcp_servers/{id}/peer_identity`) at the same moment another replica re-created it with its `key_ref` could leave a live key-pinned server with no entry in the peer-key name record, after which a later delete and a plain re-create needed only `mcp_servers:write`. The forget now deletes the entry before it looks for a live row, and a claim holds the entries it read `FOR SHARE` until its row is written, so one of the two waits for the other. ([#1992](https://github.com/mcp-hangar/mcp-hangar/pull/1992))
+- **core:** replicas starting together on an empty PostgreSQL database no longer lose one of their number to the auth tables. The API key and role stores created their tables without the schema lock every other PostgreSQL table takes, so a second replica could exit with `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` on first boot. ([#1993](https://github.com/mcp-hangar/mcp-hangar/pull/1993))
+- **core:** a key pin is now taken over the `SubjectPublicKeyInfo` exactly as the upstream's certificate encodes it, as ADR-030 defines it. Core re-encoded the key first, which turned an EC key with explicit curve parameters, the default of the `openssl` macOS ships, into its named-curve form, so a pin computed with `openssl x509 -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256` was refused as `upstream_peer_key_mismatch`. Pins of RSA and named-curve EC keys are unchanged. ([#1996](https://github.com/mcp-hangar/mcp-hangar/pull/1996))
+- **core:** a remote server's HTTP metrics are labelled with its id in `mcp_server`, not with its endpoint's host. The HTTP launcher built the client without the id, so `mcp_hangar_upstream_peer_key_connections_total`, `mcp_hangar_http_errors_total` and the other HTTP client series carried the host, two servers on one host shared a series, and a query on the id found nothing. ([#1983](https://github.com/mcp-hangar/mcp-hangar/pull/1983))
+- **core:** `server/discover` on a front door lists the same tools as the caller's `tools/list`. It answered every authenticated caller with `tools: []`: the route got the authenticated request but never bound the caller from it, so the projection saw no one. It also left out the `hangar_*` tools the caller may call, which a front door's `tools/list` has carried since #904. ([#1997](https://github.com/mcp-hangar/mcp-hangar/pull/1997))
+
+## [2.32.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.31.0...v2.32.0) (2026-10-20)
+
+### Added
+
+- **core:** `GET /api/mcp_servers/{id}` and `hangar_details` report the server's `provenance`: `human` for a server registered through the API or the configuration file, `discovery` for one a discovery source found. A client can then tell whether a name came from discovery; the operator uses this when it moves a discovered server to a key-pinned registration (ADR-030 §4f). ([#1978](https://github.com/mcp-hangar/mcp-hangar/pull/1978))
+- **core:** a key-pinned server's `key_ref` can be changed with `PUT /mcp_servers/{id}`, and a deleted key-pinned server's name can be forgotten with `DELETE /mcp_servers/{id}/peer_identity` (ADR-030 §7, §9). Both need `mcp_servers:peer_identity`. A new `key_ref` moves the name's entry in the peer-key name record within the row's transaction. It starts a new lineage, so the key list need not share a key with the old one, and the server's digest pins must be recorded again. A `key_ref` another server holds is still refused. Forgetting a name is refused while the server is registered on any replica; once forgotten, the name can be registered without a peer identity. A configuration row written for a server the configuration file declares, by a description or L7 policy change, no longer claims an entry in the record, whose entries for that server come from the file. ([#1975](https://github.com/mcp-hangar/mcp-hangar/pull/1975))
+- **core:** a server's configuration update now reaches every replica without a restart. The fleet projection applies `McpServerUpdated` for every server, not only key-pinned ones. A changed endpoint or `tls` block replaces the replica's copy with a fresh one built from the shared row, and the old copy is retired. A changed description, env, idle TTL or health-check interval is applied in place. Neither publishes anything. A group that has the server as a member follows the replacement. A server the configuration file declares still changes only when its replica reloads the file. `PUT /mcp_servers/{id}` now accepts a new endpoint for a server without a peer identity, which needs only `mcp_servers:write`. ([#1979](https://github.com/mcp-hangar/mcp-hangar/pull/1979))
+- **core:** a remote server's peer identity and endpoint can be set over REST (ADR-030 §4). `POST /mcp_servers` accepts a `tls` block, and a key-pinned server may be created without an endpoint. `PUT /mcp_servers/{id}` accepts `tls` and `endpoint`; an explicit `null` endpoint clears it. Over the API, `tls` holds only `peer_identity` and `max_connection_age`. `verify_ssl`, `ca_cert_path` and any other key are refused with 422 and stay with the configuration file. Changing the endpoint or `tls` of a key-pinned server, or giving a server a peer identity, needs `mcp_servers:peer_identity`. A discovered server given a peer identity becomes a human-registered one, held to the SSRF policy. An endpoint change resets the server's start backoff and failure count. One update may add or remove keys, but not replace the whole list under the same `key_ref`. The following are refused: changing `key_ref`, removing a peer identity, changing a server the configuration file declares, and changing the endpoint of a server without a peer identity, which would reach only one replica (#1955). A key-pinned server cannot join a group. `GET /system` lists `capabilities: ["peer_identity"]` for the operator to check. ([#1974](https://github.com/mcp-hangar/mcp-hangar/pull/1974))
+- **core:** every path that brings a server into the fleet without writing a configuration row now checks the peer-key name record (ADR-030 §9). Loading or reloading the configuration file refuses a file in three cases: it declares a recorded name without its recorded `key_ref`, it declares a recorded `key_ref` under another name, or it gives two of its servers the same `key_ref`. Recovery does not restore a row under a recorded name that lacks the recorded peer identity. `hangar_load` refuses a recorded name. Discovery does not register a recorded name and logs it as `discovered_peer_key_upstream`, and its repeated attempt to delete a server moved to a key-pinned registration is logged at info. ([#1971](https://github.com/mcp-hangar/mcp-hangar/pull/1971))
+- **core:** the SQLite and PostgreSQL configuration stores gain the peer-key name record (`peer_key_names`, ADR-030 §9). A server's name and `key_ref` are recorded there in the same transaction as its configuration row. The entry outlives the server, so a deleted key-pinned server cannot be registered again under its name without the same `key_ref`, and one `key_ref` names one server. A gateway without durable storage refuses to register a server with a peer identity. ([#1970](https://github.com/mcp-hangar/mcp-hangar/pull/1970))
+- **core:** a new permission, `mcp_servers:peer_identity`, guards declaring a peer identity (`tls.peer_identity`) on a server and deleting a server that has one (ADR-030). `admin` holds it through `*:*` and `kubernetes-operator` is granted it. `developer` and `provider-admin` are not, so `mcp_servers:write` and `mcp_servers:lifecycle` no longer suffice to remove a key-pinned server. A discovery source is refused in every authentication mode. With authentication off, the check allows. ([#1969](https://github.com/mcp-hangar/mcp-hangar/pull/1969))
+- **core:** a key-pinned server (ADR-030) replaces its connection pool every `tls.max_connection_age`. The default is one hour; give a number of seconds or a duration such as `90s`, `30m` or `1h`. After each replacement every connection handshakes again against the current key list, so a connection verified once cannot keep serving indefinitely. A request in flight finishes on the old pool before that pool is closed. The MCP session survives the replacement, and the GET stream re-opens on the new pool at once. `tls.max_connection_age` on a server without `tls.peer_identity` is refused at load. ([#1967](https://github.com/mcp-hangar/mcp-hangar/pull/1967))
+- **core:** a key-pinned server's key list or endpoint now changes on every replica without a restart (ADR-030 §8). The fleet projection applies `McpServerUpdated`. It compares the stored row with what the local copy's live client was built from, and when they differ it replaces the copy with a `COLD` one built from the row. The old copy is retired: it refuses calls and a start under way, and its connection is closed in the background. When the row cannot be read, the copy is retired and calls are refused until a later read succeeds. A plain row under a name in the peer-key name record is refused on registration and on update. Updates of servers that are not key-pinned are unchanged. ([#1972](https://github.com/mcp-hangar/mcp-hangar/pull/1972))
+- **core:** a refused upstream key (ADR-030) is visible in three more places.
+  - `mcp-hangar why` lists a cold-start refusal and a warm call refused for its upstream's key. For each it prints the key the upstream presented and the key list the configuration file declares now. A warm refusal is read from its `ToolInvocationFailed` with `failure_code`, and is never re-labelled as a `ToolCallRefused`.
+  - The new metric `mcp_hangar_upstream_peer_key_connections_total{mcp_server, outcome}` counts every TLS handshake with a key-pinned upstream, including the GET stream's, as `verified` or `refused`.
+  - The upstream call span carries `hangar.upstream.peer_spki` for the connection that served it. ([#1966](https://github.com/mcp-hangar/mcp-hangar/pull/1966))
+- **core:** the audit trail of a key-pinned server (ADR-030) records which TLS key answered. The key is read from the socket of the connection that served the attempt, never from configuration.
+  - `ToolInvocationCompleted` and `ToolInvocationFailed` gain `upstream_peer_spki`, the verified key of the serving connection.
+  - `ToolInvocationFailed` gains `failure_code` (`upstream_peer_key_mismatch`) and `observed_peer_spki`, the key a refused peer presented.
+  - `ToolCallRefused` gains `observed_peer_spki` for a refused cold start.
+
+  How each export format carries them:
+  - JSON lines: under the event field names.
+  - LEEF and syslog: as `upstreamPeerSpki`, `failureCode` and `observedPeerSpki`.
+  - CEF: the one key as `fileHash`, with `fileType` saying whether it was verified (`UpstreamTlsKeyVerified`) or refused (`UpstreamTlsKeyRefused`).
+  - OTLP audit records: as `hangar.upstream.peer_spki`, `hangar.upstream.observed_peer_spki` and `hangar.upstream.failure_code`.
+
+  A server without a peer identity records none of these fields. ([#1965](https://github.com/mcp-hangar/mcp-hangar/pull/1965))
+- **core:** a remote server can declare a peer identity in the configuration file: `tls.peer_identity` with a `key_ref` naming the key lineage, and `spki_sha256` listing the key pins it may present (ADR-030). A key pin is `sha256:` followed by 64 lowercase hex characters: the SHA-256 of the DER SubjectPublicKeyInfo. Every connection to such a server must end at a listed key, and this is checked inside the TLS 1.3 handshake before any request byte is written. A refusal is a `deny` with reason `upstream_peer_key_mismatch`. The server's upstream identity becomes `peer-key:<key_ref>`, so its digest pins survive an address change and a key rotation. These declarations are refused at load: a peer identity on a mode other than `remote`, on an `http://` endpoint, with `verify_ssl: false`, with an empty or non-canonical key list, or with no `key_ref`. A `ca_cert_path` alongside a peer identity is ignored, with a warning. This release reads the declaration from the configuration file only; the REST API and the operator cannot declare one yet. `tls.max_connection_age` and `peer_identity.issuance` are refused at load until a later release implements them. ([#1964](https://github.com/mcp-hangar/mcp-hangar/pull/1964))
+
+### Changed
+
+- **core:** the fleet snapshot keeps a server's `tls` block, so a server with `tls.peer_identity` (ADR-030) keeps its key list when it is rebuilt after a restart or on a peer replica, instead of returning as a plain server. Such a server's stored row has the mode `remote-peer-key`. This release reads that back as `remote`. A release that does not know the mode declines the row instead of serving the server without checking its key. A `remote-peer-key` row with a missing or malformed peer identity is refused and skipped at recovery. ([#1968](https://github.com/mcp-hangar/mcp-hangar/pull/1968))
+
+### Fixed
+
+- **core:** creating or updating a server with `tls.peer_identity` over the API now refuses an endpoint that is not `https` with 422. The key is checked in a TLS handshake, and the transport already refused to connect such a server, so it was accepted and then never started. ([#1976](https://github.com/mcp-hangar/mcp-hangar/pull/1976))
+- **core:** in a multi-replica deployment, a replica whose copy of a server was behind could write its stale copy over the shared configuration row. The overwrite included the L7 egress policy, so a tightened policy could revert to the older one at the next restart. Create, update and L7 policy delivery now build the new row from the recorded one, plus only the fields they change. They write with a compare-and-set on the row version. Create is insert-only and refuses a live row instead of overwriting it, and an update to a server a peer deleted no longer brings it back. ([#1956](https://github.com/mcp-hangar/mcp-hangar/pull/1956))
+
+### Security
+
+- **security:** `aiohttp>=3.14.4` is now the declared floor, so an environment resolved at the floor no longer gets a release carrying GHSA-2g87-pp6c-29x5, CVE-2026-111063 and CVE-2026-111064 (#1957). ([#1958](https://github.com/mcp-hangar/mcp-hangar/pull/1958))
+
+## [2.31.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.30.0...v2.31.0) (2026-10-19)
+
+### Added
+
+- **cli:** `mcp-hangar approvals list|approve|deny` resolves a call held by a gateway that runs over stdio, which serves no REST API, so until now a call on an `approval_list` could only time out. The command opens the approval store the gateway shares (the selected `persistence.backend`, or `mcp_hangar.db` beside an absolute `event_store.path`; `--db` names a file) and decides through the same resolution chokepoint as `POST /api/approvals/{id}/resolve`, so expiry, the compare-and-swap and tenant scoping are unchanged. The waiting gateway sees the decision on its next poll of the store, about two seconds, and publishes the usual `ToolApprovalGranted` or `ToolApprovalDenied`. No listener or IPC channel is added. The approver is always the declared `auth.stdio.principal`, and a configuration without one is refused. The principal's declared roles must hold `approval:resolve` (`provider-admin` or `admin`), and that holds even with auth off: `viewer`, the role `init` declares, is refused with the role it needs and the key to change. ([#1929](https://github.com/mcp-hangar/mcp-hangar/pull/1929))
+- **core:** `hangar_whoami` tells a caller who the gateway thinks it is. It takes
+  no parameters and returns the caller's principal, tenant, groups and role
+  bindings with their scopes, read from the same lookup the authorizer decides on,
+  plus `opa_policy` when an OPA policy can change what those roles decide. It
+  needs no permission: on a `front_door` gateway every authenticated caller is
+  offered it on the management surface, including one with no role at all, and
+  so is a declared stdio principal. With auth off, or for an anonymous caller,
+  there is no identity to report, so it is absent there and refused if called (on
+  `egress`, where the whole `hangar_*` surface is listed, a call is refused). ([#1923](https://github.com/mcp-hangar/mcp-hangar/pull/1923))
+
+### Removed
+
+- **core:** the `PolicyPushRejected` domain event is removed. Its only producer
+  was the `POST /agent/policy` endpoint retired with the Hangar Cloud connector in
+  1.5.x, and since then nothing has constructed it and nothing has handled it. A
+  refused policy push is still recorded, as `AuthorizationDenied`. No event store
+  needs migrating: the endpoint published it through the bus's delivery-only
+  `publish()`, three weeks before `publish()` started persisting, and an event
+  naming no aggregate is still delivered only, so no stored stream holds one. ([#1924](https://github.com/mcp-hangar/mcp-hangar/pull/1924))
+
+### Fixed
+
+- **cli:** `python -m mcp_hangar.server` (the legacy `parse_args` entry point) now reads the environment the way
+  `mcp-hangar serve` does: `MCP_MODE` accepts `true`/`1`/`yes`/`on` as well as `http`, `MCP_JSON_LOGS=1` turns JSON logs
+  on, and a non-integer `MCP_HTTP_PORT` is a usage error (exit 2) instead of a traceback. ([#1712](https://github.com/mcp-hangar/mcp-hangar/pull/1712))
+- **core:** a `hangar.shaping.mutation` event is recorded only when a mutator applies to the call's method. A mutator registered for another method, such as `resources/read` only, used to add two `changed=false` mutation events to every `tools/call` span although no mutator ran. ([#1574](https://github.com/mcp-hangar/mcp-hangar/pull/1574))
+
+## [2.30.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.1...v2.30.0) (2026-10-19)
+
+### Added
+
+- **cli:** a reader for the servers a user already has in an MCP client. For each
+  client file `init` detects -- Claude Code user (`~/.claude.json`), Claude Code
+  project (`./.mcp.json`), Cursor (`~/.cursor/mcp.json`) -- it parses the
+  top-level `mcpServers` map into typed stdio (`command`/`args`/`env`) and remote
+  (`url`) entries. A malformed or unknown entry is reported by name with a reason
+  instead of failing the read, and no `env` or `headers` value appears in what it
+  reports. It is not yet used by `init`: importing these servers into the Hangar
+  config, pinning them and rewriting the client file follow in later releases
+  (#1770) ([#1919](https://github.com/mcp-hangar/mcp-hangar/pull/1919))
+
+### Security
+
+- **security:** a tool whose definition drifted from its digest pin is now withheld
+  from every listing a model reads, not only refused when called. After an upstream
+  rewrote a pinned tool's description, `tools/call` was refused, but `tools/list`
+  through Hangar still returned the new description, so the rug pull's instruction
+  reached the model on every listing. The tool is now absent from the front door's
+  `tools/list` (stdio and streamable HTTP) and from `hangar_tools`, and its call is
+  answered like a call of a tool that does not exist. `notifications/tools/list_changed`
+  is sent when it is withheld and again when it returns. `hangar_details` lists it
+  under `withheld_tools` with the reason `digest_drift` and both digests, without
+  the description, and the REST tool routes show it as its name, digests and
+  `withheld: "digest_drift"`, also without the description, to every role that can
+  read them. Only
+  a pin in `block` mode withholds: under `warn` and `audit` the call goes through,
+  so the tool stays listed. The interval re-check withholds as well as refuses.
+  A caller is told nothing about a tool its policy hides ([#1920](https://github.com/mcp-hangar/mcp-hangar/pull/1920))
+- **core:** a server loaded from the registry with `hangar_load` is bound to
+  what the operator allows it, not to what its registry entry asks for.
+
+  - **Secrets.** The variables an entry names were resolved from the
+    gateway's own environment and from the secrets directory, and delivered to
+    the launched server, so an entry asking for `AWS_SECRET_ACCESS_KEY`
+    received the gateway's credential. Only the names listed for the server's
+    exact registry name in the new `hot_loading.secrets.allow` are now looked
+    up; any other is reported in `missing_secrets`, naming the key and the
+    server. A name that is not an environment variable name is refused before
+    anything is consulted, every segment of the server's directory is checked,
+    and a file is read only when its resolved path is inside the secrets
+    directory, so `../` in a name or a server and a symlink out of the
+    directory read nothing. Allowlist keys that differ only in case are
+    refused.
+  - **Environment.** A hot-loaded server inherited the gateway's environment
+    minus a name heuristic, so `AWS_ACCESS_KEY_ID`, webhook URLs and DSNs
+    reached it. Hangar now passes it only a fixed base (`PATH`, `HOME`,
+    locale, timezone, temporary directory, and the Windows equivalents) and
+    the names in the new `hot_loading.inherit_env`. Statically configured
+    servers are unchanged. What Hangar hands the server is bounded; a
+    hot-loaded server is code running as the gateway's user, so
+    `trusted_namespaces` is the boundary.
+  - **Verified.** The gate tested the registry's `status: active`, which
+    every published entry carries. An entry is now verified when its registry
+    name starts with a namespace in the new `hot_loading.trusted_namespaces`,
+    matched case-sensitively by whole segment, and the registry lists it as
+    active. Empty, the default, verifies nothing. `ServerSummary.is_official`
+    and `ServerDetails.is_official` are renamed `is_published`.
+  - **force_unverified.** The `hangar_load` argument is the caller's, and the
+    tool's own answer told the caller to set it. It is now ignored unless the
+    operator sets the new `hot_loading.allow_force_unverified: true`, and the
+    answer names the operator's keys instead.
+  - **Echoed text.** An entry whose name has whitespace or a control
+    character is treated as not found, and every name echoed from an entry is
+    escaped, so a name cannot add lines to what the agent reads. A variable
+    that is not bound gets "Ask the operator to allow it" in prose, never a
+    ready-to-paste config grant.
+- **security:** a tool under a digest pin in `block` mode is now served with only
+  the fields the pin covers: `name`, `description`, `inputSchema` and
+  `outputSchema`. The pin's digest covers those four, but every listing served
+  the rest of the upstream's definition verbatim, so an upstream could keep the
+  digest and still put instructions in `title` or `_meta`, or add
+  `annotations: {readOnlyHint: true, destructiveHint: false}` to a tool pinned
+  without them, which can remove a client's confirmation before the call. The
+  cut applies on the front door's `tools/list` (both SDK paths, stdio and
+  streamable HTTP), `server/discover`, `hangar_tools`, `hangar_details` and the
+  REST server and tool routes, through one shared allow-list, so a field the
+  spec adds later is withheld from a pinned tool too. Pins are scoped as for the
+  drift check: the server, the groups that own it and per-tenant pins. The
+  digest itself is unchanged, so existing pins stay valid. Tools without a pin,
+  and pins in `warn` or `audit` mode, are served whole as before.
+
 ## [2.29.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.29.0...v2.29.1) (2026-10-18)
 
 ### Fixed

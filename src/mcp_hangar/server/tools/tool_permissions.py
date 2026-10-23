@@ -54,6 +54,17 @@ groups, discovery, configuration, metrics -- so it requires a **global** grant,
 exactly as the REST route performing the same operation does. Only the names in
 ``TENANT_SCOPED_GRANT_TOOLS`` accept a grant held within a tenant, and the list
 and the call agree on that as they agree on everything else.
+
+Self-scoped tools
+-----------------
+``SELF_SCOPED_TOOLS`` (``hangar_whoami``, #1363) take no parameters and read only
+the caller's own identity, so no permission is required and none is invented:
+any authenticated caller may call them, a tenant-scoped grant or no grant at
+all included, because a caller whose roles are wrong is the one who needs the
+answer. They still need an *authenticated* caller. With auth off, or for an
+anonymous caller, there is no identity to report, so they are absent from the
+front door's management surface like every other management tool and refused
+if called anyway -- unlike the table, which allows everything with auth off.
 """
 
 from __future__ import annotations
@@ -116,6 +127,10 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
 #: that caller's own continuations, even when an id leaks.
 TENANT_SCOPED_GRANT_TOOLS: frozenset[str] = frozenset({"hangar_fetch_continuation", "hangar_delete_continuation"})
 
+#: Tools that read only the caller's own identity: callable by any authenticated
+#: caller, refused to every other. See "Self-scoped tools" above.
+SELF_SCOPED_TOOLS: frozenset[str] = frozenset({"hangar_whoami"})
+
 #: Tools that authorize themselves and must NOT be gated by the table.
 #:
 #: ``hangar_call`` checks ``tool:invoke`` for each call in the batch
@@ -172,7 +187,8 @@ def _stdio_management_tools() -> frozenset[str] | None:
         for tool_name, (resource_type, action) in TOOL_PERMISSIONS.items()
         if tool_name not in INVOKE_PATH_TOOLS and any(role.has_permission(resource_type, action, "*") for role in roles)
     }
-    return frozenset(permitted)
+    # A declared principal is an identity, whatever roles it holds (#1363).
+    return frozenset(permitted) | SELF_SCOPED_TOOLS
 
 
 def _stdio_role_names(principal: Any) -> list[str]:
@@ -180,6 +196,41 @@ def _stdio_role_names(principal: Any) -> list[str]:
     metadata = getattr(principal, "metadata", None) or {}
     names = metadata.get("roles", [])
     return [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
+
+
+def _configured_authz() -> Any:
+    """The authorization middleware when auth is configured and on, else None."""
+    try:
+        from ..context import get_context
+
+        auth_components = getattr(get_context(), "auth_components", None)
+    except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> auth off
+        return None
+    authz = getattr(auth_components, "authz_middleware", None)
+    if authz is None or not getattr(auth_components, "enabled", False):
+        return None
+    return authz
+
+
+def resolve_caller(mcp_ctx: Any) -> tuple[Any, Any] | None:
+    """The authenticated caller and the authorizer that decides for it, or None (#1363).
+
+    The principal is read as ``hangar_call`` reads it, from
+    ``request.state.auth`` -- the ambient contextvar defaults silently in the SDK's
+    per-session task. A declared stdio principal is decided by its declared
+    roles, as :func:`authorize_tool` decides it. None when there is no identity:
+    auth off with no declared principal, or an anonymous or missing principal.
+    """
+    from ...auth.stdio_principal import get_stdio_authorizer, get_stdio_principal
+    from .batch import _request_principal
+
+    principal = _request_principal(mcp_ctx)
+    if principal is None or principal.is_anonymous():
+        return None
+    if principal is get_stdio_principal():
+        return principal, get_stdio_authorizer()
+    authz = _configured_authz()
+    return (principal, authz) if authz is not None else None
 
 
 def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
@@ -226,15 +277,8 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
     if declared is not None and _request_principal(mcp_ctx) is declared:
         return _stdio_management_tools() or frozenset()
 
-    try:
-        from ..context import get_context
-
-        auth_components = getattr(get_context(), "auth_components", None)
-    except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> no management surface
-        return frozenset()
-
-    authz = getattr(auth_components, "authz_middleware", None)
-    if authz is None or not getattr(auth_components, "enabled", False):
+    authz = _configured_authz()
+    if authz is None:
         return frozenset()
 
     try:
@@ -247,7 +291,8 @@ def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
     if principal is None or principal.is_anonymous():
         return frozenset()
 
-    permitted: set[str] = set()
+    # Any authenticated caller sees the self-scoped tools, whatever its grants.
+    permitted: set[str] = set(SELF_SCOPED_TOOLS)
     for tool_name, (resource_type, action) in TOOL_PERMISSIONS.items():
         if tool_name in INVOKE_PATH_TOOLS:
             continue
@@ -317,15 +362,16 @@ def authorize_tool(tool_name: str, mcp_ctx: Any) -> None:
     if tool_name in SELF_AUTHORIZING_TOOLS:
         return
 
-    try:
-        from ..context import get_context
+    if tool_name in SELF_SCOPED_TOOLS:
+        # No permission, but an identity: with none there is nothing to report,
+        # and auth off does not conjure one (#1363).
+        if resolve_caller(mcp_ctx) is None:
+            logger.warning("tool_authorization_denied", tool=tool_name, reason="no_authenticated_identity")
+            raise ToolAccessNotAuthorizedError(f"'{tool_name}' answers only an authenticated caller")
+        return
 
-        auth_components = getattr(get_context(), "auth_components", None)
-    except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> auth off, allow
-        auth_components = None
-
-    authz = getattr(auth_components, "authz_middleware", None)
-    if authz is None or not getattr(auth_components, "enabled", False):
+    authz = _configured_authz()
+    if authz is None:
         return
 
     # The principal is read as `hangar_call` reads it, and a declared stdio

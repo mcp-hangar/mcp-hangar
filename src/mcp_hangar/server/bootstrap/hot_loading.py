@@ -7,6 +7,7 @@ from ...application.services.package_resolver import PackageResolver
 from ...application.services.secrets_resolver import SecretsResolver
 from ...domain.contracts.installer import IPackageInstaller
 from ...domain.model import McpServer
+from ...domain.security.hot_load_trust import hot_load_trust
 from ...infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 from ...logging_config import get_logger
 from ..state import get_runtime, get_runtime_mcp_servers
@@ -101,6 +102,10 @@ def init_hot_loading(
             # later in bootstrap, so a bool captured here would always be False.
             approval_gate_available=_approval_gate_available,
             log_buffers=log_buffers,
+            # The getter, not its value: `apply_process_config` replaces the
+            # trust on every reload, and each load asks for the one in force.
+            trust=hot_load_trust,
+            peer_key_names=runtime.config_repository.get_peer_key_names if runtime.config_repository else None,
         )
 
         unload_handler = UnloadMcpServerHandler(

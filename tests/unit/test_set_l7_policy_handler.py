@@ -77,7 +77,7 @@ class TestThePushSaysWhetherARestartKeepsThePolicy:
         return result, [e for e in logs if e["event"] == "l7_policy_not_persisted"]
 
     def test_a_policy_recorded_and_read_back_at_start_is_persisted(self) -> None:
-        result, warnings = self._push(MagicMock(), None)
+        result, warnings = self._push(MagicMock(read=MagicMock(return_value=None)), None)
 
         assert result["persisted"] is True
         assert warnings == []
@@ -88,7 +88,7 @@ class TestThePushSaysWhetherARestartKeepsThePolicy:
             # The chart default: nothing is written anywhere.
             (None, None, "no_durable_backend"),
             # Written, but MCP_AUTO_RECOVER=false: nothing reads it back.
-            (MagicMock(), "auto_recover_off", "auto_recover_off"),
+            (MagicMock(read=MagicMock(return_value=None)), "auto_recover_off", "auto_recover_off"),
         ],
     )
     def test_a_policy_a_restart_drops_is_not_persisted_and_warns(

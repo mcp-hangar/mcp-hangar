@@ -145,11 +145,11 @@ def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any
         return None
 
     try:
-        state_dir = absolute_state_dir(config)
+        database_path = approval_database_path(config)
         database_config = None
-        if state_dir:
+        if database_path is not None:
             database_config = _import_attribute("mcp_hangar.infrastructure.persistence.database", "DatabaseConfig")(
-                path=str(state_dir / "mcp_hangar.db")
+                path=str(database_path)
             )
         return bootstrap_approvals(
             database=get_database(database_config),
@@ -299,6 +299,17 @@ def absolute_state_dir(config: dict[str, Any]) -> Path | None:
     if not path or not Path(str(path)).is_absolute():
         return None
     return Path(str(path)).parent
+
+
+def approval_database_path(config: dict[str, Any]) -> Path | None:
+    """The SQLite file approvals live in when no backend is selected, or None for the relative default.
+
+    None means ``data/mcp_hangar.db`` under the gateway's working directory --
+    which a second process, such as ``mcp-hangar approvals`` (#1778), cannot
+    know, so it must not guess.
+    """
+    state_dir = absolute_state_dir(config)
+    return state_dir / "mcp_hangar.db" if state_dir else None
 
 
 def create_persistent_event_store(driver: str, config: dict[str, Any]) -> Any | None:

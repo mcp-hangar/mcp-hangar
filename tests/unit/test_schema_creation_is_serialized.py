@@ -23,7 +23,8 @@ from mcp_hangar.infrastructure.persistence.database_common import (
     postgres_ddl,
 )
 
-BACKEND = Path(__file__).resolve().parents[2] / "src/mcp_hangar/infrastructure/persistence/backends/postgresql"
+SRC = Path(__file__).resolve().parents[2] / "src/mcp_hangar"
+BACKEND = SRC / "infrastructure/persistence/backends/postgresql"
 
 
 class TestTheLockRidesWithTheStatement:
@@ -49,7 +50,11 @@ class TestTheLockRidesWithTheStatement:
 
 
 def _modules_that_create_tables() -> list[Path]:
-    return sorted(p for p in BACKEND.glob("*.py") if "CREATE TABLE" in p.read_text())
+    # Every PostgreSQL module under src/, not only the backend's: the auth
+    # stores live in their own package, and that is how they escaped (#1985).
+    return sorted(p for p in SRC.rglob("*postgres*.py") if "CREATE TABLE" in p.read_text()) + sorted(
+        p for p in BACKEND.glob("*.py") if "CREATE TABLE" in p.read_text()
+    )
 
 
 class TestNoAdapterCreatesATableUnserialized:
@@ -57,8 +62,8 @@ class TestNoAdapterCreatesATableUnserialized:
         # A guard whose subject list silently emptied would pass forever.
         found = {p.name for p in _modules_that_create_tables()}
 
-        assert {"event_store.py", "management_lease.py", "config_repository.py"} <= found
-        assert len(found) >= 8
+        assert {"event_store.py", "management_lease.py", "config_repository.py", "postgres_store.py"} <= found
+        assert len(found) >= 9
 
     @pytest.mark.parametrize("module", _modules_that_create_tables(), ids=lambda p: p.name)
     def test_it_serializes_its_ddl(self, module: Path) -> None:

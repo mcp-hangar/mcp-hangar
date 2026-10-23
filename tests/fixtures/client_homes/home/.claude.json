@@ -1,0 +1,28 @@
+{
+  "theme": "dark",
+  "mcpServers": {
+    "notes": {
+      "type": "stdio",
+      "command": "notes-server",
+      "args": ["--root", "/home/u/notes"],
+      "env": {"NOTES_TOKEN": "not-a-real-token-claude-user"}
+    },
+    "search": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer not-a-real-token-claude-header"}
+    },
+    "mcp-hangar": {
+      "type": "stdio",
+      "command": "/usr/local/bin/mcp-hangar",
+      "args": ["--config", "/home/u/.mcp-hangar/config.yaml", "serve"]
+    }
+  },
+  "projects": {
+    "/home/u/work/app": {
+      "mcpServers": {
+        "local-only": {"type": "stdio", "command": "local-server"}
+      }
+    }
+  }
+}

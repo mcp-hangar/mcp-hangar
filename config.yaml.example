@@ -319,3 +319,48 @@ logging:
 #
 # resource_links:
 #   max_per_tenant: 4096
+
+# ---------------------------------------------------------------------------
+# Hot-loading — what a server loaded from the registry may have
+# ---------------------------------------------------------------------------
+# `hangar_load` installs and starts a server from the MCP registry at runtime.
+# Its registry entry is written by whoever published it, so nothing in it is
+# trusted: the keys below are the operator's decisions, and each defaults to
+# refusing. They are applied at startup and on every reload, and each load
+# reads the ones in force.
+#
+# trusted_namespaces: the source of "verified". An entry is verified when its
+#   exact registry name starts with a listed namespace and the registry lists
+#   it as active. Matching is case-sensitive and by whole segment: every
+#   namespace ends in `/` (one is added when it is left out), so
+#   "io.github.acme/" matches "io.github.acme/weather" but not
+#   "io.github.acmeevil/weather" or "io.github.acme.labs/weather". The
+#   registry's `status: active` alone is carried by every published entry and
+#   verifies nothing. Empty or absent: every entry is unverified and refused.
+#
+# allow_force_unverified: whether the `force_unverified` argument of
+#   `hangar_load` may load an entry that is not verified. The argument is the
+#   caller's, and the caller is an agent. false (default): it is ignored.
+#
+# inherit_env: names a hot-loaded server takes from the gateway's environment
+#   on top of a fixed base (PATH, HOME, USER, LOGNAME, LANG, LC_ALL, LC_CTYPE,
+#   TZ, TMPDIR, TMP, TEMP, and the Windows equivalents). Nothing else is
+#   inherited: list a proxy, a CA bundle or UV_*/npm_config_* settings here if
+#   uvx or npx need them. Statically configured servers are unaffected.
+#
+# secrets.allow: the exact registry name of a server -> the environment
+#   variables it may receive. A variable its entry asks for and that is not
+#   listed here is reported missing and never looked up, even when the gateway
+#   has it set. A listed one is read from the gateway's environment, then from
+#   ~/.config/mcp-hangar/secrets/<registry name>/<NAME> (one directory per `/`
+#   segment: secrets/io.github.acme/weather/WEATHER_API_KEY), then from
+#   ~/.config/mcp-hangar/secrets/<NAME>.
+#
+# hot_loading:
+#   enabled: true
+#   trusted_namespaces: ["io.github.acme/"]
+#   allow_force_unverified: false
+#   inherit_env: []
+#   secrets:
+#     allow:
+#       "io.github.acme/weather": [WEATHER_API_KEY]

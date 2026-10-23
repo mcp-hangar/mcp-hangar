@@ -31,7 +31,7 @@ from mcp_hangar.server.bootstrap.pinning import (
     PinnedToolsNeedAnIdentityError,
     refuse_pins_that_no_caller_can_match,
 )
-from mcp_hangar.server.tools.tool_permissions import management_tools_for
+from mcp_hangar.server.tools.tool_permissions import SELF_SCOPED_TOOLS, management_tools_for
 
 DECLARED = {
     "auth": {
@@ -148,7 +148,8 @@ class TestTheManagementSurfaceFollowsTheRoles:
             stdio=True,
         )
 
-        assert management_tools_for(None) == frozenset()
+        # A declared principal is an identity, so it is shown whoami and nothing else (#1363).
+        assert management_tools_for(None) == SELF_SCOPED_TOOLS
 
     def test_an_unknown_role_grants_nothing(self):
         _declare_stdio_principal(
@@ -156,7 +157,8 @@ class TestTheManagementSurfaceFollowsTheRoles:
             stdio=True,
         )
 
-        assert management_tools_for(None) == frozenset()
+        # A declared principal is an identity, so it is shown whoami and nothing else (#1363).
+        assert management_tools_for(None) == SELF_SCOPED_TOOLS
 
 
 class TestPinsForTheDeclaredTenant:

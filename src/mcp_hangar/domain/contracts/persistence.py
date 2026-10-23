@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
+from ..value_objects.peer_identity import PeerIdentity
 from ..value_objects.provenance import Provenance
 
 
@@ -92,6 +93,11 @@ class AuditEntry:
         )
 
 
+#: The stored `mode` of a key-pinned server's row (ADR-030 §4e). Not a member of
+#: `McpServerMode`: the declared mode stays `remote`, and only the row says this.
+PEER_KEY_ROW_MODE = "remote-peer-key"
+
+
 @dataclass(frozen=True)
 class McpServerConfigSnapshot:
     """Immutable snapshot of mcp_server configuration.
@@ -141,6 +147,10 @@ class McpServerConfigSnapshot:
     # (#991). Wire form rather than the dataclass: it is the one shape the
     # operator, the REST route, and L7Policy.from_dict already agree on.
     l7_policy: dict[str, Any] | None = None
+    # The server's `tls` block (it holds no secret), so a server declared with a
+    # peer identity comes back with it after a restart and on a peer replica,
+    # instead of as a plain server whose key nothing checks (ADR-030 §10).
+    tls: dict[str, Any] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -158,11 +168,22 @@ class McpServerConfigSnapshot:
             addrs = frozenset(str(a) for a in addrs)
         object.__setattr__(self, "runtime_addresses", addrs)
 
+        # A key-pinned server's row is stored under a mode the previous release
+        # does not know, so that release declines the row instead of serving
+        # the server as a plain one (ADR-030 §4e). It is read back as `remote`,
+        # and only with the peer identity that gave it the encoding.
+        if self.mode == PEER_KEY_ROW_MODE:
+            if PeerIdentity.from_tls(self.tls) is None:
+                raise ValueError(
+                    f"mcp_server '{self.mcp_server_id}': a {PEER_KEY_ROW_MODE} row without tls.peer_identity"
+                )
+            object.__setattr__(self, "mode", "remote")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
         return {
             "mcp_server_id": self.mcp_server_id,
-            "mode": self.mode,
+            "mode": PEER_KEY_ROW_MODE if self.mode == "remote" and PeerIdentity.from_tls(self.tls) else self.mode,
             "command": self.command,
             "image": self.image,
             "endpoint": self.endpoint,
@@ -184,6 +205,7 @@ class McpServerConfigSnapshot:
             "runtime_addresses": (sorted(self.runtime_addresses) if self.runtime_addresses is not None else None),
             "enforce_ssrf": self.enforce_ssrf,
             "l7_policy": self.l7_policy,
+            "tls": self.tls,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -218,9 +240,21 @@ class McpServerConfigSnapshot:
             runtime_addresses=data.get("runtime_addresses"),
             enforce_ssrf=data.get("enforce_ssrf", False),
             l7_policy=data.get("l7_policy"),
+            tls=data.get("tls"),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )
+
+
+class PeerKeyClaim(Enum):
+    """How a configuration write keeps the peer-key name record (ADR-030 §9)."""
+
+    #: Claim the row's name and `key_ref`, or refuse a write the record contradicts.
+    CLAIM = "claim"
+    #: The name's entry takes the row's new `key_ref`; one held by another name is still refused.
+    MOVE = "move"
+    #: Leave the record alone: a server the configuration file declares, whose entries are the file's.
+    SKIP = "skip"
 
 
 class IMcpServerConfigRepository(Protocol):
@@ -243,6 +277,62 @@ class IMcpServerConfigRepository(Protocol):
         """
         ...
 
+    async def save_versioned(
+        self,
+        config: McpServerConfigSnapshot,
+        expected_version: int | None,
+        peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    ) -> None:
+        """Save a configuration only if the row is still the one the caller read (#1954).
+
+        `save` replaces whatever is there, so a replica whose copy is behind
+        writes its stale copy back over a peer's newer one -- an older L7 policy
+        included -- and the stale write wins. This is the compare-and-set form.
+
+        Args:
+            config: The configuration to store.
+            expected_version: The version `get_with_version` returned; 0 when
+                it returned nothing, meaning no row of any kind may exist; or
+                None for a create, which may replace a deleted (disabled) row
+                but never a live one.
+
+        The same transaction keeps the peer-key name record (ADR-030 §9): a
+        configuration with `tls.peer_identity` claims its name and `key_ref`
+        there, and one without may not take a name the record holds. An entry
+        outlives the row, so a deleted key-pinned server cannot come back as a
+        plain one, and `key_ref` names one server only. *peer_key* says how
+        the write keeps it.
+
+        Raises:
+            ConcurrentModificationError: The row changed, was deleted, or (for a
+                create) already exists, since the caller read it.
+            PeerKeyNameRefused: The record holds the name under another
+                `key_ref`, holds the `key_ref` under another name, or holds the
+                name and the configuration declares no peer identity.
+            PersistenceError: If the write fails for any other reason.
+        """
+        ...
+
+    async def forget_peer_key_name(self, mcp_server_id: str) -> bool:
+        """Remove a name's entry from the peer-key name record, unless a live row still uses it.
+
+        Returns:
+            Whether there was an entry to remove.
+
+        Raises:
+            PeerKeyNameRefused: The server is still registered under the name.
+            PersistenceError: If the write fails.
+        """
+        ...
+
+    async def get_peer_key_names(self) -> dict[str, str]:
+        """Every entry of the peer-key name record, name to `key_ref` (ADR-030 §9).
+
+        Raises:
+            PersistenceError: If the record cannot be read.
+        """
+        ...
+
     async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
         """Retrieve mcp_server configuration by ID.
 
@@ -251,6 +341,18 @@ class IMcpServerConfigRepository(Protocol):
 
         Returns:
             Configuration snapshot if found, None otherwise
+        """
+        ...
+
+    async def get_with_version(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """Retrieve a live configuration with the version `save_versioned` expects.
+
+        Args:
+            mcp_server_id: McpServer identifier
+
+        Returns:
+            The configuration and its version, or None when there is no row or
+            the server was deleted.
         """
         ...
 
@@ -408,6 +510,79 @@ class ConcurrentModificationError(PersistenceError):
             f"Concurrent modification on mcp_server '{mcp_server_id}': "
             f"expected version {expected_version}, actual {actual_version}"
         )
+
+
+class PeerKeyNameRefused(PersistenceError):
+    """A write would contradict the peer-key name record (ADR-030 §9)."""
+
+    def __init__(self, mcp_server_id: str, reason: str):
+        self.mcp_server_id = mcp_server_id
+        self.reason = reason
+        super().__init__(f"mcp_server '{mcp_server_id}': {reason}")
+
+
+def peer_key_claim(config: McpServerConfigSnapshot) -> str | None:
+    """The `key_ref` a configuration claims in the peer-key name record, if any."""
+    identity = PeerIdentity.from_tls(config.tls)
+    return identity.key_ref if identity is not None else None
+
+
+def check_peer_key_claim(mcp_server_id: str, key_ref: str | None, entries: list[tuple[str, str]]) -> None:
+    """Refuse a write the record contradicts.
+
+    Args:
+        mcp_server_id: The name being written.
+        key_ref: The `key_ref` it declares, or None for a server without a peer identity.
+        entries: The record's entries whose name is `mcp_server_id` or whose
+            `key_ref` is `key_ref`, read after the claim was inserted, so a
+            concurrent claim that won is among them.
+    """
+    if key_ref is None:
+        held = [ref for name, ref in entries if name == mcp_server_id]
+        if held:
+            raise PeerKeyNameRefused(
+                mcp_server_id,
+                f"the name is in the peer-key name record with key_ref '{held[0]}'; "
+                "a server without that peer identity cannot take it",
+            )
+        return
+    for name, ref in entries:
+        if name == mcp_server_id and ref != key_ref:
+            raise PeerKeyNameRefused(mcp_server_id, f"the name is in the peer-key name record with key_ref '{ref}'")
+        if name != mcp_server_id and ref == key_ref:
+            raise PeerKeyNameRefused(mcp_server_id, f"key_ref '{key_ref}' already names the server '{name}'")
+    if (mcp_server_id, key_ref) not in entries:
+        raise PeerKeyNameRefused(mcp_server_id, "the peer-key name record did not keep the claim")
+
+
+def peer_key_name_conflicts(declared: dict[str, str | None], stored: dict[str, str]) -> list[str]:
+    """What a configuration file contradicts in the stored peer-key name record (ADR-030 §9).
+
+    Args:
+        declared: Every server the file declares, by name, with the `key_ref`
+            of its peer identity or None.
+        stored: The record's entries, name to `key_ref`.
+
+    Returns:
+        One line per conflict; empty when the file agrees with the record. The
+        same name with the same `key_ref` agrees: that is a registered server
+        moved into the file. Two names the file gives one `key_ref` conflict
+        too, because the file's servers are entries of the record (§7).
+    """
+    holders = {ref: name for name, ref in stored.items()}
+    declared_by: dict[str, str] = {}
+    conflicts = []
+    for name, key_ref in sorted(declared.items()):
+        if key_ref is not None and declared_by.setdefault(key_ref, name) != name:
+            conflicts.append(f"'{name}' and '{declared_by[key_ref]}' both declare key_ref '{key_ref}'")
+        if name in stored and key_ref != stored[name]:
+            conflicts.append(
+                f"'{name}' is in the peer-key name record with key_ref '{stored[name]}', "
+                f"and the file declares it {'with key_ref ' + repr(key_ref) if key_ref else 'without a peer identity'}"
+            )
+        elif key_ref is not None and holders.get(key_ref, name) != name:
+            conflicts.append(f"'{name}' declares key_ref '{key_ref}', which the record holds for '{holders[key_ref]}'")
+    return conflicts
 
 
 # legacy aliases

@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.29.1"
+version = "2.33.0"
 description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
@@ -103,7 +103,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.16.9",
+    "ruff==0.17.0",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -111,8 +111,8 @@ dev = [
     # The discovery security check's HTTP client (security_validator.py). In a
     # deployment the kubernetes extra brings it; without it here the check is
     # skipped in every test run and its tests can only skip (#1756). Security
-    # floor: the deps-floor-audit job refuses anything older than 3.14.3.
-    "aiohttp>=3.14.3",
+    # floor: the deps-floor-audit job refuses anything older than 3.14.4.
+    "aiohttp>=3.14.4",
 ]
 # The kubernetes discovery source imports this. Until now it was declared
 # nowhere -- not a dependency, not an extra, not in the image -- so the source
@@ -129,13 +129,15 @@ dev = [
 # the normal test suite everywhere.
 fuzz = ["atheris>=3.1.0; sys_platform == 'linux' and python_version >= '3.12' and platform_machine == 'x86_64'"]
 kubernetes = ["kubernetes>=29.0.0"]
-# 1.35 is the lowest release that installs beside the core dependencies:
+# 1.45.1 is the floor because the API below it carries CVE-2026-114603. (1.35
+# was the lowest release that installs beside the core dependencies:
 # `opentelemetry-proto` requires `protobuf<6` through 1.34.x, and the core
-# requires `protobuf>=6.33.5` (`mcp` alone already needs the API at >=1.28).
+# requires `protobuf>=6.33.5`; `mcp` alone already needs the API at >=1.28.)
+# The three move together.
 opentelemetry = [
-    "opentelemetry-api>=1.35.0",
-    "opentelemetry-sdk>=1.35.0",
-    "opentelemetry-exporter-otlp>=1.35.0",
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp>=1.45.1",
 ]
 # The PostgreSQL stores import psycopg2 -- see `database_common.PostgresConnectionFactory`.
 # This extra declared `asyncpg`, which appears nowhere in `src/` outside a docstring,
@@ -321,10 +323,10 @@ relative_files = true
 #     Pinning those branches with deterministic tests would let this rise again.
 #
 # Two entries are visible debt rather than a target:
-#   approvals/persistence/sqlite_approval_repository.py at 64.9 -- the store
+#   approvals/persistence/sqlite_approval_repository.py at 87.0 -- the store
 #     holding approval state, tenant scoping and the arguments hash. Unit tests
 #     use a fake repository; the real SQL of `transition` is exercised by the
-#     multi-process race test (#1794), the rest of the paths barely.
+#     multi-process race test (#1794) and the CLI resolve tests (#1778).
 #   domain/value_objects/tool_access_policy.py at 84.2 -- _CompositePolicy's
 #     merge and approval-list handling, i.e. the consent-preservation logic.
 #   server/tools/batch/executor.py at 85.3 -- the invoke path, including the
@@ -344,7 +346,7 @@ drift_allowance = 3.0
   "approvals/hold_registry.py" = 100.0
   "approvals/models.py" = 97.9
   "approvals/pending.py" = 100.0
-  "approvals/persistence/sqlite_approval_repository.py" = 64.9
+  "approvals/persistence/sqlite_approval_repository.py" = 87.0
   "approvals/service.py" = 96.1
   "auth/commands/handlers.py" = 99.2
   "auth/infrastructure/middleware.py" = 96.9
@@ -480,8 +482,7 @@ reserved_without_producer = [
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
   "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
-  "McpServerApproved", "McpServerCapabilityQuarantineReleased",
-  "PolicyPushRejected", ]
+  "McpServerApproved", "McpServerCapabilityQuarantineReleased", ]
 # DiscoveryCycleCompleted and DiscoverySourceHealthChanged stay unemitted on
 # purpose rather than for lack of a caller: at the default 30s refresh a cycle
 # event is 2880 rows a day per gateway saying "nothing changed", and source

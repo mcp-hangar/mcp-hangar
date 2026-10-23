@@ -42,11 +42,19 @@ from urllib.parse import urlparse
 
 from ..value_objects.provenance import Provenance
 
-#: Refused for a human-supplied endpoint: every private range.
+#: Refused for a human-supplied endpoint: every private range. That includes
+#: the two a cluster's own pods and Services commonly sit in that are not
+#: RFC 1918 (#1754): IPv6 unique local addresses, which dual-stack and IPv6
+#: clusters use, and the shared address space of RFC 6598, which many
+#: distributions use for pods or Services. Left out, an API caller could
+#: register an in-cluster endpoint there. A deployment that registers such
+#: endpoints on purpose trusts the range in `ssrf.trusted_networks`.
 _BLOCKED_NETWORKS = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fe80::/10"),

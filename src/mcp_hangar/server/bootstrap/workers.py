@@ -1,13 +1,14 @@
 """Background workers: built by bootstrap, started and stopped here."""
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
+from ...application.read_models.tool_projection import add_change_listener, remove_change_listener
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
 from ...group_recovery import GroupRecoveryWorker
 from ...logging_config import get_logger
-from ...pin_recheck import PinRecheckWorker, pin_recheck_interval_s
+from ...pin_recheck import PIN_RECHECK_DEFAULT_INTERVAL_S, PinRecheckWorker, pin_recheck_interval_s
 from ..state import GROUPS, get_runtime
 from .coordination import may_manage
 
@@ -27,6 +28,11 @@ GROUP_RECOVERY_INTERVAL_SECONDS = 30
 
 WORKER_STOP_TIMEOUT_SECONDS = 10.0
 """How long `stop_background_workers` waits, in total, for the workers' threads to end."""
+
+
+#: The pin re-check's drift report, installed as a projection change listener;
+#: replaced, not added to, by each `create_background_workers`.
+_drift_listener: Callable[[], None] | None = None
 
 
 def create_background_workers(
@@ -76,8 +82,18 @@ def create_background_workers(
 
     # Per replica too: each re-lists the catalogue it serves from (#1693). Built
     # whenever it is on, pins or not -- a reload can add the first pin.
+    # A drifted tool is withheld from every listing, so its call no longer
+    # reports the drift on the front door: a change listener does, whether or
+    # not the re-check is on, sharing what was reported with it (#1776).
+    # Built, but neither listed nor started, when the interval is 0 (#1776).
+    pin_recheck = PinRecheckWorker(mcp_servers, GROUPS, interval_s=pin_recheck_s or PIN_RECHECK_DEFAULT_INTERVAL_S)
+    global _drift_listener
+    if _drift_listener is not None:
+        remove_change_listener(_drift_listener)
+    _drift_listener = pin_recheck.report_drift
+    add_change_listener(_drift_listener)
     if pin_recheck_s > 0:
-        workers.append(PinRecheckWorker(mcp_servers, GROUPS, interval_s=pin_recheck_s))
+        workers.append(pin_recheck)
     worker_names = [worker.task for worker in workers]
 
     logger.info("background_workers_created", workers=worker_names)

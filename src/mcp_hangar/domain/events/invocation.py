@@ -75,6 +75,13 @@ class ToolInvocationCompleted(DomainEvent):
     result_size_bytes: int = 0
     identity_context: dict[str, Any] | None = None
     logical_target: str = ""
+    #: The key pin of the connection that served the call, read from its socket,
+    #: for a key-pinned server (ADR-030 §6); None for any other server.
+    upstream_peer_spki: str | None = None
+    #: The server's `tls.peer_identity.issuance` at the time of the call, as the
+    #: configuration declares it (ADR-030 §2, §6); None when it declares none.
+    #: A declaration, never a verification.
+    declared_key_issuance: str | None = None
 
 
 @accepts_legacy_provider_id
@@ -93,6 +100,15 @@ class ToolInvocationFailed(DomainEvent):
     error_type: str = ""
     identity_context: dict[str, Any] | None = None
     logical_target: str = ""
+    #: As on ToolInvocationCompleted: set when a verified connection served a
+    #: call that failed at the application level.
+    upstream_peer_spki: str | None = None
+    #: A bounded refusal code, ``upstream_peer_key_mismatch``, or None.
+    failure_code: str | None = None
+    #: The key pin a refused peer presented; None when it presented none.
+    observed_peer_spki: str | None = None
+    #: As on ToolInvocationCompleted.
+    declared_key_issuance: str | None = None
 
 
 @dataclass
@@ -141,3 +157,6 @@ class ToolCallRefused(DomainEvent):
     l7_policy_id: str | None = None
     elapsed_ms: float = 0.0
     route_backend: str | None = None
+    #: The key pin an upstream presented when a cold start was refused for it
+    #: (ADR-030 §6); None for every other refusal.
+    observed_peer_spki: str | None = None

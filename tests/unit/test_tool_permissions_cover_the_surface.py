@@ -28,6 +28,7 @@ from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RB
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.server.tools.tool_permissions import (
     SELF_AUTHORIZING_TOOLS,
+    SELF_SCOPED_TOOLS,
     TOOL_PERMISSIONS,
     ToolAccessNotAuthorizedError,
     authorize_tool,
@@ -253,7 +254,7 @@ class TestTheGuardIsReachable:
 
         assert registered, "the served surface registered no tools; the probe is broken, not the table"
 
-        unmapped = registered - set(TOOL_PERMISSIONS) - SELF_AUTHORIZING_TOOLS
+        unmapped = registered - set(TOOL_PERMISSIONS) - SELF_AUTHORIZING_TOOLS - SELF_SCOPED_TOOLS
         assert not unmapped, (
             f"tools registered with no entry in TOOL_PERMISSIONS: {sorted(unmapped)}. "
             "An unmapped tool is refused at runtime, so this is a defect in the tool, not in the table."
@@ -292,8 +293,38 @@ class TestTheGuardIsReachable:
         server = build_serving_mcp_server()
         registered = {tool.name for tool in anyio.run(_list_tools, server)}
 
-        stale = set(TOOL_PERMISSIONS) - registered
+        stale = (set(TOOL_PERMISSIONS) | SELF_SCOPED_TOOLS) - registered
         assert not stale, f"TOOL_PERMISSIONS names tools that are not registered: {sorted(stale)}"
+
+    def test_each_tool_has_exactly_one_treatment(self):
+        """A self-scoped tool is neither table-gated nor self-authorizing (#1363)."""
+        assert not SELF_SCOPED_TOOLS & set(TOOL_PERMISSIONS)
+        assert not SELF_SCOPED_TOOLS & SELF_AUTHORIZING_TOOLS
+        assert not set(TOOL_PERMISSIONS) & SELF_AUTHORIZING_TOOLS
+
+
+class TestSelfScopedTools:
+    """`hangar_whoami` needs an identity and no permission (#1363)."""
+
+    def test_a_caller_with_no_role_may_call_it(self, with_auth):
+        principal = with_auth(None)
+
+        authorize_tool("hangar_whoami", _ctx(principal))
+
+    def test_an_anonymous_caller_is_refused(self, with_auth):
+        with_auth("admin")
+
+        with pytest.raises(ToolAccessNotAuthorizedError):
+            authorize_tool("hangar_whoami", _ctx(Principal.anonymous()))
+        with pytest.raises(ToolAccessNotAuthorizedError):
+            authorize_tool("hangar_whoami", _ctx(None))
+
+    def test_auth_off_does_not_conjure_an_identity(self, with_auth):
+        """Unlike the table, which allows everything with auth off."""
+        principal = with_auth("admin", enabled=False)
+
+        with pytest.raises(ToolAccessNotAuthorizedError):
+            authorize_tool("hangar_whoami", _ctx(principal))
 
 
 async def _list_tools(server):

@@ -19,12 +19,17 @@ from typing import Any
 
 import structlog
 
-from mcp_hangar.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES, role_as_enforced
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
-from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
+from mcp_hangar.domain.exceptions import (
+    CannotModifyBuiltinRoleError,
+    ExpiredCredentialsError,
+    RevokedCredentialsError,
+)
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
+from mcp_hangar.infrastructure.persistence.database_common import postgres_ddl
 
 logger = structlog.get_logger(__name__)
 
@@ -142,7 +147,9 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
 
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(schema)
+                # Under the schema lock: replicas starting together on an empty
+                # database otherwise race to create the table (#1985).
+                cur.execute(postgres_ddl(schema))
             conn.commit()
         logger.info("postgres_api_key_store_initialized", table=self._table)
 
@@ -696,7 +703,9 @@ class PostgresRoleStore(IRoleStore):
 
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(schema)
+                # Under the schema lock, held until the commit below, so the
+                # seeding is serialized with the tables (#1985).
+                cur.execute(postgres_ddl(schema))
 
                 # Seed built-in roles
                 for role_name, role in BUILTIN_ROLES.items():
@@ -756,10 +765,17 @@ class PostgresRoleStore(IRoleStore):
                 for p in permissions_json
             )
 
-            return Role(name=name, description=description or "", permissions=permissions)
+            return role_as_enforced(name, description or "", permissions)
 
     def add_role(self, role: Role) -> None:
-        """Add a custom role."""
+        """Add a custom role.
+
+        Raises:
+            CannotModifyBuiltinRoleError: The name is a built-in role's; the
+                upsert would rewrite its row (#1988).
+        """
+        if role.name in BUILTIN_ROLES:
+            raise CannotModifyBuiltinRoleError(role.name)
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 permissions_json = json.dumps(
@@ -829,7 +845,7 @@ class PostgresRoleStore(IRoleStore):
                     )
                     for p in permissions_json
                 )
-                roles.append(Role(name=name, description=description or "", permissions=permissions))
+                roles.append(role_as_enforced(name, description or "", permissions))
 
             return roles
 

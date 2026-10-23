@@ -1,7 +1,7 @@
 """Command handlers for hot-loading mcp_servers from the registry."""
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -19,6 +19,7 @@ from ...domain.exceptions import (
     UnverifiedMcpServerError,
 )
 from ...domain.model.mcp_server_config import parse_tools_access_config
+from ...domain.security.hot_load_trust import HotLoadTrust
 from ...domain.services import get_tool_access_resolver
 from ...domain.value_objects import ToolAccessPolicy
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
@@ -26,32 +27,11 @@ from ...logging_config import get_logger
 from ...redactor import OutputRedactor
 from ..ports.log_buffers import ILogBuffers
 from ..services.package_resolver import PackageResolver
+from ..services.registry_ids import sanitize_mcp_server_id
 from ..services.secrets_resolver import SecretsResolver
 from .commands import LoadMcpServerCommand, UnloadMcpServerCommand
 
 logger = get_logger(__name__)
-
-
-def _sanitize_mcp_server_id(server_id: str) -> str:
-    """Sanitize server ID to be a valid McpServerId.
-
-    McpServerId only allows alphanumeric characters, hyphens, and underscores.
-    This converts dots and slashes to hyphens.
-
-    Args:
-        server_id: The server ID from the registry.
-
-    Returns:
-        A sanitized mcp_server ID.
-    """
-    # Replace common separators with hyphens
-    sanitized = server_id.replace("/", "-").replace(".", "-")
-    # Remove any consecutive hyphens
-    while "--" in sanitized:
-        sanitized = sanitized.replace("--", "-")
-    # Remove leading/trailing hyphens
-    sanitized = sanitized.strip("-")
-    return sanitized
 
 
 @dataclass
@@ -113,6 +93,8 @@ class LoadMcpServerHandler(CommandHandler):
         mcp_server_repository: Any,
         approval_gate_available: Callable[[], bool] | None = None,
         log_buffers: ILogBuffers | None = None,
+        trust: Callable[[], HotLoadTrust] | None = None,
+        peer_key_names: Callable[[], Awaitable[dict[str, str]]] | None = None,
     ):
         """Initialize the handler.
 
@@ -137,6 +119,16 @@ class LoadMcpServerHandler(CommandHandler):
                 read from. Omitted means none is attached, and the server's
                 output reaches no log -- which is what the hot-load path did
                 before #1506.
+            trust: Asked once per load for the operator's decisions about
+                hot-loaded servers (`hot_loading` in `config.yaml`): which
+                entries are verified, whether `force_unverified` may load one
+                that is not, and which secrets each may receive. A callable so that a reload applies to
+                the next load. Omitted means the default, which allows nothing:
+                every entry is unverified and no secret is delivered to any server.
+            peer_key_names: Reads the peer-key name record. A hot-loaded server
+                never writes a configuration row, so the record is checked here:
+                a recorded name belongs to a key-pinned server (ADR-030 §9).
+                Omitted means no record, as on a gateway without durable storage.
         """
         self._registry_client = registry_client
         self._package_resolver = package_resolver
@@ -148,6 +140,8 @@ class LoadMcpServerHandler(CommandHandler):
         self._mcp_server_repository = mcp_server_repository
         self._approval_gate_available = approval_gate_available
         self._log_buffers = log_buffers
+        self._trust = trust or HotLoadTrust
+        self._peer_key_names = peer_key_names
 
     def _attach_log_buffer(self, mcp_server_id: str, mcp_server: Any) -> None:
         """Give the loaded server the log buffer its output is read from.
@@ -246,6 +240,36 @@ class LoadMcpServerHandler(CommandHandler):
             logger.warning("approval_gate_probe_failed", error=str(e))
             return False
 
+    @staticmethod
+    def _refuse_unless_verified(server: ServerDetails, command: LoadMcpServerCommand, trust: HotLoadTrust) -> list[str]:
+        """Raise unless the entry is verified or the operator lets this call force it; return the warnings.
+
+        Verified needs both: a namespace the operator trusts, which is what
+        says who wrote the entry, and the registry still listing it as
+        active, so a deprecated or deleted entry is not loaded on the strength
+        of its namespace alone. `status: active` on its own is carried by
+        every published entry and verifies nothing. `force_unverified` is the
+        caller's argument, so it counts only where the operator has said it
+        may.
+
+        Raises:
+            UnverifiedMcpServerError: When it is neither.
+        """
+        trusted = trust.is_trusted(server.id)
+        if not (trusted and server.is_published) and not (command.force_unverified and trust.allow_force_unverified):
+            raise UnverifiedMcpServerError(
+                server.id,
+                force_ignored=command.force_unverified and not trust.allow_force_unverified,
+                published=server.is_published,
+                trusted=trusted,
+            )
+        warnings = []
+        if not trusted:
+            warnings.append(f"McpServer {server.name!r} is not in a trusted namespace")
+        if not server.is_published:
+            warnings.append(f"McpServer {server.name!r} is not active in the registry")
+        return warnings
+
     async def handle(self, command: LoadMcpServerCommand) -> LoadResult:
         """Handle the load mcp_server command.
 
@@ -257,6 +281,8 @@ class LoadMcpServerHandler(CommandHandler):
         """
         start_time = time.perf_counter()
         warnings: list[str] = []
+        # Once, so the whole load is decided under one configuration.
+        trust = self._trust()
 
         self._event_bus.publish(
             McpServerLoadAttempted(
@@ -275,7 +301,7 @@ class LoadMcpServerHandler(CommandHandler):
             tool_policy = self._build_tool_policy(command)
 
             # Check both original name and sanitized version
-            sanitized_name = _sanitize_mcp_server_id(command.name)
+            sanitized_name = sanitize_mcp_server_id(command.name)
 
             if self._runtime_store.exists(command.name) or self._runtime_store.exists(sanitized_name):
                 return LoadResult(
@@ -291,31 +317,36 @@ class LoadMcpServerHandler(CommandHandler):
                     message=f"McpServer '{command.name}' is already configured (not hot-loaded)",
                 )
 
+            recorded = await self._peer_key_names() if self._peer_key_names is not None else {}
+            if command.name in recorded or sanitized_name in recorded:
+                return LoadResult(
+                    status="failed",
+                    mcp_server_id=sanitized_name,
+                    message=f"McpServer '{command.name}' is in the peer-key name record; it cannot be hot-loaded",
+                )
+
             server = await self._find_server(command.name)
 
-            if not server.is_official and not command.force_unverified:
-                raise UnverifiedMcpServerError(command.name)
+            warnings.extend(self._refuse_unless_verified(server, command, trust))
 
-            if not server.is_official:
-                warnings.append(f"McpServer '{server.name}' is not officially verified")
-
+            # Keyed on the exact registry name: the sanitized id is lossy, and
+            # a colliding name would otherwise inherit another server's secrets.
             secrets_result = self._secrets_resolver.resolve(
                 server.required_env_vars,
                 server.id,
+                allowed=trust.allowed_secrets(server.id),
             )
 
             # Create redactor with resolved secrets for error message sanitization
             redactor = OutputRedactor(known_secrets=secrets_result.resolved)
 
             if not secrets_result.all_resolved:
-                instructions = self._secrets_resolver.get_missing_instructions(
-                    secrets_result.missing,
-                    server.id,
-                )
+                instructions = self._secrets_resolver.get_missing_instructions(secrets_result, server.id)
                 return LoadResult(
                     status="missing_secrets",
                     mcp_server_name=server.name,
-                    message=f"Missing required secrets: {', '.join(secrets_result.missing)}",
+                    # Names from the registry entry, so each is quoted and escaped.
+                    message=f"Missing required secrets: {', '.join(map(repr, secrets_result.missing))}",
                     instructions=instructions,
                 )
 
@@ -342,13 +373,16 @@ class LoadMcpServerHandler(CommandHandler):
             installed = await installer.install(package)
 
             # Sanitize mcp_server ID (registry IDs may contain dots/slashes)
-            mcp_server_id = _sanitize_mcp_server_id(server.id)
+            mcp_server_id = sanitize_mcp_server_id(server.id)
 
             mcp_server = self._mcp_server_factory(
                 mcp_server_id=mcp_server_id,
                 mode=installed.mode.value,
                 command=installed.command,
                 env={**installed.env, **secrets_result.resolved},
+                # Not the gateway's environment: the entry's author is not
+                # the operator, so only the base and `hot_loading.inherit_env`.
+                inherit_env_names=trust.inherited_env_names(),
             )
 
             # Before `ensure_ready()`, which is what starts the process.
@@ -371,7 +405,7 @@ class LoadMcpServerHandler(CommandHandler):
                 loaded_at=datetime.now(),
                 loaded_by=command.user_id,
                 source=f"registry:{server.id}",
-                verified=server.is_official,
+                verified=trust.is_trusted(server.id) and server.is_published,
                 ephemeral=True,
                 server_id=server.id,
                 cleanup=installed.cleanup,
@@ -387,7 +421,7 @@ class LoadMcpServerHandler(CommandHandler):
                     mcp_server_id=mcp_server_id,
                     mcp_server_name=server.name,
                     source=f"registry:{server.id}",
-                    verified=server.is_official,
+                    verified=trust.is_trusted(server.id) and server.is_published,
                     user_id=command.user_id,
                     tools_count=len(tools),
                     load_duration_ms=duration_ms,
@@ -399,7 +433,7 @@ class LoadMcpServerHandler(CommandHandler):
                 mcp_server_id=mcp_server_id,
                 mcp_server_name=server.name,
                 tools=[{"name": t} for t in tools],
-                message=f"Successfully loaded '{server.name}' with {len(tools)} tools",
+                message=f"Successfully loaded {server.name!r} with {len(tools)} tools",
                 warnings=warnings if warnings else None,
             )
 
@@ -438,7 +472,9 @@ class LoadMcpServerHandler(CommandHandler):
             RegistryServerNotFoundError: If server not found.
             RegistryAmbiguousSearchError: If multiple servers match.
         """
-        server = await self._registry_client.get_server(name)
+        # `fresh`: the answer decides whether the load is verified, so a
+        # cached `active` must not outlive a deprecation.
+        server = await self._registry_client.get_server(name, fresh=True)
         if server is not None:
             return server
 
@@ -447,14 +483,14 @@ class LoadMcpServerHandler(CommandHandler):
             raise RegistryServerNotFoundError(name)
 
         if len(results) == 1:
-            server = await self._registry_client.get_server(results[0].id)
+            server = await self._registry_client.get_server(results[0].id, fresh=True)
             if server is not None:
                 return server
             raise RegistryServerNotFoundError(name)
 
         exact_match = next((r for r in results if r.id == name or r.name.lower() == name.lower()), None)
         if exact_match:
-            server = await self._registry_client.get_server(exact_match.id)
+            server = await self._registry_client.get_server(exact_match.id, fresh=True)
             if server is not None:
                 return server
 

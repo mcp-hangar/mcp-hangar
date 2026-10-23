@@ -103,6 +103,13 @@ def test_another_tenant_passes_the_same_withdrawal(gateway, exporter):
 def test_the_pinning_tenant_is_refused_by_the_pin_with_the_digest_it_named(gateway, exporter):
     _call(gateway, TENANT_A, READ)
 
+    if gateway[1] == "front_door":
+        # The front door withholds a tool that drifted from the caller's pin
+        # (#1776), so the flat call is "not found" before the executor, as for
+        # a withdrawn tool above.
+        assert not [s for s in exporter.get_finished_spans() if s.name.startswith("batch.call.")]
+        assert gateway[0].upstream.called == []
+        return
     decisions, attributes = _decisions(exporter, READ)
     assert decisions["digest_pin"] == (Gate.DENY, "digest_mismatch", STALE)
     assert attributes[Gate.REFUSAL_GATE] == "digest_pin"

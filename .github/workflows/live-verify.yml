@@ -2,8 +2,8 @@
 # nightly. Tier 0 (a real process and a stub backend, no compose, no IdP) also
 # runs on pull requests that touch the front door, the server or the domain
 # services: 48 tests in about 2.5 minutes, inside the 5-minute target. Tiers
-# whose prerequisites are absent skip cleanly; T1 (compose) and T2 (Keycloak)
-# stay nightly.
+# whose prerequisites are absent skip cleanly; T1 (compose), T2 (Keycloak) and
+# T4 (PostgreSQL) stay nightly.
 #
 # The PR trigger is path-filtered, so `live-pr` reports only when those paths
 # change. A check that is sometimes absent cannot be a required status as it is;
@@ -59,7 +59,23 @@ jobs:
   live:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    # T4 runs two gateways over one PostgreSQL; each module creates and drops
+    # a database of its own on this server.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hangar
+          POSTGRES_PASSWORD: hangar
+          POSTGRES_DB: hangar
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U hangar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -74,4 +90,5 @@ jobs:
       - name: Run live verification
         env:
           MCP_HANGAR_LIVE_VERIFY: "1"
+          HANGAR_TEST_POSTGRES_DSN: "host=127.0.0.1 port=55432 user=hangar password=hangar dbname=hangar"
         run: uv run pytest tests/live -m "${{ github.event.inputs.marker || 'live' }}" --timeout=180 -ra

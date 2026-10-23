@@ -21,6 +21,7 @@ non-standard JSON-RPC methods.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from starlette.requests import Request
@@ -32,6 +33,7 @@ from mcp_hangar.context import get_identity_context
 from mcp_hangar.logging_config import get_logger
 
 from ..protocol import HANGAR_SERVER_NAME
+from .asgi import bind_caller_identity, release_caller_identity
 from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list
 from .governance_extensions import move_governance_to_extensions
 
@@ -64,11 +66,40 @@ def tenant_scoped_tools(tenant_id: str | None) -> list[dict[str, Any]]:
     serves the ``hangar_*`` meta-API instead — see :func:`_advertised_tools`.
     """
     flat_map = _build_flat_map(tenant_id)
-    tools = _build_mcp_tool_list(flat_map)
+    tools = _build_mcp_tool_list(flat_map, tenant_id)
     return [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools]
 
 
-def _advertised_tools(mcp: FastMCP | None, tenant_id: str | None) -> list[dict[str, Any]]:
+def _registered_tools(mcp: FastMCP, names: frozenset[str] | None = None) -> list[dict[str, Any]]:
+    """The tools registered on *mcp* (only *names*, when given), serialized as MCP Tool dicts.
+
+    Read from the tool manager rather than the async `list_tools()` so this
+    stays callable from a sync context (and from tests) without an event loop.
+    """
+    try:
+        registered = mcp._tool_manager.list_tools()
+    except Exception:  # noqa: BLE001 -- discovery must answer even if the manager is unavailable
+        logger.warning("server_discover_tool_listing_failed", exc_info=True)
+        return []
+
+    advertised: list[dict[str, Any]] = []
+    for tool in registered:
+        if names is not None and tool.name not in names:
+            continue
+        entry: dict[str, Any] = {
+            "name": tool.name,
+            "description": getattr(tool, "description", "") or "",
+            "inputSchema": getattr(tool, "parameters", None) or {"type": "object"},
+        }
+        for attr, key in (("title", "title"), ("output_schema", "outputSchema"), ("annotations", "annotations")):
+            value = getattr(tool, attr, None)
+            if value:
+                entry[key] = value if isinstance(value, dict) else value.model_dump(mode="json", exclude_none=True)
+        advertised.append(entry)
+    return advertised
+
+
+def _advertised_tools(mcp: FastMCP | None, tenant_id: str | None, request_context: Any = None) -> list[dict[str, Any]]:
     """Return the tools this caller would actually get from ``tools/list``.
 
     Which surface that is depends on topology (see
@@ -81,6 +112,10 @@ def _advertised_tools(mcp: FastMCP | None, tenant_id: str | None) -> list[dict[s
     which is the only surface a stateless client has to learn from (#606). It
     also contradicted this endpoint's own promise that ``tools`` matches the
     caller's ``tools/list``.
+
+    A front door's ``tools/list`` also carries the ``hangar_*`` tools this
+    caller may call (#904), decided from the principal *request_context*
+    carries. They are added here on the same decision (#1695).
     """
     from ..domain.services.tool_access_resolver import get_tool_access_resolver
 
@@ -90,30 +125,15 @@ def _advertised_tools(mcp: FastMCP | None, tenant_id: str | None) -> list[dict[s
         front_door = False
 
     if front_door or mcp is None:
-        return tenant_scoped_tools(tenant_id)
+        tools = tenant_scoped_tools(tenant_id)
+        if mcp is None:
+            return tools
+        from ..server.tools.tool_permissions import management_tools_for
 
-    # Egress: the caller talks to the hangar_* meta-API. Read it from the tool
-    # manager rather than the async `list_tools()` so this stays callable from a
-    # sync context (and from tests) without spinning an event loop.
-    try:
-        registered = mcp._tool_manager.list_tools()
-    except Exception:  # noqa: BLE001 -- discovery must answer even if the manager is unavailable
-        logger.warning("server_discover_tool_listing_failed", exc_info=True)
-        return []
+        permitted = management_tools_for(request_context)
+        return tools + _registered_tools(mcp, permitted) if permitted else tools
 
-    advertised: list[dict[str, Any]] = []
-    for tool in registered:
-        entry: dict[str, Any] = {
-            "name": tool.name,
-            "description": getattr(tool, "description", "") or "",
-            "inputSchema": getattr(tool, "parameters", None) or {"type": "object"},
-        }
-        for attr, key in (("title", "title"), ("output_schema", "outputSchema"), ("annotations", "annotations")):
-            value = getattr(tool, attr, None)
-            if value:
-                entry[key] = value if isinstance(value, dict) else value.model_dump(mode="json", exclude_none=True)
-        advertised.append(entry)
-    return advertised
+    return _registered_tools(mcp)
 
 
 def _advertised_capabilities(mcp: FastMCP | None) -> dict[str, Any]:
@@ -138,7 +158,9 @@ def _advertised_capabilities(mcp: FastMCP | None) -> dict[str, Any]:
         return {"tools": {"listChanged": True}}
 
 
-def server_discover_result(tenant_id: str | None, mcp: FastMCP | None = None) -> dict[str, Any]:
+def server_discover_result(
+    tenant_id: str | None, mcp: FastMCP | None = None, request_context: Any = None
+) -> dict[str, Any]:
     """Build the SEP-2575 ``DiscoverResult`` payload for *tenant_id*.
 
     Shape (SEP-2575): ``supportedVersions`` + ``capabilities`` + ``serverInfo``
@@ -159,7 +181,7 @@ def server_discover_result(tenant_id: str | None, mcp: FastMCP | None = None) ->
             "`tools` field lists exactly the tools this caller may call; it "
             "matches this caller's tools/list surface."
         ),
-        "tools": _advertised_tools(mcp, tenant_id),
+        "tools": _advertised_tools(mcp, tenant_id, request_context),
     }
 
 
@@ -172,8 +194,17 @@ async def server_discover_handler(request: Request, mcp: FastMCP | None = None) 
     result envelope). The tenant is resolved from the request-scoped identity
     context, so the surface is per-tenant isolated exactly like ``tools/list``.
     """
-    tenant_id = _caller_tenant_id()
-    result = server_discover_result(tenant_id, mcp)
+    # A custom route gets the request the auth middleware authenticated, with
+    # the principal on `request.state.auth`, but nothing binds the caller from
+    # it: `tools/list` binds it in its handler, and this route has to as well,
+    # or an authenticated caller is projected as no one and shown nothing (#1695).
+    request_context = SimpleNamespace(request=request)
+    token = bind_caller_identity(request_context)
+    try:
+        tenant_id = _caller_tenant_id()
+        result = server_discover_result(tenant_id, mcp, request_context)
+    finally:
+        release_caller_identity(token)
     logger.debug("server_discover", tenant_id=tenant_id, tool_count=len(result["tools"]))
 
     if request.method == "GET":

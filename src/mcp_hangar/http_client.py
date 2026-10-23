@@ -11,26 +11,29 @@ Thread-safe HTTP client with:
 Follows the same interface as StdioClient for consistency.
 """
 
+import hashlib
 import json
 import ssl
 import threading
 import time
 import uuid
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Queue
 from typing import Any, cast
 
 import httpx
+from cryptography import x509
 
 from . import metrics as prometheus_metrics
-from .domain.exceptions import ClientError, ResponseTooLarge
+from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMismatchError
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
-from .observability.conventions import Retry
+from .observability.conventions import Retry, Upstream
 from .observability.tracing import (
     inject_trace_context,
     record_retry_attempt,
@@ -173,6 +176,105 @@ class HttpClientConfig:
     enforce_ssrf: bool = False
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
+    # The upstream's key list (ADR-030): canonical key pins, `sha256:` + hex over
+    # the DER SubjectPublicKeyInfo. When set, every connection must end at one of
+    # these keys, checked inside the TLS handshake; `verify_ssl` and
+    # `ca_cert_path` are then not used, because no CA is a trust input.
+    peer_key_pins: frozenset[str] | None = None
+    # How long, in seconds, one connection pool serves before it is replaced
+    # (ADR-030 §8): every connection then handshakes again against the current
+    # key list. httpcore has no maximum connection age, only an idle expiry.
+    max_connection_age: float | None = None
+
+
+def _der_element(data: bytes, offset: int) -> tuple[int, int]:
+    """Where the content of the DER element at ``offset`` starts, and where the element ends."""
+    if offset + 2 > len(data):
+        raise ValueError("truncated DER element")
+    length, content = data[offset + 1], offset + 2
+    if length & 0x80:
+        size = length & 0x7F
+        if not 0 < size <= 4:
+            raise ValueError("unsupported DER length")
+        length, content = int.from_bytes(data[content : content + size], "big"), content + size
+    if content + length > len(data):
+        raise ValueError("truncated DER element")
+    return content, content + length
+
+
+def _certificate_spki(der_certificate: bytes) -> bytes:
+    """The SubjectPublicKeyInfo exactly as the certificate encodes it (#1982).
+
+    Not ``public_key().public_bytes(...)``: that re-encodes the key, and an EC
+    key with explicit curve parameters comes back on its named curve, so its
+    digest differs from the one taken over the certificate's own bytes.
+    """
+    tbs = x509.load_der_x509_certificate(der_certificate).tbs_certificate_bytes
+    position, _ = _der_element(tbs, 0)
+    if tbs[position] == 0xA0:  # [0] EXPLICIT version
+        position = _der_element(tbs, position)[1]
+    # serialNumber, signature, issuer, validity, subject; then the key.
+    for _ in range(5):
+        position = _der_element(tbs, position)[1]
+    if position >= len(tbs) or tbs[position] != 0x30:
+        raise ValueError("no SubjectPublicKeyInfo where TBSCertificate places it")
+    return tbs[position : _der_element(tbs, position)[1]]
+
+
+def peer_key_pin(der_certificate: bytes) -> str:
+    """The canonical key pin of a DER certificate: SHA-256 over its DER SubjectPublicKeyInfo, as encoded."""
+    return "sha256:" + hashlib.sha256(_certificate_spki(der_certificate)).hexdigest()
+
+
+class _PeerKeyCheckedSocket(ssl.SSLSocket):
+    """A TLS socket that refuses a peer whose key is not in the key list (ADR-030 §5).
+
+    The check runs inside `do_handshake`, which `SSLContext.wrap_socket` calls
+    before httpcore hands the connection to the pool, so a refused peer receives
+    no request byte -- not even on the standing GET stream, which no per-request
+    hook would see. Verification of the chain and the name is off: the key is
+    the identity, and a CA would only add an issuance policy Hangar cannot see.
+    """
+
+    #: The key list this socket accepts; set per context by `_peer_key_context`.
+    _key_pins: frozenset[str] = frozenset()
+    #: The server label its handshakes are counted under.
+    _metric_server: str = ""
+    #: The key pin the peer presented, kept for the audit record.
+    observed_peer_spki: str | None = None
+
+    def do_handshake(self, block: bool = False) -> None:
+        super().do_handshake(block)
+        certificate = self.getpeercert(binary_form=True)
+        self.observed_peer_spki = peer_key_pin(certificate) if certificate else None
+        verified = self.observed_peer_spki in self._key_pins
+        prometheus_metrics.UPSTREAM_PEER_KEY_CONNECTIONS_TOTAL.inc(
+            mcp_server=self._metric_server, outcome="verified" if verified else "refused"
+        )
+        if verified:
+            return
+        # `SSLSocket._create` closes the socket only for OSError and ValueError,
+        # and this refusal is deliberately neither: close it here.
+        self.close()
+        raise UpstreamPeerKeyMismatchError(self.observed_peer_spki)
+
+
+def _peer_key_context(key_pins: frozenset[str], metric_server: str = "") -> ssl.SSLContext:
+    """A TLS 1.3 client context whose handshake accepts only a peer in *key_pins*.
+
+    TLS 1.3 binds the certificate and its CertificateVerify to the handshake
+    transcript and has no renegotiation, so the key checked is the key the
+    channel was established with. SNI is still sent: `server_hostname` reaches
+    `wrap_socket` from `sni_hostname` as before, only the name check is off.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_3
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.sslsocket_class = type(
+        "_PinnedSocket", (_PeerKeyCheckedSocket,), {"_key_pins": key_pins, "_metric_server": metric_server}
+    )
+    return context
 
 
 @dataclass
@@ -377,6 +479,17 @@ class HttpClient:
         # Create httpx client with retry transport
         self._client = self._create_client()
 
+        # Connection-pool replacement every `max_connection_age` (ADR-030 §8).
+        # A pool is leased per request so a replaced one is closed only once
+        # its in-flight requests are done; the GET stream is closed outright
+        # and re-opens on the new pool.
+        self._pool_lock = threading.Lock()
+        self._in_flight: dict[int, int] = {}
+        self._retired: list[httpx.Client] = []
+        self._stream_response: httpx.Response | None = None
+        self._stream_replaced = False
+        self._rotation_timer: threading.Timer | None = None
+
         # Request tracking for SSE correlation
         self._pending: dict[str, PendingHttpRequest] = {}
         self._pending_lock = threading.Lock()
@@ -398,6 +511,12 @@ class HttpClient:
 
         # Client state
         self._closed = False
+        self._schedule_pool_replacement()
+
+        # The key pin of the connection that served this thread's last call
+        # (ADR-030 §6). Per thread, because a client serves concurrent calls and
+        # each reads its own straight after it returns.
+        self._served = threading.local()
 
         logger.info(
             "http_client_initialized",
@@ -430,6 +549,14 @@ class HttpClient:
         verify: bool | str | ssl.SSLContext = config.verify_ssl
         if config.ca_cert_path:
             verify = config.ca_cert_path
+        if config.peer_key_pins is not None:
+            # A key list that verifies nothing must not become a client that
+            # connects anyway: empty, or on a scheme with no handshake, refuse.
+            if not config.peer_key_pins:
+                raise ClientError("a key-pinned upstream needs a non-empty key list", self._mcp_server_id or "")
+            if self._scheme != "https":
+                raise ClientError("a key-pinned upstream must be reached over https", self._mcp_server_id or "")
+            verify = _peer_key_context(config.peer_key_pins, self._mcp_server_id or self._host)
 
         # Timeout configuration
         timeout = httpx.Timeout(
@@ -556,7 +683,8 @@ class HttpClient:
         for attempt in range(attempts):
             reason: str
             try:
-                response = self._client.post(url, json=request_body, headers=headers, timeout=timeout)
+                with self._lease() as pool:
+                    response = pool.post(url, json=request_body, headers=headers, timeout=timeout)
                 if response.status_code not in retry_statuses or attempt == attempts - 1:
                     return response
                 reason = str(response.status_code)
@@ -656,6 +784,7 @@ class HttpClient:
                 sent_params, extra_headers = self._outbound_carriers(params)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
+                self._served.peer_spki = None
                 response = self._post_with_retry(
                     url,
                     request_body,
@@ -663,6 +792,7 @@ class HttpClient:
                     timeout,
                     mcp_server_label,
                 )
+                self._remember_served_key(response, span)
 
                 duration_s = time.time() - start_time
                 duration_ms = duration_s * 1000
@@ -813,6 +943,12 @@ class HttpClient:
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="connection_refused")
             raise ClientError(f"connection_failed: {e}") from e
 
+        except UpstreamPeerKeyMismatchError:
+            # A refusal, not a failure to wrap: the type is what the start path
+            # and the gates read the reason from (ADR-030 §5).
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+            raise
+
         except Exception as e:  # noqa: BLE001 -- infra-boundary: unexpected HTTP errors wrapped as ClientError
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
@@ -825,6 +961,66 @@ class HttpClient:
             # Record generic error
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="request_failed")
             raise ClientError(f"request_failed: {e}") from e
+
+    def _schedule_pool_replacement(self) -> None:
+        age = self._http_config.max_connection_age
+        if age is None or self._closed:
+            return
+        if self._rotation_timer is not None:
+            # One schedule at a time: a replacement made early restarts the clock.
+            self._rotation_timer.cancel()
+        timer = threading.Timer(age, self._replace_pool)
+        timer.daemon = True
+        timer.name = f"mcp-pool-age-{self._mcp_server_id or self._host}"
+        self._rotation_timer = timer
+        timer.start()
+
+    def _replace_pool(self) -> None:
+        """Swap in a new connection pool; the MCP session lives here, not in the pool, so it is kept."""
+        with self._pool_lock:
+            if self._closed:
+                return
+            self._retired.append(self._client)
+            self._client = self._create_client()
+            stream = self._stream_response
+            self._stream_replaced = stream is not None
+            self._close_idle_retired()
+        if stream is not None:
+            stream.close()
+        logger.info("http_client_pool_replaced", mcp_server=self._mcp_server_id or self._host)
+        self._schedule_pool_replacement()
+
+    @contextmanager
+    def _lease(self) -> Iterator[httpx.Client]:
+        """The current pool, held for one request so a replacement does not close it underneath."""
+        with self._pool_lock:
+            pool = self._client
+            self._in_flight[id(pool)] = self._in_flight.get(id(pool), 0) + 1
+        try:
+            yield pool
+        finally:
+            with self._pool_lock:
+                self._in_flight[id(pool)] -= 1
+                if not self._in_flight[id(pool)]:
+                    del self._in_flight[id(pool)]
+                self._close_idle_retired()
+
+    def _close_idle_retired(self) -> None:
+        """Close every replaced pool with no request in flight. Called under `_pool_lock`."""
+        for pool in [p for p in self._retired if not self._in_flight.get(id(p))]:
+            self._retired.remove(pool)
+            pool.close()
+
+    def served_peer_spki(self) -> str | None:
+        """The key pin of the connection that served this thread's last call, for a key-pinned upstream."""
+        return cast("str | None", getattr(self._served, "peer_spki", None))
+
+    def _remember_served_key(self, response: httpx.Response, span: Any) -> None:
+        stream = (getattr(response, "extensions", None) or {}).get("network_stream")
+        sock = stream.get_extra_info("socket") if stream is not None else None
+        self._served.peer_spki = getattr(sock, "observed_peer_spki", None)
+        if self._served.peer_spki is not None:
+            span.set_attribute(Upstream.PEER_SPKI, self._served.peer_spki)
 
     def _parse_sse_body(self, body: str, request_id: str) -> dict[str, Any]:
         """
@@ -957,14 +1153,18 @@ class HttpClient:
                 sent_params, headers = self._outbound_carriers(params)
                 body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
-                response = self._client.post(
-                    self._endpoint,
-                    json=body,
-                    headers=headers or None,
-                    timeout=self._http_config.read_timeout,
-                )
+                with self._lease() as pool:
+                    response = pool.post(
+                        self._endpoint,
+                        json=body,
+                        headers=headers or None,
+                        timeout=self._http_config.read_timeout,
+                    )
                 if response.status_code >= 300:
                     record_upstream_outcome(span, http_status=response.status_code)
+        except UpstreamPeerKeyMismatchError:
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+            raise
         except Exception as e:  # noqa: BLE001 -- infra-boundary: transport failure wrapped as ClientError
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="notify_failed")
             logger.error("http_client_notify_failed", method=method, error=str(e))
@@ -1020,6 +1220,7 @@ class HttpClient:
                 # read=None: this stream is MEANT to sit idle between events.
                 timeout = httpx.Timeout(connect=self._http_config.connect_timeout, read=None, write=None, pool=None)
                 with self._client.stream("GET", self._endpoint, headers=headers, timeout=timeout) as response:
+                    self._stream_response = response
                     if response.status_code in (404, 405):
                         logger.info(
                             "http_client_get_stream_unsupported",
@@ -1032,9 +1233,25 @@ class HttpClient:
                     logger.info("http_client_get_stream_open", mcp_server=mcp_server_label)
                     backoff = 1.0
                     self._read_stream_events(response, on_message, mcp_server_label)
+            except UpstreamPeerKeyMismatchError as e:
+                # Terminal for this client: every reconnect would end at the same
+                # unlisted key. The stream opens again with the next client.
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="peer_key_mismatch")
+                logger.warning(
+                    "http_client_get_stream_refused",
+                    mcp_server=mcp_server_label,
+                    failure_code=e.failure_code,
+                    observed_peer_spki=e.observed_peer_spki,
+                )
+                return
             except Exception as e:  # noqa: BLE001 -- the channel outlives any single transport failure
                 if not self._sse_running or self._closed:
                     return
+                if self._stream_replaced:
+                    # Closed by a pool replacement, not by a failure: re-open on
+                    # the new pool at once, without the failure backoff.
+                    self._stream_replaced = False
+                    continue
                 logger.warning(
                     "http_client_get_stream_error",
                     mcp_server=mcp_server_label,
@@ -1146,11 +1363,18 @@ class HttpClient:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: teardown must not fail a shutdown
                 logger.warning("http_client_session_delete_failed", error=str(e))
 
-        # Close httpx client
-        try:
-            self._client.close()
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: close cleanup must not propagate
-            logger.debug("http_client_close_error", error=str(e))
+        if self._rotation_timer is not None:
+            self._rotation_timer.cancel()
+
+        # Close httpx client, and any replaced pool still finishing a request
+        with self._pool_lock:
+            pools = [self._client, *self._retired]
+            self._retired.clear()
+        for pool in pools:
+            try:
+                pool.close()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: close cleanup must not propagate
+                logger.debug("http_client_close_error", error=str(e))
 
         # Clean up pending requests
         with self._pending_lock:

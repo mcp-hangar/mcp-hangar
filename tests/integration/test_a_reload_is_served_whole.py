@@ -63,7 +63,8 @@ def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any]]:
 
 FRONT_DOOR_HOLDS = {
     "mode": "front_door",
-    "no_tenant_tools": [],
+    # Only `hangar_whoami`, which every authenticated caller is offered (#1363): no upstream tool.
+    "no_tenant_tools": ["hangar_whoami"],
     "no_tenant_call": METHOD_NOT_FOUND,
     "tenant_sees_echo": True,
     "tenant_call": "served",

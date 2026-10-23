@@ -23,6 +23,7 @@ import json
 import platform
 import shutil
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,8 +111,11 @@ def hangar_launcher() -> tuple[str, list[str]]:
     return sys.executable, list(_MODULE_LAUNCH)
 
 
-def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | None:
+def write_hangar_entry(client: McpClient, hangar_config_path: Path, remove: Iterable[str] = ()) -> Path | None:
     """Point *client* at this Hangar, keeping everything else in its file.
+
+    *remove* names the entries Hangar now serves (#1770): they leave the file,
+    so the client reaches them through Hangar rather than directly as well.
 
     The file's pre-Hangar bytes are saved once, under the Hangar state directory
     (`init_manifest`), so `init --undo` can restore them; a second run keeps that
@@ -134,6 +138,8 @@ def write_hangar_entry(client: McpClient, hangar_config_path: Path) -> Path | No
     backup = remember_original(client.path)
 
     servers = dict(document.get("mcpServers") or {})
+    for name in remove:
+        servers.pop(name, None)
     command, leading = hangar_launcher()
     entry: dict[str, object] = {
         "command": command,
