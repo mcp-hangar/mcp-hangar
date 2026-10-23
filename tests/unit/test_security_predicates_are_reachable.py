@@ -614,17 +614,17 @@ class TestAMemberServerInTheTenantSlotIsCaught:
     def test_the_mutation_is_detected(self, tmp_path_factory: pytest.TempPathFactory) -> None:
         from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 
-        original = ToolAccessResolver.is_tool_allowed
+        original = ToolAccessResolver.is_allowed
 
-        def server_in_the_tenant_slot(self, mcp_server_id, tool_name, group_id=None, member_id=None, **kwargs):  # type: ignore[no-untyped-def]
-            return original(self, mcp_server_id, tool_name, group_id, member_id=mcp_server_id, **kwargs)
+        def server_in_the_tenant_slot(self, mcp_server_id, name, **kwargs):  # type: ignore[no-untyped-def]
+            return original(self, mcp_server_id, name, **{**kwargs, "member_id": mcp_server_id})
 
         from mcp_hangar.fastmcp_server import asgi
 
         spy = _Spy(PREDICATES)
         with _upstream() as upstream_url, pytest.MonkeyPatch.context() as env, spy.installed():
             env.delenv("MCP_TRUSTED_PROXIES", raising=False)
-            env.setattr(ToolAccessResolver, "is_tool_allowed", server_in_the_tenant_slot)
+            env.setattr(ToolAccessResolver, "is_allowed", server_in_the_tenant_slot)
             asgi._forwarded_session_extractor.cache_clear()
             try:
                 with _served("egress", upstream_url, tmp_path_factory.mktemp("mutated")) as gateway:

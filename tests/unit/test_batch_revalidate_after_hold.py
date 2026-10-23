@@ -40,14 +40,20 @@ def _call(**overrides) -> CallSpec:
 
 
 def _resolver(*, allowed=True, unrestricted=False, raises=None):
-    """A tool-access resolver whose effective policy is under test control."""
+    """A tool-access resolver whose answer is under test control.
+
+    The re-check decides through `decide()` (#1784), which asks the resolver's
+    `is_allowed` for every scope and its effective policy for the approval list.
+    An unrestricted policy allows everything.
+    """
     resolver = Mock()
     if raises is not None:
-        resolver.resolve_effective_policy.side_effect = raises
+        resolver.is_allowed.side_effect = raises
         return resolver
+    resolver.is_allowed.return_value = allowed or unrestricted
     policy = Mock()
     policy.is_unrestricted.return_value = unrestricted
-    policy.is_tool_allowed.return_value = allowed
+    policy.requires_approval.return_value = False
     resolver.resolve_effective_policy.return_value = policy
     return resolver
 
@@ -78,6 +84,8 @@ def _revalidate(executor, *, call=None, resolver=None, ctx=None, pin=None, proje
         # A projection a test hands in is not withdrawn.
         projection.is_withdrawn_for.return_value = False
     proj_registry.resolve.return_value = None if projection == "unset" else projection
+    # The overlay port `decide()` reads: unknown when no projection, else not withdrawn.
+    proj_registry.withdrawal_status.return_value = None if projection in ("unset", None) else False
     return executor._revalidate_after_hold(
         call=call or _call(),
         resolver=resolver if resolver is not None else _resolver(),
@@ -141,12 +149,7 @@ class TestPolicyRecheck:
         assert "no longer allowed by policy" in result.error
 
     def test_fully_unrestricted_proceeds(self, executor):
-        resolver = Mock()
-        policy = Mock()
-        policy.is_unrestricted.return_value = True
-        resolver.resolve_effective_policy.return_value = policy
-
-        assert _revalidate(executor, resolver=resolver) is None
+        assert _revalidate(executor, resolver=_resolver(allowed=False, unrestricted=True)) is None
 
     def test_unreadable_policy_fails_closed(self, executor):
         result = _revalidate(executor, resolver=_resolver(raises=RuntimeError("store down")))
