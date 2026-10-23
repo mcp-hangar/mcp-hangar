@@ -1,0 +1,27 @@
+# Known non-passes of the official MCP conformance suite with Hangar as the
+# CLIENT under test (#1902), run with `--spec-version 2025-11-25 --suite all`.
+#
+# Same semantics as baseline.yml: a failure listed here is known, a failure not
+# listed is a regression, and a listed scenario that now passes is a stale entry
+# that fails the run until its line is deleted.
+#
+# The client under test is tests/conformance/hangar_client.py: the scenario's
+# test server as a remote server in config.yaml, started over REST, called
+# through hangar_call. Each entry names the issue that tracks it.
+client:
+  - auth/basic-cimd # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/metadata-default # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/metadata-var1 # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/metadata-var2 # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/metadata-var3 # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/pre-registration # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/scope-from-scopes-supported # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/scope-from-www-authenticate # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/scope-omitted-when-undefined # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/scope-retry-limit # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/scope-step-up # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/token-endpoint-auth-basic # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/token-endpoint-auth-none # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - auth/token-endpoint-auth-post # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
+  - elicitation-sep1034-client-defaults # #2013
+  - sse-retry # #2014
