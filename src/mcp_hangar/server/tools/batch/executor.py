@@ -75,7 +75,7 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry, Route, Shaping
+from ....observability.conventions import GATE_REASONS, MCP, Caller, Gate, GenAI, McpServer, Retry, Route, Shaping
 from ....observability.tracing import (
     caller_ids_on_spans,
     current_traceparent,
@@ -105,34 +105,6 @@ _TENANT_QUOTA_MESSAGES = {
     NO_BUDGET: "No execution budget is configured for this tenant",
     CONCURRENCY: "This tenant's execution budget is exhausted: too many calls in flight",
     RATE: "This tenant's execution budget is exhausted: calls started too fast",
-}
-
-#: A refusing gate's `hangar.gate.reason`, keyed by the refusal's bounded
-#: `error_type`, never by its message (#1285). A refusal whose type is not here
-#: records no reason rather than an invented one. A gate that knows more than
-#: its `error_type` says -- a tenant budget's `no_budget`/`concurrency`/`rate`,
-#: an unverifiable pin -- names its reason itself with `_CallPipeline.note`.
-_GATE_REASONS = {
-    "CancellationError": "cancelled",
-    "TimeoutError": "batch_timeout",
-    "NoAvailableMemberError": "no_available_member",
-    "McpServerNotFoundError": "server_not_found",
-    "ToolAccessDeniedError": "tool_not_in_access_policy",
-    "ToolAccessDenied": "tool_not_in_access_policy",
-    "ToolWithdrawnError": "tool_withdrawn",
-    "ToolDigestMismatchError": "digest_mismatch",
-    "CircuitBreakerOpen": "circuit_open",
-    "CannotStartMcpServerError": "not_revived_by_calls",
-    "McpServerStartError": "start_failed",
-    "UpstreamPeerKeyMismatchError": "upstream_peer_key_mismatch",
-    "ValidatorDenied": "validator_denied",
-    "TenantQuotaExceeded": "tenant_quota_exceeded",
-    "ApprovalDenied": "approval_denied",
-    "approval_denied": "approval_denied",
-    "approval_timeout": "approval_timeout",
-    "ApprovalNoLongerValid": "approval_no_longer_valid",
-    "ApprovalGateError": "approval_gate_error",
-    "ApprovalRevalidationError": "approval_revalidation_error",
 }
 
 #: Refusals that mean the gate machinery broke, not that it said no: `error`,
@@ -2927,7 +2899,7 @@ def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, s
     if refusal is not None:
         error_type = refusal.error_type or ""
         outcome = Gate.ERROR if error_type in _GATE_ERRORS else Gate.DENY
-        return outcome, _GATE_REASONS.get(error_type), None
+        return outcome, GATE_REASONS.get(error_type), None
     return Gate.ALLOW, None, None
 
 

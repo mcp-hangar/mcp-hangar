@@ -21,10 +21,23 @@ from typing import Any
 
 from ...application.event_handlers.withdrawal_projection import WithdrawalProjection
 from ...application.read_models.tool_projection import ToolProjectionRegistry, get_tool_projection_registry
+from ...domain.services.access_decision import set_withdrawal_overlay_source
 from ...logging_config import get_logger
 from ...stream_ids import SEPARATOR, TOOL_WITHDRAWAL
 
 logger = get_logger(__name__)
+
+
+def wire_withdrawal_overlay() -> None:
+    """Let the access decision read this process's withdrawal overlay (#1784).
+
+    `decide()` is a domain service and reads withdrawals through the
+    `IWithdrawalOverlay` port, which the tool projection registry implements.
+    The getter is wired, not the registry: a test that resets the singleton,
+    and the next bootstrap in this process, then read the registry that is
+    current, never the one that was.
+    """
+    set_withdrawal_overlay_source(get_tool_projection_registry)
 
 
 def restore_runtime_withdrawals(runtime: Any, registry: ToolProjectionRegistry | None = None) -> int:
