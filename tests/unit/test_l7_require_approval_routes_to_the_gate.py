@@ -23,6 +23,7 @@ from mcp_hangar.domain.exceptions import (
 )
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
+from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.server.tools.batch.executor import BatchExecutor, _approval_loop_local
 
 _POLICY = L7Policy.from_dict(
@@ -77,10 +78,8 @@ def _executor() -> BatchExecutor:
 
 
 def _unrestricted_resolver():
-    policy = SimpleNamespace(is_unrestricted=lambda: True, requires_approval=lambda tool: False)
-    # The resolver's own signature: the gate asks with the group, the tenant and
-    # the member server as well as the server.
-    return SimpleNamespace(resolve_effective_policy=lambda *_scope, **_member: policy)
+    """No policy anywhere: the gate's `decide()` finds no approval list, so only the L7 rule can ask (#1784)."""
+    return ToolAccessResolver()
 
 
 def _call(tool: str):

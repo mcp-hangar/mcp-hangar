@@ -1,11 +1,14 @@
 """`decide()` agrees with the executor's composition on every target shape (#1784).
 
-PR 1 of the plan on #1763 adds the typed `Target`, `Caller` and `Decision` and
-the one `decide()` entry point, and migrates no caller. This is the proof that
-the callers can be migrated without a change in what they decide. The oracle is
-the executor's own composition, taken as it is: `_policy_scopes`,
+PR 1 of the plan on #1763 added the typed `Target`, `Caller` and `Decision` and
+the one `decide()` entry point. PR 2 routed the executor's governance decision,
+the re-check after an approval hold and a task's follow-ups through it. This is
+the proof that nothing changed in what they decide. The oracle is the
+executor's composition as it was before PR 2 -- `_policy_scopes`,
 `_allowed_in_every_scope`, `_resolve_projection`, `_withdrawn_in_scope` and
-`_approval_policy`, asked in the order the gates ask them.
+`_approval_policy`, asked in the order the gates asked them -- kept here
+verbatim, since the executor no longer has it. `_decide_governance` is then
+held to `decide()` on the same examples.
 
 For a prompt or a resource, which the executor does not serve, the oracle is
 the front door's two halves (`is_governed_allowed`): the overlay with
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import patch
 
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
@@ -180,27 +184,44 @@ worlds = st.builds(
 )
 
 
-def _the_executor_decides(
+def _legacy_scopes(target: Target, routed_to: str) -> list[tuple[str, str | None, str | None]]:
+    """The executor's `_policy_scopes` before PR 2, verbatim."""
+    if target.is_group:
+        return [(target.addressed, target.addressed, routed_to or None)]
+    return [(target.addressed, None, None), *((g, g, target.addressed) for g in target.owning_groups)]
+
+
+def _the_executor_decided(
     resolver: ToolAccessResolver, registry: ToolProjectionRegistry, target: Target, name: str, tenant_id: str | None
 ) -> Decision:
-    """The executor's composition, as `_decide_governance` and the gates make it."""
+    """The executor's composition before PR 2, as `_decide_governance` and the gates made it, verbatim."""
     routed_to = target.member_server or ""
-    scopes = executor._policy_scopes(target.addressed, target.is_group, routed_to, target.owning_groups)
-    if not executor._allowed_in_every_scope(resolver, name, tenant_id, scopes):
+    scopes = _legacy_scopes(target, routed_to)
+    if not all(  # `_allowed_in_every_scope`
+        resolver.is_tool_allowed(mcp_server_id=s, tool_name=name, group_id=g, member_id=tenant_id, member_server_id=m)
+        for s, g, m in scopes
+    ):
         return Decision.refused_by(Gate.TOOL_ACCESS)
-    projection = executor._resolve_projection(registry, target.addressed, name, tenant_id, routed_to)
-    if executor._withdrawn_in_scope(registry, projection, name, tenant_id, target.owning_groups):
+    projection = registry.resolve(target.addressed, name, tenant_id)  # `_resolve_projection`
+    if projection is None and routed_to and routed_to != target.addressed:
+        projection = registry.resolve(routed_to, name, tenant_id)
+    withdrawn = (projection is not None and projection.is_withdrawn_for(tenant_id)) or any(  # `_withdrawn_in_scope`
+        registry.is_withdrawn(g, name, tenant_id=tenant_id) for g in target.owning_groups
+    )
+    if withdrawn:
         return Decision.refused_by(Gate.WITHDRAWAL)
-    return Decision.allow(approval_policy=executor._approval_policy(resolver, name, tenant_id, scopes))
+    for s, g, m in scopes:  # `_approval_policy`
+        scoped = resolver.resolve_effective_policy(s, g, tenant_id, member_server_id=m)
+        if not scoped.is_unrestricted() and scoped.requires_approval(name):
+            return Decision.allow(approval_policy=scoped)
+    return Decision.allow()
 
 
 def _the_front_door_decides(
     resolver: ToolAccessResolver, registry: ToolProjectionRegistry, target: Target, name: str, tenant_id: str | None
 ) -> Decision:
     """The two halves of `is_governed_allowed`, under the call's scopes, for a prompt or a resource."""
-    scopes = executor._policy_scopes(
-        target.addressed, target.is_group, target.member_server or "", target.owning_groups
-    )
+    scopes = _legacy_scopes(target, target.member_server or "")
     if not all(
         resolver.is_allowed(s, name, kind=target.kind, group_id=g, member_id=tenant_id, member_server_id=m)
         for s, g, m in scopes
@@ -224,7 +245,7 @@ def _the_front_door_decides(
 def test_decide_gives_the_answer_the_gates_give(world: World) -> None:
     resolver, registry = world.build()
     caller = Caller(tenant_id=world.tenant_id)
-    oracle = _the_executor_decides if world.target.kind == "tool" else _the_front_door_decides
+    oracle = _the_executor_decided if world.target.kind == "tool" else _the_front_door_decides
 
     expected = oracle(resolver, registry, world.target, world.name, world.tenant_id)
     actual = decide(world.target, world.name, caller, resolver=resolver, withdrawals=registry)
@@ -241,10 +262,36 @@ def test_decide_leaves_the_resolver_cache_keyed_as_the_executor_keys_it(world: W
     """The scope keys `decide()` produces are the ones the executor produced, so invalidation is unchanged."""
     assume(world.target.kind == "tool")
     resolver, registry = world.build()
-    _the_executor_decides(resolver, registry, world.target, world.name, world.tenant_id)
+    _the_executor_decided(resolver, registry, world.target, world.name, world.tenant_id)
     keyed_by_the_executor = set(resolver._policy_cache)
 
     resolver.invalidate_cache()
     decide(world.target, world.name, Caller(tenant_id=world.tenant_id), resolver=resolver, withdrawals=registry)
 
     assert set(resolver._policy_cache) == keyed_by_the_executor
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow], database=None)
+@given(worlds)
+def test_the_executors_governance_decision_is_decide(world: World) -> None:
+    """`_decide_governance` carries the `Decision` `decide()` gives for the same target, caller and name (PR 2)."""
+    assume(world.target.kind == "tool")
+    resolver, registry = world.build()
+    target = world.target
+    # The executor reads which groups own a server named directly off `GROUPS`; the target already says.
+    with patch.object(executor, "owners_by_member", return_value={target.addressed: target.owning_groups}):
+        governance = executor._decide_governance(
+            resolver,
+            registry,
+            target.addressed,
+            world.name,
+            world.tenant_id,
+            is_group=target.is_group,
+            target_server_id=target.member_server or "",
+        )
+    expected = decide(target, world.name, Caller(tenant_id=world.tenant_id), resolver=resolver, withdrawals=registry)
+
+    assert governance.target == target
+    assert governance.decision == expected
+    assert governance.decision.approval_policy is expected.approval_policy
+    assert (governance.allowed, governance.withdrawn) == (expected.gate != Gate.TOOL_ACCESS, expected.withdrawn)
