@@ -1,5 +1,32 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.34.0
+
+### An endpoint in `fc00::/7` or `100.64.0.0/10` needs `ssrf.trusted_networks`
+
+The strict SSRF policy now treats IPv6 unique local addresses (`fc00::/7`) and RFC 6598 shared address space (`100.64.0.0/10`) as private, like `10.0.0.0/8`. A server registered over the API whose endpoint resolves into either range is refused at registration, and one registered before the upgrade is refused at its next connection.
+
+This includes the Kubernetes operator's registrations on a cluster whose pods or Services use these ranges, because the operator registers over the API. Servers declared in `config.yaml` are not checked by this policy and are not affected.
+
+If such an endpoint is meant, trust its network:
+
+```yaml
+ssrf:
+  trusted_networks: ["fd00:10:96::/112", "100.64.0.0/10"]
+```
+
+Servers found by discovery are not affected either.
+
+### A front-door listing shows only what a call would be allowed
+
+`tools/list`, `prompts/list`, `resources/list`, `resources/templates/list` and `server/discover` now decide each name on the member a call would be routed to, exactly as the call decides it. Three things a listing used to show are gone from it, and were never callable:
+
+- a tool, prompt or resource of a group that one of its members denies or withdraws, for every tenant the load-balancer may route to that member. A tenant pinned to a member, or routed to it by a canary split, is decided on that member alone;
+- a prompt or resource of a group that a member-level `access` policy denies, which the group-level decision used to miss;
+- everything of a group that has no member in rotation. A call to such a group is refused with `NoAvailableMemberError`, and the listing now agrees with it.
+
+A client that caches a listing will see these names disappear after the upgrade. To list a name again, allow it on every member the tenant may be routed to, or pin the tenant to the member that allows it. A listing no longer advances a group's load-balancer strategy or starts a cold member; `prompts/list` and `resources/list` of a group whose members are all cold contribute nothing until a call starts one.
+
 ## Upgrade to 2.32.1
 
 ### Remote servers' HTTP metrics are labelled with the server id
