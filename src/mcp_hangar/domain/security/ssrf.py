@@ -301,8 +301,9 @@ def resolve_validated_addresses(
 
     Returns:
         The validated, resolved IP strings. Empty when the host is absent or does
-        not resolve -- there is then nothing to pin to, and the caller connects
-        by name and fails naturally.
+        not resolve -- there is then nothing to pin to, and the transport refuses
+        the connection rather than hand the name to a second, unchecked lookup
+        (#2027).
 
     Raises:
         SsrfBlocked: if any resolved address is refused.
