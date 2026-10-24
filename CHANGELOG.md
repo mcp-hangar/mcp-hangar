@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.0...v2.34.1) (2026-10-24)
+
+### Fixed
+
+- **core:** `hangar_tools` and `hangar_details` decide each name they show through the `decide()` a call makes. `hangar_tools` on a group selected a member without the caller's tenant, advancing the load-balancer strategy and starting that member from a listing, and filtered its catalogue with the member's server id where the tenant belongs; it now decides every name on the members a call for this tenant may be routed to, lists it only when every one of them allows it, selects and starts none, and lists nothing for a group with no member in rotation instead of raising `no_healthy_members_in_group`. A server named directly was decided under its own scope alone, so a tool a group denied on its member stayed listed and was refused when called; it is now decided under every group that owns it, as `hangar_call` decides it. Neither tool read the withdrawal overlay; a withdrawn tool is now hidden as its call is refused. ([#2023](https://github.com/mcp-hangar/mcp-hangar/pull/2023))
+
 ## [2.34.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.33.0...v2.34.0) (2026-10-23)
 
 ### Added
