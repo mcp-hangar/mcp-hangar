@@ -21,7 +21,12 @@ import structlog
 
 from mcp_hangar.auth.roles import BUILTIN_ROLES, role_as_enforced
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
+from mcp_hangar.domain.contracts.authorization import (
+    CONFIG_ROLE_ASSIGNER,
+    IRoleStore,
+    assigner_rank,
+    validate_role_scope,
+)
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import (
     CannotModifyBuiltinRoleError,
@@ -862,6 +867,17 @@ class PostgresRoleStore(IRoleStore):
             roles.setdefault(principal_id, set()).add(role_name)
         return [{"principal_id": pid, "roles": sorted(names)} for pid, names in roles.items()]
 
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """List every assignment with who it is recorded against."""
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT principal_id, role_name, scope, assigned_by FROM {self._assignments_table}"
+                " ORDER BY principal_id, role_name, scope"
+            )
+            rows = cur.fetchall()
+            conn.commit()
+        return [{"principal_id": p, "role_name": r, "scope": sc, "assigned_by": by} for p, r, sc, by in rows]
+
     def assign_role(
         self,
         principal_id: str,
@@ -883,15 +899,27 @@ class PostgresRoleStore(IRoleStore):
 
                 cur.execute(
                     f"""
-                    INSERT INTO {self._assignments_table} (principal_id, role_name, scope)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO {self._assignments_table} (principal_id, role_name, scope, assigned_by)
+                    VALUES (%s, %s, %s, %s)
                     ON CONFLICT (principal_id, role_name, scope) DO NOTHING
                     RETURNING id
                 """,
-                    (principal_id, role_name, scope),
+                    (principal_id, role_name, scope, assigned_by),
                 )
 
                 result = cur.fetchone()
+                rank = assigner_rank(assigned_by)
+                if not result and rank > 0:
+                    # Already held: a stronger assigner takes the grant over (see `assigner_rank`).
+                    cur.execute(
+                        f"""
+                        UPDATE {self._assignments_table} SET assigned_by = %s
+                        WHERE principal_id = %s AND role_name = %s AND scope = %s
+                          AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
+                                    WHEN assigned_by = %s THEN 1 ELSE 2 END) < %s
+                    """,
+                        (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
+                    )
             conn.commit()
 
             # Only emit event if actually inserted
