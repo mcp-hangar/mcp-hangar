@@ -28,7 +28,11 @@ from ...application.queries.queries import (
     GetToolInvocationHistoryQuery,
     ListMcpServersQuery,
 )
-from ...application.read_models.tool_projection import WITHHELD_DIGEST_DRIFT, get_tool_projection_registry
+from ...application.read_models.tool_projection import (
+    WITHHELD_DIGEST_DRIFT,
+    WITHHELD_WITHDRAWN,
+    get_tool_projection_registry,
+)
 from ...domain.exceptions import McpServerDeclaredInConfigError, MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
@@ -128,7 +132,8 @@ async def get_mcp_server(request: Request) -> HangarJSONResponse:
         null unless its state is dead, then why, since when and what starts it
         again (`DeadInfo` in `application.read_models`, #1418). A tool withheld
         for drift is shown as on the `/tools` route: name, digests and reason,
-        without its description (#1776). Any other tool under a blocking pin
+        without its description (#1776), and so is a withdrawn one
+        (``withheld: "withdrawn"``). Any other tool under a blocking pin
         shows only the fields the pin covers.
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
@@ -213,7 +218,9 @@ async def get_mcp_server_tools(request: Request) -> HangarJSONResponse:
         ``digest`` and, when it has an all-tenants pin, ``pinned_digest`` (#1528);
         one that drifted from a pin in block mode, which ``tools/list`` and
         ``hangar_tools`` withhold, is ``{name, digest, pinned_digest?,
-        withheld: "digest_drift"}``, without its description (#1776).
+        withheld: "digest_drift"}``, without its description (#1776). One
+        withdrawn for every caller, or not admitted by the pins, is shown the
+        same way with ``withheld: "withdrawn"``.
     """
     _check_permission(request, resource_type="mcp_servers", action="read")
     mcp_server_id = request.path_params["mcp_server_id"]
@@ -234,13 +241,23 @@ def tool_with_digest(tool: dict[str, Any], mcp_server_id: str) -> dict[str, Any]
     Every role that can read this route sees it, a service account included,
     so the drifted description is not. A tool under a blocking pin for any
     tenant is shown with only the fields the pin covers.
+
+    A tool withdrawn for a caller with no tenant -- withdrawn for every tenant,
+    on the server or a group that owns it, or one the pins do not admit under
+    ``new_tools: withhold`` (#2033) -- is shown the same way, with ``withheld:
+    "withdrawn"``: a call of it is refused, and its description is the text a
+    withheld tool must not hand on. The status is the one the access decision
+    reads (`withdrawal_status`).
     """
     registry = get_tool_projection_registry()
     fields = registry.digest_fields(tool, named=mcp_server_id)
     fields.pop("withheld", None)
     scopes = _pin_scopes(mcp_server_id)
-    if registry.drifted_for_any_tenant(str(tool.get("name", "")), fields["digest"], scopes):
+    name = str(tool.get("name", ""))
+    if registry.drifted_for_any_tenant(name, fields["digest"], scopes):
         return {"name": tool.get("name", ""), **fields, "withheld": WITHHELD_DIGEST_DRIFT}
+    if any(registry.withdrawal_status(scope, name, None) for scope in scopes):
+        return {"name": tool.get("name", ""), **fields, "withheld": WITHHELD_WITHDRAWN}
     return {**registry.served_definition(tool, None, scopes, any_tenant=True), **fields}
 
 
