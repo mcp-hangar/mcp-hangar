@@ -7,4 +7,4 @@ each time serving the tool unpinned while the gateway booted. The two spellings
 now pin the tool. Any other unreadable pin is logged at ERROR and pins the tool
 to a value no definition matches, so it is withheld under `block` until fixed.
 A `pins` or `tenant_overrides` block that is not a mapping is refused at boot and
-by `mcp-hangar config check`
+by `mcp-hangar config check`. Under `new_tools: withhold` an unreadable pin does not admit its tool

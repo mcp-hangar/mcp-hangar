@@ -75,6 +75,46 @@ class TestAPinThatIsNotADigestWithholdsItsTool:
         assert registry.digest_enforcement("srv") is DigestEnforcement.AUDIT
 
 
+class TestUnderWithholdAnUnreadablePinAdmitsNothing:
+    """`new_tools: withhold` admits a tool by its pin; a pin nobody could read is not one (#2036).
+
+    Registered as an unsatisfiable pin, it would otherwise count as admission, and
+    under `audit` or `warn` -- where drift is only reported -- the mistyped tool
+    was served on every call, which it was not before the typo was read at all.
+    """
+
+    @pytest.mark.parametrize("enforcement", ["audit", "warn", "block"])
+    def test_the_mistyped_tool_stays_withheld(self, enforcement) -> None:
+        registry = _register(
+            {
+                "digest_enforcement": enforcement,
+                "new_tools": "withhold",
+                "pins": {"list_dir": GOOD, "read_file": "not-a-digest"},
+            }
+        )
+
+        assert registry.is_unadmitted("srv", "read_file", None)
+        assert registry.is_unadmitted("srv", "read_file", "t1")
+        assert not registry.is_unadmitted("srv", "list_dir", None)
+
+    def test_a_tenants_unreadable_pin_admits_nothing_for_that_tenant(self) -> None:
+        registry = _register(
+            {
+                "new_tools": "withhold",
+                "pins": {"list_dir": GOOD},
+                "tenant_overrides": {"t1": {"pins": {"read_file": 12345}}, "t2": {"pins": {"read_file": GOOD}}},
+            }
+        )
+
+        assert registry.is_unadmitted("srv", "read_file", "t1")
+        assert not registry.is_unadmitted("srv", "read_file", "t2")
+
+    def test_a_spelling_of_the_right_digest_admits(self) -> None:
+        registry = _register({"new_tools": "withhold", "pins": {"read_file": f"sha256:{GOOD.upper()}"}})
+
+        assert not registry.is_unadmitted("srv", "read_file", None)
+
+
 class TestABlockThatIsNotAMappingIsRefused:
     @pytest.mark.parametrize(
         "block",

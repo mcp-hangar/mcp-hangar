@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 import yaml
 
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
+from ..application.read_models.tool_projection import UNREADABLE_PIN_SHA256
 from ..domain.contracts.persistence import peer_key_name_conflicts
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
@@ -882,10 +883,9 @@ def _load_group_members(
             saga.register_member(member_id, group_id)
 
 
-#: The digest registered for a pin the loader cannot read (#2036): no definition
-#: hashes to it, so the tool reads as drifted from its pin -- withheld under
-#: `block`, reported under `audit` -- instead of being served unpinned.
-_UNSATISFIABLE_PIN = "0" * 64
+#: The digest registered for a pin the loader cannot read (#2036); see
+#: `UNREADABLE_PIN_SHA256` for what it does to drift and to admission.
+_UNSATISFIABLE_PIN = UNREADABLE_PIN_SHA256
 
 
 def _pin_spelling(sha256: Any) -> str | None:
