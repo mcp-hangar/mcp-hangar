@@ -21,6 +21,11 @@ def _invoke(path: Path, *args: str):
     return CliRunner().invoke(app, ["--config", str(path), "add", NAME, "-y", "--no-reload", *args])
 
 
+def _said(result) -> str:
+    """The output with rich's line wrapping undone: it wraps at the terminal width."""
+    return " ".join(result.output.split())
+
+
 def _pinned(path: Path) -> str:
     entry = ConfigFileManager(path)._build_mcp_server_entry(get_mcp_server(NAME), None, None)
     entry["command"] = [*entry["command"], "--repository", "/srv/repo"]
@@ -37,8 +42,8 @@ def test_a_configured_server_is_refused_and_the_file_is_untouched(tmp_path) -> N
     result = _invoke(path)
 
     assert result.exit_code == 1, result.output
-    assert "--replace" in result.output
-    assert "drops tool_projection" in result.output and "changes command" in result.output
+    assert "--replace" in _said(result)
+    assert "drops tool_projection" in _said(result) and "changes command" in _said(result)
     assert path.read_text() == before
 
 
@@ -49,7 +54,7 @@ def test_replace_does_it_and_says_what_it_dropped(tmp_path) -> None:
     result = _invoke(path, "--replace")
 
     assert result.exit_code == 0, result.output
-    assert "drops tool_projection" in result.output
+    assert "drops tool_projection" in _said(result)
     entry = yaml.safe_load(path.read_text())["mcp_servers"][NAME]
     assert "tool_projection" not in entry
 
@@ -63,7 +68,7 @@ def test_adding_the_same_server_twice_is_idempotent(tmp_path) -> None:
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output
-    assert "already configured" in second.output
+    assert "already configured" in _said(second)
     assert path.read_text() == after_first
 
 
