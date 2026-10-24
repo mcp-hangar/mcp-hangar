@@ -25,6 +25,8 @@ Example McpServer File:
 """
 
 import asyncio
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +112,9 @@ class FilesystemDiscoverySource(DiscoverySource):
         self._observer: Observer | None = None
         self._event_handler: FileSystemEventHandler | None = None
         self._cached_mcp_servers: dict[str, DiscoveredMcpServer] = {}
+        # file path -> reason it was last refused, so a refusal warns once
+        # rather than on every scan, and again only when the reason changes.
+        self._refused_files: dict[str, str] = {}
 
     @property
     def source_type(self) -> str:
@@ -152,6 +157,11 @@ class FilesystemDiscoverySource(DiscoverySource):
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip malformed config file
                     logger.error(f"Failed to parse {file_path}: {e}")
 
+        # A refused file that is gone warns again if it comes back.
+        seen_keys = {str(p) for p in seen_files}
+        for key in [k for k in self._refused_files if k not in seen_keys]:
+            del self._refused_files[key]
+
         logger.debug(f"Filesystem discovery found {len(mcp_servers)} mcp_servers")
         return mcp_servers
 
@@ -164,8 +174,11 @@ class FilesystemDiscoverySource(DiscoverySource):
         Returns:
             DiscoveredMcpServer or None if disabled/invalid
         """
+        fd = self._open_trusted(file_path)
+        if fd is None:
+            return None
         try:
-            with open(file_path) as f:
+            with os.fdopen(fd) as f:
                 data = yaml.safe_load(f)
         except yaml.YAMLError as e:
             # Multi-document YAML or invalid YAML - skip silently
@@ -218,6 +231,84 @@ class FilesystemDiscoverySource(DiscoverySource):
             metadata=metadata,
             ttl_seconds=ttl,
         )
+
+    def _refuse(self, file_path: Path, reason: str) -> None:
+        key = str(file_path)
+        if self._refused_files.get(key) != reason:
+            self._refused_files[key] = reason
+            logger.warning(
+                "filesystem_discovery_file_refused",
+                file_path=key,
+                reason=reason,
+                hint="the file must stay inside the discovery path, and neither it nor any directory "
+                "from it up to the discovery path may be world-writable",
+            )
+
+    def _open_trusted(self, file_path: Path) -> int | None:
+        """Open a definition file unless anyone at all could have written it.
+
+        A definition names a command the gateway runs, so these are refused: a
+        symlink resolving outside the discovery directory, anything that is not
+        a regular file, and (POSIX) a world-writable file or a file under a
+        world-writable directory between it and the discovery directory. A
+        sticky world-writable directory is refused too, since anyone can still
+        add a new file to it. Symlinks inside the directory are followed, which
+        is how a mounted Kubernetes ConfigMap lays out its files.
+
+        The file's mode is read from the descriptor that is then parsed,
+        and the resolved path is opened with O_NOFOLLOW, so the file checked is
+        the file read.
+
+        Returns:
+            An open read-only descriptor, or None when the file is refused.
+        """
+        root = os.path.realpath(self.path)
+        resolved = os.path.realpath(file_path)
+        try:
+            contained = resolved != root and os.path.commonpath([root, resolved]) == root
+        except ValueError:  # different drives on Windows
+            contained = False
+        if not contained:
+            self._refuse(file_path, f"resolves to {resolved}, outside the discovery path {root}")
+            return None
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        try:
+            fd = os.open(resolved, flags)
+        except OSError as e:
+            self._refuse(file_path, f"cannot be opened without following a link: {e}")
+            return None
+
+        try:
+            st = os.fstat(fd)
+            reason: str | None = None
+            if not stat.S_ISREG(st.st_mode):
+                reason = "is not a regular file"
+            elif os.name != "nt":
+                reason = self._world_writable(st, resolved, root)
+        except OSError as e:
+            reason = f"cannot be checked: {e}"
+        if reason is not None:
+            os.close(fd)
+            self._refuse(file_path, reason)
+            return None
+
+        self._refused_files.pop(str(file_path), None)
+        return fd
+
+    @staticmethod
+    def _world_writable(st: os.stat_result, resolved: str, root: str) -> str | None:
+        """Say why any local user could write or replace the file, or None."""
+        if st.st_mode & stat.S_IWOTH:
+            return f"is world-writable (mode {stat.S_IMODE(st.st_mode):o})"
+        directory = os.path.dirname(resolved)
+        while True:
+            dir_mode = os.stat(directory).st_mode
+            if dir_mode & stat.S_IWOTH:
+                return f"sits in {directory}, which is world-writable (mode {stat.S_IMODE(dir_mode):o})"
+            if directory == root:
+                return None
+            directory = os.path.dirname(directory)
 
     def _parse_connection(self, connection: dict[str, Any], mode: str) -> dict[str, Any]:
         """Parse connection configuration.
