@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.1...v2.34.2) (2026-10-24)
+
+### Security
+
+- **security:** the connect-time SSRF guard no longer dials a remote server by name
+  when its own DNS lookup fails. It used to pass the request on with the hostname
+  intact, so httpcore resolved the name a second time with no check, and a
+  resolver that failed the first lookup and answered the second with a private or
+  metadata address got a connection the guard never judged. The request now fails
+  with a connection error. Servers without SSRF enforcement, and names that
+  resolve, are unaffected ([#2028](https://github.com/mcp-hangar/mcp-hangar/pull/2028))
+- **security:** registering a server the gateway launches on its own host now needs
+  `mcp_servers:local_launch`. A `subprocess`, `docker` or `container` server runs
+  a command or image the caller chooses, and its `env` is read when that process
+  starts, so `POST /api/mcp_servers/` for any mode but `remote`, and a
+  `PUT`/`PATCH` that sets `env` on such a server, used to let any holder of
+  `mcp_servers:write` -- the built-in `developer` role included -- run code on the
+  gateway host. `admin` and `provider-admin` hold the new permission; `developer`,
+  `kubernetes-operator` and the read-only roles do not. Registering a `remote`
+  server is unchanged ([#2026](https://github.com/mcp-hangar/mcp-hangar/pull/2026))
+
 ## [2.34.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.0...v2.34.1) (2026-10-24)
 
 ### Fixed
