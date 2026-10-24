@@ -143,20 +143,23 @@ class DiscoveryLifecycleManager:
         if name in self._draining:
             return
 
-        mcp_server = self._mcp_servers.pop(name, None)
-        if not mcp_server:
+        if name not in self._mcp_servers:
             return
 
         # Mark as draining
         self._draining.add(name)
 
         try:
-            # Callback to main registry
+            # Callback to main registry. The entry is still here while it runs:
+            # the callback reads it to record which source lost the server and
+            # to bring that source's count down. Popped first, it found nothing,
+            # and a TTL expiry recorded no McpServerDiscoveryLost at all.
             if self.on_deregister:
                 await self.on_deregister(name, reason)
         except Exception as e:  # noqa: BLE001 -- fault-barrier: deregister callback failure must not crash lifecycle
             logger.error(f"Error deregistering mcp_server {name}: {e}")
         finally:
+            self._mcp_servers.pop(name, None)
             self._draining.discard(name)
 
     def add_mcp_server(self, mcp_server: DiscoveredMcpServer) -> None:
