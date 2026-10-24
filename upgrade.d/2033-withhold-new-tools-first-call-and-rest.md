@@ -7,4 +7,13 @@
 
 A client that reads `description` or `inputSchema` off every entry should read `withheld` first, as it should for `"digest_drift"`. A withdrawal for some tenants only is not marked.
 
-`new_tools: withhold` declared on a group's `tool_projection`, beside pins declared on the group, now withholds: the access decision `hangar_call` and the listings make refuses a tool the group's pins do not admit as withdrawn, whether the call names the group or one of its members. Before, it withheld nothing, because a group's tools are catalogued under its members' ids, and under the group id every tool read as unknown.
+`new_tools: withhold` declared on a group's `tool_projection`, beside pins declared on the group, now withholds: the access decision `hangar_call` and the listings make refuses a tool the group's pins do not admit as withdrawn, whether the call names the group or one of its members -- including a direct call to a member whose own `tool_projection` sets no `new_tools`. Before, it withheld nothing, because a group's tools are catalogued under its members' ids, and under the group id every tool read as unknown.
+
+Two more things change for a server under `new_tools: withhold` with pins:
+
+- A call naming a tool the pins do not cover is refused as withdrawn
+  (`ToolWithdrawnError`), on a warm server as on a cold one -- including a
+  misspelled tool name, which used to answer not-found.
+- On a cold server, such a call is refused before the server is started, so it
+  no longer starts the server and no `ToolAdmissionRequested` is published for
+  it; the admission request appears once something else starts the server.
