@@ -13,6 +13,8 @@ from __future__ import annotations
 import time
 from unittest.mock import Mock
 
+import pytest
+
 from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 from mcp_hangar.domain.contracts.authentication import AuthRequest
 
@@ -53,4 +55,26 @@ def test_authenticate_reads_lowercase_authorization_header() -> None:
     auth.authenticate(AuthRequest(headers={"authorization": "Bearer tok"}, source_ip="1"))
 
     # The token was extracted from the lowercase header and passed to the validator.
+    validator.validate.assert_called_once_with("tok")
+
+
+@pytest.mark.parametrize("scheme", ["bearer", "BEARER", "BeArEr"])
+def test_the_scheme_is_read_case_insensitively(scheme) -> None:
+    # RFC 9110 11.1: the auth scheme is case-insensitive, and `?token=` already
+    # lowercased; `bearer <jwt>` was treated as no credentials (#2060).
+    now = int(time.time())
+    validator = Mock()
+    validator.validate.return_value = {
+        "iss": "https://issuer.example",
+        "sub": "user-1",
+        "aud": "mcp-hangar",
+        "groups": [],
+        "iat": now,
+        "exp": now + 300,
+    }
+    auth = _authenticator(validator)
+    request = AuthRequest(headers={"authorization": f"{scheme} tok"}, source_ip="1")
+
+    assert auth.supports(request)
+    auth.authenticate(request)
     validator.validate.assert_called_once_with("tok")

@@ -133,6 +133,11 @@ class OIDCConfig:
     tenant_audiences: dict[str, str] = field(default_factory=dict)
 
 
+def _is_bearer(authorization: str) -> bool:
+    """Whether *authorization* carries the Bearer scheme, which is case-insensitive (RFC 9110 11.1, #2060)."""
+    return authorization[:7].lower() == "bearer "
+
+
 class JWTAuthenticator(IAuthenticator):
     """Authenticates requests using JWT tokens (Bearer auth).
 
@@ -187,7 +192,7 @@ class JWTAuthenticator(IAuthenticator):
 
     def supports(self, request: AuthRequest) -> bool:
         """Check if request has Bearer token."""
-        return self._authorization_header(request).startswith("Bearer ")
+        return _is_bearer(self._authorization_header(request))
 
     def authenticate(self, request: AuthRequest) -> Principal:
         """Authenticate using JWT token.
@@ -204,7 +209,7 @@ class JWTAuthenticator(IAuthenticator):
         """
         auth_header = self._authorization_header(request)
 
-        if not auth_header.startswith("Bearer "):
+        if not _is_bearer(auth_header):
             raise InvalidCredentialsError(
                 message="Missing Bearer token",
                 auth_method="jwt",
