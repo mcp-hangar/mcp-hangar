@@ -13,6 +13,7 @@ The lifecycle flow:
 
 import asyncio
 import ipaddress
+import queue
 import signal
 import sys
 import threading
@@ -846,12 +847,78 @@ class ServerLifecycle:
         return create_auth_enforced_app(inner_app, auth_components)
 
 
-def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
+class SignalReloader:
+    """Runs the reloads SIGHUP asks for, on a thread of its own, one after another.
+
+    `request()` is what the signal handler calls. It only puts a token on a
+    `SimpleQueue`, whose `put` is safe to call from a signal handler: it takes
+    no lock the interrupted main thread could be holding. The thread takes every
+    token waiting and runs one reload for all of them, so any number of SIGHUPs
+    that arrive while a reload runs ask for exactly one more.
+
+    Args:
+        send: Sends the reload command; the command bus's `send`.
+        is_stopping: True once the server is shutting down; no reload starts then.
+    """
+
+    def __init__(self, send: Callable[[Any], Any], *, is_stopping: Callable[[], bool] = lambda: False) -> None:
+        self._send = send
+        self._is_stopping = is_stopping
+        self._requests: queue.SimpleQueue[bool] = queue.SimpleQueue()
+        self._thread = threading.Thread(target=self._run, name="sighup-reload", daemon=True)
+        self._thread.start()
+
+    def request(self) -> None:
+        """Ask for a reload. Never blocks; safe to call from a signal handler."""
+        self._requests.put(True)
+
+    def stop(self, join_timeout_s: float = 0.0) -> None:
+        """End the thread once a reload running now has finished; none starts after this."""
+        self._requests.put(False)
+        if join_timeout_s > 0:
+            self._thread.join(join_timeout_s)
+
+    def _run(self) -> None:
+        while True:
+            wanted = [self._requests.get()]
+            while True:
+                try:
+                    wanted.append(self._requests.get_nowait())
+                except queue.Empty:
+                    break
+            if not all(wanted):
+                return
+            if self._is_stopping():
+                logger.info("config_reload_skipped_via_signal", reason="shutting_down")
+                continue
+            self._reload()
+
+    def _reload(self) -> None:
+        try:
+            from ..application.commands.commands import ReloadConfigurationCommand
+
+            command = ReloadConfigurationCommand(graceful=True, requested_by="sighup")
+            result = self._send(command)
+            logger.info("config_reload_completed_via_signal", result=result)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed reload must not end the reloader thread
+            logger.error(
+                "config_reload_failed_via_signal",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
+
+def _setup_signal_handlers(lifecycle: ServerLifecycle) -> SignalReloader | None:
     """Setup graceful shutdown on SIGTERM/SIGINT and reload on SIGHUP.
 
     Args:
         lifecycle: ServerLifecycle instance to shutdown on signal.
+
+    Returns:
+        The thread SIGHUP's reloads run on, for the caller to stop; None where
+        there is no SIGHUP.
     """
+    reloader: SignalReloader | None = None
 
     def shutdown_handler(signum, _frame):
         sig_name = signal.Signals(signum).name
@@ -860,36 +927,30 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
         sys.exit(0)
 
     def reload_handler(signum, _frame):
-        """Handle SIGHUP for configuration reload."""
+        """Handle SIGHUP: ask for a reload, and return at once.
+
+        The reload itself runs on the reloader's thread. Run here, it ran on the
+        main thread, which serves HTTP and stdio: the gateway answered nothing
+        until a graceful reload had drained, and a second SIGHUP started a reload
+        nested inside the first.
+        """
         sig_name = signal.Signals(signum).name
         logger.info("reload_signal_received", signal=sig_name)
-
-        try:
-            from ..application.commands.commands import ReloadConfigurationCommand
-
-            command = ReloadConfigurationCommand(
-                graceful=True,
-                requested_by="sighup",
-            )
-
-            # Access command bus from lifecycle context
-            result = lifecycle._context.runtime.command_bus.send(command)
-            logger.info("config_reload_completed_via_signal", result=result)
-
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: signal handler must not crash process
-            logger.error(
-                "config_reload_failed_via_signal",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+        if reloader is not None:
+            reloader.request()
 
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
 
     # SIGHUP is not available on Windows
     if hasattr(signal, "SIGHUP"):
+        reloader = SignalReloader(
+            lambda command: lifecycle._context.runtime.command_bus.send(command),
+            is_stopping=lambda: lifecycle._shutdown_requested,
+        )
         signal.signal(signal.SIGHUP, reload_handler)
         logger.debug("sighup_handler_registered")
+    return reloader
 
 
 @dataclass(frozen=True)
@@ -1004,7 +1065,7 @@ def run_server(cli_config: CLIConfig) -> None:
 
     # Create lifecycle manager
     lifecycle = ServerLifecycle(context)
-    _setup_signal_handlers(lifecycle)
+    reloader = _setup_signal_handlers(lifecycle)
 
     # Start background components and the dedicated discovery lifecycle loop.
     lifecycle.start()
@@ -1029,6 +1090,8 @@ def run_server(cli_config: CLIConfig) -> None:
     finally:
         # Ensure cleanup on exit
         lifecycle.shutdown()
+        if reloader is not None:
+            reloader.stop()
 
 
 __all__ = [
