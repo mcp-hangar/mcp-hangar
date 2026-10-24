@@ -7,10 +7,12 @@ unhandled fault for what was the caller's mistake.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from starlette.testclient import TestClient
+
+from mcp_hangar.server.api import create_api_router
 
 ROUTES = [
     ("POST", "/mcp_servers/"),
@@ -36,14 +38,12 @@ BODIES = ["notjson", "[]", '"x"', "{"]
 
 @pytest.fixture
 def client():
-    from mcp_hangar.server.api import create_api_router
-
+    # Imported outside any patch: a route module imported under one keeps the
+    # patched name for the rest of the session (`from .middleware import ...`).
     ctx = Mock()
     ctx.auth_components = None
     with (
         patch("mcp_hangar.server.api.middleware.get_context", return_value=ctx),
-        patch("mcp_hangar.server.api.middleware.dispatch_command", new=AsyncMock(return_value={})),
-        patch("mcp_hangar.server.api.middleware.dispatch_query", new=AsyncMock(return_value={})),
         # Reached past the "not configured" answers, so the body is what is judged.
         patch("mcp_hangar.server.api.discovery._require_orchestrator", return_value=Mock()),
         patch("mcp_hangar.approvals.api.routes._get_approval_service", return_value=Mock()),
