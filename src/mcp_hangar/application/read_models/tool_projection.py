@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
+from ...domain.contracts.withdrawals import IWithdrawalOverlay
 from ...domain.services.digest_computation import compute_tool_digest
 from ...domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 
@@ -140,7 +141,7 @@ class ToolProjection:
 # ---------------------------------------------------------------------------
 
 
-class ToolProjectionRegistry:
+class ToolProjectionRegistry(IWithdrawalOverlay):
     """Central, cached, tenant-aware catalog of all backend tools.
 
     Built from the domain repository (tool schemas already discovered);
@@ -590,6 +591,21 @@ class ToolProjectionRegistry:
         return self._is_config_withdrawn_for(mcp_server, tool, tenant_id, kind) or self._is_runtime_withdrawn_for(
             mcp_server, tool, tenant_id, kind
         )
+
+    def withdrawal_status(
+        self, mcp_server: str, name: str, tenant_id: str | None, *, kind: str = "tool"
+    ) -> bool | None:
+        """The overlay as the access decision reads it (:class:`IWithdrawalOverlay`, #1784).
+
+        A tool answers as :meth:`resolve` does, so the decision and the
+        executor's withdrawal gate read one status: ``None`` for a tool the
+        catalogue does not know, which blocks nothing. A prompt or a resource
+        answers as :meth:`is_withdrawn` does.
+        """
+        if kind != "tool":
+            return self.is_withdrawn(mcp_server, name, kind=kind, tenant_id=tenant_id)
+        projection = self.resolve(mcp_server, name, tenant_id)
+        return None if projection is None else projection.is_withdrawn_for(tenant_id)
 
     def is_withdrawn(
         self,

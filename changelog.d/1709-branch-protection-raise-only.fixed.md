@@ -1,1 +1,0 @@
-**repo:** `scripts/setup-branch-protection.sh` only raises main's protection. It starts from the current required checks and admin rule, adds what `--add` and `--mode community` ask for, and refuses a check that did not report on the last merged PR. It used to write a fixed list of six checks, two of which no job reports, and solo mode turned `enforce_admins` off.

@@ -222,12 +222,15 @@ def _links_for(tenant_id: str | None) -> list[dict[str, Any]]:
 def _relay_read(mcp_server_id: str, uri: str) -> dict[str, Any]:
     """Forward ``resources/read`` to the owning upstream (a group via a member)."""
     from ..server.context import get_context
+    from .prompt_proxy import _member_answering
 
     ctx = get_context()
     server = ctx.get_mcp_server(mcp_server_id)
     if server is None:
         group = ctx.get_group(mcp_server_id)
-        server = group.select_member() if group else None
+        # A read is a call: the member is selected for this tenant, as a
+        # tool call selects it, so it is one `_deliverable` decided on (#1784).
+        server = _member_answering(group, "resources/read") if group else None
     if server is None:
         return {"error": {"code": RESOURCE_NOT_FOUND, "message": f"Unknown resource: {uri}"}}
     return server.relay_request("resources/read", {"uri": uri})

@@ -105,6 +105,37 @@ def _upstream_ids(tenant_id: str | None) -> list[str]:
     return list(dict.fromkeys(group_of.get(server, server) for server, _tool in _build_flat_map(tenant_id).values()))
 
 
+#: The relayed methods that list: answered by a member a call may be routed
+#: to, without selecting one (#1784).
+_LISTINGS = frozenset({"prompts/list", "resources/list", "resources/templates/list"})
+
+
+def _caller_tenant() -> str | None:
+    from ..context import get_identity_context
+
+    identity = get_identity_context()
+    return identity.caller.tenant_id if identity is not None else None
+
+
+def _member_answering(group: Any, method: str) -> Any:
+    """The member of *group* that answers *method* for the caller, chosen as a call chooses it (#1784).
+
+    A listing is answered by a member a call for this tenant may be routed to
+    that is already running: nothing is selected, so the strategy does not
+    advance and no member is started for a listing (decision 1 on #1763), and
+    any such member will do, since the listing's decision holds for each of
+    them. A fetch is a call: it selects a member as a tool call does, for this
+    tenant, so the member that answers is one the decision was made on.
+    """
+    from ..domain.value_objects.mcp_server import McpServerState
+
+    tenant_id = _caller_tenant()
+    if method in _LISTINGS:
+        running = (m for m in group.route_candidates(tenant_id) if m.state_snapshot is McpServerState.READY)
+        return next(running, None)
+    return group.select_member_for(tenant_id)
+
+
 def _relay(mcp_server_id: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
     """Forward a prompt request to the owning upstream (a group via a member)."""
     from ..server.context import get_context
@@ -113,7 +144,7 @@ def _relay(mcp_server_id: str, method: str, params: dict[str, Any]) -> dict[str,
     server = ctx.get_mcp_server(mcp_server_id)
     if server is None:
         group = ctx.get_group(mcp_server_id)
-        server = group.select_member() if group else None
+        server = _member_answering(group, method) if group else None
     if server is None:
         return {"error": {"code": INVALID_PARAMS, "message": "upstream unavailable"}}
     return server.relay_request(method, params)

@@ -669,6 +669,27 @@ class McpServerGroup(AggregateRoot):
 
             return MemberSelection(None, RouteReason.NO_AVAILABLE_MEMBER)
 
+    def route_candidates(self, tenant_id: str | None) -> tuple[McpServer, ...]:
+        """The members a call for *tenant_id* may be routed to now. Selects none and starts none (#1784).
+
+        What a listing decides on, so that it shows only what a call would be
+        allowed (decision 1 on #1763). A pinned or canary tenant whose target
+        is selectable is routed to that member and no other. Any other tenant
+        may get any selectable member, since the load-balancer strategy
+        chooses among all of them. Empty when no member is selectable: such a
+        call is refused, so a listing lists nothing (decision 2).
+        :meth:`select_member_with_reason` makes the same choice, and advances
+        the strategy and the member's clock while doing so; this reads only.
+        """
+        with self._lock:
+            available = [m for m in self._members.values() if self._selectable(m)]
+            if available and tenant_id is not None and self._canary is not None:
+                routed = self._canary.resolve(tenant_id)
+                target = self._members.get(routed) if routed else None
+                if target is not None and self._selectable(target):
+                    return (target.mcp_server,)
+            return tuple(member.mcp_server for member in available)
+
     @staticmethod
     def _selectable(member: GroupMember) -> bool:
         """In rotation, and not dead for a reason a group does not route to.

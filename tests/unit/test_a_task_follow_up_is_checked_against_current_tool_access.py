@@ -285,8 +285,8 @@ class _Resolver:
         """No approval list: the gates' one decision asks for it too (#1431)."""
         return SimpleNamespace(is_unrestricted=lambda: True)
 
-    def is_tool_allowed(self, *, mcp_server_id, tool_name, group_id, member_id, member_server_id) -> bool:  # noqa: ANN001
-        self.asked.append((mcp_server_id, tool_name, group_id, member_id, member_server_id))
+    def is_allowed(self, mcp_server_id, name, *, kind, group_id, member_id, member_server_id) -> bool:  # noqa: ANN001
+        self.asked.append((mcp_server_id, name, group_id, member_id, member_server_id))
         return (mcp_server_id, group_id, member_server_id) not in self.denied
 
 
@@ -306,8 +306,12 @@ class _Registry:
     def resolve(self, server_id: str, tool: str, tenant_id: str | None) -> _Projection | None:
         return self.projections.get(server_id)
 
-    def is_withdrawn(self, group_id: str, tool: str, *, tenant_id: str | None) -> bool:
-        return group_id in self.withdrawn_on
+    def withdrawal_status(self, mcp_server: str, name: str, tenant_id: str | None, *, kind: str = "tool") -> Any:
+        """The overlay port `decide()` reads: a projection's status, a group's declared withdrawal, or unknown."""
+        projection = self.projections.get(mcp_server)
+        if projection is not None:
+            return projection.is_withdrawn_for(tenant_id)
+        return True if mcp_server in self.withdrawn_on else None
 
     def resolve_pin(self, server_id: str, tool: str, tenant_id: str | None) -> None:
         """No pin: the gates' one decision reads the pins too (#1431)."""

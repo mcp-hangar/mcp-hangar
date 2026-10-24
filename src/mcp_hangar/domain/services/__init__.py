@@ -12,6 +12,7 @@ from ..contracts.launcher import IMcpServerLauncher, LaunchResult, TransportClie
 
 # Re-export exception from canonical location for convenience
 from ..exceptions import McpServerStartError
+from .access_decision import decide
 from .error_diagnostics import collect_startup_diagnostics, get_suggestion_for_error
 from .image_builder import BuildConfig, ImageBuilder, get_image_builder
 from .tool_access_resolver import (
@@ -56,6 +57,7 @@ __all__ = [
     "collect_startup_diagnostics",
     "get_suggestion_for_error",
     "ToolAccessResolver",
+    "decide",
     "get_tool_access_resolver",
     "reset_tool_access_resolver",
     "ToolProjection",

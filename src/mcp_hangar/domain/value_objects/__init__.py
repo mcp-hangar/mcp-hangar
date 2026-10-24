@@ -16,6 +16,7 @@ All types are re-exported here for backward compatibility.
 
 # Common / shared value objects
 # Capability declarations (Phase 1 enforcement)
+from .access import Caller, Decision, Target
 from .capabilities import (
     EgressRule,
     EnvironmentCapabilities,
@@ -128,6 +129,9 @@ __all__ = [
     "ResourceScope",
     # Tool Access Policy
     "ToolAccessPolicy",
+    "Target",
+    "Caller",
+    "Decision",
     # Truncation
     "TruncationConfig",
     "ContinuationId",

@@ -29,6 +29,7 @@ from ...logging_config import should_log_now
 from ..exceptions import ConfigurationError
 from ..model.tool_catalog import ToolSchema
 from ..value_objects import ToolAccessPolicy
+from ..value_objects.access import DEFAULT_KIND, PolicyKind
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,9 @@ def configured_topology_mode(config: Mapping[str, Any]) -> TopologyMode:
     )
 
 
-# What a policy governs. A policy is keyed `(scope target, kind)`; the default
-# everywhere is "tool", which is what every pre-#1028 registration meant.
-PolicyKind = Literal["tool", "prompt", "resource"]
-DEFAULT_KIND: PolicyKind = "tool"
+# What a policy governs -- `PolicyKind` and `DEFAULT_KIND` -- is defined with
+# `Target` in `value_objects/access.py` (#1784) and imported above; the names
+# stay importable from here.
 
 # Sentinel policy that denies every tool.  deny_list=("*",) matches any
 # tool name via fnmatch, so is_tool_allowed() returns False for all names.

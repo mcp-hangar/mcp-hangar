@@ -111,22 +111,16 @@ def _tool_call(mcp_server: str, tool: str) -> Any:
     )
 
 
-def _decisions() -> tuple[Any, ...]:
-    """What a call reads off every overlay: the policy, withdrawals, pin, `header_exposure` and group policy.
+def _overlays() -> tuple[Any, ...]:
+    """What a call reads off every overlay, as each is now: policy, withdrawals, pin, `header_exposure`, group policy.
 
-    Then what a tool call decides from them (#1431): `hangar_call`'s access,
-    withdrawal and pins, for a server and for a group member, and the front
-    door's flat map, which is both its listing and its routing. Then, for the
-    server a reload moves between groups (#1488), the groups `hangar_call`
-    reads as owning it, its access, and whether it carries an L7 policy, and
-    the front door's access.
+    Read with no guard, so a swap in progress shows as a mix. `_decisions`
+    reads these first.
     """
     resolver = get_tool_access_resolver()
     registry = get_tool_projection_registry()
     pin = registry.resolve_pin(SERVER, "p", None)
     exposure = get_header_exposure_policy(SERVER)
-    call, pinned, member = _tool_call(SERVER, "t"), _tool_call(SERVER, "p"), _tool_call(MEMBER, "ga")
-    mover = _tool_call(MOVER, "ga")
     return (
         resolver.is_tool_allowed(SERVER, "t"),
         resolver.is_tool_allowed(SERVER, "u"),
@@ -134,6 +128,25 @@ def _decisions() -> tuple[Any, ...]:
         registry.is_withdrawn(SERVER, "w"),
         pin.sha256 if pin is not None else None,
         exposure.deny_annotated if exposure is not None else None,
+    )
+
+
+def _decisions() -> tuple[Any, ...]:
+    """`_overlays`, then what a tool call decides from them (#1431).
+
+    `hangar_call`'s access, withdrawal and pins, for a server and for a group
+    member, and the front door's flat map, which is both its listing and its
+    routing. Then, for the server a reload moves between groups (#1488), the
+    groups `hangar_call` reads as owning it, its access, and whether it
+    carries an L7 policy, and the front door's access. A call's decision is
+    made through `decide()`, which waits out a swap in progress itself (#1784),
+    so this is not what a reader uses to look into the window.
+    """
+    overlays = _overlays()
+    call, pinned, member = _tool_call(SERVER, "t"), _tool_call(SERVER, "p"), _tool_call(MEMBER, "ga")
+    mover = _tool_call(MOVER, "ga")
+    return (
+        *overlays,
         is_governed_allowed(MEMBER, "ga", kind="tool", tenant_id=TENANT),
         is_governed_allowed(MEMBER, "gb", kind="tool", tenant_id=TENANT),
         (call.allowed, call.withdrawn),
@@ -143,6 +156,18 @@ def _decisions() -> tuple[Any, ...]:
         (mover.owning_groups, mover.allowed, mover.l7_policy is not None),
         is_governed_allowed(MOVER, "ga", kind="tool", tenant_id=TENANT),
     )
+
+
+@pytest.fixture(autouse=True)
+def _every_member_is_selectable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The groups here never start a member, so none is in rotation; this is about overlays, not routing.
+
+    A front-door listing decides on the members a call may be routed to
+    (#1784), which is none for a group with nothing in rotation.
+    """
+    from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
+
+    monkeypatch.setattr(McpServerGroup, "_selectable", staticmethod(lambda member: True))
 
 
 def _reset() -> None:
@@ -207,7 +232,10 @@ def test_a_call_made_between_two_overlay_swaps_sees_one_set(files: _Files, monke
     try:
         assert paused.wait(5)
         # The window itself: every overlay is the new file's but `header_exposure`.
-        assert _decisions() not in (files.decided_under_old, files.decided_under_new)
+        # Read overlay by overlay, with no guard: a call's own decision waits
+        # the window out, so it cannot show it.
+        overlays = _overlays()
+        assert overlays not in (files.decided_under_old[: len(overlays)], files.decided_under_new[: len(overlays)])
 
         call.start()
         call.join(0.2)

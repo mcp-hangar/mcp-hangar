@@ -44,9 +44,12 @@ from ....domain.model.mcp_server import (
 )
 from ....domain.model.mcp_server_group import RouteReason
 from ....domain.services import get_tool_access_resolver
+from ....domain.services.access_decision import decide
 from ....domain.services.digest_validator import DigestValidator
 from ....domain.services.governance_overlays import read_as_one_set
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
+from ....domain.value_objects.access import GATE_TOOL_ACCESS, Decision, Target
+from ....domain.value_objects.access import Caller as AccessCaller
 from ....domain.value_objects.identity import IdentityContext
 from ....domain.value_objects.truncation import ContinuationOwner
 from ....errors import bounded_error_type
@@ -75,7 +78,7 @@ from ....negotiation import (
     reset_current_protocol_negotiation,
     set_current_protocol_negotiation,
 )
-from ....observability.conventions import MCP, Caller, Gate, GenAI, McpServer, Retry, Route, Shaping
+from ....observability.conventions import GATE_REASONS, MCP, Caller, Gate, GenAI, McpServer, Retry, Route, Shaping
 from ....observability.tracing import (
     caller_ids_on_spans,
     current_traceparent,
@@ -105,34 +108,6 @@ _TENANT_QUOTA_MESSAGES = {
     NO_BUDGET: "No execution budget is configured for this tenant",
     CONCURRENCY: "This tenant's execution budget is exhausted: too many calls in flight",
     RATE: "This tenant's execution budget is exhausted: calls started too fast",
-}
-
-#: A refusing gate's `hangar.gate.reason`, keyed by the refusal's bounded
-#: `error_type`, never by its message (#1285). A refusal whose type is not here
-#: records no reason rather than an invented one. A gate that knows more than
-#: its `error_type` says -- a tenant budget's `no_budget`/`concurrency`/`rate`,
-#: an unverifiable pin -- names its reason itself with `_CallPipeline.note`.
-_GATE_REASONS = {
-    "CancellationError": "cancelled",
-    "TimeoutError": "batch_timeout",
-    "NoAvailableMemberError": "no_available_member",
-    "McpServerNotFoundError": "server_not_found",
-    "ToolAccessDeniedError": "tool_not_in_access_policy",
-    "ToolAccessDenied": "tool_not_in_access_policy",
-    "ToolWithdrawnError": "tool_withdrawn",
-    "ToolDigestMismatchError": "digest_mismatch",
-    "CircuitBreakerOpen": "circuit_open",
-    "CannotStartMcpServerError": "not_revived_by_calls",
-    "McpServerStartError": "start_failed",
-    "UpstreamPeerKeyMismatchError": "upstream_peer_key_mismatch",
-    "ValidatorDenied": "validator_denied",
-    "TenantQuotaExceeded": "tenant_quota_exceeded",
-    "ApprovalDenied": "approval_denied",
-    "approval_denied": "approval_denied",
-    "approval_timeout": "approval_timeout",
-    "ApprovalNoLongerValid": "approval_no_longer_valid",
-    "ApprovalGateError": "approval_gate_error",
-    "ApprovalRevalidationError": "approval_revalidation_error",
 }
 
 #: Refusals that mean the gate machinery broke, not that it said no: `error`,
@@ -376,36 +351,6 @@ def _groups_owning(server_id: str) -> tuple[str, ...]:
     return owners_by_member().get(server_id, ())
 
 
-def member_policy_scopes(server_id: str, owning_groups: tuple[str, ...]) -> list[tuple[str, str | None, str | None]]:
-    """Every ``(server id, group id, member server id)`` a call naming *server_id* is resolved under.
-
-    The server's own scope, and one scope per group that owns it, asked as a
-    call naming that group and routed to this member is asked. A tool is
-    allowed only when every scope allows it. The front door asks these same
-    scopes for a member of several groups, which it routes to the member.
-    """
-    return [(server_id, None, None), *((group_id, group_id, server_id) for group_id in owning_groups)]
-
-
-def _withdrawn_in_scope(
-    proj_registry: Any, projection: Any, tool: str, tenant_id: str | None, owning_groups: tuple[str, ...]
-) -> bool:
-    """Whether *tool* is withdrawn for *tenant_id* on this call (#231).
-
-    *projection* is the tool's projection as the call resolved it. It already
-    folds in every withdrawal declared on the id the call named, or on the
-    member a group selected. ``None`` means the catalogue does not know the
-    tool, and that does not block. A member named directly is also withdrawn
-    by a withdrawal on any group that owns it.
-
-    The withdrawal gate and the re-check after an approval hold both ask this,
-    so they cannot ask different questions.
-    """
-    if projection is not None and projection.is_withdrawn_for(tenant_id):
-        return True
-    return any(proj_registry.is_withdrawn(group_id, tool, tenant_id=tenant_id) for group_id in owning_groups)
-
-
 #: What a call refused by tool access is told. A task's follow-up is told the same (#1473).
 _TOOL_ACCESS_DENIED = "Tool not available for this mcp_server"
 
@@ -415,41 +360,41 @@ def _withdrawn_message(tool: str) -> str:
     return f"Tool '{tool}' is withdrawn for this tenant"
 
 
-def _policy_scopes(
-    mcp_server: str, is_group: bool, target_server_id: str, owning_groups: tuple[str, ...]
-) -> list[tuple[str, str | None, str | None]]:
-    """Every ``(server id, group id, member server id)`` a call's policy is resolved under.
+def _target(mcp_server: str, is_group: bool, target_server_id: str, owning_groups: tuple[str, ...]) -> Target:
+    """What a call named, typed for `decide()` (#1784).
 
-    - A call naming a group has one scope: the group, plus the member
-      ``_gate_resolve_target`` selected. The member's policy is keyed by
-      its SERVER id (#1164).
-    - A call naming a server has its own scope. When the server is a group
-      member, there is also one scope per owning group, asked as a call
-      naming that group and routed to this member is asked.
+    - A call naming a group: the group, and the member ``_gate_resolve_target``
+      selected, whose policy is keyed by its SERVER id (#1164). The pipeline
+      presets ``target_server_id`` to the id the call named, so the group's own
+      id there means no member was selected.
+    - A call naming a server: the server, and the groups that own it, read
+      with the overlays (#1488).
 
-    The access gate, the approval gate, the re-check after a hold and a
-    task's follow-ups ask these same scopes, each with the caller's tenant.
-    The approval gate used to ask only the named server, with no tenant.
+    `Target.policy_scopes` derives from this the scopes the access gate, the
+    approval gate, the re-check after a hold and a task's follow-ups all ask,
+    each with the caller's tenant. The approval gate used to ask only the
+    named server, with no tenant.
     """
     if is_group:
-        return [(mcp_server, mcp_server, target_server_id or None)]
-    return member_policy_scopes(mcp_server, owning_groups)
+        member = target_server_id if target_server_id and target_server_id != mcp_server else None
+        return Target.group(mcp_server, member_server=member)
+    return Target.server(mcp_server, owning_groups=owning_groups)
 
 
-def _allowed_in_every_scope(
-    resolver: Any, tool: str, tenant_id: str | None, scopes: list[tuple[str, str | None, str | None]]
-) -> bool:
-    """Whether every scope's policy allows *tool* for *tenant_id*. Deny wins."""
-    return all(
-        resolver.is_tool_allowed(
-            mcp_server_id=server_id,
-            tool_name=tool,
-            group_id=group_id,
-            member_id=tenant_id,
-            member_server_id=member_server_id,
-        )
-        for server_id, group_id, member_server_id in scopes
-    )
+def _access_caller(tenant_id: str | None) -> AccessCaller:
+    """Who asks, for `decide()`: the tenant the gates read, and the identity bound to this call, if any.
+
+    *tenant_id* is the pipeline's, read once before member selection, and is
+    not read again here: a task's follow-up carries the tenant that created
+    the task and may run with no identity bound (#1473). An empty tenant is no
+    tenant, which in a ``front_door`` topology is the resolver's fail-closed
+    missing-identity branch. Roles are carried, not consulted (#1763).
+    """
+    identity = get_identity_context()
+    bound = identity.caller if identity is not None else None
+    principal = (bound.user_id or bound.agent_id) if bound is not None else None
+    roles = frozenset(role for role in bound.roles if role) if bound is not None else frozenset()
+    return AccessCaller(principal_id=principal or None, tenant_id=tenant_id or None, roles=roles)
 
 
 def _resolve_projection(
@@ -460,23 +405,6 @@ def _resolve_projection(
     if resolved is None and target_server_id and target_server_id != mcp_server:
         resolved = proj_registry.resolve(target_server_id, tool, tenant_id)
     return resolved
-
-
-def _approval_policy(
-    resolver: Any, tool: str, tenant_id: str | None, scopes: list[tuple[str, str | None, str | None]]
-) -> Any:
-    """The effective policy of the first of *scopes* whose approval list holds *tool*, or None.
-
-    Every scope the access gate asks, each with the caller's tenant. A tool on
-    any of their approval lists needs approval, and the first scope that asks
-    supplies the timeout and channel. There is no `_global` second lookup:
-    `_compute_effective_policy` merges `_global` into every scope it resolves.
-    """
-    for server_id, group_id, member_server_id in scopes:
-        scoped = resolver.resolve_effective_policy(server_id, group_id, tenant_id, member_server_id=member_server_id)
-        if not scoped.is_unrestricted() and scoped.requires_approval(tool):
-            return scoped
-    return None
 
 
 def _upstream_of(server: Any) -> str | None:
@@ -504,28 +432,45 @@ class _Governance:
 
     #: The tenant every overlay was asked for: the caller's.
     tenant_id: str | None
-    #: The groups that own the server the call names, read with the overlays.
-    #: Empty for a call that names a group, and for a server in no group.
-    owning_groups: tuple[str, ...]
-    #: Every scope the call's policy is resolved under (`_policy_scopes`), under `owning_groups`.
-    scopes: tuple[tuple[str, str | None, str | None], ...]
-    #: Whether the policy of every scope `_policy_scopes` names allows the tool. Deny wins.
-    allowed: bool
+    #: What the call named, as `_gate_resolve_target` resolved it: a group and
+    #: the member it selected, or a server and the groups that own it, read
+    #: with the overlays. Its `policy_scopes()` are the scopes `decision` asked.
+    target: Target
+    #: The one decision every surface makes (#1784): tool access over every
+    #: scope, deny wins, then withdrawal, then which policy routes the tool to
+    #: a human. The access, withdrawal and approval gates each act on their part.
+    decision: Decision
     #: The tool's projection as the call resolves it (`_resolve_projection`). None: not in the catalogue.
     projection: Any
-    #: Whether the tool is withdrawn for the tenant (`_withdrawn_in_scope`).
-    withdrawn: bool
     #: ``(id, pin, mode)`` for each pin the call must match: the pins of the
     #: groups of a member named directly first, the call's own last. Each
     #: carries the id that declared it and that id's digest-enforcement mode.
     pins: tuple[tuple[str, Any, DigestEnforcement], ...]
-    #: The policy that routes the tool to a human (`_approval_policy`), or None.
-    approval_policy: Any
     #: The L7 egress policy of the server the call is ROUTED to, which the
     #: approval gate routes the call on (`BatchExecutor._l7_approval_rule`).
     #: For a call naming a group, the member `_gate_resolve_target` selected
     #: (#1499). None: that server has none, or it was not looked up.
     l7_policy: Any = None
+
+    @property
+    def owning_groups(self) -> tuple[str, ...]:
+        """The groups that own the server the call names. Empty for a group, and for a server in no group."""
+        return self.target.owning_groups
+
+    @property
+    def allowed(self) -> bool:
+        """Whether the policy of every scope the target names allows the tool. Deny wins."""
+        return self.decision.gate != GATE_TOOL_ACCESS
+
+    @property
+    def withdrawn(self) -> bool:
+        """Whether the tool is withdrawn for the tenant, asked once access allowed it."""
+        return self.decision.withdrawn
+
+    @property
+    def approval_policy(self) -> Any:
+        """The policy that routes the tool to a human, or None."""
+        return self.decision.approval_policy
 
 
 def _l7_policy_of(servers: Any, mcp_server_id: str) -> Any:
@@ -566,7 +511,7 @@ def _decide_governance(
     # govern it: never the previous file's groups with the new file's
     # policies (#1488).
     owning_groups = () if is_group else _groups_owning(mcp_server)
-    scopes = _policy_scopes(mcp_server, is_group, target_server_id, owning_groups)
+    target = _target(mcp_server, is_group, target_server_id, owning_groups)
     projection = _resolve_projection(proj_registry, mcp_server, tool, tenant_id, target_server_id)
     own = proj_registry.resolve_pin(mcp_server, tool, tenant_id)
     if own is None and target_server_id and target_server_id != mcp_server:
@@ -587,13 +532,14 @@ def _decide_governance(
         pins.append((mcp_server, own))
     return _Governance(
         tenant_id=tenant_id,
-        owning_groups=owning_groups,
-        scopes=tuple(scopes),
-        allowed=_allowed_in_every_scope(resolver, tool, tenant_id, scopes),
+        target=target,
+        # Access over every scope the target names, then withdrawal under the
+        # id named, the member selected and the owning groups, then the policy
+        # that asks a human: `decide()`, with the withdrawals read off the same
+        # registry the pins are (#1784).
+        decision=decide(target, tool, _access_caller(tenant_id), resolver=resolver, withdrawals=proj_registry),
         projection=projection,
-        withdrawn=_withdrawn_in_scope(proj_registry, projection, tool, tenant_id, owning_groups),
         pins=tuple((scope, pin, proj_registry.digest_enforcement(scope)) for scope, pin in pins),
-        approval_policy=_approval_policy(resolver, tool, tenant_id, scopes),
         # The L7 policy of the server the call is ROUTED to, not of the id it
         # names. A group id is not a server id, so a call naming a group read
         # no policy at all: the member's `requireApproval` rule never reached
@@ -633,37 +579,21 @@ def _governance_after_hold(
     # the policies and withdrawals below, as the gate before the hold read
     # them (#1488). A call naming a group has none.
     owning_groups = () if group_id is not None else _groups_owning(call.mcp_server)
-    # The caller's tenant and the target group are carried, not dropped: asked
-    # without them this was a different question than the pre-hold gate asked,
-    # and in front_door a resolve with no member_id is the fail-closed
-    # missing-identity branch, which refused EVERY approved call at dispatch
-    # (#1039). Then the groups of a member named directly, asked exactly as
-    # the gate before the hold asked them.
-    #
-    # No `_global` second lookup: `_compute_effective_policy` merges the
-    # `_global` policy into every scope it resolves, so a result that is
-    # unrestricted means `_global` was empty too.
-    scopes = [
-        (call.mcp_server, group_id, target_server_id or None),
-        *((owner, owner, call.mcp_server) for owner in owning_groups),
-    ]
+    # The same question the gates before the hold asked, through the same
+    # `decide()` (#1784): the caller's tenant and the target group are carried,
+    # not dropped. Asked without them this was a different question, and in
+    # front_door a resolve with no member_id is the fail-closed missing-identity
+    # branch, which refused EVERY approved call at dispatch (#1039).
+    target = _target(call.mcp_server, group_id is not None, target_server_id, owning_groups)
     try:
-        denied = any(
-            not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool)
-            for policy in (
-                resolver.resolve_effective_policy(server_id, scope_group, tenant_id, member_server_id=member)
-                for server_id, scope_group, member in scopes
-            )
-        )
-    except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
+        decision = decide(target, call.tool, _access_caller(tenant_id), resolver=resolver, withdrawals=proj_registry)
+    except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy or overlay
         return _AfterHold((f"policy could not be re-resolved: {exc}", "ApprovalRevalidationError"))
-    if denied:
+    if decision.gate == GATE_TOOL_ACCESS:
         return _AfterHold(("tool is no longer allowed by policy", "ToolAccessDenied"))
-    # The catalogue as it is now. The withdrawal and pin re-checks both read it.
+    # The catalogue as it is now. The pin re-check reads it.
     projection = _resolve_projection(proj_registry, call.mcp_server, call.tool, tenant_id, target_server_id)
-    return _AfterHold(
-        None, projection, _withdrawn_in_scope(proj_registry, projection, call.tool, tenant_id, owning_groups)
-    )
+    return _AfterHold(None, projection, decision.withdrawn)
 
 
 def current_tool_access_refusal(
@@ -688,7 +618,7 @@ def current_tool_access_refusal(
     """
     resolver, registry = get_tool_access_resolver(), get_tool_projection_registry()
 
-    def decide() -> _Governance:
+    def governance() -> _Governance:
         # A group id is not a server id, so this is the choice `_gate_resolve_target` makes.
         is_group = mcp_server in GROUPS
         return _decide_governance(
@@ -696,12 +626,12 @@ def current_tool_access_refusal(
         )
 
     # The gates' one decision, against one configuration's overlays and groups (#1431, #1488).
-    governance = read_as_one_set(decide)
-    if not governance.allowed:
-        return _TOOL_ACCESS_DENIED, "ToolAccessDeniedError"
-    if governance.withdrawn:
+    decision = read_as_one_set(governance).decision
+    if decision.allowed:
+        return None
+    if decision.withdrawn:
         return _withdrawn_message(tool), "ToolWithdrawnError"
-    return None
+    return _TOOL_ACCESS_DENIED, "ToolAccessDeniedError"
 
 
 @dataclass
@@ -847,13 +777,6 @@ class _CallPipeline:
         was before group pins were added.
         """
         return self.governance.pins
-
-    def policy_scopes(self) -> list[tuple[str, str | None, str | None]]:
-        """Every ``(server id, group id, member server id)`` this call's policy is resolved under.
-
-        See :func:`_policy_scopes`. The scopes the governance decision was made under.
-        """
-        return list(self.governance.scopes)
 
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
@@ -1090,7 +1013,6 @@ class BatchExecutor:
         ctx: Any,
         *,
         tenant_id: str | None = None,
-        scopes: list[tuple[str, str | None, str | None]] | None = None,
         governance: _Governance | None = None,
         abandoned: threading.Event | None = None,
     ) -> CallResult | None:
@@ -1104,13 +1026,10 @@ class BatchExecutor:
                 front_door, a resolve without it is the fail-closed
                 missing-identity branch, which answers deny-all and so never
                 asks for approval (#1039).
-            scopes: The ``(server, group, member server)`` scopes the access
-                gate asked, from ``_CallPipeline.policy_scopes``. The default
-                is the named server alone.
             governance: The call's governance decision. Its approval policy
                 is the one this gate applies, read with the rest of the call's
-                governance as one set (#1431). Without it, the approval lists
-                of *scopes* are read here, as one set.
+                governance as one set (#1431). Without it, the named server
+                alone is decided here, through the same `decide()`.
             abandoned: The batch's cancel event. An approval that arrives
                 after it is set is refused and recorded ``cancelled`` (#1702).
         """
@@ -1120,16 +1039,20 @@ class BatchExecutor:
         _approval_loop_local.approval_id = None
 
         # The approval lists of every scope the access gate asked, each with
-        # the caller's tenant: see `_approval_policy`. Before this, only the
-        # named server's list was read. A group's list and a tenant's list
+        # the caller's tenant: the policy `decide()` found. Before this, only
+        # the named server's list was read. A group's list and a tenant's list
         # never held a call, and in front_door no list did.
         policy: Any
         if governance is not None:
             policy = governance.approval_policy
         else:
-            policy = read_as_one_set(
-                partial(_approval_policy, resolver, call.tool, tenant_id, scopes or [(call.mcp_server, None, None)])
-            )
+            policy = decide(
+                Target.server(call.mcp_server),
+                call.tool,
+                _access_caller(tenant_id),
+                resolver=resolver,
+                withdrawals=get_tool_projection_registry(),
+            ).approval_policy
 
         needs_mrtr_approval = policy is not None
 
@@ -2097,12 +2020,12 @@ class BatchExecutor:
             policy_span.set_attribute("policy.is_group", p.is_group)
             if p.is_group:
                 p.group_obj = GROUPS.get(p.call.mcp_server)
-            # Every scope `policy_scopes` names, each with the caller's tenant.
+            # Every scope the target names, each with the caller's tenant.
             # For a group: the group, and the policy of the member
             # `_gate_resolve_target` selected, keyed by its SERVER id (#1164).
             # For a server: its own policy, plus each group that owns it when
             # it is a member named directly. Deny wins. Decided with the
-            # withdrawals and pins, as one set (#1431).
+            # withdrawals and pins, as one set (#1431), through `decide()`.
             allowed = p.governance.allowed
             policy_span.set_attribute("policy.allowed", allowed)
 
@@ -2420,7 +2343,6 @@ class BatchExecutor:
                 p.resolver,
                 p.ctx,
                 tenant_id=p.caller_tenant_id,
-                scopes=p.policy_scopes(),
                 governance=p.governance,
                 abandoned=p.cancel_event,
             )
@@ -2927,7 +2849,7 @@ def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, s
     if refusal is not None:
         error_type = refusal.error_type or ""
         outcome = Gate.ERROR if error_type in _GATE_ERRORS else Gate.DENY
-        return outcome, _GATE_REASONS.get(error_type), None
+        return outcome, GATE_REASONS.get(error_type), None
     return Gate.ALLOW, None, None
 
 

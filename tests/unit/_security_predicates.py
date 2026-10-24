@@ -36,13 +36,14 @@ from mcp_hangar.application.validators.payload_size import PayloadSizeValidator
 from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import evaluate_headers
+from mcp_hangar.domain.services.access_decision import decide
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.services.ui_resource_guard import UiResourceGuard
 from mcp_hangar.fastmcp_server.flat_tool_projection import _authorize_flat_call, is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_request_if_session_suspended
 from mcp_hangar.server.tools.batch import _authorize_calls, _refuse_if_param_headers_unchecked
-from mcp_hangar.server.tools.batch.executor import BatchExecutor, _CallPipeline, _withdrawn_in_scope
+from mcp_hangar.server.tools.batch.executor import BatchExecutor
 from mcp_hangar.server.tools.tool_permissions import authorize_tool
 
 SRC = Path(mcp_hangar.__file__).resolve().parent
@@ -190,9 +191,8 @@ PREDICATES: tuple[Predicate, ...] = (
         AuthorizationMiddleware.authorize,
         paths=_each(_INVOKE_PATHS + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL) + _LISTING_TOOL_PATHS),
     ),
-    # Tool-access policy: the executor's call-time check, and the decision
-    # every projected surface shares.
-    Predicate(ToolAccessResolver.is_tool_allowed, paths=_each(_INVOKE_PATHS), scope=_SCOPE_IS_ALLOWED),
+    # Tool-access policy: the decision every surface shares, the executor's
+    # call-time check included (#1784).
     Predicate(
         ToolAccessResolver.is_allowed,
         by="kind",
@@ -227,17 +227,13 @@ PREDICATES: tuple[Predicate, ...] = (
         paths=_each((HANGAR_DETAILS, FRONT_DOOR_HANGAR_DETAILS)),
         scope={"mcp_server_id": "server", "member_id": "tenant"},
     ),
-    # Withdrawal: the overlay the governed surfaces read, and the check the
-    # executor's withdrawal gate makes.
+    # Withdrawal: the overlay `decide()` reads through `withdrawal_status`. A
+    # prompt or a resource has no projection, so its status is `is_withdrawn`;
+    # a tool's comes off its projection (`is_withdrawn_for`, below).
     Predicate(
         ToolProjectionRegistry.is_withdrawn,
         by="kind",
-        paths={
-            FLAT_TOOL_CALL: "tool",
-            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
-            **_each(_PROMPT_PATHS, "prompt"),
-            **_each(_RESOURCE_PATHS, "resource"),
-        },
+        paths={**_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
         scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
     Predicate(
@@ -245,11 +241,22 @@ PREDICATES: tuple[Predicate, ...] = (
         paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS),
         scope={"tenant_id": "tenant"},
     ),
-    # The scope the executor's gates ask under: every scope a call's policy is
-    # resolved under, and every scope a withdrawal can hold in. The front
-    # door's flat call dispatches through the same executor, so both run there.
-    Predicate(_CallPipeline.policy_scopes, paths=_each(_INVOKE_PATHS)),
-    Predicate(_withdrawn_in_scope, paths=_each(_INVOKE_PATHS), scope={"tenant_id": "tenant"}),
+    # The one decision every surface makes (#1784): the executor's access and
+    # withdrawal gates, and each front-door listing and fetch through
+    # `is_governed_allowed`. Every scope the target names, then every id a
+    # withdrawal can hold under, read through the overlay port.
+    Predicate(decide, paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS)),
+    Predicate(
+        ToolProjectionRegistry.withdrawal_status,
+        by="kind",
+        paths={
+            **_each(_INVOKE_PATHS, "tool"),
+            **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+        },
+        scope={"tenant_id": "tenant"},
+    ),
     # The executor's digest-pin and approval gates. `_enforce_digest_pins`
     # applies every pin a call must match, a member's group pins included,
     # and `_enforce_digest_pin` checks one of them.
@@ -320,6 +327,10 @@ EXEMPT: dict[str, str] = {
     ),
     "application/read_models/tool_projection.py::ToolProjectionRegistry._is_withdrawn_for": (
         "The overlay lookup behind is_withdrawn and resolve(); ToolProjection.is_withdrawn_for is registered."
+    ),
+    "domain/services/tool_access_resolver.py::ToolAccessResolver.is_tool_allowed": (
+        "The tool-kind spelling of is_allowed, which is registered. Every surface asks decide(), which asks "
+        "is_allowed; this one is retired with the loose-string signatures (#1784)."
     ),
     "domain/services/task_ownership.py::TaskOwnershipRegistry.authorize": (
         "The ownership rule GovernedTaskStore.authorize applies. That method is registered."

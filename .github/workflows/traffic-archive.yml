@@ -1,0 +1,130 @@
+# Archives GitHub traffic for the org's public repositories to the `traffic`
+# branch, because GitHub keeps only the last 14 days (#1797).
+#
+# Two jobs, so the PAT and `contents: write` never share one:
+#
+# * `fetch` reads the traffic API with TRAFFIC_TOKEN, a fine-grained PAT owned
+#   by the mcp-hangar org with "Administration: read" on the repositories below
+#   (the permission GitHub lists for the traffic endpoints). GITHUB_TOKEN cannot
+#   read traffic for other repositories. With no secret configured the job ends
+#   with a notice, not a failure, and nothing else runs.
+# * `archive` merges the responses into the `traffic` branch with
+#   scripts/archive_traffic.py and pushes with GITHUB_TOKEN. Re-runs deduplicate
+#   by date, so a manual dispatch on top of the weekly run is harmless.
+#
+# A token that is present but expired, or lacks access to one repository, fails
+# the run: what could be read is still archived, and `fetch` goes red.
+name: traffic-archive
+
+on:
+  schedule:
+    - cron: "29 4 * * 1"  # weekly, Monday 04:29 UTC; 14 days of retention leave a week of slack
+  workflow_dispatch:
+
+# Not cancel-in-progress: a run halfway through a push should finish.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TRAFFIC_OWNER: mcp-hangar
+  TRAFFIC_REPOS: mcp-hangar,mcp-hangar-operator,helm-charts,docs,mcp-hangar-website
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      token: ${{ steps.token.outputs.present }}
+    steps:
+      - name: Check for TRAFFIC_TOKEN
+        id: token
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          if [ -z "${TRAFFIC_TOKEN}" ]; then
+            echo "::notice title=traffic not archived::The TRAFFIC_TOKEN secret is not set, so there is nothing to read the traffic API with. Skipping (see #1797)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.token.outputs.present == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: steps.token.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Fetch traffic
+        if: steps.token.outputs.present == 'true'
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: python scripts/archive_traffic.py fetch --owner "$TRAFFIC_OWNER" --repos "$TRAFFIC_REPOS" --out raw
+
+      # Uploaded even when one repository failed, so the rest is still archived.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: ${{ !cancelled() && steps.token.outputs.present == 'true' }}
+        with:
+          name: traffic-raw
+          path: raw/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  archive:
+    needs: fetch
+    if: ${{ !cancelled() && needs.fetch.outputs.token == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push to the `traffic` branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: traffic-raw
+          path: raw
+
+      # A worktree of this checkout, so the push reuses its GITHUB_TOKEN
+      # credential. The first run creates the branch as an orphan.
+      - name: Check out the traffic branch
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin traffic >/dev/null; then
+            git fetch --depth=1 origin +refs/heads/traffic:refs/remotes/origin/traffic
+            git worktree add -B traffic archive origin/traffic
+          else
+            echo "::notice::No traffic branch yet; creating it."
+            git worktree add --detach archive
+            git -C archive switch --orphan traffic
+          fi
+
+      - name: Merge
+        run: python scripts/archive_traffic.py merge --raw raw --archive archive
+
+      - name: Commit and push
+        working-directory: archive
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::notice::Nothing new since the last archived run."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "traffic: archive $(date -u +%Y-%m-%d)"
+          git push origin traffic
