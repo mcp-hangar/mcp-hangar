@@ -87,9 +87,19 @@ async def create_api_key(request: Request) -> HangarJSONResponse:
     created_by = _actor(request, body)
     expires_at = None
     if body.get("expires_at"):
-        from datetime import datetime
+        from datetime import UTC, datetime
 
-        expires_at = datetime.fromisoformat(body["expires_at"])
+        try:
+            expires_at = datetime.fromisoformat(str(body["expires_at"]))
+        except ValueError:
+            raise ValidationError(
+                "expires_at must be an ISO 8601 date-time, such as 2030-01-01T00:00:00+00:00",
+                field="expires_at",
+            ) from None
+        if expires_at.tzinfo is None:
+            # Read as UTC rather than compared later with an aware "now",
+            # which raised on every authentication with the key (#2046).
+            expires_at = expires_at.replace(tzinfo=UTC)
 
     result = await dispatch_command(
         CreateApiKeyCommand(
