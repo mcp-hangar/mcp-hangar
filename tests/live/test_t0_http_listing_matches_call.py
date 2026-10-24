@@ -3,8 +3,9 @@
 Over real streamable-HTTP, with API-key tenants, against a group of two
 subprocess members of ``examples/provider_math``: ``member-b`` denies ``power``
 by its own policy, ``member-a`` withdraws ``divide`` for one tenant, and two
-tenants are pinned, one to each member. For each tenant, ``tools/list`` and
-``server/discover`` are compared with what a flat call to every name does:
+tenants are pinned, one to each member. For each tenant, ``tools/list``,
+``server/discover`` and ``hangar_tools`` on the group are compared with what a
+flat call to every name does:
 
 - a pinned tenant is routed to one member, so its listing is exactly what its
   calls are allowed;
@@ -24,6 +25,7 @@ Run on demand::
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -180,6 +182,37 @@ def _tools_list(gateway: _Gateway, tenant: str) -> set[str]:
     return asyncio.run(asyncio.wait_for(_list(), timeout=60))
 
 
+def _dict_with(result: Any, key: str) -> dict[str, Any]:
+    """The dict carrying *key* in a tool call's result, structured or as JSON text."""
+    structured = getattr(result, "structured_content", None) or getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        inner = structured if key in structured else structured.get("result")
+        if isinstance(inner, dict) and key in inner:
+            return inner
+    for block in getattr(result, "content", None) or []:
+        try:
+            data = json.loads(getattr(block, "text", None) or "")
+        except ValueError:
+            continue
+        if isinstance(data, dict) and key in data:
+            return data
+    raise AssertionError(f"no dict with {key!r} in {result!r}")
+
+
+def _hangar_tools(gateway: _Gateway, tenant: str) -> set[str]:
+    """What `hangar_tools` on the group shows *tenant*, over the same transport as the flat listing."""
+    from mcp import ClientSession
+
+    async def _list() -> set[str]:
+        async with _session(gateway, tenant) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool("hangar_tools", {"mcp_server": GROUP})
+        return {tool["name"] for tool in _dict_with(result, "tools")["tools"]} & set(TOOLS)
+
+    return asyncio.run(asyncio.wait_for(_list(), timeout=60))
+
+
 def _discovered(gateway: _Gateway, tenant: str) -> set[str]:
     response = httpx.get(f"{gateway.base_url}/server/discover", headers={"X-API-Key": gateway.keys[tenant]}, timeout=30)
     assert response.status_code == 200, response.text
@@ -216,6 +249,12 @@ def test_the_listing_is_what_the_tenant_is_allowed(gateway: _Gateway, tenant: st
 @pytest.mark.parametrize("tenant", TENANTS)
 def test_discovery_agrees_with_the_listing(gateway: _Gateway, tenant: str) -> None:
     assert _discovered(gateway, tenant) == _tools_list(gateway, tenant)
+
+
+@pytest.mark.parametrize("tenant", TENANTS)
+def test_hangar_tools_agrees_with_the_listing(gateway: _Gateway, tenant: str) -> None:
+    """The management tool lists the group as the front door does: on the members this tenant may be routed to."""
+    assert _hangar_tools(gateway, tenant) == _tools_list(gateway, tenant)
 
 
 @pytest.mark.parametrize("tenant", (PIN_A, PIN_B))
