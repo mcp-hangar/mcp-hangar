@@ -38,6 +38,11 @@ class DiscoveryCycleResult:
     error_count: int = 0
     duration_ms: float = 0.0
     source_results: dict[str, int] = field(default_factory=dict)
+    #: Names an authoritative source that answered this cycle did not report,
+    #: and whose TTL has not run out yet. Their last sighting must not be
+    #: refreshed, or they never expire. Not part of `to_dict`, so the
+    #: trigger/API response keeps its shape.
+    lost_names: set[str] = field(default_factory=set)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -258,19 +263,24 @@ class DiscoveryService:
                         self._conflict_resolver.update(conflict_result.winner)
                         all_discovered[mcp_server.name] = conflict_result.winner
 
-                # Handle authoritative mode - deregister missing mcp_servers
+                # Authoritative mode: a server this source registered and no
+                # longer reports is lost. It was compared against last cycle's
+                # names only, so a name was looked at once -- in the first cycle
+                # after it went, before its TTL could have run out -- and never
+                # again; it stayed registered for good. Every entry the resolver
+                # holds for this source is checked on every cycle instead, until
+                # its TTL runs out. Reached only when discover() succeeded: a
+                # source that failed this cycle says nothing about what exists.
                 if source.mode == DiscoveryMode.AUTHORITATIVE:
-                    previous_names = self._mcp_servers_by_source.get(source_type, set())
-                    lost_names = previous_names - current_names
-
-                    for name in lost_names:
-                        existing = self._conflict_resolver.get_registered(name)
-                        if existing and existing.source_type == source_type:
-                            # Check if expired
-                            if existing.is_expired():
-                                self._conflict_resolver.deregister(name)
-                                result.deregistered_count += 1
-                                logger.info(f"Deregistered expired mcp_server: {name}")
+                    for name, existing in self._conflict_resolver.get_all_registered().items():
+                        if existing.source_type != source_type or name in current_names:
+                            continue
+                        if existing.is_expired():
+                            self._conflict_resolver.deregister(name)
+                            result.deregistered_count += 1
+                            logger.info(f"Deregistered expired mcp_server: {name}")
+                        else:
+                            result.lost_names.add(name)
 
                 # Update tracked mcp_servers for this source
                 self._mcp_servers_by_source[source_type] = current_names
