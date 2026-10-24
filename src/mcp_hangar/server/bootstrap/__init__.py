@@ -345,6 +345,34 @@ def _declare_stdio_principal(full_config: dict[str, Any], stdio: bool) -> None:
         tenant_id=principal.tenant_id,
         roles=principal.metadata["roles"],
     )
+    _warn_if_the_declared_roles_bind_nothing(full_config, principal)
+
+
+def _warn_if_the_declared_roles_bind_nothing(full_config: dict[str, Any], principal: Any) -> None:
+    """Say so when the declared roles have no effect on what the stdio caller may manage (#2079).
+
+    The roles bound the management tools on the front door, and with auth on.
+    With auth off in `egress` mode every management tool is allowed before the
+    declared principal is consulted -- the long-standing auth-off behaviour --
+    so a `viewer` stdio caller can reload, stop and start. That is unchanged
+    here; what changes is that the operator is told.
+    """
+    from mcp_hangar.auth.config import parse_auth_config
+
+    tool_access = full_config.get("tool_access")
+    mode = tool_access.get("mode", "egress") if isinstance(tool_access, dict) else "egress"
+    if parse_auth_config(full_config.get("auth")).enabled or mode == "front_door":
+        return
+    logger.warning(
+        "stdio_principal_roles_not_enforced",
+        principal_id=principal.id.value,
+        roles=principal.metadata["roles"],
+        detail=(
+            "auth is disabled and tool_access.mode is egress, so every hangar_* management tool is "
+            "allowed to this stdio caller whatever its roles"
+        ),
+        hint="set tool_access.mode: front_door, or auth.enabled: true, for the roles to bound what it may manage",
+    )
 
 
 def declared_stdio_principal(full_config: dict[str, Any]) -> Any:
