@@ -412,9 +412,29 @@ def bootstrap_auth(
                     require_tenant=entry.require_tenant,
                     strict_tenant_audience=entry.strict_tenant_audience,
                     tenant_audiences=dict(entry.tenant_audiences),
+                    allowed_tenants=entry.allowed_tenants,
                 )
                 for entry in issuer_cfgs
             ]
+            # Every issuer is trusted to name any tenant unless it has its own
+            # allowed_tenants. With one issuer that is the whole point; with two
+            # or more, one identity provider can sign a token for another's
+            # tenant and users. Say so once, naming the issuers that are open.
+            _unbound = [c.issuer for c in oidc_configs if c.allowed_tenants is None]
+            if len(oidc_configs) > 1 and _unbound:
+                logger.warning(
+                    "oidc_issuers_not_bound_to_tenants",
+                    issuers=_unbound,
+                    issuer_count=len(oidc_configs),
+                    risk=(
+                        "each listed issuer may sign a token naming any tenant, and a subject or group it "
+                        "asserts is the same principal as the one another issuer asserts"
+                    ),
+                    remedy=(
+                        "set allowed_tenants on every entry in auth.oidc.issuers and grant OIDC users "
+                        "and groups only tenant-scoped roles"
+                    ),
+                )
             # Warn on duplicate issuer strings: the validator registry and the
             # per-issuer config map are keyed by issuer, so a duplicate silently
             # drops the earlier entry (last-wins).
