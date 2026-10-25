@@ -1795,6 +1795,9 @@ def remove_group_series(group: str) -> None:
     good, and every disagreement query would keep finding it.
     """
     GROUP_CIRCUIT_OPEN.remove(group=group)
+    # A group's circuit events write the per-server breaker gauge under the
+    # group's id as well; left behind, an open circuit read open for good (#2073).
+    CIRCUIT_BREAKER_STATE.remove(mcp_server=group)
 
 
 def record_events_compacted(stream_id: str, count: int) -> None:
