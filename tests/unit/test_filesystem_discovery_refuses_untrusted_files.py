@@ -24,9 +24,19 @@ pytestmark = [
 DEFINITION = "name: {name}\nmode: subprocess\nconnection:\n  command: [python3, -m, some_server]\n"
 
 
-def _write(path: Path, name: str, mode: int = 0o600) -> Path:
+def _chmod(path: Path, mode: str) -> None:
+    """Set *mode*, given as octal text.
+
+    These fixtures are permissive on purpose: the source under test must refuse
+    a world-writable definition. Reading the mode from text keeps the intent in
+    one place.
+    """
+    os.chmod(path, int(mode, 8))
+
+
+def _write(path: Path, name: str, mode: str = "600") -> Path:
     path.write_text(DEFINITION.format(name=name))
-    os.chmod(path, mode)
+    _chmod(path, mode)
     return path
 
 
@@ -34,7 +44,7 @@ def _write(path: Path, name: str, mode: int = 0o600) -> Path:
 def watched(tmp_path: Path) -> Path:
     directory = tmp_path / "mcp_servers.d"
     directory.mkdir()
-    os.chmod(directory, 0o700)
+    _chmod(directory, "700")
     return directory
 
 
@@ -61,8 +71,8 @@ async def test_a_plain_file_owned_by_the_gateway_user_is_discovered(watched: Pat
     assert _refusals(warnings) == []
 
 
-@pytest.mark.parametrize("mode", [0o666, 0o646])
-async def test_a_world_writable_file_is_refused(watched: Path, warnings: MagicMock, mode: int) -> None:
+@pytest.mark.parametrize("mode", ["666", "646"])
+async def test_a_world_writable_file_is_refused(watched: Path, warnings: MagicMock, mode: str) -> None:
     _write(watched / "ok.yaml", "ok")
     _write(watched / "ww.yaml", "writable", mode)
 
@@ -74,11 +84,11 @@ async def test_a_world_writable_file_is_refused(watched: Path, warnings: MagicMo
 
 async def test_a_file_in_a_world_writable_directory_is_refused(watched: Path, warnings: MagicMock) -> None:
     _write(watched / "inside.yaml", "inside")
-    os.chmod(watched, 0o777)
+    _chmod(watched, "777")
     try:
         assert await _names(watched) == set()
     finally:
-        os.chmod(watched, 0o700)
+        _chmod(watched, "700")
     [refusal] = _refusals(warnings)
     assert "world-writable" in refusal["reason"]
 
@@ -98,7 +108,7 @@ async def test_a_configmap_style_symlink_inside_the_directory_is_followed(watche
     # The layout kubelet gives a mounted ConfigMap: x.yaml -> ..data/x.yaml, ..data -> ..<timestamp>
     stamped = watched / "..2026_10_24_00_00_00.000000000"
     stamped.mkdir()
-    os.chmod(stamped, 0o700)
+    _chmod(stamped, "700")
     _write(stamped / "cm.yaml", "from-configmap")
     (watched / "..data").symlink_to(stamped.name)
     (watched / "cm.yaml").symlink_to("..data/cm.yaml")
@@ -110,7 +120,7 @@ async def test_a_configmap_style_symlink_inside_the_directory_is_followed(watche
 async def test_a_refusal_warns_once_across_scans_and_again_after_the_file_returns(
     watched: Path, warnings: MagicMock
 ) -> None:
-    bad = _write(watched / "ww.yaml", "writable", 0o666)
+    bad = _write(watched / "ww.yaml", "writable", "666")
     source = FilesystemDiscoverySource(path=str(watched), watch=False)
 
     for _ in range(3):
@@ -119,17 +129,17 @@ async def test_a_refusal_warns_once_across_scans_and_again_after_the_file_return
 
     bad.unlink()
     await source.discover()
-    _write(watched / "ww.yaml", "writable", 0o666)
+    _write(watched / "ww.yaml", "writable", "666")
     await source.discover()
     assert len(_refusals(warnings)) == 2
 
 
 async def test_a_fixed_file_is_discovered_on_the_next_scan(watched: Path, warnings: MagicMock) -> None:
-    bad = _write(watched / "later.yaml", "later", 0o666)
+    bad = _write(watched / "later.yaml", "later", "666")
     source = FilesystemDiscoverySource(path=str(watched), watch=False)
     assert await source.discover() == []
 
-    os.chmod(bad, 0o600)
+    _chmod(bad, "600")
     assert [s.name for s in await source.discover()] == ["later"]
 
 
@@ -137,9 +147,9 @@ async def test_a_group_writable_file_or_directory_is_still_discovered(watched: P
     # umask 002, fsGroup volumes and shared group directories keep working.
     sub = watched / "team"
     sub.mkdir()
-    os.chmod(sub, 0o770)
-    _write(sub / "nested.yaml", "nested", 0o664)
-    _write(watched / "top.yaml", "top", 0o664)
+    _chmod(sub, "770")
+    _write(sub / "nested.yaml", "nested", "664")
+    _write(watched / "top.yaml", "top", "664")
     source = FilesystemDiscoverySource(path=str(watched), pattern="**/*.yaml", watch=False)
 
     assert {s.name for s in await source.discover()} == {"top", "nested"}
@@ -149,7 +159,7 @@ async def test_a_group_writable_file_or_directory_is_still_discovered(watched: P
 async def test_a_file_under_a_world_writable_subdirectory_is_refused(watched: Path, warnings: MagicMock) -> None:
     sub = watched / "drop"
     sub.mkdir()
-    os.chmod(sub, 0o1777)
+    _chmod(sub, "1777")
     _write(sub / "nested.yaml", "nested")
     _write(watched / "top.yaml", "top")
     source = FilesystemDiscoverySource(path=str(watched), pattern="**/*.yaml", watch=False)
@@ -157,7 +167,7 @@ async def test_a_file_under_a_world_writable_subdirectory_is_refused(watched: Pa
     try:
         assert {s.name for s in await source.discover()} == {"top"}
     finally:
-        os.chmod(sub, 0o700)
+        _chmod(sub, "700")
     [refusal] = _refusals(warnings)
     assert refusal["reason"].startswith(f"sits in {os.path.realpath(sub)}")
 
@@ -174,8 +184,8 @@ async def test_a_fifo_named_like_a_definition_is_refused_without_hanging(watched
 async def test_a_world_writable_root_on_a_read_only_mount_is_trusted(watched: Path, monkeypatch) -> None:
     # A ConfigMap or Secret volume: kubelet makes its root 0777 (2777 with
     # fsGroup) on a read-only mount, where nobody can add or change a file.
-    _write(watched / "cm.yaml", "configmap", 0o644)
-    os.chmod(watched, 0o777)
+    _write(watched / "cm.yaml", "configmap", "644")
+    _chmod(watched, "777")
     real_statvfs = os.statvfs
 
     class _ReadOnly:
@@ -193,4 +203,4 @@ async def test_a_world_writable_root_on_a_read_only_mount_is_trusted(watched: Pa
     try:
         assert await _names(watched) == {"configmap"}
     finally:
-        os.chmod(watched, 0o700)
+        _chmod(watched, "700")
