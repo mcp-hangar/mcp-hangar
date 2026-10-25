@@ -13,6 +13,8 @@ The lifecycle flow:
 
 import asyncio
 import ipaddress
+import logging
+import os
 import queue
 import signal
 import sys
@@ -908,11 +910,45 @@ class SignalReloader:
             )
 
 
-def _setup_signal_handlers(lifecycle: ServerLifecycle) -> SignalReloader | None:
+#: How long a stdio gateway may take to exit on its own after a shutdown signal
+#: before it is ended without waiting for the stdin reader (#2090).
+STDIO_EXIT_GRACE_S = 2.0
+
+
+def _end_after(grace_s: float) -> None:
+    """End the process if it is still running *grace_s* from now.
+
+    Over stdio the SDK reads stdin on a worker thread. While the client keeps
+    the pipe open that thread is blocked in a read nothing can interrupt, and the
+    interpreter joins it before exiting, so `sys.exit` from the signal handler
+    left a gateway that had shut everything down running until stdin closed or a
+    SIGKILL. The timer is a daemon thread, which the join does not wait for: it
+    flushes the logs and ends the process. When stdin is closed the process
+    exits normally before it fires.
+    """
+
+    def end() -> None:
+        logger.info("stdio_exit_forced", reason="stdin_reader_still_blocked", grace_s=grace_s)
+        logging.shutdown()
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except (OSError, ValueError):
+                pass
+        os._exit(0)
+
+    timer = threading.Timer(grace_s, end)
+    timer.daemon = True
+    timer.start()
+
+
+def _setup_signal_handlers(lifecycle: ServerLifecycle, *, stdio: bool = False) -> SignalReloader | None:
     """Setup graceful shutdown on SIGTERM/SIGINT and reload on SIGHUP.
 
     Args:
         lifecycle: ServerLifecycle instance to shutdown on signal.
+        stdio: Whether this process serves over stdio, where the exit after a
+            shutdown signal is bounded by `STDIO_EXIT_GRACE_S`.
 
     Returns:
         The thread SIGHUP's reloads run on, for the caller to stop; None where
@@ -924,6 +960,8 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle) -> SignalReloader | None:
         sig_name = signal.Signals(signum).name
         logger.info("shutdown_signal_received", signal=sig_name)
         lifecycle.shutdown()
+        if stdio:
+            _end_after(STDIO_EXIT_GRACE_S)
         sys.exit(0)
 
     def reload_handler(signum, _frame):
@@ -1065,7 +1103,7 @@ def run_server(cli_config: CLIConfig) -> None:
 
     # Create lifecycle manager
     lifecycle = ServerLifecycle(context)
-    reloader = _setup_signal_handlers(lifecycle)
+    reloader = _setup_signal_handlers(lifecycle, stdio=not cli_config.http_mode)
 
     # Start background components and the dedicated discovery lifecycle loop.
     lifecycle.start()
