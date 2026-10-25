@@ -32,7 +32,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...application.read_models.tool_projection import get_tool_projection_registry
-from ...domain.events import McpServerStarted, ToolAdmissionRequested
+from ...domain.events import (
+    ConfigurationReloaded,
+    McpServerDeregistered,
+    McpServerHotUnloaded,
+    McpServerStarted,
+    ToolAdmissionRequested,
+)
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -91,6 +97,46 @@ class ToolProjectionPopulationHandler:
             mcp_server_id=mcp_server_id,
             tool_count=len(tools),
         )
+
+    def forget(self, mcp_server_id: str) -> None:
+        """Drop *mcp_server_id*'s projections: it left the fleet (#2088).
+
+        The registry tells its change listeners, which is how a listing client
+        hears ``tools/list_changed``; nothing is published on the event bus. Its
+        pending admission requests are forgotten too, so a withheld tool of a
+        server added back under the same name asks again.
+        """
+        self._requested = {key for key in self._requested if key[0] != mcp_server_id}
+        if get_tool_projection_registry().forget_server(mcp_server_id):
+            logger.info("tool_projection_dropped_for_removed_server", mcp_server_id=mcp_server_id)
+
+    def handle_deregistered(self, event: object) -> None:
+        """On McpServerDeregistered, drop the server's projections, on every replica.
+
+        A REST or discovery delete. Reads only the event's server id, so it may
+        run on a peer's tailed event, where `FleetProjection` removes the server
+        from the local fleet on the same event.
+        """
+        if isinstance(event, McpServerDeregistered):
+            self.forget(event.mcp_server_id)
+
+    def handle_left_locally(self, event: object) -> None:
+        """On a reload's removals or a hot unload, drop what left this replica's fleet.
+
+        Only a server the local repository no longer holds: a hot-loaded server
+        never was in it, and a declared server by the same name must keep its
+        tools. A reload's rebuilt servers are not here; their start replaces
+        their projections.
+        """
+        if isinstance(event, ConfigurationReloaded):
+            removed = list(event.mcp_servers_removed)
+        elif isinstance(event, McpServerHotUnloaded):
+            removed = [event.mcp_server_id]
+        else:
+            return
+        for mcp_server_id in removed:
+            if not self._repository.exists(mcp_server_id):
+                self.forget(mcp_server_id)
 
     def _request_admission(self, registry: Any, mcp_server_id: str) -> None:
         """Publish ``ToolAdmissionRequested`` once for each tool the server withholds (#1801)."""

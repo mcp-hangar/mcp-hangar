@@ -21,8 +21,10 @@ from ...domain.contracts.risk import NullRiskScorer
 from ...domain.events import (
     BehavioralDeviationDetected,
     CapabilityViolationDetected,
+    ConfigurationReloaded,
     DetectionRuleMatched,
     McpServerDeregistered,
+    McpServerHotUnloaded,
     McpServerRegistered,
     McpServerStarted,
     McpServerStateChanged,
@@ -68,10 +70,18 @@ def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerReposit
     catalogue -- is answered by every replica starting the fleet itself (#885).
     An upstream's ``list_changed`` arrives only on the replica holding its GET
     stream, so the announcement is local by construction.
+
+    A server that leaves the fleet takes its projections with it (#2088). A
+    delete (REST or discovery) is a PROJECTION: the event names the server, and
+    the fleet drops it on every replica on that same event. A reload's removals
+    and a hot unload are this replica's own fleet, so LOCAL_VIEW.
     """
     tool_projection_handler = ToolProjectionPopulationHandler(repository=repository, event_bus=event_bus)
     event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
     tool_catalogue_changes.register_listener(tool_projection_handler.project)
+    event_bus.subscribe(McpServerDeregistered, tool_projection_handler.handle_deregistered, kind=HandlerKind.PROJECTION)
+    event_bus.subscribe(ConfigurationReloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
+    event_bus.subscribe(McpServerHotUnloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
     return tool_projection_handler
 
 

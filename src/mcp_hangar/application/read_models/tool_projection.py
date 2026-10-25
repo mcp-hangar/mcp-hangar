@@ -265,6 +265,30 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
             )
         _projection_changed()
 
+    def forget_server(self, mcp_server: str) -> bool:
+        """Drop *mcp_server*'s projections, because it left the fleet (#2088).
+
+        Only the projections go. Withdrawals, pins, digest enforcement and the
+        new-tools policy are keyed by name and stay, so a server added back under
+        the same name is withdrawn and pinned as before: clearing them would let
+        it back in ungoverned. ``was_projected`` stays true too, as for a stopped
+        server, so a required catalogue's readiness is what it was.
+
+        Returns:
+            Whether anything was dropped. Listeners are told only then.
+        """
+        with self._lock:
+            stale_keys = [k for k in self._projections if k[0] == mcp_server]
+            for k in stale_keys:
+                del self._projections[k]
+        if not stale_keys:
+            return False
+        logger.debug(
+            "tool_projection_server_forgotten", extra={"mcp_server": mcp_server, "tool_count": len(stale_keys)}
+        )
+        _projection_changed()
+        return True
+
     # ------------------------------------------------------------------
     # Config-withdrawal overlay (populated at config-load time)
     # ------------------------------------------------------------------
