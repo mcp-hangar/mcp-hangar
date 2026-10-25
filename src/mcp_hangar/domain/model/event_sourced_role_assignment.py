@@ -6,9 +6,10 @@ Implements Event Sourcing pattern for role assignments where:
 - State can be rebuilt by replaying events
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from ..contracts.authorization import assigner_rank
 from ..events import DomainEvent, RoleAssigned, RoleRevoked
 from .aggregate import AggregateRoot
 
@@ -21,11 +22,14 @@ class RoleAssignmentSnapshot:
         principal_id: Principal ID.
         assignments: Dict of scope -> set of role names.
         version: Aggregate version.
+        assigned_by: Dict of scope -> role name -> who it is recorded against;
+            a grant missing from it is untracked.
     """
 
     principal_id: str
     assignments: dict[str, list[str]]
     version: int
+    assigned_by: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -33,6 +37,7 @@ class RoleAssignmentSnapshot:
             "principal_id": self.principal_id,
             "assignments": self.assignments,
             "version": self.version,
+            "assigned_by": self.assigned_by,
         }
 
     @classmethod
@@ -42,6 +47,7 @@ class RoleAssignmentSnapshot:
             principal_id=d["principal_id"],
             assignments=d.get("assignments", {}),
             version=d.get("version", 0),
+            assigned_by=d.get("assigned_by", {}),
         )
 
 
@@ -63,6 +69,8 @@ class EventSourcedRoleAssignment(AggregateRoot):
         self._principal_id = principal_id
         # scope -> set of role names
         self._assignments: dict[str, set[str]] = {}
+        # (scope, role name) -> who the grant is recorded against
+        self._assigned_by: dict[tuple[str, str], str] = {}
 
     @property
     def principal_id(self) -> str:
@@ -113,6 +121,9 @@ class EventSourcedRoleAssignment(AggregateRoot):
 
         # Restore state from snapshot
         assignment._assignments = {scope: set(roles) for scope, roles in snapshot.assignments.items()}
+        assignment._assigned_by = {
+            (scope, role): by for scope, roles in snapshot.assigned_by.items() for role, by in roles.items()
+        }
         assignment._version = snapshot.version
 
         # Apply any events after snapshot
@@ -140,11 +151,12 @@ class EventSourcedRoleAssignment(AggregateRoot):
             assigned_by: Who is assigning the role.
 
         Returns:
-            True if role was assigned, False if already assigned.
+            True if an event was recorded: the role was not held, or it was and
+            *assigned_by* takes it over (see `assigner_rank`). False otherwise.
         """
-        # Check if already assigned
         if scope in self._assignments and role_name in self._assignments[scope]:
-            return False
+            if assigner_rank(assigned_by) <= assigner_rank(self._assigned_by.get((scope, role_name))):
+                return False
 
         self._record_event(
             RoleAssigned(
@@ -159,6 +171,7 @@ class EventSourcedRoleAssignment(AggregateRoot):
         if scope not in self._assignments:
             self._assignments[scope] = set()
         self._assignments[scope].add(role_name)
+        self._assigned_by[(scope, role_name)] = assigned_by
 
         return True
 
@@ -193,6 +206,7 @@ class EventSourcedRoleAssignment(AggregateRoot):
 
         # Apply immediately
         self._assignments[scope].discard(role_name)
+        self._assigned_by.pop((scope, role_name), None)
         if not self._assignments[scope]:
             del self._assignments[scope]
 
@@ -211,10 +225,17 @@ class EventSourcedRoleAssignment(AggregateRoot):
             scope = event.scope
             if scope not in self._assignments:
                 self._assignments[scope] = set()
+            key = (scope, event.role_name)
+            # Replayed by the rule `assign_role` records by, so a racing weaker assigner does not win.
+            if event.role_name not in self._assignments[scope] or assigner_rank(event.assigned_by) > assigner_rank(
+                self._assigned_by.get(key)
+            ):
+                self._assigned_by[key] = event.assigned_by
             self._assignments[scope].add(event.role_name)
 
         elif isinstance(event, RoleRevoked):
             scope = event.scope
+            self._assigned_by.pop((scope, event.role_name), None)
             if scope in self._assignments:
                 self._assignments[scope].discard(event.role_name)
                 if not self._assignments[scope]:
@@ -265,4 +286,16 @@ class EventSourcedRoleAssignment(AggregateRoot):
             principal_id=self._principal_id,
             assignments={scope: list(roles) for scope, roles in self._assignments.items()},
             version=self._version,
+            assigned_by={
+                scope: {role: self._assigned_by[(scope, role)] for role in roles if (scope, role) in self._assigned_by}
+                for scope, roles in self._assignments.items()
+            },
         )
+
+    def list_assignments(self) -> list[tuple[str, str, str | None]]:
+        """Every ``(scope, role name, assigned_by)`` held; ``assigned_by`` is None where unknown."""
+        return [
+            (scope, role, self._assigned_by.get((scope, role)))
+            for scope, roles in self._assignments.items()
+            for role in roles
+        ]
