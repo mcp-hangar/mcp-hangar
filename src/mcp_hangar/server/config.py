@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 import yaml
 
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
+from ..application.read_models.tool_projection import UNREADABLE_PIN_SHA256
 from ..domain.contracts.persistence import peer_key_name_conflicts
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
@@ -882,6 +883,24 @@ def _load_group_members(
             saga.register_member(member_id, group_id)
 
 
+#: The digest registered for a pin the loader cannot read (#2036); see
+#: `UNREADABLE_PIN_SHA256` for what it does to drift and to admission.
+_UNSATISFIABLE_PIN = UNREADABLE_PIN_SHA256
+
+
+def _pin_spelling(sha256: Any) -> str | None:
+    """*sha256* as `ToolDigest` reads it, or None when it is not a digest at all.
+
+    Two spellings of a correct digest are accepted: uppercase hex, and the
+    `sha256:<hex>` form key pins on the same server use. Both used to be dropped,
+    leaving the tool unpinned although the pin named the right digest.
+    """
+    if not isinstance(sha256, str):
+        return None
+    spelled = sha256.strip().lower()
+    return spelled.removeprefix("sha256:")
+
+
 def _register_config_pins(
     tp_registry: Any,
     mcp_server_id: str,
@@ -894,41 +913,49 @@ def _register_config_pins(
 
     Shared by the all-tenants block (`tool_projection.pins`) and the per-tenant
     one (`tool_projection.tenant_overrides.<tenant>.pins`) so the two cannot
-    validate differently. A malformed entry is dropped with a warning naming it,
-    which is what the per-tenant block did before it had a sibling.
+    validate differently.
+
+    A pin is a request for enforcement, so one the loader cannot read is not
+    dropped (#2036): dropping it served the tool unpinned while the gateway
+    booted. It is registered as a pin nothing satisfies and logged at ERROR, so
+    that tool is withheld under `block` until the pin is fixed and every other
+    tool is unaffected. A block that is not a mapping names no tool to hold
+    back, so it is refused, as the neighbouring `tool_projection` keys are.
 
     Args:
         tp_registry: The ToolProjectionRegistry to register on.
         mcp_server_id: Owning mcp_server identifier.
-        pins: The raw mapping from the config file; a non-mapping is ignored.
+        pins: The raw mapping from the config file.
         tenant_id: Tenant the pins apply to, or ``None`` for all tenants.
         upstream: The upstream identity the block's pins are bound to (``tool_projection.upstream``), if any (#1802).
+
+    Raises:
+        ConfigurationError: *pins* is not a mapping.
     """
-    if not isinstance(pins, dict):
+    if pins is None:
+        # `pins:` left empty in YAML reads as None, and pins nothing, as before.
         return
+    if not isinstance(pins, dict):
+        where = "pins" if tenant_id is None else f"tenant_overrides.{tenant_id}.pins"
+        raise ConfigurationError(
+            f"Invalid tool_projection.{where} for '{mcp_server_id}': expected a mapping of tool name to "
+            f"sha256 digest, got {type(pins).__name__}"
+        )
     for tool_name, sha256 in pins.items():
         if not (isinstance(tool_name, str) and tool_name):
             continue
-        if not isinstance(sha256, str):
-            logger.warning(
-                "invalid_config_digest_pin",
-                mcp_server_id=mcp_server_id,
-                tool=tool_name,
-                tenant_id=tenant_id,
-                error="pin value must be a string sha256",
-            )
-            continue
         try:
-            digest = ToolDigest(tool_name=tool_name, sha256=sha256, upstream=upstream)
+            digest = ToolDigest(tool_name=tool_name, sha256=_pin_spelling(sha256) or "", upstream=upstream)
         except ValueError as e:
-            logger.warning(
+            logger.error(
                 "invalid_config_digest_pin",
                 mcp_server_id=mcp_server_id,
                 tool=tool_name,
                 tenant_id=tenant_id,
-                error=str(e),
+                error=str(e) if isinstance(sha256, str) else "pin value must be a string sha256",
+                effect="the tool is withheld under block until the pin is fixed",
             )
-            continue
+            digest = ToolDigest(tool_name=tool_name, sha256=_UNSATISFIABLE_PIN, upstream=upstream)
         tp_registry.set_config_pin(mcp_server_id, tool_name, tenant_id, digest)
         logger.debug(
             "config_digest_pin_registered",
@@ -1157,11 +1184,24 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
     # Global withdrawals (all tenants), of every kind.
     _register_config_withdrawals(tp_registry, scope_id, tool_projection_config, tenant_id=None)
 
-    tenant_overrides_config = tool_projection_config.get("tenant_overrides", {})
-    if isinstance(tenant_overrides_config, dict):
+    tenant_overrides_config = tool_projection_config.get("tenant_overrides") or {}
+    if not isinstance(tenant_overrides_config, dict):
+        # A block that asks for per-tenant enforcement and names nothing it
+        # could apply to is refused rather than skipped in silence (#2036).
+        raise ConfigurationError(
+            f"Invalid tool_projection.tenant_overrides for '{scope_id}': expected a mapping of tenant to "
+            f"overrides, got {type(tenant_overrides_config).__name__}"
+        )
+    if tenant_overrides_config:
         for tenant_id_key, tenant_spec in tenant_overrides_config.items():
-            if not isinstance(tenant_spec, dict):
+            if tenant_spec is None:
+                # A tenant key left empty overrides nothing, as before.
                 continue
+            if not isinstance(tenant_spec, dict):
+                raise ConfigurationError(
+                    f"Invalid tool_projection.tenant_overrides.{tenant_id_key} for '{scope_id}': expected a "
+                    f"mapping, got {type(tenant_spec).__name__}"
+                )
             _register_config_withdrawals(tp_registry, scope_id, tenant_spec, tenant_id=tenant_id_key)
             _register_config_pins(
                 tp_registry, scope_id, tenant_spec.get("pins", {}), tenant_id=tenant_id_key, upstream=upstream
