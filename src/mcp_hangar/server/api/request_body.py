@@ -17,7 +17,10 @@ code in a different file.
 
 from __future__ import annotations
 
+import json
 from typing import Any
+
+from starlette.requests import Request
 
 from .serializers import HangarJSONResponse
 
@@ -44,3 +47,18 @@ def missing_fields(body: Any, *required: str) -> HangarJSONResponse | None:
         {"error": "missing_fields", "detail": f"required field(s) absent: {', '.join(absent)}"},
         status_code=400,
     )
+
+
+async def json_body(request: Request) -> Any:
+    """The parsed request body, or None when it is not JSON at all (#2066).
+
+    Pair it with :func:`missing_fields`, which answers 400 ``invalid_body`` for
+    anything that is not a JSON object -- None included -- and 400
+    ``missing_fields`` for an absent field. `await request.json()` raised on a
+    body that is not JSON, which answered a generic 500 and was logged as an
+    unhandled fault for what was the caller's mistake.
+    """
+    try:
+        return await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None

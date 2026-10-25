@@ -35,6 +35,7 @@ from mcp_hangar.auth.queries.queries import (
 from mcp_hangar.domain.exceptions import ValidationError
 from mcp_hangar.server.api.actor import request_actor
 from mcp_hangar.server.api.middleware import dispatch_command, dispatch_query
+from mcp_hangar.server.api.request_body import json_body, missing_fields
 from mcp_hangar.server.api.serializers import HangarJSONResponse
 
 #: Body fields that once named the actor of an auth mutation (#1649).
@@ -83,7 +84,9 @@ async def create_api_key(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with key_id, raw_key (shown once!), principal_id, name, created_by.
     """
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body, "principal_id", "name")) is not None:
+        return invalid
     created_by = _actor(request, body)
     expires_at = None
     if body.get("expires_at"):
@@ -186,7 +189,9 @@ async def assign_role(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with assignment status.
     """
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body, "principal_id", "role_name")) is not None:
+        return invalid
     assigned_by = _actor(request, body)
     result = await dispatch_command(
         AssignRoleCommand(
@@ -212,7 +217,9 @@ async def revoke_role(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with revocation status.
     """
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body, "principal_id", "role_name")) is not None:
+        return invalid
     revoked_by = _actor(request, body)
     result = await dispatch_command(
         RevokeRoleCommand(
@@ -248,7 +255,9 @@ async def create_custom_role(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with created role info.
     """
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body, "role_name")) is not None:
+        return invalid
     created_by = _actor(request, body)
     result = await dispatch_command(
         CreateCustomRoleCommand(
@@ -352,7 +361,9 @@ async def update_role(request: Request) -> HangarJSONResponse:
         JSON with updated role info.
     """
     role_name = request.path_params["role_name"]
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     updated_by = _actor(request, body)
     result = await dispatch_command(
         UpdateCustomRoleCommand(
@@ -413,7 +424,9 @@ async def check_permission(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"allowed": bool, "granted_by_role": str | null}.
     """
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body, "principal_id")) is not None:
+        return invalid
     principal_id = body["principal_id"]
 
     if "action" in body:
@@ -473,7 +486,9 @@ async def set_tool_access_policy(request: Request) -> HangarJSONResponse:
             status_code=400,
         )
 
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     result = await dispatch_command(
         SetToolAccessPolicyCommand(
             scope=scope,
