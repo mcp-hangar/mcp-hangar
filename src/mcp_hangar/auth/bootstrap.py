@@ -10,7 +10,7 @@ from typing import Any
 
 import structlog
 
-from mcp_hangar.auth.config import AuthConfig, OIDCIssuerConfig
+from mcp_hangar.auth.config import AuthConfig, OIDCIssuerConfig, RoleAssignment
 from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
 from mcp_hangar.auth.infrastructure.jwt_authenticator import (
     JWKSTokenValidator,
@@ -23,9 +23,85 @@ from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OP
 from mcp_hangar.auth.infrastructure.rate_limiter import AuthRateLimitConfig, AuthRateLimiter
 from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
 from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
-from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
+from mcp_hangar.domain.contracts.authorization import CONFIG_ROLE_ASSIGNER, IAuthorizer, IRoleStore, assigner_rank
 
 logger = structlog.get_logger(__name__)
+
+
+def apply_config_role_assignments(
+    role_store: IRoleStore, assignments: list[RoleAssignment], reconcile: bool = True
+) -> None:
+    """Apply ``auth.role_assignments`` under `CONFIG_ROLE_ASSIGNER`, then, if *reconcile*, revoke what it dropped."""
+    for assignment in assignments:
+        if not assignment.principal or not assignment.role:
+            logger.warning(
+                "skipping_invalid_role_assignment",
+                principal=assignment.principal,
+                role=assignment.role,
+            )
+            continue
+
+        try:
+            role_store.assign_role(
+                principal_id=assignment.principal,
+                role_name=assignment.role,
+                scope=assignment.scope,
+                assigned_by=CONFIG_ROLE_ASSIGNER,
+            )
+            logger.debug(
+                "role_assigned_from_config",
+                principal=assignment.principal,
+                role=assignment.role,
+                scope=assignment.scope,
+            )
+        except ValueError as e:
+            logger.warning(
+                "role_assignment_failed",
+                principal=assignment.principal,
+                role=assignment.role,
+                error=str(e),
+            )
+    if reconcile:
+        reconcile_config_role_assignments(role_store, assignments)
+
+
+def reconcile_config_role_assignments(role_store: IRoleStore, assignments: list[RoleAssignment]) -> None:
+    """Bring the grants the config file owns in line with ``auth.role_assignments``.
+
+    Run after the file's entries were applied under `CONFIG_ROLE_ASSIGNER`. A
+    durable store kept every grant the file ever made, so a line removed from
+    the file left its role in force (#2052). A grant recorded against the
+    file and no longer listed is now revoked. A grant made by anyone else --
+    the API, ``bootstrap-admin`` -- is never touched. An untracked grant, which
+    every store wrote before the file was tagged, cannot be told apart from an
+    API grant, so it is kept and named in a warning instead.
+
+    An entry counts as listed when it names a principal and a role, whether or
+    not applying it succeeded: a line still in the file never loses its grant.
+    """
+    listed = {(a.principal, a.role, a.scope) for a in assignments if a.principal and a.role}
+    for row in role_store.list_role_assignments():
+        key = (row["principal_id"], row["role_name"], row["scope"])
+        if key in listed:
+            continue
+        rank = assigner_rank(row["assigned_by"])
+        if rank == 1:
+            role_store.revoke_role(*key, revoked_by=CONFIG_ROLE_ASSIGNER)
+            logger.info("config_role_assignment_revoked", principal=key[0], role=key[1], scope=key[2])
+        elif rank == 0:
+            logger.warning(
+                "untracked_role_assignment_not_in_config",
+                principal=key[0],
+                role=key[1],
+                scope=key[2],
+                detail=(
+                    "This grant predates source tracking, so it may have come from auth.role_assignments "
+                    "or from the API. It is kept. If it was a config entry you removed, revoke it with "
+                    "DELETE /api/auth/roles/revoke and a body naming principal_id, role_name and scope; "
+                    "to keep it and silence this warning, assign it again through POST /api/auth/roles/assign "
+                    "or list it in auth.role_assignments."
+                ),
+            )
 
 
 def _create_storage_backends(
@@ -340,6 +416,7 @@ def bootstrap_auth(
     event_store=None,
     event_bus=None,
     persistence_backend: Any = None,
+    reconcile_role_assignments: bool = True,
 ) -> AuthComponents:
     """Bootstrap authentication and authorization components.
 
@@ -351,6 +428,10 @@ def bootstrap_auth(
         event_store: Optional event store for event_sourcing driver.
         event_bus: Optional event bus for event_sourcing driver.
         persistence_backend: The selected storage backend, when there is one.
+        reconcile_role_assignments: Revoke grants the config file applied and no
+            longer lists. Off for a one-off command such as ``bootstrap-admin``,
+            which only adds, as it always did: the server's boot is what
+            reconciles.
 
     Returns:
         AuthComponents with initialized middleware and stores.
@@ -483,35 +564,7 @@ def bootstrap_auth(
         rate_limiter=rate_limiter if config.rate_limit.enabled else None,
     )
 
-    # Apply static role assignments from config
-    for assignment in config.role_assignments:
-        if not assignment.principal or not assignment.role:
-            logger.warning(
-                "skipping_invalid_role_assignment",
-                principal=assignment.principal,
-                role=assignment.role,
-            )
-            continue
-
-        try:
-            role_store.assign_role(
-                principal_id=assignment.principal,
-                role_name=assignment.role,
-                scope=assignment.scope,
-            )
-            logger.debug(
-                "role_assigned_from_config",
-                principal=assignment.principal,
-                role=assignment.role,
-                scope=assignment.scope,
-            )
-        except ValueError as e:
-            logger.warning(
-                "role_assignment_failed",
-                principal=assignment.principal,
-                role=assignment.role,
-                error=str(e),
-            )
+    apply_config_role_assignments(role_store, config.role_assignments, reconcile=reconcile_role_assignments)
 
     # Initialize authorizer
     rbac_authorizer = RBACAuthorizer(role_store)
