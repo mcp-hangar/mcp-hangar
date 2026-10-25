@@ -26,4 +26,3 @@ A server another change now refuses to discover -- a Kubernetes local mode, a
 Docker label volume outside `allowed_mount_paths`, a world-writable discovery
 file -- is no longer reported either, so on an authoritative source it is removed
 after its TTL rather than left registered.
-
