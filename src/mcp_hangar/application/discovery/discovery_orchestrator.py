@@ -169,6 +169,10 @@ class DiscoveryOrchestrator:
         # Callbacks for registry integration
         self.on_register: RegistrationCallback | None = None
         self.on_deregister: DeregistrationCallback | None = None
+        #: The discovered servers already in the fleet, taken back at the start
+        #: of each management tenure (#2106). None takes back nothing.
+        self.restored_servers: Callable[[], list[DiscoveredMcpServer]] | None = None
+        self._took_back_restored = False
 
         # Discovery loop state
         self._running = False
@@ -299,6 +303,38 @@ class DiscoveryOrchestrator:
         """
         self._discovery_service.set_static_mcp_servers(names)
 
+    def _take_back_restored(self) -> None:
+        """Track the discovered servers already in the fleet, once per management tenure (#2106).
+
+        Servers discovery registered before a restart, or that another replica
+        registered while this one followed. Each is tracked as if its source had
+        just reported it: the source's mode then governs it, an authoritative
+        source that no longer reports it removes it one TTL later, and a changed
+        definition reads as a change.
+
+        At the start of a tenure, not at boot: the TTL runs from when this
+        instance may act on it. Taken at boot, it would run out while this
+        instance waited for the lease, and the first expiry check after taking
+        it would delete every discovered server before a cycle could see them.
+        """
+        if self.restored_servers is None or self._took_back_restored or not self._may_manage():
+            return
+        self._took_back_restored = True
+        taken = []
+        for mcp_server in self.restored_servers():
+            if self.is_tracking(mcp_server.name) or self._lifecycle_manager.is_quarantined(mcp_server.name):
+                continue
+            self._conflict_resolver.register(mcp_server)
+            self._lifecycle_manager.add_mcp_server(mcp_server)
+            self._validator.record_registration(mcp_server)
+            taken.append(mcp_server.name)
+        if taken:
+            logger.info("discovery_restored_servers_tracked", mcp_server_ids=sorted(taken))
+
+    def is_tracking(self, name: str) -> bool:
+        """Whether discovery governs *name* in this process."""
+        return self._lifecycle_manager.get_mcp_server(name) is not None
+
     async def start(self) -> None:
         """Start the discovery orchestrator."""
         # Captured while we are certain to be on the loop discovery runs on, so a
@@ -410,6 +446,8 @@ class DiscoveryOrchestrator:
                 )
                 self._trace_lease_transition(Discovery.HOLDER, skipped)
             return True
+        # The next tenure takes the fleet back as it is then.
+        self._took_back_restored = False
         if self._idle.failed():
             logger.info(
                 "discovery_idle_not_the_lease_holder",
@@ -445,6 +483,7 @@ class DiscoveryOrchestrator:
         import time
 
         start_time = time.perf_counter()
+        self._take_back_restored()
 
         result = DiscoveryCycleResult()
         tracer = get_tracer(__name__)

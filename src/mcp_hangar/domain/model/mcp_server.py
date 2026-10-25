@@ -59,7 +59,7 @@ from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..value_objects.peer_identity import PeerIdentity, connection_declaration
-from ..value_objects.provenance import Provenance
+from ..value_objects.provenance import DiscoveryOrigin, Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .mcp_server_config import McpServerConfig
@@ -336,6 +336,9 @@ class McpServer(AggregateRoot):
         # handler); off for config-file / directly-built servers so an
         # intentionally private endpoint is not newly refused at connect.
         enforce_ssrf: bool = False,
+        # For a DISCOVERY server, the source that registered it and the
+        # definition it reported (#2106); None for everything else.
+        discovered_as: DiscoveryOrigin | None = None,
         # The only names a subprocess server takes from the gateway's own
         # environment; None inherits it as the launcher's filters allow. Set for
         # a server loaded from the registry, whose author is not the operator.
@@ -412,6 +415,7 @@ class McpServer(AggregateRoot):
         self._provenance = provenance
         self._runtime_addresses = runtime_addresses
         self._enforce_ssrf = enforce_ssrf
+        self._discovered_as = discovered_as if provenance is Provenance.DISCOVERY else None
 
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or get_default_metrics_publisher()
@@ -632,6 +636,11 @@ class McpServer(AggregateRoot):
     def provenance(self) -> Provenance:
         """How the server reached the fleet: registered by a human, or found by discovery."""
         return self._provenance
+
+    @property
+    def discovered_as(self) -> DiscoveryOrigin | None:
+        """For a discovered server, the source that registered it and the definition it reported."""
+        return self._discovered_as
 
     @property
     def mode(self) -> McpServerMode:
@@ -2827,6 +2836,7 @@ class McpServer(AggregateRoot):
             self._tls_config = tls
             self._peer_identity = identity
             self._provenance = Provenance.HUMAN
+            self._discovered_as = None
             self._runtime_addresses = None
             self._enforce_ssrf = endpoint is not None
             self._health.reset()

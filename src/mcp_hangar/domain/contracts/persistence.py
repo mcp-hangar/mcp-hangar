@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Any, Protocol
 
 from ..value_objects.peer_identity import PeerIdentity
-from ..value_objects.provenance import Provenance
+from ..value_objects.provenance import DiscoveryOrigin, Provenance
 
 
 class AuditAction(Enum):
@@ -151,6 +151,11 @@ class McpServerConfigSnapshot:
     # peer identity comes back with it after a restart and on a peer replica,
     # instead of as a plain server whose key nothing checks (ADR-030 §10).
     tls: dict[str, Any] | None = None
+    # For a DISCOVERY server, the source that registered it and the definition
+    # it reported, so discovery can take it back after a restart instead of it
+    # coming back protected as static (#2106). None for every other row, and for
+    # a discovered row written before the field: an older replica drops the key.
+    discovered_as: DiscoveryOrigin | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -167,6 +172,7 @@ class McpServerConfigSnapshot:
         if addrs is not None and not isinstance(addrs, frozenset):
             addrs = frozenset(str(a) for a in addrs)
         object.__setattr__(self, "runtime_addresses", addrs)
+        object.__setattr__(self, "discovered_as", DiscoveryOrigin.from_dict(self.discovered_as))
 
         # A key-pinned server's row is stored under a mode the previous release
         # does not know, so that release declines the row instead of serving
@@ -206,6 +212,7 @@ class McpServerConfigSnapshot:
             "enforce_ssrf": self.enforce_ssrf,
             "l7_policy": self.l7_policy,
             "tls": self.tls,
+            "discovered_as": self.discovered_as.to_dict() if self.discovered_as is not None else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -241,6 +248,7 @@ class McpServerConfigSnapshot:
             enforce_ssrf=data.get("enforce_ssrf", False),
             l7_policy=data.get("l7_policy"),
             tls=data.get("tls"),
+            discovered_as=data.get("discovered_as"),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )

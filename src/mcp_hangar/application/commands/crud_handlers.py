@@ -292,6 +292,8 @@ class CreateMcpServerHandler(CommandHandler):
             enforce_ssrf=(
                 McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None
             ),
+            # Kept by the aggregate for a DISCOVERY server only.
+            discovered_as=command.discovered_as,
         )
 
         # Recorded before it joins the fleet, and before the event. The order is

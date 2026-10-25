@@ -9,7 +9,7 @@ from typing import Any
 
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
-from ...domain.value_objects.provenance import Provenance
+from ...domain.value_objects.provenance import DiscoveryOrigin, Provenance
 from ...domain.value_objects.security import Principal
 from .commands import Command
 
@@ -56,6 +56,9 @@ class CreateMcpServerCommand(Command):
             of them. Without this, DISCOVERY buys nothing: provenance grants a
             *specific address*, never an address class, or a container that
             labels itself with a neighbour's address launders its way there.
+        discovered_as: For DISCOVERY, the source that reported the server and
+            the definition it reported, recorded with the row so discovery
+            takes the server back after a restart (#2106). Ignored otherwise.
     """
 
     mcp_server_id: str
@@ -78,6 +81,7 @@ class CreateMcpServerCommand(Command):
     #: from its body; None for a path with no caller. A peer identity is
     #: declared only by a principal holding `mcp_servers:peer_identity` (§9).
     principal: Principal | None = None
+    discovered_as: DiscoveryOrigin | None = None
 
 
 @dataclass(frozen=True)

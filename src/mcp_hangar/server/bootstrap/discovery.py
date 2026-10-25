@@ -19,6 +19,7 @@ from ...infrastructure.discovery.registry import (
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 from .coordination import may_manage
+from .restored_discovery import declared_mcp_server_ids, discovery_origin_of, govern_restored_discovered_servers
 
 logger = get_logger(__name__)
 
@@ -40,7 +41,9 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     logger.info("discovery_initializing")
 
     repository = get_runtime().repository
-    static_mcp_servers = set(repository.get_all_ids())
+    # Not every id in the repository: on a durable backend the fleet is
+    # restored first, and what discovery registered is not static (#2106).
+    static_mcp_servers = declared_mcp_server_ids(repository)
     orchestrator_config = DiscoveryConfig.from_dict(discovery_config)
     orchestrator = DiscoveryOrchestrator(
         config=orchestrator_config,
@@ -92,6 +95,7 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     # Set up registration callbacks
     orchestrator.on_register = _on_mcp_server_register
     orchestrator.on_deregister = _on_mcp_server_deregister
+    govern_restored_discovered_servers(orchestrator, repository)
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
@@ -275,6 +279,7 @@ async def _on_mcp_server_register(mcp_server) -> bool:
                 source=f"discovery:{mcp_server.source_type}",
                 provenance=Provenance.DISCOVERY,
                 runtime_addresses=runtime_addresses,
+                discovered_as=discovery_origin_of(mcp_server),
             )
         )
         logger.info(
