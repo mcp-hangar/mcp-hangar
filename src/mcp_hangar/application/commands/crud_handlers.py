@@ -205,6 +205,7 @@ class CreateMcpServerHandler(CommandHandler):
         log_buffers: ILogBuffers | None = None,
         peer_identity_authority: IPeerIdentityAuthority | None = None,
         drain: Callable[[str, float], bool] | None = None,
+        groups: dict | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -226,6 +227,8 @@ class CreateMcpServerHandler(CommandHandler):
             drain: Waits, for at most the given seconds, until a server has no
                 call in flight; what a graceful reload waits on. Used before a
                 discovered server is replaced (#2091). None stops it at once.
+            groups: The groups, whose members hold a server by reference and
+                follow a replaced discovered server to its new copy.
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -234,6 +237,7 @@ class CreateMcpServerHandler(CommandHandler):
         self._log_buffers = log_buffers
         self._peer_identity_authority = peer_identity_authority
         self._drain = drain
+        self._groups = groups
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -306,10 +310,13 @@ class CreateMcpServerHandler(CommandHandler):
         # refused definition leaves the running one exactly as it was. Its L7
         # egress policy is carried over, as a reload carries it: a changed
         # definition must not lift enforcement until the operator pushes again.
+        # The record is swapped first; the running server is retired only
+        # once that write has gone through.
         if replaced is not None:
             if replaced._l7_policy is not None:
                 mcp_server.set_l7_policy(replaced._l7_policy)
-            self._retire(replaced, command)
+            self._swap_record(mcp_server, command)
+            self._retire(replaced, mcp_server, command)
 
         # Recorded before it joins the fleet, and before the event. The order is
         # the point: a write that fails leaves nothing behind and the caller is
@@ -318,7 +325,7 @@ class CreateMcpServerHandler(CommandHandler):
         # then quietly resolves by forgetting the server.
         # Insert-only: another replica may have created it already, before this
         # one heard of it (#1954). Its row is refused rather than overwritten.
-        if self._fleet_writer is not None:
+        elif self._fleet_writer is not None:
             try:
                 self._fleet_writer.save_versioned(snapshot_of(mcp_server), None)
             except ConcurrentModificationError as e:
@@ -368,26 +375,44 @@ class CreateMcpServerHandler(CommandHandler):
             return cast(McpServer, existing)
         raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
 
-    def _retire(self, old: McpServer, command: CreateMcpServerCommand) -> None:
-        """Take the discovered server being replaced out of the fleet, as a delete would.
+    def _swap_record(self, new: McpServer, command: CreateMcpServerCommand) -> None:
+        """Wait for the calls in flight, then overwrite the server's row in one versioned write.
 
-        Its calls in flight are waited for first, as a graceful reload waits for
-        a server it restarts. The fenced record delete comes before the stop,
-        so an instance that lost the management lease changes nothing. Peers
-        see a deregistration and then a registration: their projection ignores
-        a registration of a name they already hold.
+        Calls in flight are waited for first, as a graceful reload waits for a
+        server it restarts. The row is replaced in place, never deleted and
+        inserted: a write that does not apply -- a peer changed the row since it
+        was read (`ConcurrentModificationError`) or the peer-key record refuses
+        it -- raises before anything else has changed, and the running server
+        keeps running everywhere.
         """
         name = command.mcp_server_id
         if self._drain is not None and not self._drain(name, REPLACE_DRAIN_TIMEOUT_S):
             logger.warning("mcp_server_replace_drain_timed_out", mcp_server_id=name, timeout_s=REPLACE_DRAIN_TIMEOUT_S)
-        if self._fleet_writer is not None:
-            self._fleet_writer.delete(name, fenced=True)
+        if self._fleet_writer is None:
+            return
+        recorded = self._fleet_writer.read(name)
+        try:
+            self._fleet_writer.save_versioned(snapshot_of(new), 0 if recorded is None else recorded[1])
+        except PeerKeyNameRefused as e:
+            raise PeerKeyNameTaken(str(e)) from e
+
+    def _retire(self, old: McpServer, new: McpServer, command: CreateMcpServerCommand) -> None:
+        """Take the replaced server out of this replica's fleet, after its row was swapped.
+
+        Peers see a deregistration and then a registration: their projection
+        ignores a registration of a name they already hold, and reads the new
+        row on the second. A group member is pointed at the new copy, so the
+        group does not route to (and relaunch) the stopped one.
+        """
+        name = command.mcp_server_id
         if old.state is not McpServerState.COLD:
             old.shutdown()
             self._event_bus.publish_aggregate_events(MCP_SERVER, name, old.collect_events())
         self._repository.remove(name)
         if self._log_buffers is not None:
             self._log_buffers.release(name)
+        for group in (self._groups or {}).values():
+            group.replace_member_server(name, new)
         self._event_bus.publish(McpServerDeregistered(mcp_server_id=name, source=command.source))
         logger.info("mcp_server_replaced", mcp_server_id=name, source=command.source)
 
@@ -1167,6 +1192,7 @@ def register_crud_handlers(
             log_buffers=log_buffers,
             peer_identity_authority=peer_identity_authority,
             drain=drain,
+            groups=groups,
         ),
     )
     command_bus.register(

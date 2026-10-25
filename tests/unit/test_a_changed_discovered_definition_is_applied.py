@@ -19,7 +19,9 @@ repository, with a clock the test moves.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,6 +49,7 @@ from mcp_hangar.domain.exceptions import ValidationError
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.domain.value_objects.provenance import Provenance
 from mcp_hangar.infrastructure.discovery.filesystem_source import FilesystemDiscoverySource
 from mcp_hangar.infrastructure.discovery.registry import create_source
@@ -238,10 +241,11 @@ class TestAChangeIsApplied:
 
         assert _command_of(fleet.repo, "svc") == ["python", "-m", "new"]
 
-    async def test_a_record_write_refused_after_the_stop_is_retried_not_kept(self, fleet) -> None:
-        # The running server is already gone when the new row is refused: that
-        # is not "the old one keeps running", and the next cycle creates it.
-        writer = _FleetWriter([])
+    async def test_a_record_write_that_does_not_apply_keeps_the_server_and_its_policy(self, fleet) -> None:
+        # A peer changed the row between read and write: the running server,
+        # with its L7 policy, is untouched, and the next cycle applies the
+        # change with the policy carried over.
+        writer = _FleetWriter()
         fleet.commands.create = CreateMcpServerHandler(
             repository=fleet.repo, event_bus=fleet.events, fleet_writer=writer
         )
@@ -249,15 +253,34 @@ class TestAChangeIsApplied:
         orchestrator = fleet.build(source)
         source.defs["svc"] = _subprocess("old")
         await _tick(orchestrator)
+        policy = L7Policy.from_dict({"tools": {"deny": ["exec"]}, "defaultAction": "Allow"})
+        fleet.repo.get("svc").set_l7_policy(policy)
 
         source.defs["svc"] = _subprocess("new")
-        writer.refuse_next_save = True
+        writer.peer_writes_after_read = True
         with structlog.testing.capture_logs() as captured:
             await _tick(orchestrator)
-            await _tick(orchestrator)
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "old"]
+        assert [e["retried"] for e in _not_applied(captured)] == [True]
 
+        await _tick(orchestrator)
         assert _command_of(fleet.repo, "svc") == ["python", "-m", "new"]
-        assert all(e["retried"] for e in _not_applied(captured))
+        assert fleet.repo.get("svc")._l7_policy == policy
+        assert writer.rows["svc"][0].l7_policy == policy.to_wire()
+
+    async def test_a_takeover_by_another_source_moves_the_count(self, fleet) -> None:
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source)
+        source.defs["svc"] = _subprocess("old")
+        await _tick(orchestrator)
+        running = orchestrator._lifecycle_manager.get_mcp_server("svc")
+        taken = DiscoveredMcpServer.create(
+            name="svc", source_type="kubernetes", mode="subprocess", connection_info={"command": ["k"]}
+        )
+
+        orchestrator._applied(running, taken)
+
+        assert orchestrator._validator._mcp_server_counts == {"filesystem": 0, "kubernetes": 1}
 
     async def test_a_transient_failure_is_retried_next_cycle(self, fleet) -> None:
         source = _Source(DiscoveryMode.ADDITIVE)
@@ -344,6 +367,21 @@ class TestARefusedChangeKeepsTheRunningDefinition:
         assert len(fleet.commands.of(CreateMcpServerCommand)) == creates + 1
         assert len(_not_applied(captured)) == 1
         assert not fleet.events.of(McpServerDeregistered)
+
+    async def test_a_manual_scan_tries_a_refused_change_again(self, fleet) -> None:
+        # After the operator fixed what refused it; the definition is the same.
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source)
+        source.defs["svc"] = _subprocess("old")
+        await _tick(orchestrator)
+        source.defs["svc"] = ("http", {"endpoint": "http://169.254.169.254/mcp"})
+        await _tick(orchestrator)
+        await _tick(orchestrator)
+        attempts = len(fleet.commands.of(CreateMcpServerCommand))
+
+        await orchestrator.trigger_discovery()
+
+        assert len(fleet.commands.of(CreateMcpServerCommand)) == attempts + 1
 
     async def test_a_refusal_of_a_coordinated_local_mode_leaves_the_running_server(self, fleet) -> None:
         fleet.commands.create._coordinated = lambda: True
@@ -445,6 +483,58 @@ class TestASourceThatNeedsApproval:
         assert _command_of(fleet.repo, "svc") == ["python", "-m", "approved"]
         # Not applied unapproved by the next cycle: back where it waited.
         assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["svc"]
+
+    async def test_an_approval_whose_record_write_does_not_apply_leaves_the_server_up(self, fleet) -> None:
+        writer = _FleetWriter()
+        fleet.commands.create = CreateMcpServerHandler(
+            repository=fleet.repo, event_bus=fleet.events, fleet_writer=writer
+        )
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source, auto_register=False)
+        source.defs["svc"] = _subprocess("approved")
+        await _tick(orchestrator)
+        await orchestrator.approve_mcp_server("svc")
+        source.defs["svc"] = _subprocess("edited")
+        await _tick(orchestrator)
+
+        writer.peer_writes_after_read = True
+        result = await orchestrator.approve_mcp_server("svc")
+        await _tick(orchestrator)
+
+        assert result["approved"] is False
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "approved"]
+        assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["svc"]
+
+    async def test_an_approval_runs_on_the_discovery_loop(self, fleet) -> None:
+        # The replace drains calls in flight; it must not do that on the request loop.
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source, auto_register=False)
+        source.defs["svc"] = _subprocess("approved")
+        await _tick(orchestrator)
+        await orchestrator.approve_mcp_server("svc")
+        source.defs["svc"] = _subprocess("edited")
+        await _tick(orchestrator)
+        threads: list[str] = []
+        replace = orchestrator.on_update
+
+        async def recording(mcp_server: DiscoveredMcpServer) -> None:
+            threads.append(threading.current_thread().name)
+            await replace(mcp_server)
+
+        orchestrator.on_update = recording
+        discovery_loop = asyncio.new_event_loop()
+        runner = threading.Thread(target=discovery_loop.run_forever, name="discovery-loop", daemon=True)
+        runner.start()
+        orchestrator._loop = discovery_loop
+        try:
+            result = await orchestrator.approve_mcp_server("svc")
+        finally:
+            discovery_loop.call_soon_threadsafe(discovery_loop.stop)
+            runner.join(5)
+            discovery_loop.close()
+
+        assert result["approved"] is True
+        assert threads == ["discovery-loop"]
 
 
 @pytest.mark.asyncio
@@ -596,25 +686,37 @@ class TestLabelsAndAnnotations:
 
 
 class _FleetWriter:
-    """Records the order of record writes; refuses a fenced delete or a save when told to."""
+    """A versioned row store with the real writer's semantics, recording what it was asked.
 
-    def __init__(self, calls: list[str], holds_lease: bool = True) -> None:
-        self.calls = calls
-        self.holds_lease = holds_lease
-        self.refuse_next_save = False
-        self.saved: dict[str, Any] = {}
+    A fenced delete under a tenure that has ended matches zero rows and returns
+    normally, as `RepositoryFleetWriter.delete` does: it does not raise.
+    """
 
-    def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
-        if fenced and not self.holds_lease:
-            raise NotTheManagerError("the lease is held elsewhere")
-        self.calls.append(f"delete fenced={fenced}")
+    def __init__(self, calls: list[str] | None = None) -> None:
+        self.calls = calls if calls is not None else []
+        self.rows: dict[str, tuple[Any, int]] = {}
+        #: A peer (the new lease holder, say) writes the row between our read and our write.
+        self.peer_writes_after_read = False
+
+    def read(self, mcp_server_id: str) -> tuple[Any, int] | None:
+        self.calls.append(f"read {mcp_server_id}")
+        recorded = self.rows.get(mcp_server_id)
+        if recorded is not None and self.peer_writes_after_read:
+            self.peer_writes_after_read = False
+            self.rows[mcp_server_id] = (recorded[0], recorded[1] + 1)
+        return recorded
 
     def save_versioned(self, snapshot: Any, expected_version: int | None, *_: Any) -> None:
-        if self.refuse_next_save:
-            self.refuse_next_save = False
-            raise ConcurrentModificationError(snapshot.mcp_server_id, 0, 1)
-        self.calls.append(f"save {snapshot.command}")
-        self.saved[snapshot.mcp_server_id] = snapshot
+        current = self.rows.get(snapshot.mcp_server_id)
+        current_version = 0 if current is None else current[1]
+        if (expected_version or 0) != current_version or (expected_version is None and current is not None):
+            raise ConcurrentModificationError(snapshot.mcp_server_id, expected_version or 0, current_version)
+        self.calls.append(f"save {snapshot.command} over v{current_version}")
+        self.rows[snapshot.mcp_server_id] = (snapshot, current_version + 1)
+
+    def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
+        # A stale tenure: zero rows, no exception.
+        self.calls.append(f"delete fenced={fenced}")
 
 
 def _discovered_server(name: str = "svc") -> McpServer:
@@ -635,38 +737,59 @@ class TestTheReplacementItself:
 
         return CreateMcpServerHandler(repository=repo, event_bus=_RecordingBus(), drain=drain, **kwargs)
 
-    def test_calls_in_flight_are_drained_and_the_record_delete_is_fenced(self) -> None:
+    def _recorded(self, repo, calls: list[str], old: McpServer) -> _FleetWriter:
+        writer = _FleetWriter(calls)
+        repo.add(old.mcp_server_id, old)
+        writer.rows[old.mcp_server_id] = (snapshot_of(old), 3)
+        return writer
+
+    def test_calls_in_flight_are_drained_and_the_row_is_swapped_in_place(self) -> None:
         repo, calls = InMemoryMcpServerRepository(), []
-        repo.add("svc", _discovered_server())
+        writer = self._recorded(repo, calls, _discovered_server())
 
-        self._handler(repo, calls, fleet_writer=_FleetWriter(calls)).handle(_replacement())
+        self._handler(repo, calls, fleet_writer=writer).handle(_replacement())
 
-        assert calls == ["drain svc 30.0", "delete fenced=True", "save ['new']"]
+        # Never a delete and an insert: there is no moment without a live row.
+        assert calls == ["drain svc 30.0", "read svc", "save ['new'] over v3"]
         assert list(repo.get("svc")._command) == ["new"]
+
+    def test_a_row_changed_by_a_peer_leaves_the_running_server(self) -> None:
+        # The case a stale lease produces: the new holder wrote the row after
+        # this instance read it. The write does not apply, so nothing is retired.
+        repo, calls = InMemoryMcpServerRepository(), []
+        old = _discovered_server()
+        writer = self._recorded(repo, calls, old)
+        writer.peer_writes_after_read = True
+
+        with pytest.raises(ConcurrentModificationError):
+            self._handler(repo, calls, fleet_writer=writer).handle(_replacement())
+
+        assert repo.get("svc") is old
+        assert writer.rows["svc"][0].command == ["old"]
+        assert not [c for c in calls if c.startswith("delete")]
+
+    def test_a_group_member_follows_the_replacement(self) -> None:
+        repo, calls = InMemoryMcpServerRepository(), []
+        old = _discovered_server()
+        repo.add("svc", old)
+        group = MagicMock()
+
+        self._handler(repo, calls, groups={"g": group}).handle(_replacement())
+
+        group.replace_member_server.assert_called_once_with("svc", repo.get("svc"))
 
     def test_the_l7_policy_is_carried_over(self) -> None:
         # As a reload carries it: a changed annotation must not lift enforcement.
         repo, calls = InMemoryMcpServerRepository(), []
-        writer = _FleetWriter(calls)
         old = _discovered_server()
         policy = L7Policy.from_dict({"tools": {"deny": ["exec"]}, "defaultAction": "Allow"})
         old.set_l7_policy(policy)
-        repo.add("svc", old)
+        writer = self._recorded(repo, calls, old)
 
         self._handler(repo, calls, fleet_writer=writer).handle(_replacement())
 
         assert repo.get("svc")._l7_policy == policy
-        assert writer.saved["svc"].l7_policy == policy.to_wire()
-
-    def test_an_instance_without_the_lease_changes_nothing(self) -> None:
-        repo, calls = InMemoryMcpServerRepository(), []
-        old = _discovered_server()
-        repo.add("svc", old)
-
-        with pytest.raises(NotTheManagerError):
-            self._handler(repo, calls, fleet_writer=_FleetWriter(calls, holds_lease=False)).handle(_replacement())
-
-        assert repo.get("svc") is old
+        assert writer.rows["svc"][0].l7_policy == policy.to_wire()
 
     def test_a_refused_definition_is_not_even_drained(self) -> None:
         repo, calls = InMemoryMcpServerRepository(), []

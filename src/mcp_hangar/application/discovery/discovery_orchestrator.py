@@ -586,7 +586,10 @@ class DiscoveryOrchestrator:
             # validator no longer recognises sources by name.
             producing_source = self._discovery_service.get_source(mcp_server.source_type)
             validation_report = await self._validator.validate(
-                mcp_server, source=producing_source, replacing=existing is not None
+                mcp_server,
+                source=producing_source,
+                # A takeover by another source is a new server for that source's count.
+                replacing=existing is not None and existing.source_type == mcp_server.source_type,
             )
 
             main_metrics.record_discovery_validation_duration(
@@ -744,14 +747,18 @@ class DiscoveryOrchestrator:
             span.set_attribute("discovery.result", "skipped")
             record_handled_failure(span, e)
             return "skipped"
-        self._applied(mcp_server)
+        self._applied(existing, mcp_server)
         main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
         span.set_attribute("discovery.result", "updated")
         return "updated"
 
-    def _applied(self, mcp_server: DiscoveredMcpServer) -> None:
+    def _applied(self, replaced: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer) -> None:
         """Track *mcp_server* as the definition that runs, and forget its pending change."""
         self._lifecycle_manager.update_mcp_server(mcp_server)
+        if replaced.source_type != mcp_server.source_type:
+            # Taken over by another source: it moves between the two counts.
+            self._validator.record_deregistration(replaced)
+            self._validator.record_registration(mcp_server)
         if self._lifecycle_manager.is_quarantined(mcp_server.name):
             # An older change still waiting there would otherwise be approvable
             # over this one.
@@ -832,9 +839,14 @@ class DiscoveryOrchestrator:
     async def trigger_discovery(self) -> dict[str, Any]:
         """Trigger immediate discovery cycle.
 
+        A manual scan also tries again every change that was refused for good
+        (#2091): it is what an operator runs after fixing whatever refused it,
+        which leaves the definition, and so its fingerprint, unchanged.
+
         Returns:
             Discovery results
         """
+        self._change_refused.clear()
         result = await self.run_discovery_cycle()
         return result.to_dict()
 
@@ -902,12 +914,24 @@ class DiscoveryOrchestrator:
         approval replaces the running server; refused, the running definition
         stays and the change is not approved.
 
+        Run on discovery's own loop when it has one, as a manual scan is: the
+        replace waits for calls in flight, which must not freeze the request
+        loop that asked, and a cycle replacing the same server at the same time
+        is then not possible.
+
         Args:
             name: McpServer name
 
         Returns:
             Result dictionary
         """
+        loop = self._loop
+        if loop is not None and loop.is_running() and loop is not asyncio.get_running_loop():
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self._approve(name), loop))
+        return await self._approve(name)
+
+    async def _approve(self, name: str) -> dict[str, Any]:
+        """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
         running = self._lifecycle_manager.get_mcp_server(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False
@@ -956,7 +980,7 @@ class DiscoveryOrchestrator:
                 # change in pending again rather than applying it unapproved.
                 self._conflict_resolver.register(running)
             return {"approved": False, "mcp_server": mcp_server.name, "error": str(e)}
-        self._applied(mcp_server)
+        self._applied(running, mcp_server)
         main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
         return {"approved": True, "mcp_server": mcp_server.name, "status": "updated"}
 
