@@ -19,7 +19,8 @@ services:
   mcp-hangar:
     image: ghcr.io/mcp-hangar/mcp-hangar:latest
     ports:
-      - "8080:8080"
+      # Loopback only: this gateway runs with --unsafe-no-auth (#2040).
+      - "127.0.0.1:8080:8080"
     # The image's default CMD is `serve --http --host 0.0.0.0 --port 8080`, and
     # this example configures no authentication -- so the gateway refuses to
     # start and the container exits 1:

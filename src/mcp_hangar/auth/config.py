@@ -59,6 +59,14 @@ class OIDCIssuerConfig:
             when ``strict_tenant_audience`` is True. Explicit (auditable) mapping is
             preferred over templating. A tenant absent from this map is rejected
             fail-closed; the global ``audience`` is never a fallback in strict mode.
+        allowed_tenants: Opt-in binding of this issuer to the tenants it may assert.
+            When set, a token from this issuer is rejected unless its
+            ``tenant_claim`` is a string in this list; a token naming no tenant is
+            rejected too. ``None`` (the key absent) keeps the old behaviour: the
+            issuer may assert any tenant, or none. Set it on every issuer when two
+            or more are trusted, so one identity provider cannot name another
+            customer's tenant. Never inherited from the top-level ``oidc`` block:
+            one list shared by every issuer would bind nothing.
     """
 
     issuer: str = ""
@@ -88,6 +96,9 @@ class OIDCIssuerConfig:
     # Strict per-tenant audience binding (RFC 8707), opt-in
     strict_tenant_audience: bool = False
     tenant_audiences: dict[str, str] = field(default_factory=dict)
+
+    # Per-issuer tenant binding, opt-in. None means the issuer may assert any tenant.
+    allowed_tenants: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -350,6 +361,27 @@ def _parse_tenant_audiences(raw: Any) -> dict[str, str]:
     return result
 
 
+def _parse_allowed_tenants(raw: Any, issuer: str) -> tuple[str, ...]:
+    """The tenants an issuer may assert, or a refusal naming the issuer.
+
+    A configured binding that cannot be read refuses the configuration rather
+    than being ignored: dropping it would let the issuer assert any tenant,
+    which is the opposite of what the operator asked for. A bare string is
+    refused rather than read as one tenant, and an empty list is refused because
+    it would reject every token the issuer signs.
+    """
+    where = f"oidc.issuers[{issuer!r}].allowed_tenants"
+    # Present but empty (YAML null, e.g. a template that rendered nothing) is
+    # refused too: read as absent it would leave the issuer unbound while the
+    # file looks bound.
+    if not isinstance(raw, list) or not raw:
+        raise ConfigurationError(f"{where} must be a non-empty list of tenant ids, got {raw!r}")
+    for entry in raw:
+        if not isinstance(entry, str) or not entry.strip():
+            raise ConfigurationError(f"{where} must hold only non-empty strings, got {entry!r}")
+    return tuple(raw)
+
+
 #: The most clock drift a token's exp/iat/nbf may be forgiven. Past five minutes the
 #: leeway stops absorbing drift and starts extending every token's lifetime.
 MAX_CLOCK_SKEW_LEEWAY_SECONDS = 300
@@ -425,6 +457,12 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     top_tenant_audiences = _parse_tenant_audiences(oidc_dict.get("tenant_audiences", {}))
     top_strict_tenant_audience = oidc_dict.get("strict_tenant_audience", False)
 
+    # The tenant binding is per issuer. A list here would either bind nothing
+    # (copied to every issuer) or be ignored on the single-issuer form, so it
+    # refuses the configuration instead of failing open.
+    if "allowed_tenants" in oidc_dict:
+        raise ConfigurationError("oidc.allowed_tenants is per issuer: set it on each entry in oidc.issuers")
+
     # Parse per-issuer trust entries. Omitted fields inherit the top-level
     # oidc.* values so per-issuer claim mappings fall back to the globals.
     clock_skew_leeway_seconds = _clock_skew_leeway(oidc_dict.get("clock_skew_leeway_seconds", 60), "oidc")
@@ -456,6 +494,13 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                         _parse_tenant_audiences(issuer_dict["tenant_audiences"])
                         if "tenant_audiences" in issuer_dict
                         else dict(top_tenant_audiences)
+                    ),
+                    allowed_tenants=(
+                        _parse_allowed_tenants(
+                            issuer_dict["allowed_tenants"], issuer_dict.get("issuer", oidc_dict.get("issuer", ""))
+                        )
+                        if "allowed_tenants" in issuer_dict
+                        else None
                     ),
                 )
             )

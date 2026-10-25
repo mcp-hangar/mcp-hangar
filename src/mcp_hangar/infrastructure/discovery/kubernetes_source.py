@@ -80,6 +80,8 @@ class KubernetesDiscoverySource(DiscoverySource):
     """
 
     ANNOTATION_PREFIX = "mcp-hangar.io/"
+    #: Modes that connect to the pod. Anything else would run on Hangar's host.
+    REMOTE_MODES = frozenset({"http", "sse", "remote"})
 
     def __init__(
         self,
@@ -91,6 +93,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         default_ttl: int = 90,
         allowed_namespaces: set[str] | None = None,
         denied_namespaces: set[str] | None = None,
+        allow_local_modes: bool = False,
     ):
         """Initialize Kubernetes discovery source.
 
@@ -101,6 +104,11 @@ class KubernetesDiscoverySource(DiscoverySource):
             in_cluster: Whether running inside cluster
             kubeconfig_path: Path to kubeconfig (for out-of-cluster)
             default_ttl: Default TTL for discovered mcp_servers
+            allow_local_modes: Let an `mcp-hangar.io/mode` annotation other
+                than http/sse/remote through -- a `subprocess` entry runs its
+                `mcp-hangar.io/command` on Hangar's own host. Off by default:
+                anyone who can create a pod in a watched namespace would
+                otherwise choose a command the gateway runs.
         """
         super().__init__(mode)
 
@@ -123,6 +131,10 @@ class KubernetesDiscoverySource(DiscoverySource):
             allowed=frozenset(allowed_namespaces or ()),
             denied=frozenset(denied_namespaces) if denied_namespaces is not None else NamespacePolicy.denied,
         )
+
+        self._allow_local_modes = allow_local_modes
+        #: Names already warned about, so a refusal repeated every cycle logs once.
+        self._refused: set[str] = set()
 
         self._v1: client.CoreV1Api | None = None
         self._initialized = False
@@ -237,6 +249,19 @@ class KubernetesDiscoverySource(DiscoverySource):
         # Extract mcp_server config
         name = annotations.get(f"{self.ANNOTATION_PREFIX}name", pod.metadata.name)
         mode = annotations.get(f"{self.ANNOTATION_PREFIX}mode", "http")
+        if mode not in self.REMOTE_MODES and not self._allow_local_modes:
+            log = logger.debug if name in self._refused else logger.warning
+            self._refused.add(name)
+            log(
+                "kubernetes_discovery_local_mode_refused",
+                mcp_server_name=name,
+                namespace=namespace,
+                pod_name=pod.metadata.name,
+                mode=mode,
+                detail="a pod annotation asked Hangar to run something on its own host",
+                hint="set `allow_local_modes: true` on this kubernetes source to allow it",
+            )
+            return None
         port = annotations.get(f"{self.ANNOTATION_PREFIX}port", "8080")
         health_path = annotations.get(f"{self.ANNOTATION_PREFIX}health-path", "/health")
         # The MCP endpoint's path (#1208). Without this the built endpoint was

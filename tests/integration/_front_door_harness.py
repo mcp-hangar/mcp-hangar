@@ -274,6 +274,7 @@ def front_door(
     topology: str = "front_door",
     also: tuple[str, ...] = (),
     upstream_class: type[Upstream] = Upstream,
+    auth: Any = None,
 ) -> Iterator[FrontDoor]:
     """A served front door over one upstream exposing *tools*, each tenant with an API key.
 
@@ -283,7 +284,9 @@ def front_door(
     ``hangar_call``, for a test that compares the two surfaces. Each id in
     *also* is one more server on the same upstream, registered cold.
     *upstream_class* is the upstream's handler, for a test whose upstream does
-    more than answer POSTs.
+    more than answer POSTs. *auth* replaces the API-key authentication with
+    another object carrying an ``authn_middleware``, for a test of another
+    credential; the keys are still minted but nothing accepts them.
     """
     from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
     from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
@@ -319,7 +322,8 @@ def front_door(
             tenant: store.create_key(principal_id=f"agent-{label}", name=f"key-{label}", tenant_id=tenant)
             for label, tenant in (("a", TENANT_A), ("b", TENANT_B))
         }
-        auth = SimpleNamespace(authn_middleware=AuthenticationMiddleware([ApiKeyAuthenticator(store)]))
+        if auth is None:
+            auth = SimpleNamespace(authn_middleware=AuthenticationMiddleware([ApiKeyAuthenticator(store)]))
         app = _with_metrics(create_auth_enforced_app(mcp_app_for_serving(build_serving_mcp_server()), auth))
         with TestClient(app, base_url=BASE_URL) as client:
             yield FrontDoor(client, keys, handler)

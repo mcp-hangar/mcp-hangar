@@ -119,6 +119,22 @@ def _refuse_a_key_ref_the_fleet_holds(repository: IMcpServerRepository, mcp_serv
             )
 
 
+def _refuse_an_endpoint_no_launcher_can_dial(mcp_server_id: str, endpoint: str) -> None:
+    """Refuse a remote endpoint the HTTP launcher would refuse at start (#2056).
+
+    The rule is the launcher's (`HttpLauncher._validate_endpoint`): http or https,
+    with a host. Checked only there, a `file://` endpoint was accepted over REST,
+    stored and listed, and failed at every start.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValidationError(
+            f"mcp_server '{mcp_server_id}': endpoint must be an http or https URL with a host, got {endpoint!r}"
+        )
+
+
 def _refuse_plaintext_for_a_peer_identity(mcp_server_id: str, endpoint: str | None) -> None:
     """A key is checked in a TLS handshake, so a key-pinned server is reached over https (ADR-030 §4).
 
@@ -244,6 +260,7 @@ class CreateMcpServerHandler(CommandHandler):
             _refuse_plaintext_for_a_peer_identity(command.mcp_server_id, command.endpoint)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
+            _refuse_an_endpoint_no_launcher_can_dial(command.mcp_server_id, command.endpoint)
             validate_no_ssrf(
                 command.endpoint,
                 provenance=command.provenance,
@@ -548,6 +565,7 @@ class UpdateMcpServerHandler(CommandHandler):
         if new is not None:
             _refuse_plaintext_for_a_peer_identity(name, endpoint)
         if endpoint is not None:
+            _refuse_an_endpoint_no_launcher_can_dial(name, endpoint)
             # Set over the API, the endpoint is a human's, whatever it was
             # before: a server moved from discovery meets the policy now (§4f).
             validate_no_ssrf(endpoint, provenance=Provenance.HUMAN)
