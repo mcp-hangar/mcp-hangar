@@ -73,19 +73,31 @@ def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerReposit
 
     A server that leaves the fleet takes its projections with it (#2088). A
     delete (REST or discovery) is a PROJECTION: the event names the server, and
-    the fleet drops it on every replica on that same event. Registering one
-    again under that name restores its last entries, the same way, because the
-    replica that starts it may be another one. A reload's removals and a hot
-    unload are this replica's own fleet, so LOCAL_VIEW.
+    the fleet drops it on every replica on that same event. A reload's removals
+    and a hot unload are this replica's own fleet, so LOCAL_VIEW. Registering
+    one again restores its last entries: see `subscribe_tool_projection_restore`,
+    which has to be subscribed later.
     """
     tool_projection_handler = ToolProjectionPopulationHandler(repository=repository, event_bus=event_bus)
     event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
     tool_catalogue_changes.register_listener(tool_projection_handler.project)
     event_bus.subscribe(McpServerDeregistered, tool_projection_handler.handle_deregistered, kind=HandlerKind.PROJECTION)
-    event_bus.subscribe(McpServerRegistered, tool_projection_handler.handle_registered, kind=HandlerKind.PROJECTION)
     event_bus.subscribe(ConfigurationReloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
     event_bus.subscribe(McpServerHotUnloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
     return tool_projection_handler
+
+
+def subscribe_tool_projection_restore(event_bus: EventBus, handler: ToolProjectionPopulationHandler) -> None:
+    """Restore a re-registered server's last entries, on every replica (#2088).
+
+    A PROJECTION like the delete, because the replica that starts the server may
+    be another one. Subscribed AFTER `FleetProjection`'s ``McpServerRegistered``:
+    the restore lists only a server the local fleet holds, and on a peer it is
+    `FleetProjection` that adds it -- or declines it (a peer-key contradiction,
+    an unreadable record, no row), in which case nothing may be listed. Handlers
+    run in subscription order, on a tailed event and a local one alike.
+    """
+    event_bus.subscribe(McpServerRegistered, handler.handle_registered, kind=HandlerKind.PROJECTION)
 
 
 def init_event_handlers(runtime: "Runtime") -> None:
@@ -122,7 +134,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     # Populate the tool-projection registry from discovered tools on server start
     # (#248), and again on an upstream's own `tools/list_changed` (#1366).
-    subscribe_tool_projection(runtime.event_bus, runtime.repository)
+    tool_projection_handler = subscribe_tool_projection(runtime.event_bus, runtime.repository)
     # On a front door, a server a reload adds or rebuilds is started as boot
     # starts every configured one, so its tools are projected and announced.
     subscribe_reload_warm_up(runtime)
@@ -254,6 +266,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
         # is a log an operator cannot read. `_configured` matches
         # `fleet_writer_configured` next door.
         logger.info("fleet_projection_configured")
+
+    # After `FleetProjection`, which decides whether a peer's server joins this
+    # replica's fleet at all; the restore lists only one that did (#2088).
+    subscribe_tool_projection_restore(runtime.event_bus, tool_projection_handler)
 
     # Suspension has to reach every replica: a session refused here and served
     # by the other two is a block a caller walks past by retrying. A projection,

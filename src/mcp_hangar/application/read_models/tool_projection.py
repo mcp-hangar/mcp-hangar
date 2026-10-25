@@ -55,6 +55,12 @@ def _projection_changed() -> None:
             logger.warning("tool_projection_change_listener_failed", exc_info=True)
 
 
+#: Removed servers whose last entries are kept for `restore_server` (#2088). The
+#: oldest go first past it, so discovery with per-pod names cannot grow the
+#: store without bound; one evicted is simply not restored, and its start
+#: projects it as any new server.
+MAX_REMOVED_SERVERS = 1024
+
 #: Why a listing withholds a tool whose definition drifted from a blocking pin (#1776).
 WITHHELD_DIGEST_DRIFT = "digest_drift"
 
@@ -287,7 +293,10 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         with self._lock:
             stale_keys = [k for k in self._projections if k[0] == mcp_server]
             if stale_keys:
+                self._removed.pop(mcp_server, None)  # re-inserted as the newest
                 self._removed[mcp_server] = {k: self._projections.pop(k) for k in stale_keys}
+                while len(self._removed) > MAX_REMOVED_SERVERS:
+                    del self._removed[next(iter(self._removed))]
         if not stale_keys:
             return False
         logger.debug(

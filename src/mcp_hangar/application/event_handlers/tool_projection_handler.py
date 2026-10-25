@@ -147,10 +147,11 @@ class ToolProjectionPopulationHandler:
     def handle_registered(self, event: object) -> None:
         """On McpServerRegistered, restore a removed server's last entries, on every replica.
 
-        The counterpart of :meth:`handle_deregistered`, and the same kind: it
-        reads only the event's server id.
+        The counterpart of :meth:`handle_deregistered`, and the same kind. Only
+        for a server the local fleet holds: on a peer, `FleetProjection` may
+        decline the new copy, and its old tools must not be listed then.
         """
-        if isinstance(event, McpServerRegistered):
+        if isinstance(event, McpServerRegistered) and self._repository.exists(event.mcp_server_id):
             self.restore(event.mcp_server_id)
 
     def handle_left_locally(self, event: object) -> None:

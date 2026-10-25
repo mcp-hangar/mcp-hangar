@@ -16,12 +16,15 @@ Naming: neutral placeholders only (server_a, server_b, read_item, tenant:a).
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_hangar.application.event_handlers.fleet_projection import FleetProjection
 from mcp_hangar.application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from mcp_hangar.application.read_models import tool_projection as tp
 from mcp_hangar.application.read_models.tool_projection import (
@@ -29,6 +32,7 @@ from mcp_hangar.application.read_models.tool_projection import (
     reset_tool_projection_registry,
 )
 from mcp_hangar.domain.contracts.event_bus import HandlerKind
+from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.domain.events import (
     ConfigurationReloaded,
     McpServerDeregistered,
@@ -40,7 +44,8 @@ from mcp_hangar.domain.model.tool_catalog import ToolCatalog, ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.fastmcp_server.flat_tool_projection import generate_projection
 from mcp_hangar.infrastructure.event_bus import EventBus
-from mcp_hangar.server.bootstrap.event_handlers import subscribe_tool_projection
+from mcp_hangar.server.bootstrap import event_handlers
+from mcp_hangar.server.bootstrap.event_handlers import subscribe_tool_projection, subscribe_tool_projection_restore
 
 TENANT = "tenant:a"
 
@@ -55,8 +60,11 @@ class _Repository:
     def __init__(self) -> None:
         self.servers: dict[str, Any] = {}
 
-    def add(self, mcp_server_id: str, tools: list[str]) -> None:
-        self.servers[mcp_server_id] = SimpleNamespace(tools=ToolCatalog({t: _schema(t) for t in tools}))
+    def add(self, mcp_server_id: str, server: Any) -> None:
+        """*server* is a list of tool names, or a copy `FleetProjection` built."""
+        if isinstance(server, list):
+            server = SimpleNamespace(tools=ToolCatalog({t: _schema(t) for t in server}))
+        self.servers[mcp_server_id] = server
 
     def get(self, mcp_server_id: str) -> Any:
         return self.servers.get(mcp_server_id)
@@ -68,11 +76,37 @@ class _Repository:
         self.servers.pop(mcp_server_id, None)
 
 
+class _Records:
+    """The shared configuration record a peer's `FleetProjection` reads."""
+
+    def __init__(self, row: McpServerConfigSnapshot | None, names: dict[str, str] | None = None) -> None:
+        self.row = row
+        self.names = names or {}
+
+    async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
+        return self.row
+
+    async def get_peer_key_names(self) -> dict[str, str]:
+        return self.names
+
+
+class _SyncLoop:
+    def run(self, coro: Any, timeout: float) -> Any:
+        return asyncio.run(coro)
+
+
 class _Gateway:
-    def __init__(self) -> None:
+    """Wired in bootstrap's order: the projection, then the fleet, then the restore."""
+
+    def __init__(self, records: _Records | None = None) -> None:
         self.bus = EventBus()
         self.repository = _Repository()
-        subscribe_tool_projection(self.bus, self.repository)  # type: ignore[arg-type]
+        handler = subscribe_tool_projection(self.bus, self.repository)  # type: ignore[arg-type]
+        if records is not None:
+            fleet = FleetProjection(self.repository, records, _SyncLoop())  # type: ignore[arg-type]
+            for event_type in (McpServerRegistered, McpServerDeregistered):
+                self.bus.subscribe(event_type, fleet.handle, kind=HandlerKind.PROJECTION)
+        subscribe_tool_projection_restore(self.bus, handler)
 
     def start(self, mcp_server_id: str, tools: list[str]) -> None:
         self.repository.add(mcp_server_id, tools)
@@ -243,16 +277,6 @@ class TestComingBack:
         assert set(_listing()) == {"read_item", "get_item", "list_items"}
         assert len(told) == 1
 
-    def test_a_peers_delete_and_create_lists_it_again_here(self, gateway) -> None:
-        # The create's start stays on the peer: `McpServerStarted` is a local
-        # view and never reaches this replica.
-        gateway.bus.deliver_tailed(McpServerDeregistered(mcp_server_id="server_a", source="api"))
-        assert "read_item" not in _listing()
-
-        gateway.bus.deliver_tailed(McpServerRegistered(mcp_server_id="server_a", source="api", mode="remote"))
-
-        assert _listing()["read_item"] == ("server_a", "read_item")
-
     def test_a_start_replaces_the_restored_entries(self, gateway) -> None:
         gateway.delete("server_a")
         gateway.create("server_a", ["read_item"])
@@ -319,7 +343,8 @@ def test_a_delete_runs_on_every_replica_and_a_local_removal_only_where_it_happen
     # brings them back everywhere. A reload and a hot
     # unload change only the fleet of the replica that made them.
     bus = MagicMock()
-    subscribe_tool_projection(bus, _Repository())  # type: ignore[arg-type]
+    handler = subscribe_tool_projection(bus, _Repository())  # type: ignore[arg-type]
+    subscribe_tool_projection_restore(bus, handler)
 
     kinds = {c.args[0]: c.kwargs["kind"] for c in bus.subscribe.call_args_list}
 
@@ -327,3 +352,70 @@ def test_a_delete_runs_on_every_replica_and_a_local_removal_only_where_it_happen
     assert kinds[McpServerRegistered] is HandlerKind.PROJECTION
     assert kinds[ConfigurationReloaded] is HandlerKind.LOCAL_VIEW
     assert kinds[McpServerHotUnloaded] is HandlerKind.LOCAL_VIEW
+
+
+def test_bootstrap_subscribes_the_restore_after_the_fleet_projection() -> None:
+    # Handlers run in subscription order. Before `FleetProjection`, a peer's
+    # copy is not in the fleet yet when the restore looks, and the restore of a
+    # copy it then declines could not be told apart.
+    source = inspect.getsource(event_handlers.init_event_handlers)
+
+    assert source.index("McpServerRegistered, fleet_projection.handle") < source.index(
+        "subscribe_tool_projection_restore("
+    )
+
+
+#: The row a peer's create wrote; its copy is built from it.
+_ROW = McpServerConfigSnapshot(mcp_server_id="server_a", mode="remote", endpoint="http://upstream.test:8080/mcp")
+
+
+class TestAPeersDeleteAndCreate:
+    """The create's start stays on the peer: `McpServerStarted` is a local view and never arrives here."""
+
+    def _peer(self, records: _Records) -> _Gateway:
+        gw = _Gateway(records)
+        gw.start("server_a", ["read_item", "get_item"])
+        gw.start("server_b", ["list_items"])
+        gw.bus.deliver_tailed(McpServerDeregistered(mcp_server_id="server_a", source="api"))
+        assert "read_item" not in _listing()
+        return gw
+
+    def test_a_copy_this_replica_takes_is_listed_with_its_last_tools(self) -> None:
+        gw = self._peer(_Records(_ROW))
+
+        gw.bus.deliver_tailed(McpServerRegistered(mcp_server_id="server_a", source="api", mode="remote"))
+
+        assert gw.repository.exists("server_a")
+        assert _listing()["read_item"] == ("server_a", "read_item")
+
+    def test_a_copy_the_peer_key_record_contradicts_is_not_listed(self) -> None:
+        # ADR-030: the name is recorded under a key the row does not declare, so
+        # `FleetProjection` declines it. Listing its old tools would show a
+        # server this replica cannot call.
+        gw = self._peer(_Records(_ROW, names={"server_a": "key-1"}))
+
+        gw.bus.deliver_tailed(McpServerRegistered(mcp_server_id="server_a", source="api", mode="remote"))
+
+        assert not gw.repository.exists("server_a")
+        assert set(_listing()) == {"list_items"}
+
+    def test_a_copy_with_no_record_is_not_listed(self) -> None:
+        gw = self._peer(_Records(None))
+
+        gw.bus.deliver_tailed(McpServerRegistered(mcp_server_id="server_a", source="api", mode="remote"))
+
+        assert not gw.repository.exists("server_a")
+        assert set(_listing()) == {"list_items"}
+
+
+def test_the_oldest_removed_servers_are_forgotten_past_the_cap(monkeypatch) -> None:
+    # Discovery with per-pod names would otherwise keep every name it ever saw.
+    monkeypatch.setattr(tp, "MAX_REMOVED_SERVERS", 2)
+    registry = get_tool_projection_registry()
+    for name in ("pod-1", "pod-2", "pod-3"):
+        registry.build_from_tools(name, [_schema(f"tool_{name}")])
+        registry.forget_server(name)
+
+    assert registry.restore_server("pod-1") is False
+    assert registry.restore_server("pod-2") is True
+    assert registry.restore_server("pod-3") is True
