@@ -23,9 +23,20 @@ There are two classes here:
     listens for domain events and starts ``McpServerFailoverSaga`` instances via the
     SagaManager when a configured primary degrades.  This class owns the failover
     configuration and tracks which pairs are currently active.
+
+Deprecated (#2092)
+------------------
+Neither class is reachable from a running gateway: no configuration key reaches
+``configure_failover()``, so the event saga registered at boot has no pair to
+act on. And the step saga does not wait in ``await_primary``: the saga manager
+runs every step in one call, so ``failback`` stops the backup right after
+``start_backup`` started it. A group's rotation is the failover Hangar has.
+Both classes stay importable and behave as before; ``configure_failover()`` and
+the step saga's ``configure()``, which only code outside Hangar calls, warn.
 """
 
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -87,6 +98,12 @@ class McpServerFailoverSaga(Saga):
 
         The context must contain ``primary_id`` and ``backup_id``.
         """
+        warnings.warn(
+            "McpServerFailoverSaga is deprecated: its failback step stops the backup right after starting it, "
+            "because await_primary does not wait. Put the servers in a group, whose rotation fails over (#2092).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         primary_id: str = context.data["primary_id"]
         backup_id: str = context.data["backup_id"]
 
@@ -176,6 +193,12 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
             auto_failback: Whether to automatically fail back when primary recovers.
             failback_delay_s: Delay in seconds before failing back.
         """
+        warnings.warn(
+            "McpServerFailoverEventSaga.configure_failover is deprecated: the step saga it starts stops the backup "
+            "right after starting it. Put the servers in a group, whose rotation fails over (#2092).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._failover_configs[primary_id] = FailoverConfig(
             primary_id=primary_id,
             backup_id=backup_id,
