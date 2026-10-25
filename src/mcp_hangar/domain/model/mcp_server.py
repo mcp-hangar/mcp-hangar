@@ -107,10 +107,10 @@ _REFUSING_MODES = frozenset({"block", "quarantine"})
 #
 # Deliberate starts, which revive any of them: hangar_start, the REST start and
 # StartMcpServerCommand; a group's start_all and add_member(auto_start);
-# hangar_warm naming the server; and a failover saga starting the backup it
-# was configured with. Bulk warm-ups -- the front door's at boot, hangar_warm()
-# with no names -- skip every DEAD server, and hangar_tools lists one without
-# starting it.
+# hangar_warm naming the server; and the deprecated failover saga starting the
+# backup it was configured with, which nothing in Hangar configures (#2092).
+# Bulk warm-ups -- the front door's at boot, hangar_warm() with no names -- skip
+# every DEAD server, and hangar_tools lists one without starting it.
 #
 # `dead_status()` reports the reason, with when the server went DEAD, to
 # hangar_details, hangar_list, hangar_status and the REST server endpoints
