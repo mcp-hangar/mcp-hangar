@@ -18,7 +18,12 @@ held open across the reload on a real loopback socket.
   is one ``late`` lists too: a flat listing names tools without their server.
 * added: ``late`` (``_reload_upstream.py``: ``echo`` and ``links``) is added, and
   ``edit``'s description becomes ``after``, which rebuilds it.
-* removed: ``late`` is deleted again.
+* removed: ``late`` is deleted again, and its tools leave the listing (#2088).
+* readded: ``late`` is added back by reload under the same name and listed again.
+* rest: ``api`` (the same upstream) is registered and started over REST, then
+  deleted with ``DELETE /api/mcp_servers/api`` and registered again without a
+  start, which lists its last tools until a call starts it. Over REST because
+  the delete refuses a server the configuration declares (#1744).
 """
 
 from __future__ import annotations
@@ -56,7 +61,7 @@ def _edit(description: str) -> dict[str, Any]:
 
 def _config(workdir: Path, mode: str, phase: str) -> dict[str, Any]:
     servers: dict[str, Any] = {"edit": _edit("before" if phase == "boot" else "after")}
-    if phase == "added":
+    if phase in ("added", "readded"):
         servers["late"] = {"mode": "subprocess", "command": [sys.executable, str(UPSTREAM)], "idle_ttl_s": 600}
     return {
         "tool_access": {"mode": mode},
@@ -122,6 +127,11 @@ class _Stream:
                 return False
         return False
 
+    def settle(self, quiet: float = 1.0) -> None:
+        """Wait out the notifications already on their way, until none arrives for *quiet* seconds."""
+        while self.told(timeout=quiet):
+            pass
+
     def close(self) -> None:
         self._stop.set()
         self._thread.join(timeout=5)
@@ -163,6 +173,10 @@ class _Door(_Client):
         if "error" in payload:
             return payload["error"]["code"]
         return "error-result" if payload["result"].get("isError") else "served"
+
+    def admin(self, method: str, url: str, body: dict[str, Any] | None = None) -> int:
+        headers = {"X-API-Key": self.keys["admin"]}
+        return int(self.client.request(method, url, headers=headers, json=body).status_code)
 
 
 def run(mode: str, workdir: Path) -> dict[str, Any]:
@@ -215,17 +229,52 @@ def run(mode: str, workdir: Path) -> dict[str, Any]:
             out["added"] = added
 
             if mode == "front_door":
+                assert stream is not None
+                stream.settle()  # the add and the rebuild above are announced first
                 path.write_text(yaml.safe_dump(_config(workdir, mode, "removed")), encoding="utf-8")
                 status, _body = door.reload("admin")
-                # One listing: the projection of a removed server is not dropped
-                # (no path removes one yet), so waiting for it to go never ends.
-                tools = door.tools()
+                told = stream.told(timeout=20.0)
+                tools = door.until(lambda t: LATE_TOOL not in t)
                 out["removed"] = {
                     "status": status,
+                    "told": told,
                     "tools": sorted(tools),
                     "late_call": door.call(LATE_TOOL),
                     "in_repository": repository.exists("late"),
                 }
+
+                path.write_text(yaml.safe_dump(_config(workdir, mode, "readded")), encoding="utf-8")
+                status, _body = door.reload("admin")
+                tools = door.until(lambda t: LATE_TOOL in t)
+                out["readded"] = {"status": status, "tools": sorted(tools), "late_call": door.call(LATE_TOOL)}
+
+                # Out of the way of `api`, which lists the same names.
+                path.write_text(yaml.safe_dump(_config(workdir, mode, "removed")), encoding="utf-8")
+                door.reload("admin")
+                door.until(lambda t: LATE_TOOL not in t)
+
+                api = {"mcp_server_id": "api", "mode": "subprocess", "command": [sys.executable, str(UPSTREAM)]}
+                stream.settle()  # the reloads just above are announced first
+                rest: dict[str, Any] = {"created": door.admin("POST", "/api/mcp_servers", api)}
+                rest["started"] = door.admin("POST", "/api/mcp_servers/api/start")
+                rest["listed"] = LATE_TOOL in door.until(lambda t: LATE_TOOL in t)
+                # Told of the add before the delete: changes inside one coalescing
+                # window that cancel out are, rightly, no notification at all.
+                rest["told_added"] = stream.told(timeout=20.0)
+                stream.drain()
+                rest["deleted"] = door.admin("DELETE", "/api/mcp_servers/api")
+                rest["told"] = stream.told(timeout=20.0)
+                rest["tools"] = sorted(door.until(lambda t: LATE_TOOL not in t))
+                rest["call"] = door.call(LATE_TOOL)
+                # Registered again and NOT started, as a discovery re-appearance or an
+                # operator re-create is: listed with its last tools, and the first
+                # call starts the new copy.
+                rest["recreated"] = door.admin("POST", "/api/mcp_servers", api)
+                rest["state_recreated"] = state("api")
+                rest["listed_again"] = LATE_TOOL in door.until(lambda t: LATE_TOOL in t)
+                rest["call_again"] = door.call(LATE_TOOL)
+                rest["state_after_call"] = state("api")
+                out["rest"] = rest
         finally:
             if stream is not None:
                 stream.close()
