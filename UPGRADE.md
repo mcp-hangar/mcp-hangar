@@ -1,5 +1,11 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.34.3
+
+### `mcp-hangar why` reads `data/events.db` for a configuration that names no event store
+
+For a configuration with no `event_store` and no `persistence` block, and when no configuration file is found, `why` now reads `data/events.db` from the current directory: the store the gateway writes, from its own working directory, for that configuration. It used to read `$XDG_STATE_HOME/mcp-hangar/events.db` (`~/.local/state/mcp-hangar/events.db`), where the gateway writes only when the configuration names that path, as the one `init` generates does. Configurations that name a store are read as before. Run `why` from the directory the gateway runs in, or pass `--db <path>`.
+
 ## Upgrade to 2.34.2
 
 ### Registering a subprocess or container server over REST needs `mcp_servers:local_launch`
