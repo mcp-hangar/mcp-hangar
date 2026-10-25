@@ -24,7 +24,8 @@ class IWithdrawalOverlay(ABC):
         runtime overlays, and the pins that withhold a tool new since they were
         taken (#1801). ``None`` means the tool is unknown -- not discovered and
         not withdrawn -- which blocks nothing, so a registry that was never
-        populated is the safe default it always was.
+        populated is the safe default it always was. A tool the pins do not
+        admit is withdrawn (``True``) even before the catalogue knows it.
 
         For a prompt or a resource, which are relayed live and have no
         projection, it is the overlays alone, and never ``None``.

@@ -219,3 +219,14 @@ class TestTurningItOffIsLoud:
         assert "upstream.internal" in overrides[0]["endpoint"]
         assert "enforced" in overrides[0]["detail"]
         assert overrides[0]["ca_cert_path"] == str(bundle)
+
+
+@pytest.mark.parametrize("value", ["false", "true", "False", 0, 1])
+def test_a_verify_ssl_that_is_not_a_boolean_is_refused_by_name(value) -> None:
+    # httpx reads a string `verify` as a CA bundle path: "false" failed every
+    # start with "No such file or directory" and never warned (#2058).
+    from mcp_hangar.domain.exceptions import ValidationError
+    from mcp_hangar.infrastructure.launchers.http import HttpLauncher
+
+    with pytest.raises(ValidationError, match="tls.verify_ssl must be true or false"):
+        HttpLauncher().launch(endpoint="https://upstream.internal:8443/mcp", tls_config={"verify_ssl": value})
