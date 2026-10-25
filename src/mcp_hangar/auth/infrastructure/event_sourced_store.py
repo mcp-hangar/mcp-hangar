@@ -732,6 +732,18 @@ class EventSourcedRoleStore(IRoleStore):
                 out.append({"principal_id": principal_id, "roles": names})
         return out
 
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """List every assignment with who it is recorded against, read from the role-assignment streams."""
+        prefix = f"{self.STREAM_PREFIX}:"
+        out = []
+        for stream_id in self._event_store.list_streams(prefix):
+            principal_id = stream_id[len(prefix) :]
+            for scope, role_name, assigned_by in self._load_assignment(principal_id).list_assignments():
+                out.append(
+                    {"principal_id": principal_id, "role_name": role_name, "scope": scope, "assigned_by": assigned_by}
+                )
+        return sorted(out, key=lambda a: (a["principal_id"], a["role_name"], a["scope"]))
+
     def assign_role(
         self,
         principal_id: str,

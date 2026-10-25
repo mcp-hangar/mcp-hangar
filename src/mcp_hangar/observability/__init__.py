@@ -34,7 +34,6 @@ __all__ = [
     "init_tracing",
     "shutdown_tracing",
     "get_tracer",
-    "",
     "trace_span",
     "inject_trace_context",
     "extract_trace_context",
