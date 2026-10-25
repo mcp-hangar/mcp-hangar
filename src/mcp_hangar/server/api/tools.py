@@ -26,7 +26,8 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
         tool_name, description, input_schema and digest, and pinned_digest
         when the tool has an all-tenants pin (#1528). A tool that drifted from
         a pin in block mode, withheld from every listing a model reads, has
-        ``withheld: "digest_drift"`` and no description or input_schema (#1776).
+        ``withheld: "digest_drift"`` and no description or input_schema (#1776);
+        a withdrawn one, or one the pins do not admit, has ``withheld: "withdrawn"``.
     """
     mcp_servers = await dispatch_query(ListMcpServersQuery(state_filter=None))
     all_tools = []
