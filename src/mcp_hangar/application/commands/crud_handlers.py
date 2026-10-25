@@ -56,6 +56,10 @@ from .crud_commands import (
 
 logger = get_logger(__name__)
 
+#: How long replacing a discovered server waits for its calls in flight: the
+#: bound a graceful reload uses for the servers it restarts (#2091).
+REPLACE_DRAIN_TIMEOUT_S = 30.0
+
 
 def _require_peer_identity_authority(
     authority: IPeerIdentityAuthority | None,
@@ -200,6 +204,7 @@ class CreateMcpServerHandler(CommandHandler):
         coordinated: Callable[[], bool] | None = None,
         log_buffers: ILogBuffers | None = None,
         peer_identity_authority: IPeerIdentityAuthority | None = None,
+        drain: Callable[[str, float], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -218,6 +223,9 @@ class CreateMcpServerHandler(CommandHandler):
             log_buffers: Where a created server gets the log buffer its output
                 is read into (#1747), as a reloaded (#1502) and a hot-loaded
                 (#1506) one do. None means no buffer, as before.
+            drain: Waits, for at most the given seconds, until a server has no
+                call in flight; what a graceful reload waits on. Used before a
+                discovered server is replaced (#2091). None stops it at once.
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -225,6 +233,7 @@ class CreateMcpServerHandler(CommandHandler):
         self._coordinated = coordinated or (lambda: False)
         self._log_buffers = log_buffers
         self._peer_identity_authority = peer_identity_authority
+        self._drain = drain
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -238,8 +247,7 @@ class CreateMcpServerHandler(CommandHandler):
         Raises:
             ValidationError: If a mcp_server with the same ID already exists.
         """
-        if self._repository.exists(command.mcp_server_id):
-            raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
+        replaced = self._discovered_server_to_replace(command)
 
         self._refuse_local_mode_when_coordinating(command.mode)
 
@@ -294,6 +302,15 @@ class CreateMcpServerHandler(CommandHandler):
             ),
         )
 
+        # Only now, with every check above passed and the new server built: a
+        # refused definition leaves the running one exactly as it was. Its L7
+        # egress policy is carried over, as a reload carries it: a changed
+        # definition must not lift enforcement until the operator pushes again.
+        if replaced is not None:
+            if replaced._l7_policy is not None:
+                mcp_server.set_l7_policy(replaced._l7_policy)
+            self._retire(replaced, command)
+
         # Recorded before it joins the fleet, and before the event. The order is
         # the point: a write that fails leaves nothing behind and the caller is
         # told the registration did not happen. The other order gives a running
@@ -330,6 +347,49 @@ class CreateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "created": True}
+
+    def _discovered_server_to_replace(self, command: CreateMcpServerCommand) -> McpServer | None:
+        """The server this command replaces, None when the id is free; refused otherwise.
+
+        Only discovery replaces, and only what discovery registered (#2091): an
+        edited definition file or changed labels. A server an operator created,
+        re-pointed over the API (which makes it HUMAN), or the configuration
+        file declares is never replaced, so a discovered definition cannot take
+        over a name someone else owns.
+        """
+        existing = self._repository.get(command.mcp_server_id)
+        if existing is None:
+            return None
+        if (
+            command.replace_discovered
+            and command.provenance is Provenance.DISCOVERY
+            and getattr(existing, "provenance", None) is Provenance.DISCOVERY
+        ):
+            return cast(McpServer, existing)
+        raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
+
+    def _retire(self, old: McpServer, command: CreateMcpServerCommand) -> None:
+        """Take the discovered server being replaced out of the fleet, as a delete would.
+
+        Its calls in flight are waited for first, as a graceful reload waits for
+        a server it restarts. The fenced record delete comes before the stop,
+        so an instance that lost the management lease changes nothing. Peers
+        see a deregistration and then a registration: their projection ignores
+        a registration of a name they already hold.
+        """
+        name = command.mcp_server_id
+        if self._drain is not None and not self._drain(name, REPLACE_DRAIN_TIMEOUT_S):
+            logger.warning("mcp_server_replace_drain_timed_out", mcp_server_id=name, timeout_s=REPLACE_DRAIN_TIMEOUT_S)
+        if self._fleet_writer is not None:
+            self._fleet_writer.delete(name, fenced=True)
+        if old.state is not McpServerState.COLD:
+            old.shutdown()
+            self._event_bus.publish_aggregate_events(MCP_SERVER, name, old.collect_events())
+        self._repository.remove(name)
+        if self._log_buffers is not None:
+            self._log_buffers.release(name)
+        self._event_bus.publish(McpServerDeregistered(mcp_server_id=name, source=command.source))
+        logger.info("mcp_server_replaced", mcp_server_id=name, source=command.source)
 
     def _refuse_local_mode_when_coordinating(self, mode: str) -> None:
         """Refuse a mode that runs a child process, when there are peers.
@@ -1072,6 +1132,7 @@ def register_crud_handlers(
     restore_gap: str | None = None,
     declared_in_config: Callable[[str], bool] | None = None,
     peer_identity_authority: IPeerIdentityAuthority | None = None,
+    drain: Callable[[str, float], bool] | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -1092,6 +1153,8 @@ def register_crud_handlers(
             the delete handler then refuses (#1744).
         peer_identity_authority: Who may declare or remove a peer identity
             (ADR-030 §9). None refuses every such change.
+        drain: Waits for a server's calls in flight before discovery replaces
+            it (#2091). None replaces at once.
     """
     # McpServer handlers
     command_bus.register(
@@ -1103,6 +1166,7 @@ def register_crud_handlers(
             coordinated=coordinated,
             log_buffers=log_buffers,
             peer_identity_authority=peer_identity_authority,
+            drain=drain,
         ),
     )
     command_bus.register(

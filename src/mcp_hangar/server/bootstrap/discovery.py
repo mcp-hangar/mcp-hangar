@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
-from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
+from ...application.discovery import DiscoveryChangeRefused, DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.contracts.fleet import NotTheManagerError
-from ...domain.exceptions import PeerIdentityChangeDenied, PeerKeyNameTaken
+from ...domain.exceptions import PeerIdentityChangeDenied, PeerKeyNameTaken, ValidationError
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance
 from ...infrastructure.discovery.registry import (
@@ -91,6 +91,7 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     # Set up registration callbacks
     orchestrator.on_register = _on_mcp_server_register
+    orchestrator.on_update = _on_mcp_server_update
     orchestrator.on_deregister = _on_mcp_server_deregister
 
     set_discovery_orchestrator(orchestrator)
@@ -169,6 +170,110 @@ def _runtime_addresses_of(mcp_server) -> frozenset[str] | None:
     return cleaned or None
 
 
+def _create_command(mcp_server, *, replace: bool = False) -> CreateMcpServerCommand | None:
+    """The command that registers *mcp_server*, or None when it cannot be built (logged).
+
+    One builder for a new registration and for a changed definition (#2091), so
+    a change is held to exactly what a new registration is.
+    """
+    conn_info = mcp_server.connection_info
+    mode = mcp_server.mode
+
+    if mode == "container":
+        mcp_server_mode = "docker"
+    elif mode in ("http", "sse"):
+        mcp_server_mode = "remote"
+    elif mode in ("subprocess", "docker", "remote"):
+        mcp_server_mode = mode
+    else:
+        logger.warning(
+            "unknown_mcp_server_mode_skipping",
+            mode=mode,
+            mcp_server_name=mcp_server.name,
+        )
+        return None
+
+    mcp_server_kwargs: dict[str, Any] = {
+        "mcp_server_id": mcp_server.name,
+        "mode": mcp_server_mode,
+        "description": f"Discovered from {mcp_server.source_type}",
+    }
+
+    if mcp_server_mode == "docker":
+        image = conn_info.get("image")
+        if not image:
+            logger.warning(
+                "container_mcp_server_no_image_skipping",
+                mcp_server_name=mcp_server.name,
+            )
+            return None
+        mcp_server_kwargs["image"] = image
+        mcp_server_kwargs["read_only"] = conn_info.get("read_only", False)
+        if conn_info.get("command"):
+            mcp_server_kwargs["command"] = conn_info.get("command")
+
+        volumes = conn_info.get("volumes", [])
+        if not volumes:
+            volumes = _auto_add_volumes(mcp_server.name)
+        if volumes:
+            mcp_server_kwargs["volumes"] = volumes
+
+    elif mcp_server_mode == "remote":
+        host = conn_info.get("host")
+        port = conn_info.get("port")
+        endpoint = conn_info.get("endpoint")
+        if endpoint:
+            mcp_server_kwargs["endpoint"] = endpoint
+        elif host and port:
+            # A source that reports host/port without a full endpoint (the
+            # kubernetes source) may also report the path the server is
+            # mounted on (#1208, mcp-hangar.io/path); other sources that
+            # never set it get the pre-#1208 bare host:port they always got.
+            path = conn_info.get("path", "")
+            mcp_server_kwargs["endpoint"] = f"http://{host}:{port}{path}"
+        else:
+            logger.warning(
+                "http_mcp_server_no_endpoint_skipping",
+                mcp_server_name=mcp_server.name,
+            )
+            return None
+    else:
+        command = conn_info.get("command")
+        if not command:
+            logger.warning(
+                "subprocess_mcp_server_no_command_skipping",
+                mcp_server_name=mcp_server.name,
+            )
+            return None
+        mcp_server_kwargs["command"] = command
+
+    mcp_server_kwargs["env"] = conn_info.get("env", {})
+
+    # Through the command bus, not around it. Building the aggregate here
+    # skipped everything the command handler does: the duplicate guard, the
+    # SSRF check on a remote endpoint, and `McpServerRegistered` -- so a
+    # server could join the fleet automatically, unvalidated, leaving one
+    # log line and no record. `source` carries the provenance the CRUD path
+    # has always carried for hand-registered servers.
+    # `provenance` is set here and nowhere a request can reach: it is what
+    # the SSRF policy branches on, so it has to be established by the
+    # construction path rather than read off a field. `source` stays a label
+    # for an operator; a policy keyed on that string would be settable by
+    # anyone who can reach a route that forwards it.
+    #
+    # The addresses come from what the runtime reported for this container
+    # or pod, so provenance grants a *specific address* rather than an
+    # address class. Absent -- a source that reports none -- the strict
+    # human policy applies, which is the safe direction to fail.
+    return CreateMcpServerCommand(
+        **cast(Any, mcp_server_kwargs),
+        source=f"discovery:{mcp_server.source_type}",
+        provenance=Provenance.DISCOVERY,
+        runtime_addresses=_runtime_addresses_of(mcp_server),
+        replace_discovered=replace,
+    )
+
+
 async def _on_mcp_server_register(mcp_server) -> bool:
     """Callback when discovery wants to register a mcp_server.
 
@@ -179,108 +284,14 @@ async def _on_mcp_server_register(mcp_server) -> bool:
         True if registration succeeded, False otherwise.
     """
     try:
-        conn_info = mcp_server.connection_info
-        mode = mcp_server.mode
-
-        if mode == "container":
-            mcp_server_mode = "docker"
-        elif mode in ("http", "sse"):
-            mcp_server_mode = "remote"
-        elif mode in ("subprocess", "docker", "remote"):
-            mcp_server_mode = mode
-        else:
-            logger.warning(
-                "unknown_mcp_server_mode_skipping",
-                mode=mode,
-                mcp_server_name=mcp_server.name,
-            )
+        command = _create_command(mcp_server)
+        if command is None:
             return False
-
-        mcp_server_kwargs: dict[str, Any] = {
-            "mcp_server_id": mcp_server.name,
-            "mode": mcp_server_mode,
-            "description": f"Discovered from {mcp_server.source_type}",
-        }
-
-        if mcp_server_mode == "docker":
-            image = conn_info.get("image")
-            if not image:
-                logger.warning(
-                    "container_mcp_server_no_image_skipping",
-                    mcp_server_name=mcp_server.name,
-                )
-                return False
-            mcp_server_kwargs["image"] = image
-            mcp_server_kwargs["read_only"] = conn_info.get("read_only", False)
-            if conn_info.get("command"):
-                mcp_server_kwargs["command"] = conn_info.get("command")
-
-            volumes = conn_info.get("volumes", [])
-            if not volumes:
-                volumes = _auto_add_volumes(mcp_server.name)
-            if volumes:
-                mcp_server_kwargs["volumes"] = volumes
-
-        elif mcp_server_mode == "remote":
-            host = conn_info.get("host")
-            port = conn_info.get("port")
-            endpoint = conn_info.get("endpoint")
-            if endpoint:
-                mcp_server_kwargs["endpoint"] = endpoint
-            elif host and port:
-                # A source that reports host/port without a full endpoint (the
-                # kubernetes source) may also report the path the server is
-                # mounted on (#1208, mcp-hangar.io/path); other sources that
-                # never set it get the pre-#1208 bare host:port they always got.
-                path = conn_info.get("path", "")
-                mcp_server_kwargs["endpoint"] = f"http://{host}:{port}{path}"
-            else:
-                logger.warning(
-                    "http_mcp_server_no_endpoint_skipping",
-                    mcp_server_name=mcp_server.name,
-                )
-                return False
-        else:
-            command = conn_info.get("command")
-            if not command:
-                logger.warning(
-                    "subprocess_mcp_server_no_command_skipping",
-                    mcp_server_name=mcp_server.name,
-                )
-                return False
-            mcp_server_kwargs["command"] = command
-
-        mcp_server_kwargs["env"] = conn_info.get("env", {})
-
-        # Through the command bus, not around it. Building the aggregate here
-        # skipped everything the command handler does: the duplicate guard, the
-        # SSRF check on a remote endpoint, and `McpServerRegistered` -- so a
-        # server could join the fleet automatically, unvalidated, leaving one
-        # log line and no record. `source` carries the provenance the CRUD path
-        # has always carried for hand-registered servers.
-        # `provenance` is set here and nowhere a request can reach: it is what
-        # the SSRF policy branches on, so it has to be established by the
-        # construction path rather than read off a field. `source` stays a label
-        # for an operator; a policy keyed on that string would be settable by
-        # anyone who can reach a route that forwards it.
-        #
-        # The addresses come from what the runtime reported for this container
-        # or pod, so provenance grants a *specific address* rather than an
-        # address class. Absent -- a source that reports none -- the strict
-        # human policy applies, which is the safe direction to fail.
-        runtime_addresses = _runtime_addresses_of(mcp_server)
-        get_runtime().command_bus.send(
-            CreateMcpServerCommand(
-                **cast(Any, mcp_server_kwargs),
-                source=f"discovery:{mcp_server.source_type}",
-                provenance=Provenance.DISCOVERY,
-                runtime_addresses=runtime_addresses,
-            )
-        )
+        get_runtime().command_bus.send(command)
         logger.info(
             "discovery_registered_mcp_server",
             mcp_server_name=mcp_server.name,
-            mode=mcp_server_mode,
+            mode=command.mode,
         )
         return True
     except PeerKeyNameTaken as e:
@@ -295,6 +306,38 @@ async def _on_mcp_server_register(mcp_server) -> bool:
             error=str(e),
         )
         return False
+
+
+async def _on_mcp_server_update(mcp_server) -> None:
+    """Callback when the definition of a server discovery registered has changed (#2091).
+
+    Sent as a registration that replaces the running server, so every check a
+    new registration passes runs on the change too, before the running server
+    is stopped. The handler replaces only a server discovery registered.
+
+    Raises:
+        DiscoveryChangeRefused: The change is refused; the running server is
+            untouched. The orchestrator does not retry this definition.
+        Exception: Anything else (a lost lease, storage) is retried next cycle.
+    """
+    command = _create_command(mcp_server, replace=True)
+    if command is None:
+        raise DiscoveryChangeRefused("the changed definition cannot be registered; see the line above")
+    try:
+        get_runtime().command_bus.send(command)
+    except NotTheManagerError as e:
+        # As on deregistration: decided under a tenure that has since ended.
+        logger.info("discovery_replace_fenced", mcp_server_name=mcp_server.name, detail=str(e))
+        raise
+    except (ValidationError, ValueError) as e:
+        # ValueError covers SsrfBlocked and a value object that refuses a field.
+        # A refusal only while the running server is still there: one raised
+        # after it was taken out (its record write refused, say) is retried, and
+        # the next cycle registers the change as a new server.
+        if not get_runtime().repository.exists(mcp_server.name):
+            raise
+        raise DiscoveryChangeRefused(str(e)) from e
+    logger.info("discovery_replaced_mcp_server", mcp_server_name=mcp_server.name, mode=command.mode)
 
 
 async def _on_mcp_server_deregister(name: str, reason: str):
