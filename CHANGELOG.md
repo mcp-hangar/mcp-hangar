@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.2...v2.34.3) (2026-10-25)
+
+### Fixed
+
+- **cli:** `mcp-hangar why` reads the event store the gateway writes for the configuration. A configuration that names no `event_store` or `persistence` has the gateway write `data/events.db` under its working directory, and `why` read the path `init` writes into its configurations instead, so it reported no store or showed another one. With no configuration file it reads `data/events.db` too. A relative path is read from the current directory, and the "no event store" message says so. ([#2086](https://github.com/mcp-hangar/mcp-hangar/pull/2086))
+
 ## [2.34.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.1...v2.34.2) (2026-10-25)
 
 ### Fixed
