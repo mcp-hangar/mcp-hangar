@@ -97,6 +97,18 @@ CREATE TABLE IF NOT EXISTS initial_admin_bootstrap (
 """
 
 
+def _stored_instant(value: str | None) -> datetime | None:
+    """A stored ISO instant as an aware datetime; one written without an offset is UTC.
+
+    A key created with a naive `expires_at` was stored that way, and comparing it
+    with `datetime.now(UTC)` raised on every authentication with it (#2046).
+    """
+    if not value:
+        return None
+    instant = datetime.fromisoformat(value)
+    return instant if instant.tzinfo is not None else instant.replace(tzinfo=UTC)
+
+
 class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
     """SQLite-based API key store.
 
@@ -215,7 +227,7 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 )
 
         # Check expiration
-        expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+        expires_at = _stored_instant(row["expires_at"])
         if expires_at:
             if expires_at < datetime.now(UTC):
                 raise ExpiredCredentialsError(
@@ -474,7 +486,7 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 name=row["name"],
                 principal_id=row["principal_id"],
                 created_at=datetime.fromisoformat(row["created_at"]),
-                expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
+                expires_at=_stored_instant(row["expires_at"]),
                 last_used_at=datetime.fromisoformat(row["last_used_at"]) if row["last_used_at"] else None,
                 revoked=bool(row["revoked"]),
             )
