@@ -20,8 +20,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from .config_file import default_event_store_path
-
 #: The stored event types that say a call was refused or an approval was not given.
 REFUSAL_EVENT_TYPES = (
     "ToolCallRefused",
@@ -117,8 +115,9 @@ def _read_rows(db_path: Path, event_types: tuple[str, ...], *, order: str) -> li
     """``(event_type, data)`` of the stored events of *event_types*, read-only, in position order."""
     if not db_path.is_file():
         raise EventStoreNotReadable(
-            f"No event store at {db_path}. The gateway writes it when it first runs with this config; "
-            "pass --db to read another file."
+            f"No event store at {db_path}. The gateway writes it when it first runs with this config"
+            + ("" if db_path.is_absolute() else ", from the directory it runs in, as this is read from the current one")
+            + "; pass --db to read another file."
         )
     marks = ",".join("?" for _ in event_types)
     try:
@@ -163,11 +162,6 @@ def event_store_path(config: dict[str, Any]) -> Path:
             f"The event store driver is {driver!r}: it is not durable, so there is nothing on disk to read."
         )
     return Path(str(event_store.get("path", "data/events.db")))
-
-
-def default_path() -> Path:
-    """Where `init` puts the event store, for a config that names none."""
-    return default_event_store_path()
 
 
 def read_refusals(
