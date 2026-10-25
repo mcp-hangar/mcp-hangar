@@ -36,4 +36,4 @@ Servers already registered from these labels before the upgrade are stored and a
 
 #### Every container: no host root mount
 
-A container mount whose host path is `/`, or normalises to it (`/etc/..`), is now refused for every container server, declared ones included.
+A container mount whose host path is `/`, or normalises to it (`/etc/..`), is now refused for every container server, declared ones included. Every other declared mount is checked exactly as before: a trailing slash or a doubled slash (`/var/data/`, `/var//data`) is not normalised by the other rules.

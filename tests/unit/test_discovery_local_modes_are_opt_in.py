@@ -199,3 +199,9 @@ class TestTheSharedVolumeCheck:
 
     def test_an_ordinary_mount_is_still_accepted(self):
         _launcher()._validate_volume("/srv/data:/data:rw")
+
+    @pytest.mark.parametrize("volume", ["/var/data/:/data", "/etc/ssl/:/etc/ssl:ro", "/var//data:/d"])
+    def test_a_declared_mount_that_started_before_still_starts(self, volume):
+        # The depth rule reads the path as written, as it always has; only the
+        # host-root refusal normalises.
+        _launcher()._validate_volume(volume)
