@@ -356,7 +356,9 @@ class TestSetupSignalHandlers:
         lifecycle = ServerLifecycle(mock_context)
 
         with patch("mcp_hangar.server.lifecycle.signal.signal") as mock_signal:
-            _setup_signal_handlers(lifecycle)
+            reloader = _setup_signal_handlers(lifecycle)
+        if reloader is not None:
+            reloader.stop(join_timeout_s=5.0)
 
         # Check SIGTERM was registered
         sigterm_call = None
@@ -373,7 +375,9 @@ class TestSetupSignalHandlers:
         lifecycle = ServerLifecycle(mock_context)
 
         with patch("mcp_hangar.server.lifecycle.signal.signal") as mock_signal:
-            _setup_signal_handlers(lifecycle)
+            reloader = _setup_signal_handlers(lifecycle)
+        if reloader is not None:
+            reloader.stop(join_timeout_s=5.0)
 
         # Check SIGINT was registered
         sigint_call = None
