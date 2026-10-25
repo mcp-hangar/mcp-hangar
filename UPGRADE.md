@@ -1,5 +1,355 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.34.2
+
+### Registering a subprocess or container server over REST needs `mcp_servers:local_launch`
+
+`POST /api/mcp_servers/` with `mode` `subprocess`, `docker` or `container`, and
+a `PUT`/`PATCH /api/mcp_servers/{id}` that sets `env` on such a server, now
+need `mcp_servers:local_launch` as well as `mcp_servers:write`. Without it they
+answer `403`. Registering a `remote` server, and every other field of an
+update, still need only `mcp_servers:write`.
+
+- `admin` and `provider-admin` hold the permission: nothing changes for them.
+- `developer` does not. A developer key that registered local servers over REST
+  gets `403` from now on. Servers it already registered are untouched: they
+  still load at boot and start as before, because the check runs on the REST
+  request, not when a stored server is read back.
+- `kubernetes-operator` does not, and needs none: the operator registers only
+  `remote` servers.
+- With authentication off every caller may, as on every other route.
+
+To let a principal keep registering local servers, assign it `provider-admin`,
+or create a custom role that holds `mcp_servers:local_launch` with the
+permissions it already had, through `POST /api/auth/roles`.
+
+### REST tool listings mark a withdrawn or unadmitted tool `withheld: "withdrawn"` and drop its description
+
+`GET /api/mcp_servers/{id}/tools`, `GET /api/tools/` and `GET /api/mcp_servers/{id}` show a tool a call of it is refused as withdrawn the way they already show a tool that drifted from a blocking pin: its name, `digest`, `pinned_digest` when it has one, and `withheld`, with no `description` and no `inputSchema` (`input_schema` on `/api/tools/`). The new `withheld` value is `"withdrawn"`, beside the existing `"digest_drift"`. It applies to:
+
+- a tool `tool_projection.withdrawn:` (or a runtime withdrawal) covers for every tenant, on the server or a group that owns it;
+- under `tool_projection.new_tools: withhold`, a tool the server's pins do not admit for every tenant. A tool pinned only for some tenants is shown withheld here too, because these routes answer for no tenant.
+
+A client that reads `description` or `inputSchema` off every entry should read `withheld` first, as it should for `"digest_drift"`. A withdrawal for some tenants only is not marked.
+
+`new_tools: withhold` declared on a group's `tool_projection`, beside pins declared on the group, now withholds: the access decision `hangar_call` and the listings make refuses a tool the group's pins do not admit as withdrawn, whether the call names the group or one of its members -- including a direct call to a member whose own `tool_projection` sets no `new_tools`. Before, it withheld nothing, because a group's tools are catalogued under its members' ids, and under the group id every tool read as unknown.
+
+Two more things change for a server under `new_tools: withhold` with pins:
+
+- A call naming a tool the pins do not cover is refused as withdrawn
+  (`ToolWithdrawnError`), on a warm server as on a cold one -- including a
+  misspelled tool name, which used to answer not-found.
+- On a cold server, such a call is refused before the server is started, so it
+  no longer starts the server and no `ToolAdmissionRequested` is published for
+  it; the admission request appears once something else starts the server.
+
+### A `pins` or `tenant_overrides` block that is not a mapping is refused
+
+`tool_projection.pins`, `tool_projection.tenant_overrides` and each
+`tenant_overrides.<tenant>` (with its `pins`) must be mappings. A list or a
+string there used to be skipped without a word, which left every tool it was
+meant to pin unpinned; it now refuses the configuration at boot, on reload and
+in `mcp-hangar config check`, naming the block. An empty key (`pins:` with
+nothing under it) is still nothing.
+
+A single pin value that is not a 64-character hex digest no longer disappears
+either. Uppercase hex and the `sha256:<hex>` spelling are read as the digest they
+name. Anything else is logged at ERROR as `invalid_config_digest_pin` and holds
+its tool as drifted, so under `digest_enforcement: block` that tool is withheld
+until the pin is corrected, for example with `mcp-hangar pin --write`. Run
+`mcp-hangar config check` and look for `invalid_config_digest_pin` in the boot
+log before upgrading if your pins are hand-written.
+
+Three consequences to check if your pins are hand-written:
+
+- A pin written in uppercase or as `sha256:<hex>` used to be ignored; it now
+  enforces. If it was stale -- the tool changed since it was taken -- that tool
+  is now withheld under `block` (the default). `mcp-hangar pin --check` shows it.
+- Under `new_tools: withhold`, an unreadable pin does not admit its tool: the
+  tool stays withheld, whatever `digest_enforcement` says. And a server whose
+  only pins are unreadable now has a baseline, so every other tool it serves is
+  withheld too, where before there was no baseline and everything was served.
+- Under `digest_enforcement: audit` or `warn`, an unreadable pin reports drift on
+  every recheck until it is fixed.
+
+### Discovery no longer takes a host process or host mounts from a label
+
+#### Kubernetes: local modes need `allow_local_modes`
+
+The Kubernetes discovery source now registers only pods Hangar connects to: `mcp-hangar.io/mode` `http` (the default), `sse` or `remote`. A pod whose annotation asks for anything else, such as `subprocess` with `mcp-hangar.io/command`, which ran that command on Hangar's own host, is skipped and logged once as `kubernetes_discovery_local_mode_refused`.
+
+If whoever can create pods in the watched namespaces is trusted to choose what Hangar runs on its own host, opt the source in. The value must be the boolean `true`; a string such as `"yes"` leaves the source closed.
+
+```yaml
+discovery:
+  sources:
+    - type: kubernetes
+      allow_local_modes: true
+```
+
+#### Docker: label volumes need `allowed_mount_paths`, and the root is read-only
+
+Docker `container` mode is unchanged and still the default. Two things about the container Hangar runs from it are different:
+
+- A `mcp.hangar.volumes` label is honoured only when every host path in it is absolute and under one of the source's `allowed_mount_paths`. `/` and any `*.sock` file are refused even there, and `~` is not expanded. A container whose label names anything else is not registered, rather than registered without its mounts, and is logged once as `docker_discovery_label_volumes_refused`. With no `allowed_mount_paths`, which is every existing configuration, any container carrying the label is refused. List the directories it may use:
+
+  ```yaml
+  discovery:
+    sources:
+      - type: docker
+        allowed_mount_paths: ["/srv/mcp-data"]
+  ```
+
+- A discovered container runs with a read-only root filesystem, as a declared one does. Label it `mcp.hangar.read-only: "false"` to get the old behaviour.
+
+Containers without a volumes label, `http` and `sse` containers, filesystem and entry-point discovery, and servers declared in `config.yaml` are not affected by either change.
+
+#### Already-registered servers stay
+
+Servers already registered from these labels before the upgrade are stored and are not removed by it. In `GET /api/mcp_servers` they carry the description `Discovered from kubernetes` or `Discovered from docker` (`GET /api/mcp_servers/<id>` shows `provenance: discovery`); check the `subprocess` and `docker` ones and `DELETE /api/mcp_servers/<id>` each one you did not intend.
+
+#### Every container: no host root mount
+
+A container mount whose host path is `/`, or normalises to it (`/etc/..`), is now refused for every container server, declared ones included. Every other declared mount is checked exactly as before: a trailing slash or a doubled slash (`/var/data/`, `/var//data`) is not normalised by the other rules.
+
+### The example compose files publish the gateway on `127.0.0.1` only
+
+`docker-compose.yml` and the `quickstart`, `otel-collector` and `task_upstream`
+examples now publish port 8080 as `127.0.0.1:8080:8080`, and the quickstart's
+Prometheus and Grafana likewise. From the same host, `http://localhost:8080`
+works as before. From another machine it no longer answers.
+
+Those files run the gateway with `--unsafe-no-auth`, so reaching it from
+elsewhere meant reaching an unauthenticated management API. To serve other hosts,
+configure authentication (see `examples/auth-keycloak/`), drop `--unsafe-no-auth`,
+and only then publish the port beyond loopback.
+
+### `mcp-hangar add` refuses to replace a server the config already has
+
+Re-running `mcp-hangar add <name>` for a server already in the file used to
+overwrite its entry with the registry default, dropping its pins, policy, args and
+`env`. It now leaves the file alone:
+
+- if the entry is exactly what `add` would write, it prints that and exits 0, so
+  scripts that re-run `add` keep working;
+- otherwise it exits 1 and lists the keys the replacement would drop or change.
+
+To get the old behaviour, pass `--replace`:
+
+```bash
+mcp-hangar add git --replace
+```
+
+### Bind each trusted OIDC issuer to its tenants with `allowed_tenants`
+
+With two or more entries in `auth.oidc.issuers`, each issuer could sign a token
+naming any tenant, and its `sub` and `groups` become the same principal and
+groups another issuer's do. Boot now logs one `oidc_issuers_not_bound_to_tenants`
+warning naming every issuer without a binding. Nothing is refused until you add
+one.
+
+```yaml
+auth:
+  oidc:
+    enabled: true
+    issuers:
+      - issuer: https://issuer-a.example.com
+        audience: https://gateway.example.com
+        allowed_tenants: [team-a]
+      - issuer: https://issuer-b.example.com
+        audience: https://gateway.example.com
+        allowed_tenants: [team-b]
+```
+
+- A bound issuer's token is refused with `401` unless its tenant claim is a
+  string in the list. A token naming no tenant is refused as well.
+- The list must name at least one tenant. An empty list, a bare string, or the
+  key with no value (YAML null) refuses the configuration rather than leaving
+  the issuer unbound.
+- The key is per issuer. Set at the top level of `auth.oidc` it refuses the
+  configuration at boot, as does a bare string, an empty list or a non-string
+  entry.
+- The binding confines tenant-scoped roles only. A role assigned at scope
+  `global` to a subject or to `group:<name>` still reaches a token with that
+  subject or group from any trusted issuer. With more than one identity
+  provider, grant OIDC users and groups only `tenant:<id>` roles, and do not
+  list one tenant under two issuers.
+- A single trusted issuer needs no change and logs no warning.
+
+### Authoritative discovery sources now remove servers that disappear
+
+A source configured with `mode: authoritative` now deregisters a server it has
+stopped reporting once the server's TTL has passed since it was last seen:
+90 s by default, or the `mcp.hangar.ttl` label on a container, the
+`mcp-hangar.io/ttl` annotation on a pod, or `ttl` in a discovered file. Before this release such a server stayed registered until the next
+restart, whatever the mode.
+
+- If you rely on discovered servers staying registered after their container,
+  pod or file is gone, set the source to `mode: additive`, which still never
+  removes anything.
+- A server that comes back within its TTL is left running. A source whose scan
+  fails (daemon or API unreachable) removes nothing that cycle.
+- Static servers from the configuration are never touched.
+
+What counts as "no longer reported": a cycle in which the source answered and
+reports itself healthy afterwards. A source that raises, or that cannot reach what
+it watches -- Docker when the daemon does not answer, a filesystem path that is
+missing -- removes nothing, however long that lasts. Two cases still count as a
+real absence and remove the server once its TTL has run out:
+
+- a Kubernetes namespace whose pod listing fails while the API itself answers;
+- a discovery file that stops parsing.
+
+A server another change now refuses to discover -- a Kubernetes local mode, a
+Docker label volume outside `allowed_mount_paths`, a world-writable discovery
+file -- is no longer reported either, so on an authoritative source it is removed
+after its TTL rather than left registered.
+
+### Removing a line from `auth.role_assignments` now revokes its grant
+
+When the server boots with auth enabled, a grant that `auth.role_assignments`
+applied and no longer lists is revoked. This only matters with a durable auth
+store (`sqlite`, `postgresql`, `event_sourcing`); the `memory` store forgot
+everything at a restart already. `mcp-hangar auth bootstrap-admin` applies the
+file's lines as before but never revokes anything.
+
+- Grants made through `POST /api/auth/roles/assign` or `bootstrap-admin` are
+  never revoked by a boot, even when the same role is also listed in the file:
+  the API call or the bootstrap claim takes the grant over from the file, in
+  whichever order the two happened.
+- Grants written before this release record no assigner, so a boot cannot tell
+  a config line from an API call. Each one the file still lists is adopted by
+  the file: removing that line later revokes it. That includes an old API grant
+  that happens to duplicate a line, so to keep such a grant independent of the
+  file, assign it again through the API before removing the line.
+- Each pre-release grant the file does not list is kept, and logged at every
+  boot as `untracked_role_assignment_not_in_config` with its principal, role and
+  scope. If it came from a line you deleted, revoke it with
+  `DELETE /api/auth/roles/revoke` (body: `principal_id`, `role_name`, `scope`).
+  If it should stay, assign it again through `POST /api/auth/roles/assign`, or
+  list it in the file, and the warning stops.
+- Every process that boots the server against the same durable store
+  reconciles against its own file. A second process with auth enabled and a
+  different `auth.role_assignments` -- a replica mid-rollout on shared
+  PostgreSQL, or a development `serve` pointed at the production SQLite file --
+  revokes the file grants its list lacks, and the other process re-grants them
+  only at its next boot. Give every such process the same list.
+- On `event_sourcing`, a change of who owns a grant -- the file adopting an
+  old grant, or the API taking one over from the file -- is recorded as a new
+  `RoleAssigned` event and published like any other, so the first boot after
+  the upgrade emits one per adopted grant. The SQL stores update the row in
+  place and emit nothing.
+- `IRoleStore` has a new abstract method, `list_role_assignments()`, returning
+  one `{"principal_id", "role_name", "scope", "assigned_by"}` per assignment.
+  An out-of-tree role store must implement it, or it no longer instantiates.
+
+### `mcp-hangar pin --check` now checks the pins declared on a group
+
+A configuration with a `mode: group` entry used to make every `pin` run exit 2,
+so a CI gate on `pin --check` either failed on every run or was narrowed with
+`--server`. It now exits 0, 1 or 2 as for servers alone, and the pins a group
+declares under its own `tool_projection.pins` are compared for the first time:
+each member that serves a pinned tool must serve it at the pin, and a pinned
+tool no member serves is drift.
+
+- A group pin that went stale while it was never checked now fails the gate
+  with exit 1, reported as `drift <group>.<tool> (member <id>)`. Refresh it by
+  hand: `pin --write` does not write pins into a group, because a group's pin
+  holds for every member and is the operator's to choose.
+- `--server <group>` now asks that group's members and checks its pins.
+  `--server <member>` checks that member's own pins, not those of the groups it
+  belongs to.
+- `pin --check --json` adds a `member` key to a drift entry that comes from a
+  group pin. Entries for servers are unchanged.
+
+### Filesystem discovery skips world-writable definition files and symlinks out of its directory
+
+A `filesystem` discovery source now skips a definition file, and logs
+`filesystem_discovery_file_refused` once with the reason, when any of these
+holds:
+
+- the file resolves, through a symlink, to a path outside the source's `path`;
+- the file is not a regular file;
+- on POSIX, the file is world-writable;
+- on POSIX, the source's `path`, or a directory between it and the file, is
+  world-writable. A sticky directory such as `/tmp` counts, since anyone can
+  still add a file to it.
+
+Group-writable files and directories, files owned by another user, and a
+mounted Kubernetes ConfigMap are unaffected. If the warning appears, move the
+file into the directory or remove world write:
+
+```bash
+chmod o-w /etc/mcp-hangar/mcp_servers.d /etc/mcp-hangar/mcp_servers.d/*.yaml
+```
+
+A server the source registered before the upgrade may stay registered: review
+the servers described as `Discovered from filesystem` and delete any you did not
+expect. There is no setting to turn the checks off.
+
+A world-writable mode on a filesystem mounted read-only is not refused, since
+nobody can write there whatever the mode says. A Kubernetes ConfigMap or Secret
+volume is mounted read-only with a 0777 root (2777 with `fsGroup`), so it keeps
+working unchanged. An `emptyDir` is writable, and its 0777 root is refused: fill
+it from an init container into a subdirectory that is not world-writable, or
+mount a ConfigMap instead.
+
+### SIGHUP reloads in the background, and reloads queue
+
+`kill -HUP` used to run the reload on the thread that serves requests, so a
+request sent right after it waited until the reload had applied (and so did
+every other request, `/health/live` included). The reload now runs on a thread
+of its own: the gateway keeps answering, and a request sent right after the
+signal can still see the old configuration. A script that sends SIGHUP and
+then checks the result should wait for the `config_reload_completed_via_signal`
+(or `config_reload_failed_via_signal`) log line, or use
+`POST /api/config/reload`, which answers once the reload has applied.
+
+Reloads also run one at a time now. A `POST /api/config/reload` or
+`hangar_reload_config` call made while another reload runs waits for it, which
+for a graceful reload can be up to its 30 s drain, then applies and returns its
+own result. The log says `config_reload_waiting` when that happens.
+
+### On a front door, a reload starts the servers it adds or rebuilds
+
+With `tool_access.mode: front_door`, a configuration reload (`SIGHUP`,
+`POST /api/config/reload`, `hangar_reload_config` or the file watcher) now
+starts each server it adds and each server whose settings it changed, right
+after the reload applies, on a background thread. This is what boot already
+does for every configured server, and it is how their tools reach `tools/list`.
+Before, they stayed `COLD` and their tools were not served until a restart.
+
+- A reload can therefore launch subprocesses or containers, or open connections
+  to remote servers, on the gateway that ran it. A server that fails to start is
+  logged as `front_door_reload_warmup_failed` with its error type, and the
+  others still start; the reload itself reports success either way, as before.
+- Servers the reload keeps unchanged are not restarted.
+- `idle_ttl_s` applies to them as to any started server.
+- `egress` gateways are unchanged: a reload starts nothing, and servers start on
+  first use.
+- Nothing to configure. A deployment that relied on reload-added servers staying
+  cold on a front door should note that they now start.
+
+### With OPA enabled, decide whether it may widen RBAC
+
+OPA has always been asked only when RBAC denies, and an OPA allow overrides that
+deny, with no tenant scope: a principal with no role, or one confined to a
+tenant, is admitted to whatever the policy allows. That is unchanged, and the
+boot log now says so (`opa_may_widen_rbac`).
+
+To have OPA only refuse more -- both must allow -- set:
+
+```yaml
+auth:
+  opa:
+    enabled: true
+    require_both: true
+```
+
+With `require_both: true`, a principal RBAC refuses stays refused whatever the
+policy says, so a policy written to admit callers RBAC does not know about stops
+admitting them.
+
 ## Upgrade to 2.34.1
 
 ### `hangar_tools` lists what a call would be allowed, and raises no more for a group with nobody in rotation
