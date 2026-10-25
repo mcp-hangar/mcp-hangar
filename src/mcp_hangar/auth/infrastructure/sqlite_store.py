@@ -24,7 +24,12 @@ import structlog
 
 from mcp_hangar.auth.roles import BUILTIN_ROLES, role_as_enforced
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
-from mcp_hangar.domain.contracts.authorization import IRoleStore, validate_role_scope
+from mcp_hangar.domain.contracts.authorization import (
+    CONFIG_ROLE_ASSIGNER,
+    IRoleStore,
+    assigner_rank,
+    validate_role_scope,
+)
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
@@ -389,6 +394,8 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 """,
                 (principal_id, now, actor),
             )
+            # A grant the config file applied first becomes the bootstrap admin's own.
+            _take_over_assignment(conn, principal_id, "admin", "global", actor)
             conn.execute(
                 "UPDATE initial_admin_bootstrap SET key_id = ?, created_at = ? WHERE singleton = 1", (key_id, now)
             )
@@ -628,6 +635,24 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         self._initialized = False
 
 
+def _take_over_assignment(
+    conn: sqlite3.Connection, principal_id: str, role_name: str, scope: str, assigned_by: str | None
+) -> None:
+    """Record *assigned_by* on an existing grant if it ranks above the current assigner (see `assigner_rank`)."""
+    rank = assigner_rank(assigned_by)
+    if rank == 0:
+        return
+    conn.execute(
+        """
+        UPDATE role_assignments SET assigned_by = ?
+        WHERE principal_id = ? AND role_name = ? AND scope = ?
+          AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
+                    WHEN assigned_by = ? THEN 1 ELSE 2 END) < ?
+        """,
+        (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
+    )
+
+
 class SQLiteRoleStore(IRoleStore):
     """SQLite-based role store.
 
@@ -827,6 +852,15 @@ class SQLiteRoleStore(IRoleStore):
             roles.setdefault(row["principal_id"], set()).add(row["role_name"])
         return [{"principal_id": pid, "roles": sorted(names)} for pid, names in roles.items()]
 
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """List every assignment with who it is recorded against."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT principal_id, role_name, scope, assigned_by FROM role_assignments"
+            " ORDER BY principal_id, role_name, scope"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def assign_role(
         self,
         principal_id: str,
@@ -849,11 +883,13 @@ class SQLiteRoleStore(IRoleStore):
         now = datetime.now(UTC).isoformat()
         cursor = conn.execute(
             """
-            INSERT OR IGNORE INTO role_assignments (principal_id, role_name, scope, assigned_at)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO role_assignments (principal_id, role_name, scope, assigned_at, assigned_by)
+            VALUES (?, ?, ?, ?, ?)
         """,
-            (principal_id, role_name, scope, now),
+            (principal_id, role_name, scope, now, assigned_by),
         )
+        if cursor.rowcount == 0:
+            _take_over_assignment(conn, principal_id, role_name, scope, assigned_by)
 
         conn.commit()
 

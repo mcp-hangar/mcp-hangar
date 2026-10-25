@@ -180,11 +180,23 @@ class HttpLauncher(McpServerLauncher):
 
         if tls_config:
             identity = PeerIdentity.from_tls(tls_config)
+            verify_ssl = tls_config.get("verify_ssl", True)
+            # An empty YAML key (None) keeps what it did before; only a value of
+            # the wrong type is refused.
+            if verify_ssl is not None and not isinstance(verify_ssl, bool):
+                # httpx reads a string `verify` as a CA bundle path, so "false"
+                # failed every start with "No such file or directory" and never
+                # logged that verification was off (#2058).
+                raise ValidationError(
+                    message=f"tls.verify_ssl must be true or false, got {verify_ssl!r}",
+                    field="tls.verify_ssl",
+                    value=str(verify_ssl),
+                )
             http_cfg = HttpClientConfig(
                 connect_timeout=http_cfg.connect_timeout,
                 read_timeout=http_cfg.read_timeout,
                 max_retries=http_cfg.max_retries,
-                verify_ssl=cast(bool, tls_config.get("verify_ssl", True)),
+                verify_ssl=cast(bool, verify_ssl),
                 ca_cert_path=cast(str | None, tls_config.get("ca_cert_path")),
                 peer_key_pins=identity.spki_sha256 if identity is not None else None,
                 max_connection_age=max_connection_age(tls_config),
