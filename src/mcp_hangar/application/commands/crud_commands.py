@@ -81,6 +81,11 @@ class CreateMcpServerCommand(Command):
     #: from its body; None for a path with no caller. A peer identity is
     #: declared only by a principal holding `mcp_servers:peer_identity` (§9).
     principal: Principal | None = None
+    #: Replace a server of this id that discovery registered, instead of being
+    #: refused because it exists (#2091). Honoured only when this command and
+    #: the existing server both have DISCOVERY provenance, so it can never
+    #: replace a server an operator or the configuration file declared.
+    replace_discovered: bool = False
     discovered_as: DiscoveryOrigin | None = None
 
 

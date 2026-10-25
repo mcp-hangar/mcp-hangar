@@ -4,12 +4,13 @@ This module contains application layer components for mcp_server discovery,
 including the orchestrator, security validation, and metrics.
 """
 
-from .discovery_orchestrator import DiscoveryConfig, DiscoveryOrchestrator
+from .discovery_orchestrator import DiscoveryChangeRefused, DiscoveryConfig, DiscoveryOrchestrator
 from .discovery_registry import DiscoveryRegistry
 from .lifecycle_manager import DiscoveryLifecycleManager
 from .security_validator import SecurityConfig, SecurityValidator, ValidationReport, ValidationResult
 
 __all__ = [
+    "DiscoveryChangeRefused",
     "DiscoveryOrchestrator",
     "DiscoveryConfig",
     "DiscoveryRegistry",

@@ -135,6 +135,9 @@ def init_cqrs(
         # Declaring or removing a peer identity needs `mcp_servers:peer_identity`
         # (ADR-030 §9), decided as the REST routes decide.
         peer_identity_authority=ContextPeerIdentityAuthority(),
+        # A discovered server whose definition changed is replaced only after
+        # its calls in flight finish, as a graceful reload restarts one (#2091).
+        drain=_drain_in_flight_calls,
     )
 
     if discovery_registry is not None:

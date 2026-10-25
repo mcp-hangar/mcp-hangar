@@ -7,10 +7,10 @@ Manages discovery sources, validation, and integration with the registry.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.event_bus import IEventBus
@@ -24,6 +24,7 @@ from mcp_hangar.domain.events import (
     McpServerDiscoveryLost,
     McpServerQuarantined,
 )
+from mcp_hangar.domain.exceptions import McpServerNotHereError
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.conventions import Discovery
 from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
@@ -91,6 +92,17 @@ class DiscoveryConfig:
 # Type for registry registration callback
 RegistrationCallback = Callable[[DiscoveredMcpServer], Awaitable[bool]]
 DeregistrationCallback = Callable[[str, str], Awaitable[None]]
+#: Applies a changed definition of a registered server; raises when it is not applied.
+UpdateCallback = Callable[[DiscoveredMcpServer], Awaitable[None]]
+
+
+class DiscoveryChangeRefused(Exception):
+    """The control plane refused a changed definition; the running one stays (#2091).
+
+    Raised by an update callback for a refusal that asking again cannot change,
+    so the same definition is not tried again. Any other exception is retried
+    on the next cycle.
+    """
 
 
 class DiscoveryOrchestrator:
@@ -169,6 +181,16 @@ class DiscoveryOrchestrator:
         # Callbacks for registry integration
         self.on_register: RegistrationCallback | None = None
         self.on_deregister: DeregistrationCallback | None = None
+        #: Applies a changed definition of a server already registered (#2091).
+        #: Unset, a change goes to `on_register`, as it always did.
+        self.on_update: UpdateCallback | None = None
+        # Changed definitions not applied yet, all by server name: the
+        # fingerprint whose change was recorded as an event, the one the
+        # control plane refused for good, and the (fingerprint, reason) last
+        # logged. Each says something once rather than every cycle.
+        self._change_announced: dict[str, str] = {}
+        self._change_refused: dict[str, str] = {}
+        self._change_logged: dict[str, tuple[str, str]] = {}
         #: The discovered servers already in the fleet, taken back at the start
         #: of each management tenure (#2106). None takes back nothing.
         self.restored_servers: Callable[[], list[DiscoveredMcpServer]] | None = None
@@ -573,23 +595,10 @@ class DiscoveryOrchestrator:
         # Check if already tracked
         existing = self._lifecycle_manager.get_mcp_server(mcp_server.name)
         if existing:
-            if existing.fingerprint == mcp_server.fingerprint:
+            if existing.fingerprint == mcp_server.fingerprint or self._refused_before(existing, mcp_server):
                 # Just update last_seen
                 self._lifecycle_manager.update_seen(mcp_server.name)
                 return "skipped"
-            else:
-                # Config changed, need to validate again. Recorded here because
-                # this is the only place both fingerprints exist: a moment later
-                # `existing` has been overwritten with the new definition and the
-                # old one is gone for good.
-                self._emit(
-                    McpServerDiscoveryConfigChanged(
-                        mcp_server_name=mcp_server.name,
-                        source_type=mcp_server.source_type,
-                        old_fingerprint=existing.fingerprint,
-                        new_fingerprint=mcp_server.fingerprint,
-                    )
-                )
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("discovery.process_mcp_server") as prov_span:
@@ -597,38 +606,31 @@ class DiscoveryOrchestrator:
             prov_span.set_attribute("discovery.source_type", mcp_server.source_type)
 
             # Validate command from untrusted discovery sources
-            command = mcp_server.connection_info.get("command", [])
-            if command and self._input_validator:
-                try:
-                    validation_result = self._input_validator.validate_command(command)
-                except ValueError as exc:
+            refusal = self._command_refusal(mcp_server)
+            if refusal is not None:
+                if existing:
+                    self._keep_running_definition(existing, mcp_server, f"command rejected: {refusal}", final=True)
+                else:
                     logger.warning(
                         "discovered_mcp_server_command_rejected",
                         mcp_server_name=mcp_server.name,
                         source=mcp_server.source_type,
-                        command=command,
-                        reason=str(exc),
+                        command=mcp_server.connection_info.get("command", []),
+                        reason=refusal,
                     )
-                    prov_span.set_attribute("discovery.result", "rejected")
-                    return "rejected"
-
-                if not validation_result.valid:
-                    issues = "; ".join(i.message for i in validation_result.issues)
-                    logger.warning(
-                        "discovered_mcp_server_command_rejected",
-                        mcp_server_name=mcp_server.name,
-                        source=mcp_server.source_type,
-                        command=command,
-                        reason=issues,
-                    )
-                    prov_span.set_attribute("discovery.result", "rejected")
-                    return "rejected"
+                prov_span.set_attribute("discovery.result", "rejected")
+                return "rejected"
 
             # Validate mcp_server
             # The source that produced it answers for its own policy; the
             # validator no longer recognises sources by name.
             producing_source = self._discovery_service.get_source(mcp_server.source_type)
-            validation_report = await self._validator.validate(mcp_server, source=producing_source)
+            validation_report = await self._validator.validate(
+                mcp_server,
+                source=producing_source,
+                # A takeover by another source is a new server for that source's count.
+                replacing=existing is not None and existing.source_type == mcp_server.source_type,
+            )
 
             main_metrics.record_discovery_validation_duration(
                 source_type=mcp_server.source_type,
@@ -637,41 +639,10 @@ class DiscoveryOrchestrator:
             prov_span.set_attribute("discovery.validation_passed", validation_report.is_passed)
 
             if not validation_report.is_passed:
-                # Handle validation failure
-                logger.warning(f"McpServer '{mcp_server.name}' failed validation: {validation_report.reason}")
+                return self._refuse(existing, mcp_server, validation_report, prov_span)
 
-                main_metrics.record_discovery_validation_failure(
-                    source_type=mcp_server.source_type,
-                    validation_type=validation_report.result.value,
-                )
-
-                if self.config.security.quarantine_on_failure:
-                    # Only the transition is an event. A refused server is
-                    # re-reported by its source on every cycle and refused again
-                    # each time, so recording each refusal writes a row per
-                    # cycle -- 2880 a day at the default refresh, all saying the
-                    # same thing. That is the poll transcript this log declines
-                    # to keep for cycle events, and it would be no better here.
-                    was_quarantined = self._lifecycle_manager.is_quarantined(mcp_server.name)
-                    self._lifecycle_manager.quarantine(mcp_server, validation_report.reason)
-                    main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
-                    # A refusal is the discovery event most worth keeping: it
-                    # says something asked to join the fleet and was turned away,
-                    # and by which rule.
-                    if not was_quarantined:
-                        self._emit(
-                            McpServerQuarantined(
-                                mcp_server_name=mcp_server.name,
-                                source_type=mcp_server.source_type,
-                                reason=validation_report.reason,
-                                validation_result=validation_report.result.value,
-                            )
-                        )
-                    prov_span.set_attribute("discovery.result", "quarantined")
-                    return "quarantined"
-
-                prov_span.set_attribute("discovery.result", "skipped")
-                return "skipped"
+            if existing and self.on_update:
+                return await self._apply_change(existing, mcp_server, prov_span)
 
             # Recorded before registration is attempted, for two reasons. The
             # log has to read in the order things happened -- discovery saw it,
@@ -718,6 +689,156 @@ class DiscoveryOrchestrator:
                 prov_span.set_attribute("discovery.result", "registered")
                 return "registered"
 
+    def _refuse(
+        self, existing: DiscoveredMcpServer | None, mcp_server: DiscoveredMcpServer, validation_report: Any, span: Any
+    ) -> str:
+        """Quarantine or skip *mcp_server*, which failed validation."""
+        # Handle validation failure. A changed definition is logged once
+        # (below) and retried: a health check fails while a new pod
+        # starts. The running definition stays until one passes.
+        if not existing:
+            logger.warning(f"McpServer '{mcp_server.name}' failed validation: {validation_report.reason}")
+
+        main_metrics.record_discovery_validation_failure(
+            source_type=mcp_server.source_type,
+            validation_type=validation_report.result.value,
+        )
+
+        if self.config.security.quarantine_on_failure:
+            # Only the transition is an event. A refused server is
+            # re-reported by its source on every cycle and refused again
+            # each time, so recording each refusal writes a row per
+            # cycle -- 2880 a day at the default refresh, all saying the
+            # same thing. That is the poll transcript this log declines
+            # to keep for cycle events, and it would be no better here.
+            was_quarantined = self._lifecycle_manager.is_quarantined(mcp_server.name)
+            self._lifecycle_manager.quarantine(mcp_server, validation_report.reason)
+            if existing:
+                # Quarantine untracks the name; the running definition
+                # is tracked again, and runs until this one is approved.
+                self._keep_running_definition(existing, mcp_server, validation_report.reason, final=False)
+            main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
+            # A refusal is the discovery event most worth keeping: it
+            # says something asked to join the fleet and was turned away,
+            # and by which rule.
+            if not was_quarantined:
+                self._emit(
+                    McpServerQuarantined(
+                        mcp_server_name=mcp_server.name,
+                        source_type=mcp_server.source_type,
+                        reason=validation_report.reason,
+                        validation_result=validation_report.result.value,
+                    )
+                )
+            span.set_attribute("discovery.result", "quarantined")
+            return "quarantined"
+
+        if existing:
+            self._keep_running_definition(existing, mcp_server, validation_report.reason, final=False)
+        span.set_attribute("discovery.result", "skipped")
+        return "skipped"
+
+    def _command_refusal(self, mcp_server: DiscoveredMcpServer) -> str | None:
+        """Why the input validator refuses the command of *mcp_server*, or None."""
+        command = mcp_server.connection_info.get("command", [])
+        if not command or not self._input_validator:
+            return None
+        try:
+            validation_result = self._input_validator.validate_command(command)
+        except ValueError as exc:
+            return str(exc)
+        if not validation_result.valid:
+            return "; ".join(i.message for i in validation_result.issues)
+        return None
+
+    def _refused_before(self, existing: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer) -> bool:
+        """Record a changed definition once, and say whether it was already refused for good (#2091).
+
+        Recorded here because this is the only place both fingerprints exist: a
+        moment later `existing` has been overwritten with the new definition
+        and the old one is gone for good. Once per definition: a change that is
+        not applied is seen again every cycle.
+        """
+        if self._change_announced.get(mcp_server.name) != mcp_server.fingerprint:
+            self._change_announced[mcp_server.name] = mcp_server.fingerprint
+            self._emit(
+                McpServerDiscoveryConfigChanged(
+                    mcp_server_name=mcp_server.name,
+                    source_type=mcp_server.source_type,
+                    old_fingerprint=existing.fingerprint,
+                    new_fingerprint=mcp_server.fingerprint,
+                )
+            )
+        # Refused for good, and logged when it was: the running definition
+        # stays, and stays tracked so its TTL does not run out.
+        return self._change_refused.get(mcp_server.name) == mcp_server.fingerprint
+
+    async def _apply_change(self, existing: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, span: Any) -> str:
+        """Replace the running definition of *existing* with *mcp_server*, which passed validation (#2091)."""
+        assert self.on_update is not None
+        try:
+            await self.on_update(mcp_server)
+        except DiscoveryChangeRefused as e:
+            self._keep_running_definition(existing, mcp_server, str(e), final=True)
+            span.set_attribute("discovery.result", "rejected")
+            return "rejected"
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed update callback must not crash discovery
+            self._keep_running_definition(existing, mcp_server, f"{type(e).__name__}: {e}", final=False)
+            span.set_attribute("discovery.result", "skipped")
+            record_handled_failure(span, e)
+            return "skipped"
+        self._applied(existing, mcp_server)
+        main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
+        span.set_attribute("discovery.result", "updated")
+        return "updated"
+
+    def _applied(self, replaced: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer) -> None:
+        """Track *mcp_server* as the definition that runs, and forget its pending change."""
+        self._lifecycle_manager.update_mcp_server(mcp_server)
+        if replaced.source_type != mcp_server.source_type:
+            # Taken over by another source: it moves between the two counts.
+            self._validator.record_deregistration(replaced)
+            self._validator.record_registration(mcp_server)
+        if self._lifecycle_manager.is_quarantined(mcp_server.name):
+            # An older change still waiting there would otherwise be approvable
+            # over this one.
+            self._lifecycle_manager.reject(mcp_server.name)
+        self._change_refused.pop(mcp_server.name, None)
+        self._change_logged.pop(mcp_server.name, None)
+        logger.info(
+            "discovery_change_applied",
+            mcp_server_name=mcp_server.name,
+            source=mcp_server.source_type,
+            fingerprint=mcp_server.fingerprint,
+        )
+
+    def _keep_running_definition(
+        self, existing: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, reason: str, *, final: bool
+    ) -> None:
+        """A changed definition was not applied: the one that runs stays, and stays tracked (#2091).
+
+        Tracked again and seen now, or its TTL would run out and the lifecycle
+        manager would deregister a server its source still reports. *final*
+        means asking again cannot help, so this definition is not tried again.
+        Logged once per definition and reason, at DEBUG after that.
+        """
+        self._lifecycle_manager.add_mcp_server(existing.with_updated_seen_time())
+        if final:
+            self._change_refused[mcp_server.name] = mcp_server.fingerprint
+        logged = (mcp_server.fingerprint, reason)
+        log = logger.debug if self._change_logged.get(mcp_server.name) == logged else logger.warning
+        self._change_logged[mcp_server.name] = logged
+        log(
+            "discovery_change_not_applied",
+            mcp_server_name=mcp_server.name,
+            source=mcp_server.source_type,
+            running_fingerprint=existing.fingerprint,
+            refused_fingerprint=mcp_server.fingerprint,
+            reason=reason,
+            retried=not final,
+            detail="the definition that was running keeps running" if final else "tried again on the next cycle",
+        )
+
     async def _handle_deregister(self, name: str, reason: str) -> None:
         """Handle mcp_server deregistration.
 
@@ -730,6 +851,8 @@ class DiscoveryOrchestrator:
         # again next cycle as a server nobody tracks, and registered anew: the
         # removed server came straight back.
         self._conflict_resolver.deregister(name)
+        for pending_change in (self._change_announced, self._change_refused, self._change_logged):
+            pending_change.pop(name, None)
         if mcp_server:
             self._validator.record_deregistration(mcp_server)
             main_metrics.record_discovery_deregistration(source_type=mcp_server.source_type, reason=reason)
@@ -756,11 +879,44 @@ class DiscoveryOrchestrator:
     async def trigger_discovery(self) -> dict[str, Any]:
         """Trigger immediate discovery cycle.
 
+        A manual scan also tries again every change that was refused for good
+        (#2091): it is what an operator runs after fixing whatever refused it,
+        which leaves the definition, and so its fingerprint, unchanged.
+
+        Refused on an instance that does not hold the management lease, and
+        run on discovery's own loop, for the reasons `approve_mcp_server` gives.
+
         Returns:
             Discovery results
         """
+        self._refuse_unless_managing("run a discovery scan")
+        return cast(dict[str, Any], await self._on_discovery_loop(self._trigger))
+
+    async def _trigger(self) -> dict[str, Any]:
+        self._change_refused.clear()
         result = await self.run_discovery_cycle()
         return result.to_dict()
+
+    def _refuse_unless_managing(self, what: str) -> None:
+        """Refuse a manual scan or approval on an instance that does not hold the management lease.
+
+        Only the periodic loop asked; an ex-holder keeps its lifecycle and
+        quarantine state, and a scan or approval sent to it would rewrite rows
+        from a view that is no longer the fleet's (#2091). A standalone gateway
+        is always its own manager.
+        """
+        if not self._may_manage():
+            raise McpServerNotHereError(
+                f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
+                "the instance that does. Send the request to that instance."
+            )
+
+    async def _on_discovery_loop(self, work: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
+        """Await *work* on discovery's own loop when it runs one elsewhere, inline otherwise."""
+        loop = self._loop
+        if loop is not None and loop.is_running() and loop is not asyncio.get_running_loop():
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work(), loop))
+        return await work()
 
     def trigger_discovery_blocking(self) -> dict[str, Any]:
         """Run one discovery cycle to completion from a synchronous caller.
@@ -821,17 +977,37 @@ class DiscoveryOrchestrator:
         in the first, so with ``auto_register: false`` nothing could ever
         register a discovered server (#1667).
 
+        A changed definition of a server that already runs waits in the same
+        two places, while the running definition keeps running (#2091). Its
+        approval replaces the running server; refused, the running definition
+        stays and the change is not approved.
+
+        Refused on an instance that does not hold the management lease. Run on
+        discovery's own loop when it has one, as a manual scan is: the replace
+        waits for calls in flight, which must not freeze the request loop that
+        asked, and a cycle replacing the same server at the same time is then
+        not possible.
+
         Args:
             name: McpServer name
 
         Returns:
             Result dictionary
         """
+        self._refuse_unless_managing(f"approve mcp_server {name!r}")
+        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name)))
+
+    async def _approve(self, name: str) -> dict[str, Any]:
+        """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
+        running = self._lifecycle_manager.get_mcp_server(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False
         if mcp_server is None:
             mcp_server = self._discovery_service.approve_pending(name)
             was_pending = mcp_server is not None
+
+        if mcp_server and running and self.on_update and running.fingerprint != mcp_server.fingerprint:
+            return await self._approve_change(running, mcp_server, was_pending)
 
         if mcp_server:
             # Register with main registry
@@ -855,6 +1031,25 @@ class DiscoveryOrchestrator:
             "mcp_server": name,
             "error": "McpServer not found in quarantine or pending",
         }
+
+    async def _approve_change(
+        self, running: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, was_pending: bool
+    ) -> dict[str, Any]:
+        """Apply an approved change of a running server, or put everything back as it was."""
+        assert self.on_update is not None
+        try:
+            await self.on_update(mcp_server)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed update callback must not crash approval
+            logger.error(f"Error applying approved change of mcp_server {mcp_server.name}: {e}")
+            self._lifecycle_manager.add_mcp_server(running)
+            if was_pending:
+                # Back to the running definition, so the next cycle parks the
+                # change in pending again rather than applying it unapproved.
+                self._conflict_resolver.register(running)
+            return {"approved": False, "mcp_server": mcp_server.name, "error": str(e)}
+        self._applied(running, mcp_server)
+        main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
+        return {"approved": True, "mcp_server": mcp_server.name, "status": "updated"}
 
     async def reject_mcp_server(self, name: str) -> dict[str, Any]:
         """Reject a quarantined or pending mcp_server.
