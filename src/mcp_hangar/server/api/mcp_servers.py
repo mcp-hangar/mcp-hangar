@@ -36,6 +36,7 @@ from ...application.read_models.tool_projection import (
 from ...domain.exceptions import McpServerDeclaredInConfigError, MissingCredentialsError
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
+from ...domain.value_objects.mcp_server import McpServerMode
 from ...infrastructure.persistence.log_buffer import get_log_buffer
 from ..context import get_context
 from .middleware import dispatch_command, dispatch_query
@@ -89,6 +90,18 @@ def _check_permission(request: Request, resource_type: str, action: str) -> None
         resource_type=resource_type,
         resource_id="*",
     )
+
+
+def _launches_locally(mode: Any) -> bool:
+    """Whether a server of *mode* is a process or container the gateway starts on its own host.
+
+    Anything that is not recognisably `remote` counts, so a mode string the
+    domain refuses later is still checked here rather than let through (#2025).
+    """
+    try:
+        return McpServerMode.normalize(mode) is not McpServerMode.REMOTE
+    except ValueError:
+        return True
 
 
 async def list_mcp_servers(request: Request) -> HangarJSONResponse:
@@ -368,6 +381,10 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
     body = await request.json()
     if (invalid := missing_fields(body, "mcp_server_id", "mode")) is not None:
         return invalid
+    # A local server runs the caller's command or image on the gateway host, so
+    # registering one needs more than `mcp_servers:write` (#2025).
+    if _launches_locally(body["mode"]):
+        _check_permission(request, resource_type="mcp_servers", action="local_launch")
     try:
         result = await dispatch_command(
             CreateMcpServerCommand(
@@ -442,6 +459,14 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
     _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
     body = await request.json()
+    if body.get("env") is not None:
+        # A local server reads its environment when it starts, and an
+        # interpreter reads startup code from it: changing it is launching
+        # code on the gateway host (#2025). A missing server answers 404 here,
+        # as the command would.
+        server = await dispatch_query(GetMcpServerQuery(mcp_server_id=mcp_server_id))
+        if _launches_locally(getattr(server, "mode", None)):
+            _check_permission(request, resource_type="mcp_servers", action="local_launch")
     try:
         result = await dispatch_command(
             UpdateMcpServerCommand(

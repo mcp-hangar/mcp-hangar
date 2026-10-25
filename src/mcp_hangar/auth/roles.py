@@ -67,6 +67,7 @@ PERMISSION_PROVIDERS_READ = core_security.PERMISSION_PROVIDERS_READ
 PERMISSION_PROVIDERS_WRITE = core_security.PERMISSION_PROVIDERS_WRITE
 PERMISSION_PROVIDERS_LIFECYCLE = core_security.PERMISSION_PROVIDERS_LIFECYCLE
 PERMISSION_MCP_SERVERS_PEER_IDENTITY = core_security.PERMISSION_MCP_SERVERS_PEER_IDENTITY
+PERMISSION_MCP_SERVERS_LOCAL_LAUNCH = core_security.PERMISSION_MCP_SERVERS_LOCAL_LAUNCH
 PERMISSION_CONFIG_RELOAD = core_security.PERMISSION_CONFIG_RELOAD
 
 # Admin wildcard permission
@@ -117,6 +118,7 @@ PERMISSIONS: dict[str, Permission] = {
     "providers:write": PERMISSION_PROVIDERS_WRITE,
     "providers:lifecycle": PERMISSION_PROVIDERS_LIFECYCLE,
     "mcp_servers:peer_identity": PERMISSION_MCP_SERVERS_PEER_IDENTITY,
+    "mcp_servers:local_launch": PERMISSION_MCP_SERVERS_LOCAL_LAUNCH,
     "config:reload": PERMISSION_CONFIG_RELOAD,
     # Admin
     "admin:*": PERMISSION_ADMIN_ALL,
@@ -156,6 +158,10 @@ ROLE_PROVIDER_ADMIN = Role(
             PERMISSION_PROVIDERS_READ,
             PERMISSION_PROVIDERS_WRITE,
             PERMISSION_PROVIDERS_LIFECYCLE,
+            # Registering a subprocess or container server is launching it on
+            # the gateway host (#2025). This role manages the fleet, so it keeps
+            # that; `developer` does not.
+            PERMISSION_MCP_SERVERS_LOCAL_LAUNCH,
             PERMISSION_POLICY_READ,
             PERMISSION_POLICY_WRITE,
             PERMISSION_TOOL_INVOKE,

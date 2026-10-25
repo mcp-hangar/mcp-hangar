@@ -124,3 +124,31 @@ class TestSsrfGuardedTransport:
         sent = sup.call_args.args[0]
         assert sent.url.host == "10.1.2.3"
         assert sent.headers["Host"] == "svc.pod:8080"
+
+    def test_a_name_the_guard_cannot_resolve_is_not_dialled_by_name(self):
+        # The guard's lookup fails; connecting by name would let httpcore resolve
+        # it a second time, unchecked, and follow wherever that answer points (#2027).
+        transport = _SsrfGuardedTransport(enforce_ssrf=True, provenance=Provenance.HUMAN, runtime_addresses=None)
+        request = _make_request()
+
+        def _fails(*args, **kwargs):
+            raise OSError("temporary failure in name resolution")
+
+        with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _fails):
+            with patch.object(httpx.HTTPTransport, "handle_request") as sup:
+                with pytest.raises(httpx.ConnectError, match="did not resolve"):
+                    transport.handle_request(request)
+        sup.assert_not_called()
+
+    def test_an_unresolvable_name_is_passed_through_when_enforcement_is_off(self):
+        transport = _SsrfGuardedTransport(enforce_ssrf=False, provenance=Provenance.HUMAN, runtime_addresses=None)
+        request = _make_request()
+
+        def _fails(*args, **kwargs):
+            raise OSError("temporary failure in name resolution")
+
+        with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _fails):
+            with patch.object(httpx.HTTPTransport, "handle_request", return_value=httpx.Response(200)) as sup:
+                transport.handle_request(request)
+        sup.assert_called_once()
+        assert sup.call_args.args[0].url.host == "mcp.example.com"

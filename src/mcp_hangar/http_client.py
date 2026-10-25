@@ -357,6 +357,18 @@ class _SsrfGuardedTransport(httpx.HTTPTransport):
             # connection to make to a refused address.
             raise httpx.ConnectError(f"SSRF guard blocked connection: {e}", request=request) from e
 
+        if not validated:
+            # The guard's own lookup found nothing to judge. Connecting by name
+            # would hand the name to httpcore, which resolves it again, and a
+            # resolver that fails the first lookup and answers the second with a
+            # private address would get a connection nobody checked (#2027). A
+            # name that does not resolve could not be dialled anyway, so refusing
+            # here changes nothing for an honest endpoint.
+            raise httpx.ConnectError(
+                f"SSRF guard refused connection: {original_host} did not resolve to an address it could check",
+                request=request,
+            )
+
         if validated:
             pinned_ip = validated[0]
             # Preserve vhost + TLS identity while connecting by IP. httpx keeps
