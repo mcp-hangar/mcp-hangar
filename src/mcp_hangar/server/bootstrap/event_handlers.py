@@ -46,6 +46,7 @@ from ...logging_config import get_logger
 from ...observability.health import set_compliance_export_status
 from ..api.sessions import get_session_suspension_registry
 from .group_circuit_metric import observe_created_group
+from .reload_warm_up import subscribe_reload_warm_up
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -109,6 +110,9 @@ def init_event_handlers(runtime: "Runtime") -> None:
     # Populate the tool-projection registry from discovered tools on server start
     # (#248), and again on an upstream's own `tools/list_changed` (#1366).
     subscribe_tool_projection(runtime.event_bus, runtime.repository)
+    # On a front door, a server a reload adds or rebuilds is started as boot
+    # starts every configured one, so its tools are projected and announced.
+    subscribe_reload_warm_up(runtime)
 
     # A revoked key or role ends that principal's list_changed streams, so the
     # reconnect authenticates again (#1366).
