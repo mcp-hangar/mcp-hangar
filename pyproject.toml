@@ -365,7 +365,7 @@ drift_allowance = 3.0
   # swing noted below.
   "domain/services/tool_access_resolver.py" = 96.0
   "domain/services/ui_resource_guard.py" = 100.0
-  "domain/value_objects/tool_access_policy.py" = 84.7
+  "domain/value_objects/tool_access_policy.py" = 89.4
   # 88.7 -> 92.7 because the two security regression files moved from
   # tests/security/ into tests/unit, and this gate's pinned selection is
   # `tests/unit tests/integration` -- it never saw them. Same tests, same code,

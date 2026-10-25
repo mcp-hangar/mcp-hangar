@@ -43,6 +43,7 @@ from ..ports.log_buffers import ILogBuffers
 from ..ports.peer_identity import IPeerIdentityAuthority
 from .crud_commands import (
     AddGroupMemberCommand,
+    AdoptDiscoveredMcpServerCommand,
     CreateGroupCommand,
     CreateMcpServerCommand,
     DeleteGroupCommand,
@@ -304,6 +305,8 @@ class CreateMcpServerHandler(CommandHandler):
             enforce_ssrf=(
                 McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None
             ),
+            # Kept by the aggregate for a DISCOVERY server only.
+            discovered_as=command.discovered_as,
         )
 
         # Only now, with every check above passed and the new server built: a
@@ -481,6 +484,40 @@ class ForgetPeerKeyNameHandler(CommandHandler):
         return {"mcp_server_id": name, "forgotten": True}
 
 
+class AdoptDiscoveredMcpServerHandler(CommandHandler):
+    """Hands a discovered server to the source that reports it, and records its origin (#2106, #2112)."""
+
+    def __init__(self, repository: IMcpServerRepository, fleet_writer: IFleetWriter | None = None) -> None:
+        self._repository = repository
+        self._fleet_writer = fleet_writer
+
+    def handle(self, command: AdoptDiscoveredMcpServerCommand) -> dict[str, Any]:
+        """Record the origin, if the server belongs to the reporting source.
+
+        Raises:
+            McpServerNotFoundError: No server has the id.
+            ValidationError: The server is not one this source registered: a
+                declared one, another source's, or a discovered one whose
+                source cannot be told, which stays protected.
+        """
+        name = command.mcp_server_id
+        server = self._repository.get(name)
+        if server is None:
+            raise McpServerNotFoundError(name)
+        server = cast(McpServer, server)
+        source_type = command.discovered_as.source_type
+        if server.discovering_source != source_type:
+            raise ValidationError(f"mcp_server '{name}': not registered by the discovery source '{source_type}'")
+        if self._fleet_writer is not None:
+            try:
+                _record_fields(self._fleet_writer, server, discovered_as=command.discovered_as)
+            except PeerKeyNameRefused as e:
+                raise PeerKeyNameTaken(str(e)) from e
+        server.adopt_discovery_origin(command.discovered_as)
+        logger.info("discovered_mcp_server_adopted", mcp_server_id=name, source_type=source_type)
+        return {"mcp_server_id": name, "adopted": True}
+
+
 class UpdateMcpServerHandler(CommandHandler):
     """Handler for UpdateMcpServerCommand.
 
@@ -559,6 +596,7 @@ class UpdateMcpServerHandler(CommandHandler):
                     endpoint=endpoint,
                     tls=tls,
                     provenance=Provenance.HUMAN,
+                    discovered_as=None,
                     runtime_addresses=None,
                     enforce_ssrf=endpoint is not None,
                 )
@@ -1211,6 +1249,10 @@ def register_crud_handlers(
         ForgetPeerKeyNameHandler(
             repository=repository, fleet_writer=fleet_writer, peer_identity_authority=peer_identity_authority
         ),
+    )
+    command_bus.register(
+        AdoptDiscoveredMcpServerCommand,
+        AdoptDiscoveredMcpServerHandler(repository=repository, fleet_writer=fleet_writer),
     )
     command_bus.register(
         SetL7PolicyCommand,

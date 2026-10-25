@@ -9,7 +9,7 @@ from typing import Any
 
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
-from ...domain.value_objects.provenance import Provenance
+from ...domain.value_objects.provenance import DiscoveryOrigin, Provenance
 from ...domain.value_objects.security import Principal
 from .commands import Command
 
@@ -56,6 +56,9 @@ class CreateMcpServerCommand(Command):
             of them. Without this, DISCOVERY buys nothing: provenance grants a
             *specific address*, never an address class, or a container that
             labels itself with a neighbour's address launders its way there.
+        discovered_as: For DISCOVERY, the source that reported the server and
+            the definition it reported, recorded with the row so discovery
+            takes the server back after a restart (#2106). Ignored otherwise.
     """
 
     mcp_server_id: str
@@ -83,6 +86,7 @@ class CreateMcpServerCommand(Command):
     #: the existing server both have DISCOVERY provenance, so it can never
     #: replace a server an operator or the configuration file declared.
     replace_discovered: bool = False
+    discovered_as: DiscoveryOrigin | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +197,20 @@ class ForgetPeerKeyNameCommand(Command):
     provenance: Provenance = Provenance.HUMAN
     #: The authenticated caller, as on CreateMcpServerCommand.
     principal: Principal | None = None
+
+
+@dataclass(frozen=True)
+class AdoptDiscoveredMcpServerCommand(Command):
+    """Hand a discovered server already in the fleet to the source that reports it (#2106).
+
+    For a server discovery registered before a restart whose row records no
+    origin. Accepted only from the source the server belongs to, and the origin
+    is written to the row, so the next restart takes the server back at once
+    (#2112). Sent only by discovery.
+    """
+
+    mcp_server_id: str
+    discovered_as: DiscoveryOrigin
 
 
 # =============================================================================

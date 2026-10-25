@@ -82,6 +82,35 @@ class DiscoveredMcpServer:
             ttl_seconds=ttl_seconds,
         )
 
+    @classmethod
+    def restored(
+        cls,
+        name: str,
+        source_type: str,
+        mode: str,
+        fingerprint: str,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int = 90,
+    ) -> "DiscoveredMcpServer":
+        """A server discovery registered before a restart, as its row records it (#2106).
+
+        The fingerprint is the one the source reported then, so the source's
+        next report reads as unchanged or as a change exactly as it would have
+        without the restart. Last seen now: its TTL runs from the restart.
+        """
+        now = datetime.now(UTC)
+        return cls(
+            name=name,
+            source_type=source_type,
+            mode=mode,
+            connection_info={},
+            metadata=metadata or {},
+            fingerprint=fingerprint,
+            discovered_at=now,
+            last_seen_at=now,
+            ttl_seconds=ttl_seconds,
+        )
+
     def is_expired(self) -> bool:
         """Check if mcp_server has exceeded TTL.
 

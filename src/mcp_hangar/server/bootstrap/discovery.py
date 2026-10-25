@@ -10,7 +10,7 @@ from ...application.discovery import DiscoveryChangeRefused, DiscoveryConfig, Di
 from ...domain.contracts.fleet import NotTheManagerError
 from ...domain.exceptions import PeerIdentityChangeDenied, PeerKeyNameTaken, ValidationError
 from ...domain.security.input_validator import InputValidator
-from ...domain.value_objects.provenance import Provenance
+from ...domain.value_objects.provenance import Provenance, discovered_description
 from ...infrastructure.discovery.registry import (
     UnknownDiscoveryModeError,
     UnknownDiscoverySourceError,
@@ -19,6 +19,7 @@ from ...infrastructure.discovery.registry import (
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 from .coordination import may_manage
+from .restored_discovery import declared_mcp_server_ids, discovery_origin_of, govern_restored_discovered_servers
 
 logger = get_logger(__name__)
 
@@ -40,7 +41,9 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     logger.info("discovery_initializing")
 
     repository = get_runtime().repository
-    static_mcp_servers = set(repository.get_all_ids())
+    # Not every id in the repository: on a durable backend the fleet is
+    # restored first, and what discovery registered is not static (#2106).
+    static_mcp_servers = declared_mcp_server_ids(repository)
     orchestrator_config = DiscoveryConfig.from_dict(discovery_config)
     orchestrator = DiscoveryOrchestrator(
         config=orchestrator_config,
@@ -93,6 +96,9 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     orchestrator.on_register = _on_mcp_server_register
     orchestrator.on_update = _on_mcp_server_update
     orchestrator.on_deregister = _on_mcp_server_deregister
+    govern_restored_discovered_servers(
+        orchestrator, repository, send=lambda command: get_runtime().command_bus.send(command)
+    )
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
@@ -196,7 +202,7 @@ def _create_command(mcp_server, *, replace: bool = False) -> CreateMcpServerComm
     mcp_server_kwargs: dict[str, Any] = {
         "mcp_server_id": mcp_server.name,
         "mode": mcp_server_mode,
-        "description": f"Discovered from {mcp_server.source_type}",
+        "description": discovered_description(mcp_server.source_type),
     }
 
     if mcp_server_mode == "docker":
@@ -271,6 +277,7 @@ def _create_command(mcp_server, *, replace: bool = False) -> CreateMcpServerComm
         provenance=Provenance.DISCOVERY,
         runtime_addresses=_runtime_addresses_of(mcp_server),
         replace_discovered=replace,
+        discovered_as=discovery_origin_of(mcp_server),
     )
 
 

@@ -76,6 +76,7 @@ def snapshot_of(mcp_server: McpServer, *, enabled: bool = True) -> McpServerConf
         # The whole `tls` block, peer identity included (ADR-030 §10). It holds
         # no secret: a CA path, a flag, public key pins and a connection age.
         tls=dict(mcp_server._tls_config) if mcp_server._tls_config else None,
+        discovered_as=mcp_server.discovered_as,
     )
 
 
@@ -183,4 +184,9 @@ def server_from_snapshot(config: McpServerConfigSnapshot) -> McpServer:
         # Restored as stored. A row whose peer identity is malformed never gets
         # here: the snapshot refuses it, and the constructor would too.
         tls=config.tls,
+        # Which source registered it, so discovery takes it back rather than
+        # leaving it protected as static (#2106). Read as stored: a row without
+        # it restores None, and discovery takes the server over when a source
+        # next reports it.
+        discovered_as=config.discovered_as,
     )
