@@ -274,3 +274,53 @@ def test_a_racing_config_assignment_does_not_take_over_an_api_grant_on_replay() 
     assert EventSourcedRoleAssignment.from_events(ANN, events).list_assignments() == [
         ("global", "admin", "user:operator")
     ]
+
+
+# --- the bootstrap admin owns its grant ---------------------------------------
+
+
+def the_bootstrap_admin_keeps_a_grant_the_file_also_made(role_store: IRoleStore, key_store) -> None:
+    """``bootstrap-admin`` for a principal the file lists, then the line removed: still admin."""
+    apply_config_role_assignments(role_store, [_entry(ANN, "admin"), _entry(BOB, "admin")])
+    assert key_store.bootstrap_initial_admin(ANN, "first-admin") is not None
+    assert _assigner(role_store, ANN, "admin") == "local-cli-bootstrap"
+
+    apply_config_role_assignments(role_store, [])
+
+    assert _roles(role_store, ANN) == {"admin"}
+    assert _roles(role_store, BOB) == set()
+
+
+def the_bootstrap_admin_takes_over_an_untracked_grant(role_store: IRoleStore, key_store) -> None:
+    role_store.assign_role(ANN, "admin")
+    assert key_store.bootstrap_initial_admin(ANN, "first-admin") is not None
+
+    with capture_logs() as logs:
+        apply_config_role_assignments(role_store, [])
+
+    assert _assigner(role_store, ANN, "admin") == "local-cli-bootstrap"
+    assert _roles(role_store, ANN) == {"admin"}
+    assert not [e for e in logs if e["event"] == "untracked_role_assignment_not_in_config"]
+
+
+BOOTSTRAP_SCENARIOS = [
+    the_bootstrap_admin_keeps_a_grant_the_file_also_made,
+    the_bootstrap_admin_takes_over_an_untracked_grant,
+]
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("scenario", BOOTSTRAP_SCENARIOS, ids=lambda f: f.__name__)
+def test_the_bootstrap_admin_owns_its_grant_on_sqlite(tmp_path, scenario) -> None:
+    from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+
+    db = str(tmp_path / "auth.db")
+    role_store = SQLiteRoleStore(db_path=db)
+    role_store.initialize()
+    key_store = SQLiteApiKeyStore(db)
+    key_store.initialize()
+    try:
+        scenario(role_store, key_store)
+    finally:
+        role_store.close()
+        key_store.close()

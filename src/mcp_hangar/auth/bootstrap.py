@@ -28,8 +28,10 @@ from mcp_hangar.domain.contracts.authorization import CONFIG_ROLE_ASSIGNER, IAut
 logger = structlog.get_logger(__name__)
 
 
-def apply_config_role_assignments(role_store: IRoleStore, assignments: list[RoleAssignment]) -> None:
-    """Apply ``auth.role_assignments`` under `CONFIG_ROLE_ASSIGNER`, then reconcile what the file owns."""
+def apply_config_role_assignments(
+    role_store: IRoleStore, assignments: list[RoleAssignment], reconcile: bool = True
+) -> None:
+    """Apply ``auth.role_assignments`` under `CONFIG_ROLE_ASSIGNER`, then, if *reconcile*, revoke what it dropped."""
     for assignment in assignments:
         if not assignment.principal or not assignment.role:
             logger.warning(
@@ -59,7 +61,8 @@ def apply_config_role_assignments(role_store: IRoleStore, assignments: list[Role
                 role=assignment.role,
                 error=str(e),
             )
-    reconcile_config_role_assignments(role_store, assignments)
+    if reconcile:
+        reconcile_config_role_assignments(role_store, assignments)
 
 
 def reconcile_config_role_assignments(role_store: IRoleStore, assignments: list[RoleAssignment]) -> None:
@@ -413,6 +416,7 @@ def bootstrap_auth(
     event_store=None,
     event_bus=None,
     persistence_backend: Any = None,
+    reconcile_role_assignments: bool = True,
 ) -> AuthComponents:
     """Bootstrap authentication and authorization components.
 
@@ -424,6 +428,10 @@ def bootstrap_auth(
         event_store: Optional event store for event_sourcing driver.
         event_bus: Optional event bus for event_sourcing driver.
         persistence_backend: The selected storage backend, when there is one.
+        reconcile_role_assignments: Revoke grants the config file applied and no
+            longer lists. Off for a one-off command such as ``bootstrap-admin``,
+            which only adds, as it always did: the server's boot is what
+            reconciles.
 
     Returns:
         AuthComponents with initialized middleware and stores.
@@ -536,7 +544,7 @@ def bootstrap_auth(
         rate_limiter=rate_limiter if config.rate_limit.enabled else None,
     )
 
-    apply_config_role_assignments(role_store, config.role_assignments)
+    apply_config_role_assignments(role_store, config.role_assignments, reconcile=reconcile_role_assignments)
 
     # Initialize authorizer
     rbac_authorizer = RBACAuthorizer(role_store)

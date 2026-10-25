@@ -389,6 +389,8 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                     """,
                     (principal_id, actor),
                 )
+                # A grant the config file applied first becomes the bootstrap admin's own.
+                _take_over_assignment(cur, self._assignments_table, principal_id, "admin", "global", actor)
                 cur.execute(
                     f"UPDATE {self._bootstrap_table} SET key_id = %s WHERE singleton = TRUE",
                     (key_id,),
@@ -638,6 +640,24 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 conn.rollback()
                 logger.error("api_key_rotation_failed", key_id=key_id, error=str(e))
                 raise
+
+
+def _take_over_assignment(
+    cur: Any, table: str, principal_id: str, role_name: str, scope: str, assigned_by: str | None
+) -> None:
+    """Record *assigned_by* on an existing grant if it ranks above the current assigner (see `assigner_rank`)."""
+    rank = assigner_rank(assigned_by)
+    if rank == 0:
+        return
+    cur.execute(
+        f"""
+        UPDATE {table} SET assigned_by = %s
+        WHERE principal_id = %s AND role_name = %s AND scope = %s
+          AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
+                    WHEN assigned_by = %s THEN 1 ELSE 2 END) < %s
+        """,
+        (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
+    )
 
 
 class PostgresRoleStore(IRoleStore):
@@ -908,18 +928,8 @@ class PostgresRoleStore(IRoleStore):
                 )
 
                 result = cur.fetchone()
-                rank = assigner_rank(assigned_by)
-                if not result and rank > 0:
-                    # Already held: a stronger assigner takes the grant over (see `assigner_rank`).
-                    cur.execute(
-                        f"""
-                        UPDATE {self._assignments_table} SET assigned_by = %s
-                        WHERE principal_id = %s AND role_name = %s AND scope = %s
-                          AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
-                                    WHEN assigned_by = %s THEN 1 ELSE 2 END) < %s
-                    """,
-                        (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
-                    )
+                if not result:
+                    _take_over_assignment(cur, self._assignments_table, principal_id, role_name, scope, assigned_by)
             conn.commit()
 
             # Only emit event if actually inserted

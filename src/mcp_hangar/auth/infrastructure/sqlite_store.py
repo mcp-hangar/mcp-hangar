@@ -382,6 +382,8 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 """,
                 (principal_id, now, actor),
             )
+            # A grant the config file applied first becomes the bootstrap admin's own.
+            _take_over_assignment(conn, principal_id, "admin", "global", actor)
             conn.execute(
                 "UPDATE initial_admin_bootstrap SET key_id = ?, created_at = ? WHERE singleton = 1", (key_id, now)
             )
@@ -621,6 +623,24 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         self._initialized = False
 
 
+def _take_over_assignment(
+    conn: sqlite3.Connection, principal_id: str, role_name: str, scope: str, assigned_by: str | None
+) -> None:
+    """Record *assigned_by* on an existing grant if it ranks above the current assigner (see `assigner_rank`)."""
+    rank = assigner_rank(assigned_by)
+    if rank == 0:
+        return
+    conn.execute(
+        """
+        UPDATE role_assignments SET assigned_by = ?
+        WHERE principal_id = ? AND role_name = ? AND scope = ?
+          AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
+                    WHEN assigned_by = ? THEN 1 ELSE 2 END) < ?
+        """,
+        (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
+    )
+
+
 class SQLiteRoleStore(IRoleStore):
     """SQLite-based role store.
 
@@ -856,18 +876,8 @@ class SQLiteRoleStore(IRoleStore):
         """,
             (principal_id, role_name, scope, now, assigned_by),
         )
-        rank = assigner_rank(assigned_by)
-        if cursor.rowcount == 0 and rank > 0:
-            # Already held: a stronger assigner takes the grant over (see `assigner_rank`).
-            conn.execute(
-                """
-                UPDATE role_assignments SET assigned_by = ?
-                WHERE principal_id = ? AND role_name = ? AND scope = ?
-                  AND (CASE WHEN assigned_by IS NULL OR assigned_by = 'system' THEN 0
-                            WHEN assigned_by = ? THEN 1 ELSE 2 END) < ?
-            """,
-                (assigned_by, principal_id, role_name, scope, CONFIG_ROLE_ASSIGNER, rank),
-            )
+        if cursor.rowcount == 0:
+            _take_over_assignment(conn, principal_id, role_name, scope, assigned_by)
 
         conn.commit()
 

@@ -17,8 +17,8 @@ from uuid import uuid4
 
 import pytest
 
-from mcp_hangar.auth.infrastructure.postgres_store import PostgresRoleStore
-from tests.unit.test_config_role_assignments_are_reconciled import SCENARIOS, OpenStore
+from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore, PostgresRoleStore
+from tests.unit.test_config_role_assignments_are_reconciled import BOOTSTRAP_SCENARIOS, SCENARIOS, OpenStore
 
 pytestmark = [pytest.mark.live, pytest.mark.security]
 
@@ -41,21 +41,38 @@ class _DirectFactory:
 
 
 @pytest.fixture
-def open_store() -> Iterator[OpenStore]:
+def prefix() -> Iterator[str]:
     """Tables of this test's own, dropped afterwards."""
-    prefix = f"cfg_grants_{uuid4().hex[:8]}_"
+    name = f"cfg_grants_{uuid4().hex[:8]}_"
+    yield name
+    with _DirectFactory().get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"DROP TABLE IF EXISTS {name}initial_admin_bootstrap, {name}api_keys, {name}role_assignments, {name}roles"
+        )
+        conn.commit()
+
+
+@pytest.fixture
+def open_store(prefix: str) -> OpenStore:
+    """A new store handle on this test's tables, as a restarted process opens."""
 
     def open_postgres() -> PostgresRoleStore:
         store = PostgresRoleStore(_DirectFactory(), table_prefix=prefix)
         store.initialize()
         return store
 
-    yield open_postgres
-    with _DirectFactory().get_connection() as conn, conn.cursor() as cur:
-        cur.execute(f"DROP TABLE IF EXISTS {prefix}role_assignments, {prefix}roles")
-        conn.commit()
+    return open_postgres
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda f: f.__name__)
 def test_config_role_assignments_are_reconciled_on_postgres(open_store: OpenStore, scenario) -> None:
     scenario(open_store)
+
+
+@pytest.mark.parametrize("scenario", BOOTSTRAP_SCENARIOS, ids=lambda f: f.__name__)
+def test_the_bootstrap_admin_owns_its_grant_on_postgres(prefix: str, scenario) -> None:
+    role_store = PostgresRoleStore(_DirectFactory(), table_prefix=prefix)
+    role_store.initialize()
+    key_store = PostgresApiKeyStore(_DirectFactory(), table_prefix=prefix)
+    key_store.initialize()
+    scenario(role_store, key_store)
