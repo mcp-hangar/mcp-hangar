@@ -15,7 +15,7 @@ its own key, while a ``GET /mcp`` stream is held open on a real socket. In
 
 A server that leaves the fleet, by reload or by ``DELETE /api/mcp_servers``,
 leaves the listing too, the client is told, and one added back under the same
-name is listed again (#2088).
+name is listed again, started or not (#2088).
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def test_a_server_a_reload_adds_back_is_listed_again(front_door: dict[str, Any])
     assert readded["late_call"] == "served"
 
 
-def test_a_server_deleted_over_rest_leaves_the_listing_and_comes_back_when_registered_again(
+def test_a_server_deleted_over_rest_leaves_the_listing_and_comes_back_when_registered_again_unstarted(
     front_door: dict[str, Any],
 ) -> None:
     rest = front_door["rest"]
@@ -119,8 +119,11 @@ def test_a_server_deleted_over_rest_leaves_the_listing_and_comes_back_when_regis
     assert LATE_TOOL not in rest["tools"]
     assert "add" in rest["tools"]
     assert rest["call"] == METHOD_NOT_FOUND
-    assert (rest["recreated"], rest["restarted"], rest["listed_again"]) == (201, 200, True), rest
+    # Registered again with no start: listed with its last tools, and the first
+    # call starts the new copy, as a re-created server was served before #2088.
+    assert (rest["recreated"], rest["state_recreated"], rest["listed_again"]) == (201, "cold", True), rest
     assert rest["call_again"] == "served"
+    assert rest["state_after_call"] == "ready"
 
 
 def test_egress_starts_nothing_on_a_reload(egress: dict[str, Any]) -> None:

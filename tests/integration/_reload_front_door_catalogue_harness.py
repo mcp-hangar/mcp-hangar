@@ -21,8 +21,9 @@ held open across the reload on a real loopback socket.
 * removed: ``late`` is deleted again, and its tools leave the listing (#2088).
 * readded: ``late`` is added back by reload under the same name and listed again.
 * rest: ``api`` (the same upstream) is registered and started over REST, then
-  deleted with ``DELETE /api/mcp_servers/api`` and registered again. Over REST
-  because the delete refuses a server the configuration declares (#1744).
+  deleted with ``DELETE /api/mcp_servers/api`` and registered again without a
+  start, which lists its last tools until a call starts it. Over REST because
+  the delete refuses a server the configuration declares (#1744).
 """
 
 from __future__ import annotations
@@ -265,10 +266,14 @@ def run(mode: str, workdir: Path) -> dict[str, Any]:
                 rest["told"] = stream.told(timeout=20.0)
                 rest["tools"] = sorted(door.until(lambda t: LATE_TOOL not in t))
                 rest["call"] = door.call(LATE_TOOL)
+                # Registered again and NOT started, as a discovery re-appearance or an
+                # operator re-create is: listed with its last tools, and the first
+                # call starts the new copy.
                 rest["recreated"] = door.admin("POST", "/api/mcp_servers", api)
-                rest["restarted"] = door.admin("POST", "/api/mcp_servers/api/start")
+                rest["state_recreated"] = state("api")
                 rest["listed_again"] = LATE_TOOL in door.until(lambda t: LATE_TOOL in t)
                 rest["call_again"] = door.call(LATE_TOOL)
+                rest["state_after_call"] = state("api")
                 out["rest"] = rest
         finally:
             if stream is not None:

@@ -73,13 +73,16 @@ def subscribe_tool_projection(event_bus: EventBus, repository: IMcpServerReposit
 
     A server that leaves the fleet takes its projections with it (#2088). A
     delete (REST or discovery) is a PROJECTION: the event names the server, and
-    the fleet drops it on every replica on that same event. A reload's removals
-    and a hot unload are this replica's own fleet, so LOCAL_VIEW.
+    the fleet drops it on every replica on that same event. Registering one
+    again under that name restores its last entries, the same way, because the
+    replica that starts it may be another one. A reload's removals and a hot
+    unload are this replica's own fleet, so LOCAL_VIEW.
     """
     tool_projection_handler = ToolProjectionPopulationHandler(repository=repository, event_bus=event_bus)
     event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
     tool_catalogue_changes.register_listener(tool_projection_handler.project)
     event_bus.subscribe(McpServerDeregistered, tool_projection_handler.handle_deregistered, kind=HandlerKind.PROJECTION)
+    event_bus.subscribe(McpServerRegistered, tool_projection_handler.handle_registered, kind=HandlerKind.PROJECTION)
     event_bus.subscribe(ConfigurationReloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
     event_bus.subscribe(McpServerHotUnloaded, tool_projection_handler.handle_left_locally, kind=HandlerKind.LOCAL_VIEW)
     return tool_projection_handler

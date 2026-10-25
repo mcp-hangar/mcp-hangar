@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_hangar.application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from mcp_hangar.application.read_models import tool_projection as tp
 from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
@@ -32,6 +33,7 @@ from mcp_hangar.domain.events import (
     ConfigurationReloaded,
     McpServerDeregistered,
     McpServerHotUnloaded,
+    McpServerRegistered,
     McpServerStarted,
 )
 from mcp_hangar.domain.model.tool_catalog import ToolCatalog, ToolSchema
@@ -80,14 +82,22 @@ class _Gateway:
             )
         )
 
-    def reload(self, *, removed: list[str] = (), updated: list[str] = ()) -> None:  # type: ignore[assignment]
-        # The reload handler removes from the repository, then publishes.
+    def reload(
+        self,
+        *,
+        removed: list[str] = (),  # type: ignore[assignment]
+        updated: list[str] = (),  # type: ignore[assignment]
+        added: dict[str, list[str]] | None = None,
+    ) -> None:
+        # The reload handler removes from the repository, adds cold, then publishes.
         for mcp_server_id in removed:
             self.repository.remove(mcp_server_id)
+        for mcp_server_id, tools in (added or {}).items():
+            self.repository.add(mcp_server_id, tools)
         self.bus.publish(
             ConfigurationReloaded(
                 config_path="config.yaml",
-                mcp_servers_added=[],
+                mcp_servers_added=list(added or {}),
                 mcp_servers_removed=list(removed),
                 mcp_servers_updated=list(updated),
                 mcp_servers_unchanged=[],
@@ -99,6 +109,11 @@ class _Gateway:
     def delete(self, mcp_server_id: str) -> None:
         self.repository.remove(mcp_server_id)
         self.bus.publish(McpServerDeregistered(mcp_server_id=mcp_server_id, source="api"))
+
+    def create(self, mcp_server_id: str, tools: list[str]) -> None:
+        """Registered and not started: REST create, a discovery re-appearance, an operator re-create."""
+        self.repository.add(mcp_server_id, tools)
+        self.bus.publish(McpServerRegistered(mcp_server_id=mcp_server_id, source="api", mode="subprocess"))
 
 
 def _listing() -> dict[str, tuple[str, str]]:
@@ -214,6 +229,64 @@ class TestComingBack:
 
         assert _listing()["read_item"] == ("server_a", "read_item")
 
+    def test_a_server_created_again_and_not_started_is_listed_with_its_last_tools(self, gateway, told) -> None:
+        # A discovery TTL expiry and re-appearance, an operator re-create, or a
+        # REST create with no start. Listed, the first flat call routes to the
+        # new copy, and the executor starts it -- as before #2088, when nothing
+        # was removed at all.
+        gateway.delete("server_a")
+        told.clear()
+
+        gateway.create("server_a", ["read_item", "get_item"])
+
+        assert _listing()["read_item"] == ("server_a", "read_item")
+        assert set(_listing()) == {"read_item", "get_item", "list_items"}
+        assert len(told) == 1
+
+    def test_a_peers_delete_and_create_lists_it_again_here(self, gateway) -> None:
+        # The create's start stays on the peer: `McpServerStarted` is a local
+        # view and never reaches this replica.
+        gateway.bus.deliver_tailed(McpServerDeregistered(mcp_server_id="server_a", source="api"))
+        assert "read_item" not in _listing()
+
+        gateway.bus.deliver_tailed(McpServerRegistered(mcp_server_id="server_a", source="api", mode="remote"))
+
+        assert _listing()["read_item"] == ("server_a", "read_item")
+
+    def test_a_start_replaces_the_restored_entries(self, gateway) -> None:
+        gateway.delete("server_a")
+        gateway.create("server_a", ["read_item"])
+
+        gateway.start("server_a", ["read_item"])
+
+        assert set(_listing()) == {"read_item", "list_items"}
+
+    def test_a_server_a_reload_adds_back_is_listed_before_its_warm_up(self, gateway) -> None:
+        gateway.reload(removed=["server_a"])
+
+        gateway.reload(added={"server_a": ["read_item", "get_item"]})
+
+        assert _listing()["read_item"] == ("server_a", "read_item")
+
+    def test_a_registration_of_a_new_name_restores_nothing(self, gateway, told) -> None:
+        gateway.create("server_new", ["write_item"])
+
+        assert "write_item" not in _listing()
+        assert told == []
+
+    def test_a_delete_that_lands_while_the_start_is_projected_is_not_undone(self, gateway) -> None:
+        # The start read the server, then the delete forgot it, then the start
+        # wrote its tools: they must not stay listed for a server that is gone.
+        server = gateway.repository.get("server_a")
+        reads = iter([server])  # the server, then gone
+        repository = SimpleNamespace(get=lambda _id: next(reads, None))
+        handler = ToolProjectionPopulationHandler(repository=repository)  # type: ignore[arg-type]
+        gateway.delete("server_a")
+
+        handler.project("server_a")
+
+        assert set(_listing()) == {"list_items"}
+
     def test_a_withdrawal_outlives_the_removal(self, gateway) -> None:
         # Only the projections go. A server added back by the same name is still
         # withdrawn: clearing the overlays would let it back in ungoverned.
@@ -242,7 +315,8 @@ class TestTheCollisionRule:
 
 def test_a_delete_runs_on_every_replica_and_a_local_removal_only_where_it_happened() -> None:
     # A delete removes the server from every replica's fleet (`FleetProjection`
-    # on the same event), so its projections go everywhere. A reload and a hot
+    # on the same event), so its projections go everywhere, and a registration
+    # brings them back everywhere. A reload and a hot
     # unload change only the fleet of the replica that made them.
     bus = MagicMock()
     subscribe_tool_projection(bus, _Repository())  # type: ignore[arg-type]
@@ -250,5 +324,6 @@ def test_a_delete_runs_on_every_replica_and_a_local_removal_only_where_it_happen
     kinds = {c.args[0]: c.kwargs["kind"] for c in bus.subscribe.call_args_list}
 
     assert kinds[McpServerDeregistered] is HandlerKind.PROJECTION
+    assert kinds[McpServerRegistered] is HandlerKind.PROJECTION
     assert kinds[ConfigurationReloaded] is HandlerKind.LOCAL_VIEW
     assert kinds[McpServerHotUnloaded] is HandlerKind.LOCAL_VIEW
