@@ -126,6 +126,8 @@ class FilesystemDiscoverySource(DiscoverySource):
         # file path -> reason it was last refused, so a refusal warns once
         # rather than on every scan, and again only when the reason changes.
         self._refused_files: dict[str, str] = {}
+        #: Files the last scan found but could not read or parse; see `unscanned_part`.
+        self._unreadable_files: frozenset[str] = frozenset()
 
     @property
     def source_type(self) -> str:
@@ -153,6 +155,10 @@ class FilesystemDiscoverySource(DiscoverySource):
             patterns.append("*.yml")
 
         seen_files = set()
+        # Files that exist but could not be read or parsed this scan. What one
+        # of them registered before is not reported, and must not read as gone
+        # on an authoritative source (#2089).
+        unreadable: set[str] = set()
         for pattern in patterns:
             for file_path in self.path.glob(pattern):
                 if file_path in seen_files:
@@ -160,13 +166,16 @@ class FilesystemDiscoverySource(DiscoverySource):
                 seen_files.add(file_path)
 
                 try:
-                    mcp_server = self._parse_file(file_path)
+                    mcp_server = self._parse_file(file_path, unreadable)
                     if mcp_server:
                         mcp_servers.append(mcp_server)
                         self._cached_mcp_servers[mcp_server.name] = mcp_server
                         await self.on_mcp_server_discovered(mcp_server)
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip malformed config file
+                    unreadable.add(str(file_path))
                     logger.error(f"Failed to parse {file_path}: {e}")
+
+        self._unreadable_files = frozenset(unreadable)
 
         # A refused file that is gone warns again if it comes back.
         seen_keys = {str(p) for p in seen_files}
@@ -177,11 +186,14 @@ class FilesystemDiscoverySource(DiscoverySource):
         logger.debug(f"Filesystem discovery found {len(mcp_servers)} mcp_servers")
         return mcp_servers
 
-    def _parse_file(self, file_path: Path) -> DiscoveredMcpServer | None:
+    def _parse_file(self, file_path: Path, unreadable: set[str] | None = None) -> DiscoveredMcpServer | None:
         """Parse YAML file into DiscoveredMcpServer.
 
         Args:
             file_path: Path to YAML file
+            unreadable: Where a scan collects files that are not valid YAML.
+                A local of `discover()` rather than state on the source, since
+                the file watcher's thread parses files too.
 
         Returns:
             DiscoveredMcpServer or None if disabled/invalid
@@ -193,8 +205,13 @@ class FilesystemDiscoverySource(DiscoverySource):
             with os.fdopen(fd) as f:
                 data = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            # Multi-document YAML or invalid YAML - skip silently
+            # Multi-document YAML or invalid YAML - skip silently. Recorded all
+            # the same: a definition caught half-written, or broken by an edit,
+            # must not remove the server it described. A YAML file that never
+            # registered anything costs nothing here.
             logger.debug(f"Skipping non-mcp_server YAML file {file_path}: {e}")
+            if unreadable is not None:
+                unreadable.add(str(file_path))
             return None
 
         if not data:
@@ -243,6 +260,17 @@ class FilesystemDiscoverySource(DiscoverySource):
             metadata=metadata,
             ttl_seconds=ttl,
         )
+
+    def unscanned_part(self, mcp_server: DiscoveredMcpServer) -> str | None:
+        """The definition file of *mcp_server*, when it still exists but could not be read last scan.
+
+        A deleted file is not one, and neither is a file the trust checks in
+        `_open_trusted` refuse: that refusal is meant to take the server away.
+        """
+        file_path = mcp_server.metadata.get("file_path")
+        if file_path in self._unreadable_files:
+            return f"file {file_path}"
+        return None
 
     def _refuse(self, file_path: Path, reason: str) -> None:
         key = str(file_path)
