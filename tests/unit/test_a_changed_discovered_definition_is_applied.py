@@ -45,7 +45,7 @@ from mcp_hangar.domain.events import (
     McpServerDiscoveryLost,
     McpServerRegistered,
 )
-from mcp_hangar.domain.exceptions import ValidationError
+from mcp_hangar.domain.exceptions import McpServerNotHereError, ValidationError
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
@@ -152,10 +152,12 @@ def fleet(monkeypatch):
         lambda: SimpleNamespace(repository=repo, command_bus=commands, event_bus=events),
     )
 
-    def build(source: DiscoverySource, *, static: set[str] | None = None, **config_kwargs: Any):
+    def build(source: DiscoverySource, *, static: set[str] | None = None, may_manage=None, **config_kwargs: Any):
         config = DiscoveryConfig(default_ttl_s=TTL, **config_kwargs)
         config.security.require_health_check = False
-        orchestrator = DiscoveryOrchestrator(config=config, static_mcp_servers=static, event_bus=events)
+        orchestrator = DiscoveryOrchestrator(
+            config=config, static_mcp_servers=static, event_bus=events, may_manage=may_manage
+        )
         # As create_discovery_orchestrator wires them.
         orchestrator.on_register = bootstrap_discovery._on_mcp_server_register
         orchestrator.on_update = bootstrap_discovery._on_mcp_server_update
@@ -534,6 +536,75 @@ class TestASourceThatNeedsApproval:
             discovery_loop.close()
 
         assert result["approved"] is True
+        assert threads == ["discovery-loop"]
+
+
+@pytest.mark.asyncio
+class TestManualScansAndApprovals:
+    """A manual scan and an approval replace servers too, so they obey what the periodic cycle obeys."""
+
+    async def _changed_and_pending(self, fleet, holder: dict[str, bool]) -> DiscoveryOrchestrator:
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source, auto_register=False, may_manage=lambda: holder["lease"])
+        source.defs["svc"] = _subprocess("approved")
+        await _tick(orchestrator)
+        await orchestrator.approve_mcp_server("svc")
+        source.defs["svc"] = _subprocess("edited")
+        await _tick(orchestrator)
+        return orchestrator
+
+    async def test_an_instance_without_the_lease_refuses_both(self, fleet) -> None:
+        holder = {"lease": True}
+        orchestrator = await self._changed_and_pending(fleet, holder)
+        holder["lease"] = False
+        sent = len(fleet.commands.sent)
+
+        with pytest.raises(McpServerNotHereError, match="management lease"):
+            await orchestrator.trigger_discovery()
+        with pytest.raises(McpServerNotHereError, match="management lease"):
+            await orchestrator.approve_mcp_server("svc")
+
+        assert len(fleet.commands.sent) == sent
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "approved"]
+        assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["svc"]
+
+    async def test_a_standalone_gateway_allows_both(self, fleet) -> None:
+        # No coordination: the default `may_manage`, as in every existing deployment.
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source, auto_register=False)
+        source.defs["svc"] = _subprocess("approved")
+
+        await orchestrator.trigger_discovery()
+        result = await orchestrator.approve_mcp_server("svc")
+
+        assert result["approved"] is True
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "approved"]
+
+    async def test_a_manual_scan_runs_on_the_discovery_loop(self, fleet) -> None:
+        # Its replaces drain calls in flight, and the cycle's state is the discovery thread's.
+        source = _Source(DiscoveryMode.ADDITIVE)
+        orchestrator = fleet.build(source)
+        source.defs["svc"] = _subprocess("old")
+        threads: list[str] = []
+        discover = source.discover
+
+        async def recording() -> list[DiscoveredMcpServer]:
+            threads.append(threading.current_thread().name)
+            return await discover()
+
+        source.discover = recording  # type: ignore[method-assign]
+        discovery_loop = asyncio.new_event_loop()
+        runner = threading.Thread(target=discovery_loop.run_forever, name="discovery-loop", daemon=True)
+        runner.start()
+        orchestrator._loop = discovery_loop
+        try:
+            result = await orchestrator.trigger_discovery()
+        finally:
+            discovery_loop.call_soon_threadsafe(discovery_loop.stop)
+            runner.join(5)
+            discovery_loop.close()
+
+        assert result["discovered_count"] == 1
         assert threads == ["discovery-loop"]
 
 

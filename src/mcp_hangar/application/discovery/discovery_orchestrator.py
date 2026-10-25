@@ -7,10 +7,10 @@ Manages discovery sources, validation, and integration with the registry.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.event_bus import IEventBus
@@ -24,6 +24,7 @@ from mcp_hangar.domain.events import (
     McpServerDiscoveryLost,
     McpServerQuarantined,
 )
+from mcp_hangar.domain.exceptions import McpServerNotHereError
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.conventions import Discovery
 from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
@@ -843,12 +844,40 @@ class DiscoveryOrchestrator:
         (#2091): it is what an operator runs after fixing whatever refused it,
         which leaves the definition, and so its fingerprint, unchanged.
 
+        Refused on an instance that does not hold the management lease, and
+        run on discovery's own loop, for the reasons `approve_mcp_server` gives.
+
         Returns:
             Discovery results
         """
+        self._refuse_unless_managing("run a discovery scan")
+        return cast(dict[str, Any], await self._on_discovery_loop(self._trigger))
+
+    async def _trigger(self) -> dict[str, Any]:
         self._change_refused.clear()
         result = await self.run_discovery_cycle()
         return result.to_dict()
+
+    def _refuse_unless_managing(self, what: str) -> None:
+        """Refuse a manual scan or approval on an instance that does not hold the management lease.
+
+        Only the periodic loop asked; an ex-holder keeps its lifecycle and
+        quarantine state, and a scan or approval sent to it would rewrite rows
+        from a view that is no longer the fleet's (#2091). A standalone gateway
+        is always its own manager.
+        """
+        if not self._may_manage():
+            raise McpServerNotHereError(
+                f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
+                "the instance that does. Send the request to that instance."
+            )
+
+    async def _on_discovery_loop(self, work: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
+        """Await *work* on discovery's own loop when it runs one elsewhere, inline otherwise."""
+        loop = self._loop
+        if loop is not None and loop.is_running() and loop is not asyncio.get_running_loop():
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work(), loop))
+        return await work()
 
     def trigger_discovery_blocking(self) -> dict[str, Any]:
         """Run one discovery cycle to completion from a synchronous caller.
@@ -914,10 +943,11 @@ class DiscoveryOrchestrator:
         approval replaces the running server; refused, the running definition
         stays and the change is not approved.
 
-        Run on discovery's own loop when it has one, as a manual scan is: the
-        replace waits for calls in flight, which must not freeze the request
-        loop that asked, and a cycle replacing the same server at the same time
-        is then not possible.
+        Refused on an instance that does not hold the management lease. Run on
+        discovery's own loop when it has one, as a manual scan is: the replace
+        waits for calls in flight, which must not freeze the request loop that
+        asked, and a cycle replacing the same server at the same time is then
+        not possible.
 
         Args:
             name: McpServer name
@@ -925,10 +955,8 @@ class DiscoveryOrchestrator:
         Returns:
             Result dictionary
         """
-        loop = self._loop
-        if loop is not None and loop.is_running() and loop is not asyncio.get_running_loop():
-            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self._approve(name), loop))
-        return await self._approve(name)
+        self._refuse_unless_managing(f"approve mcp_server {name!r}")
+        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name)))
 
     async def _approve(self, name: str) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
