@@ -55,6 +55,12 @@ def _projection_changed() -> None:
             logger.warning("tool_projection_change_listener_failed", exc_info=True)
 
 
+#: Removed servers whose last entries are kept for `restore_server` (#2088). The
+#: oldest go first past it, so discovery with per-pod names cannot grow the
+#: store without bound; one evicted is simply not restored, and its start
+#: projects it as any new server.
+MAX_REMOVED_SERVERS = 1024
+
 #: Why a listing withholds a tool whose definition drifted from a blocking pin (#1776).
 WITHHELD_DIGEST_DRIFT = "digest_drift"
 
@@ -173,6 +179,10 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         # process, an empty catalogue included (#1446). Never shrinks: a stop
         # does not remove a projection, so an idle server still counts.
         self._projected: set[str] = set()
+        # The entries of each server that left the fleet, as they were (#2088):
+        # not listed, and put back by `restore_server` when a server is
+        # registered again under that name. A build for the server discards them.
+        self._removed: dict[str, dict[tuple[str, str], ToolProjection]] = {}
         # Config-withdrawal overlay: (mcp_server, kind, name) -> set of tenant_ids
         # or _ALL_TENANTS sentinel. Populated at config-load time; re-applied on
         # every reload. _ALL_TENANTS means withdrawn for every tenant.
@@ -254,6 +264,7 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
             for k in stale_keys:
                 del self._projections[k]
             self._projections.update(new_projections)
+            self._removed.pop(mcp_server, None)
             self._built = True
             self._projected.add(mcp_server)
             logger.debug(
@@ -264,6 +275,54 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
                 },
             )
         _projection_changed()
+
+    def forget_server(self, mcp_server: str) -> bool:
+        """Drop *mcp_server*'s projections, because it left the fleet (#2088).
+
+        Only the projections go. Withdrawals, pins, digest enforcement and the
+        new-tools policy are keyed by name and stay, so a server added back under
+        the same name is withdrawn and pinned as before: clearing them would let
+        it back in ungoverned. ``was_projected`` stays true too, as for a stopped
+        server, so a required catalogue's readiness is what it was.
+
+        The entries are kept aside for :meth:`restore_server`.
+
+        Returns:
+            Whether anything was dropped. Listeners are told only then.
+        """
+        with self._lock:
+            stale_keys = [k for k in self._projections if k[0] == mcp_server]
+            if stale_keys:
+                self._removed.pop(mcp_server, None)  # re-inserted as the newest
+                self._removed[mcp_server] = {k: self._projections.pop(k) for k in stale_keys}
+                while len(self._removed) > MAX_REMOVED_SERVERS:
+                    del self._removed[next(iter(self._removed))]
+        if not stale_keys:
+            return False
+        logger.debug(
+            "tool_projection_server_forgotten", extra={"mcp_server": mcp_server, "tool_count": len(stale_keys)}
+        )
+        _projection_changed()
+        return True
+
+    def restore_server(self, mcp_server: str) -> bool:
+        """Put back what :meth:`forget_server` dropped for *mcp_server*, unless it has entries again.
+
+        For a server registered again under that name and not started here: the
+        entries list it, under the overlays its name still has, and route the
+        first call to the new copy, which starts it. Its start replaces them.
+
+        Returns:
+            Whether anything was put back. Listeners are told only then.
+        """
+        with self._lock:
+            removed = self._removed.pop(mcp_server, None)
+            if not removed or any(k[0] == mcp_server for k in self._projections):
+                return False
+            self._projections.update(removed)
+        logger.debug("tool_projection_server_restored", extra={"mcp_server": mcp_server, "tool_count": len(removed)})
+        _projection_changed()
+        return True
 
     # ------------------------------------------------------------------
     # Config-withdrawal overlay (populated at config-load time)
@@ -919,6 +978,7 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         """
         with self._lock:
             self._projections.clear()
+            self._removed.clear()
             self._config_withdrawals.clear()
             self._runtime_withdrawals.clear()
             self._config_pins.clear()
