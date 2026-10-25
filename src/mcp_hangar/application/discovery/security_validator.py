@@ -154,12 +154,15 @@ class SecurityValidator:
         self._mcp_server_counts: dict[str, int] = {}
 
     async def validate(
-        self, mcp_server: DiscoveredMcpServer, source: "DiscoverySource | None" = None
+        self, mcp_server: DiscoveredMcpServer, source: "DiscoverySource | None" = None, *, replacing: bool = False
     ) -> ValidationReport:
         """Run full validation pipeline.
 
         Args:
             mcp_server: McpServer to validate
+            replacing: The server is a changed definition of one already
+                registered (#2091). It takes no new place in the source's count,
+                so a source at its cap can still change what it runs.
 
         Returns:
             ValidationReport with result and details
@@ -179,7 +182,7 @@ class SecurityValidator:
             return rate_result
 
         # Step 3: McpServer count check
-        count_result = self._check_mcp_server_count(mcp_server)
+        count_result = None if replacing else self._check_mcp_server_count(mcp_server)
         if count_result:
             count_result.duration_ms = (time.perf_counter() - start_time) * 1000
             return count_result
