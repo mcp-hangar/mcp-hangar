@@ -143,6 +143,20 @@ class TestTheGauge:
 
         assert _gauge() == []
 
+    def test_a_deleted_group_leaves_no_circuit_breaker_state_series(self, served):
+        # A group's circuit events also write the per-server breaker gauge under
+        # the group's id; it read open for good after the group went (#2073).
+        from mcp_hangar.domain.events import CircuitBreakerStateChanged
+
+        MetricsEventHandler().handle(
+            CircuitBreakerStateChanged(mcp_server_id=GROUP, old_state="closed", new_state="open")
+        )
+        assert prometheus_metrics.CIRCUIT_BREAKER_STATE.has_series(mcp_server=GROUP)
+
+        MetricsEventHandler().handle(GroupDeleted(group_id=GROUP))
+
+        assert not prometheus_metrics.CIRCUIT_BREAKER_STATE.has_series(mcp_server=GROUP)
+
     def test_a_group_no_longer_served_does_not_write_its_series_back(self, served):
         GROUPS.pop(GROUP)
         MetricsEventHandler().handle(GroupDeleted(group_id=GROUP))

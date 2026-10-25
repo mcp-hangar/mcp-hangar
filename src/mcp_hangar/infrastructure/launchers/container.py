@@ -254,6 +254,18 @@ class ContainerLauncher(McpServerLauncher):
 
         # Expand environment variables and user home
         host_path = os.path.expandvars(os.path.expanduser(host_path))
+        # The host's root, which the depth rule below never covered -- also
+        # when it is spelled `/etc/..` or `//`. Only this check normalises: the
+        # rules below keep reading the path as written, as they always have, so
+        # a declared mount such as `/var/data/:/data` that started before still
+        # starts. A path with no slash is a named volume.
+        normalised = os.path.normpath(host_path) if os.path.isabs(host_path) else host_path
+        if normalised in ("/", "//"):
+            raise ValidationError(
+                message="Mounting the host root '/' is not allowed",
+                field="volume",
+                value=volume,
+            )
 
         # Check blocked paths
         for blocked in self.BLOCKED_MOUNT_PATHS:

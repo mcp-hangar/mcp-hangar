@@ -90,6 +90,10 @@ class OIDCConfig:
         tenant_audiences: Explicit ``{tenant_id: expected_audience}`` map consulted
             only when ``strict_tenant_audience`` is True. The global ``audience`` is
             never used as a fallback for an unmapped tenant.
+        allowed_tenants: Opt-in binding of this issuer to the tenants it may
+            assert. When set, a token whose ``tenant_claim`` is not a string in
+            this collection is rejected, a token naming no tenant included.
+            ``None`` lets the issuer assert any tenant, or none.
     """
 
     issuer: str
@@ -131,6 +135,14 @@ class OIDCConfig:
     # Strict per-tenant audience binding (RFC 8707), opt-in
     strict_tenant_audience: bool = False
     tenant_audiences: dict[str, str] = field(default_factory=dict)
+
+    # Per-issuer tenant binding, opt-in
+    allowed_tenants: tuple[str, ...] | None = None
+
+
+def _is_bearer(authorization: str) -> bool:
+    """Whether *authorization* carries the Bearer scheme, which is case-insensitive (RFC 9110 11.1, #2060)."""
+    return authorization[:7].lower() == "bearer "
 
 
 class JWTAuthenticator(IAuthenticator):
@@ -187,7 +199,7 @@ class JWTAuthenticator(IAuthenticator):
 
     def supports(self, request: AuthRequest) -> bool:
         """Check if request has Bearer token."""
-        return self._authorization_header(request).startswith("Bearer ")
+        return _is_bearer(self._authorization_header(request))
 
     def authenticate(self, request: AuthRequest) -> Principal:
         """Authenticate using JWT token.
@@ -204,7 +216,7 @@ class JWTAuthenticator(IAuthenticator):
         """
         auth_header = self._authorization_header(request)
 
-        if not auth_header.startswith("Bearer "):
+        if not _is_bearer(auth_header):
             raise InvalidCredentialsError(
                 message="Missing Bearer token",
                 auth_method="jwt",
@@ -317,6 +329,26 @@ class JWTAuthenticator(IAuthenticator):
             )
             raise InvalidCredentialsError(
                 message="Missing required tenant claim",
+                auth_method="jwt",
+            )
+
+        # Per-issuer tenant binding: with more than one trusted issuer, nothing
+        # else stops issuer B from signing a token that names tenant A. When the
+        # issuer has a list, its token must name one of those tenants; one that
+        # names none would be a global principal, so it is refused as well.
+        if config.allowed_tenants is not None and not (
+            isinstance(tenant_id, str) and tenant_id in config.allowed_tenants
+        ):
+            logger.warning(
+                "jwt_tenant_not_bound_to_issuer",
+                tenant_claim=config.tenant_claim,
+                tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+                issuer=claims.get("iss"),
+                subject=subject,
+                reason="tenant_not_allowed_for_issuer",
+            )
+            raise InvalidCredentialsError(
+                message="Tenant not allowed for this issuer",
                 auth_method="jwt",
             )
 
