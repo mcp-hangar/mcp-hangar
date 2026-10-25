@@ -19,8 +19,18 @@ from typing import Any
 
 import pytest
 
-from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
-from mcp_hangar.application.commands.crud_handlers import CreateMcpServerHandler, DeleteMcpServerHandler
+from mcp_hangar.application.commands.crud_commands import (
+    AdoptDiscoveredMcpServerCommand,
+    CreateMcpServerCommand,
+    DeleteMcpServerCommand,
+    UpdateMcpServerCommand,
+)
+from mcp_hangar.application.commands.crud_handlers import (
+    AdoptDiscoveredMcpServerHandler,
+    CreateMcpServerHandler,
+    DeleteMcpServerHandler,
+    UpdateMcpServerHandler,
+)
 from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryOrchestrator
 from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.domain.discovery import discovered_mcp_server as discovered_module
@@ -63,18 +73,28 @@ class _RecordingBus:
 
 
 class _CommandBus:
-    """The real create and delete handlers, recording to the durable backend."""
+    """The real CRUD handlers, recording to the durable backend."""
 
     def __init__(self, repository, event_bus, writer) -> None:
         self.sent: list[Any] = []
-        self._create = CreateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=writer)
-        self._delete = DeleteMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=writer)
+        self._handlers = {
+            CreateMcpServerCommand: CreateMcpServerHandler(
+                repository=repository, event_bus=event_bus, fleet_writer=writer
+            ),
+            DeleteMcpServerCommand: DeleteMcpServerHandler(
+                repository=repository, event_bus=event_bus, fleet_writer=writer
+            ),
+            UpdateMcpServerCommand: UpdateMcpServerHandler(
+                repository=repository, event_bus=event_bus, fleet_writer=writer
+            ),
+            AdoptDiscoveredMcpServerCommand: AdoptDiscoveredMcpServerHandler(
+                repository=repository, fleet_writer=writer
+            ),
+        }
 
     def send(self, command: Any) -> Any:
         self.sent.append(command)
-        if isinstance(command, CreateMcpServerCommand):
-            return self._create.handle(command)
-        return self._delete.handle(command)
+        return self._handlers[type(command)].handle(command)
 
     def of(self, kind: type) -> list[Any]:
         return [c for c in self.sent if isinstance(c, kind)]
@@ -372,20 +392,21 @@ class TestWhatADeclarationProtectsStaysProtected:
 
 @pytest.mark.asyncio
 class TestADiscoveredRowFromBeforeThisFix:
-    """DISCOVERY provenance, but no record of which source registered it or as what."""
+    """DISCOVERY provenance, but no recorded origin: only the description discovery gave it."""
 
     @staticmethod
-    def _write(durable, name: str) -> None:
+    def _write(durable, name: str, description: str | None = "Discovered from filesystem") -> None:
         durable.save(
             McpServerConfigSnapshot(
                 mcp_server_id=name,
                 mode="subprocess",
                 command=["python", "-m", name],
+                description=description,
                 provenance=Provenance.DISCOVERY,
             )
         )
 
-    async def test_it_is_taken_over_when_a_source_reports_it_and_removed_once_lost(self, durable) -> None:
+    async def test_its_own_source_takes_it_over_and_removes_it_once_lost(self, durable) -> None:
         self._write(durable, "older")
 
         second = durable.boot()
@@ -395,7 +416,7 @@ class TestADiscoveredRowFromBeforeThisFix:
 
         # Taken over, not created again: there is nothing to create.
         assert second.commands.of(CreateMcpServerCommand) == []
-        assert second.orchestrator._lifecycle_manager.get_mcp_server("older") is not None
+        assert second.orchestrator.is_tracking("older")
 
         second.source.names = set()
         await second.run_past_the_ttl()
@@ -403,15 +424,105 @@ class TestADiscoveredRowFromBeforeThisFix:
         assert second.repo.get("older") is None
         assert durable.row("older") is None
 
-    async def test_it_stays_while_no_source_reports_it(self, durable) -> None:
-        # Nothing says which source it came from, so no source can be said to
-        # have lost it. It stays until one reports it, as on an additive source.
+    async def test_the_takeover_records_the_origin_so_the_next_restart_takes_it_back_at_once(self, durable) -> None:
+        self._write(durable, "older")
+        second = durable.boot()
+        second.source.names = {"older"}
+        await second.tick(0)
+
+        row = durable.row("older")
+        assert row is not None and row.discovered_as is not None
+        assert row.discovered_as.source_type == "filesystem"
+
+        # The next restart: the source no longer reports it, and nothing has
+        # to report it first for it to be removed.
+        third = durable.boot()
+        await third.run_past_the_ttl()
+
+        assert third.repo.get("older") is None
+
+    async def test_another_source_cannot_take_it_over(self, durable) -> None:
+        # Registered by the docker source; the filesystem source reports the
+        # same name. Before #2106 this row was static, and it must not become
+        # the filesystem source's to replace or remove.
+        self._write(durable, "theirs", description="Discovered from docker")
+
+        second = durable.boot()
+        second.source.names = {"theirs"}
+        await second.tick(0)
+        second.source.names = set()
+        await second.run_past_the_ttl()
+
+        assert second.repo.get("theirs") is not None
+        assert not second.orchestrator.is_tracking("theirs")
+        row = durable.row("theirs")
+        assert row is not None and row.discovered_as is None
+
+    @pytest.mark.parametrize("description", [None, "edited over the API"])
+    async def test_one_whose_source_cannot_be_told_stays_protected(self, durable, description) -> None:
+        self._write(durable, "unknown", description=description)
+
+        second = durable.boot()
+        assert second.is_static("unknown")
+        second.source.names = {"unknown"}
+        await second.tick(0)
+        second.source.names = set()
+        await second.run_past_the_ttl()
+
+        assert second.repo.get("unknown") is not None
+        assert second.commands.sent == []
+
+    async def test_it_stays_while_its_source_does_not_report_it(self, durable) -> None:
+        # Its definition was never recorded, so it cannot be tracked before its
+        # source reports it. It stays until then, as on an additive source.
         self._write(durable, "older")
 
         second = durable.boot()
         await second.run_past_the_ttl()
 
         assert second.repo.get("older") is not None
+
+
+@pytest.mark.asyncio
+class TestTheRowFollowsTheServer:
+    async def test_a_replaced_definition_records_the_new_fingerprint(self, durable) -> None:
+        first = durable.boot()
+        first.source.names = {"moved"}
+        await first.tick(0)
+        before = durable.row("moved")
+        assert before is not None and before.discovered_as is not None
+
+        first.source.variant = "-v2"
+        await first.tick()
+
+        after = durable.row("moved")
+        assert after is not None and after.discovered_as is not None
+        assert after.discovered_as.fingerprint != before.discovered_as.fingerprint
+        assert (
+            after.discovered_as.fingerprint == first.orchestrator._lifecycle_manager.get_mcp_server("moved").fingerprint
+        )
+        assert after.command == ["python", "-m", "moved-v2"]
+
+    async def test_a_server_re_pointed_over_the_api_is_recorded_without_its_origin(self, durable) -> None:
+        first = durable.boot()
+        first.commands.send(
+            CreateMcpServerCommand(
+                mcp_server_id="remote",
+                mode="remote",
+                endpoint="https://93.184.216.34/mcp",
+                source="discovery:docker",
+                provenance=Provenance.DISCOVERY,
+                discovered_as=DiscoveryOrigin(source_type="docker", fingerprint="abc"),
+            )
+        )
+
+        first.commands.send(UpdateMcpServerCommand(mcp_server_id="remote", endpoint="https://93.184.216.35/mcp"))
+
+        row = durable.row("remote")
+        assert row is not None
+        assert row.provenance is Provenance.HUMAN
+        assert row.discovered_as is None
+        assert durable.boot().is_static("remote")
 
 
 class TestTheRowRecordsTheOrigin:

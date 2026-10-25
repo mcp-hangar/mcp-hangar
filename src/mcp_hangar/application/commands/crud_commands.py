@@ -199,6 +199,20 @@ class ForgetPeerKeyNameCommand(Command):
     principal: Principal | None = None
 
 
+@dataclass(frozen=True)
+class AdoptDiscoveredMcpServerCommand(Command):
+    """Hand a discovered server already in the fleet to the source that reports it (#2106).
+
+    For a server discovery registered before a restart whose row records no
+    origin. Accepted only from the source the server belongs to, and the origin
+    is written to the row, so the next restart takes the server back at once
+    (#2112). Sent only by discovery.
+    """
+
+    mcp_server_id: str
+    discovered_as: DiscoveryOrigin
+
+
 # =============================================================================
 # Group CRUD Commands
 # =============================================================================

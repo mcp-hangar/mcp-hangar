@@ -6,39 +6,42 @@ discovery had registered static: an authoritative source never removed it
 again, a changed definition was never applied, and the protection meant for
 what an operator declared covered a server nobody declared.
 
-What is static is what a human declared: the configuration file's servers and
-those created over the API or the CLI, which all carry HUMAN provenance. A row
-written before provenance was recorded reads back HUMAN, so it stays protected
-as it was. Only a DISCOVERY server is handed back to discovery.
+What is static is what discovery cannot claim: the configuration file's servers
+and those created over the API or the CLI, which carry HUMAN provenance (as a
+row written before provenance was recorded reads back), and a discovered server
+whose source cannot be told. A discovered server is handed back to the source it
+belongs to, and to no other.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+from ...application.commands.crud_commands import AdoptDiscoveredMcpServerCommand
 from ...application.discovery import DiscoveryOrchestrator
 from ...domain.discovery.discovered_mcp_server import DiscoveredMcpServer
-from ...domain.value_objects.provenance import DiscoveryOrigin, Provenance
+from ...domain.exceptions import McpServerNotFoundError, ValidationError
+from ...domain.value_objects.provenance import DiscoveryOrigin
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 def declared_mcp_server_ids(repository: Any) -> set[str]:
-    """The servers discovery must not touch: everything but what discovery registered."""
-    return {name for name in repository.get_all_ids() if not _is_discovered(repository.get(name))}
+    """The servers discovery must not touch: all but those a discovery source can claim."""
+    return {name for name in repository.get_all_ids() if _discovering_source(repository.get(name)) is None}
 
 
-def _is_discovered(server: Any) -> bool:
-    return server is not None and server.provenance is Provenance.DISCOVERY
+def _discovering_source(server: Any) -> str | None:
+    return getattr(server, "discovering_source", None) if server is not None else None
 
 
 def discovery_origin_of(mcp_server: DiscoveredMcpServer) -> DiscoveryOrigin | None:
     """What the row records of a discovered server, to take it back after a restart.
 
     None when the report lacks a source or a fingerprint: the row then reads
-    as one written before the origin was recorded, which is taken over when a
-    source next reports it.
+    as one written before the origin was recorded.
     """
     metadata = getattr(mcp_server, "metadata", None)
     namespace = metadata.get("namespace") if isinstance(metadata, dict) else None
@@ -51,29 +54,37 @@ def discovery_origin_of(mcp_server: DiscoveredMcpServer) -> DiscoveryOrigin | No
     )
 
 
-def govern_restored_discovered_servers(orchestrator: DiscoveryOrchestrator, repository: Any) -> None:
-    """Hand the DISCOVERY servers already in the fleet back to *orchestrator*.
+def govern_restored_discovered_servers(
+    orchestrator: DiscoveryOrchestrator, repository: Any, send: Callable[[Any], Any]
+) -> None:
+    """Hand the discovered servers already in the fleet back to *orchestrator*.
 
     A row that records its origin is tracked under the source that registered
     it, from the start of each management tenure (see
-    `DiscoveryOrchestrator._take_back_restored`). A row that does not --
-    written before the origin was recorded -- cannot be attributed to any
-    source, so no source can be said to have lost it; it is taken over when a
-    source next reports it, and stays until then, as on an additive source.
+    `DiscoveryOrchestrator._take_back_restored`).
 
-    Taking one over means answering the registration that report would send:
-    the server is already in the fleet, so creating it again is refused, and a
-    refused registration is never tracked. Only for a name discovery does not
-    already govern: a changed definition of one it does goes on as before.
+    A row written before the origin was recorded is attributed by the
+    description discovery gave it, and taken over when that source next reports
+    it: the registration the report sends is answered by adopting the server,
+    which writes the origin to the row (#2112), instead of a create refused as
+    "already exists" on every cycle. Another source reporting the name is
+    refused, as is every source for a row whose source cannot be told; that one
+    is static. A changed definition of a server discovery tracks goes on as
+    before.
+
+    Args:
+        orchestrator: The orchestrator, its callbacks already set.
+        repository: The fleet.
+        send: Sends a command on the command bus.
     """
 
     def restored() -> list[DiscoveredMcpServer]:
         servers = []
         for name in repository.get_all_ids():
             server = repository.get(name)
-            if not _is_discovered(server) or server.discovered_as is None:
+            origin = getattr(server, "discovered_as", None) if _discovering_source(server) else None
+            if origin is None:
                 continue
-            origin = server.discovered_as
             servers.append(
                 DiscoveredMcpServer.restored(
                     name=name,
@@ -91,15 +102,27 @@ def govern_restored_discovered_servers(orchestrator: DiscoveryOrchestrator, repo
     register = orchestrator.on_register
     if register is None:
         return
+    refused: set[tuple[str, str]] = set()
 
-    async def take_over_or_register(mcp_server: DiscoveredMcpServer) -> bool:
-        if _is_discovered(repository.get(mcp_server.name)) and not orchestrator.is_tracking(mcp_server.name):
-            logger.info(
-                "discovery_took_over_restored_server",
-                mcp_server_name=mcp_server.name,
-                source_type=mcp_server.source_type,
-            )
-            return True
-        return await register(mcp_server)
+    async def adopt_or_register(mcp_server: DiscoveredMcpServer) -> bool:
+        if _discovering_source(repository.get(mcp_server.name)) is None or orchestrator.is_tracking(mcp_server.name):
+            return await register(mcp_server)
+        origin = discovery_origin_of(mcp_server)
+        if origin is None:
+            return False
+        try:
+            send(AdoptDiscoveredMcpServerCommand(mcp_server_id=mcp_server.name, discovered_as=origin))
+        except (McpServerNotFoundError, ValidationError) as e:
+            # Repeated every cycle the source reports the name; said once.
+            if (mcp_server.name, origin.source_type) not in refused:
+                refused.add((mcp_server.name, origin.source_type))
+                logger.warning(
+                    "discovery_takeover_refused",
+                    mcp_server_name=mcp_server.name,
+                    source_type=origin.source_type,
+                    detail=str(e),
+                )
+            return False
+        return True
 
-    orchestrator.on_register = take_over_or_register
+    orchestrator.on_register = adopt_or_register

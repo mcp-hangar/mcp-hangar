@@ -34,6 +34,25 @@ class Provenance(Enum):
         return self.value
 
 
+#: How discovery has always described what it registers. A row written before
+#: the origin was recorded says nothing else about where it came from, so this
+#: is what attributes it to a source (#2106).
+_DISCOVERED_FROM = "Discovered from "
+
+
+def discovered_description(source_type: str) -> str:
+    """The description discovery gives a server it registers."""
+    return _DISCOVERED_FROM + source_type
+
+
+def source_of_discovered_description(description: str | None) -> str | None:
+    """The source a description written by discovery names, or None for any other description."""
+    if not description or not description.startswith(_DISCOVERED_FROM):
+        return None
+    source_type = description[len(_DISCOVERED_FROM) :]
+    return source_type if source_type and source_type.strip() == source_type else None
+
+
 @dataclass(frozen=True)
 class DiscoveryOrigin:
     """Which discovery source registered a server, and the definition it reported (#2106).

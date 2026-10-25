@@ -59,7 +59,7 @@ from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..value_objects.peer_identity import PeerIdentity, connection_declaration
-from ..value_objects.provenance import DiscoveryOrigin, Provenance
+from ..value_objects.provenance import DiscoveryOrigin, Provenance, source_of_discovered_description
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .mcp_server_config import McpServerConfig
@@ -641,6 +641,27 @@ class McpServer(AggregateRoot):
     def discovered_as(self) -> DiscoveryOrigin | None:
         """For a discovered server, the source that registered it and the definition it reported."""
         return self._discovered_as
+
+    @property
+    def discovering_source(self) -> str | None:
+        """The discovery source this server belongs to, or None when that cannot be said (#2106).
+
+        The recorded origin's source; for a row written before the origin was
+        recorded, the source its description names, as discovery wrote it.
+        None for a server discovery did not register, and for a discovered one
+        whose description no longer names a source.
+        """
+        if self._provenance is not Provenance.DISCOVERY:
+            return None
+        if self._discovered_as is not None:
+            return self._discovered_as.source_type
+        return source_of_discovered_description(self._description)
+
+    def adopt_discovery_origin(self, origin: DiscoveryOrigin) -> None:
+        """Record the origin of a discovered server whose row had none (#2112)."""
+        with self._lock:
+            if self._provenance is Provenance.DISCOVERY:
+                self._discovered_as = origin
 
     @property
     def mode(self) -> McpServerMode:
