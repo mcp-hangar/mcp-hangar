@@ -19,6 +19,10 @@ Label Reference:
     mcp.hangar.path: "/mcp"              # For http mode only - the MCP endpoint's path (default /mcp)
     mcp.hangar.command: "python app.py"  # Optional - override container command
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
+    mcp.hangar.read-only: "false"        # Optional - opt out of the read-only root (default: true)
+
+A ``mcp.hangar.volumes`` label is honoured only for host paths under the
+source's ``allowed_mount_paths``; a label is not the operator.
 """
 
 import asyncio
@@ -150,6 +154,7 @@ class DockerDiscoverySource(DiscoverySource):
         initial_backoff_s: float = 1.0,
         max_backoff_s: float = 30.0,
         connect_timeout_s: float = 5.0,
+        allowed_mount_paths: list[str] | None = None,
     ):
         """Initialize discovery source.
 
@@ -163,6 +168,10 @@ class DockerDiscoverySource(DiscoverySource):
             connect_timeout_s: Timeout of each request a connection attempt
                 makes, instead of the client's default of 60 s. A connected
                 client gets the default back.
+            allowed_mount_paths: Absolute host directories a `mcp.hangar.volumes`
+                label may mount from. Empty means no label volume is accepted:
+                anyone who can create a labelled container would otherwise
+                choose the host mounts of a container the gateway launches.
         """
         super().__init__(mode)
 
@@ -177,6 +186,9 @@ class DockerDiscoverySource(DiscoverySource):
         self._max_backoff_s = max_backoff_s
         self._connect_timeout_s = connect_timeout_s
         self._known_container_ids: set[str] = set()
+        self._allowed_mount_paths = [os.path.normpath(p) for p in (allowed_mount_paths or ()) if os.path.isabs(p)]
+        #: Names already warned about, so a refusal repeated every cycle logs once.
+        self._refused: set[str] = set()
         #: Set by request_stop() and stop(), cleared by start(). The retry
         #: backoff waits on it, on the connection's own thread (#1436).
         self._stop_requested = threading.Event()
@@ -364,8 +376,8 @@ class DockerDiscoverySource(DiscoverySource):
         name = labels.get(f"{self.LABEL_PREFIX}name", container.name)
         mode = labels.get(f"{self.LABEL_PREFIX}mode", "container")
 
-        # Parse read-only setting (default: false for discovered containers)
-        read_only_str = labels.get(f"{self.LABEL_PREFIX}read-only", "false").lower()
+        # Read-only root by default, like a container declared in config.
+        read_only_str = labels.get(f"{self.LABEL_PREFIX}read-only", "true").lower()
         read_only = read_only_str in ("true", "1", "yes")
 
         # Image info
@@ -385,7 +397,12 @@ class DockerDiscoverySource(DiscoverySource):
             if cmd := labels.get(f"{self.LABEL_PREFIX}command"):
                 connection_info["command"] = cmd.split()
             if vols := labels.get(f"{self.LABEL_PREFIX}volumes"):
-                connection_info["volumes"] = [v.strip() for v in vols.split(",")]
+                volumes = [v.strip() for v in vols.split(",")]
+                bad = [v for v in volumes if not self._label_volume_allowed(v)]
+                if bad:
+                    self._refuse(name, bad)
+                    return None
+                connection_info["volumes"] = volumes
 
             mode = "container"  # Normalize
 
@@ -516,6 +533,35 @@ class DockerDiscoverySource(DiscoverySource):
             return ip, port
 
         return None
+
+    def _refuse(self, name: str, volumes: list[str]) -> None:
+        """Log, once per name, a container whose label asks for host mounts this source does not allow."""
+        log = logger.debug if name in self._refused else logger.warning
+        self._refused.add(name)
+        log(
+            "docker_discovery_label_volumes_refused",
+            mcp_server_name=name,
+            volumes=volumes,
+            detail="a label asked Hangar to mount host paths outside this source's `allowed_mount_paths`",
+            hint="list the host directories in `allowed_mount_paths` on this docker source to allow them",
+        )
+
+    def _label_volume_allowed(self, volume: str) -> bool:
+        """Whether a label-supplied mount stays inside an operator-allowed directory.
+
+        No `~` or variable expansion: a label is not the operator. Runtime
+        sockets are refused even inside an allowed directory, since mounting
+        one hands the container the daemon.
+        """
+        host_path = volume.split(":", 1)[0]
+        if not os.path.isabs(host_path):
+            return False
+        host_path = os.path.normpath(host_path)
+        if host_path == "/" or host_path.endswith(".sock"):
+            return False
+        return any(
+            host_path == root or host_path.startswith(root.rstrip("/") + "/") for root in self._allowed_mount_paths
+        )
 
     async def health_check(self) -> bool:
         """Report whether the runtime answered when discovery last reached it.
