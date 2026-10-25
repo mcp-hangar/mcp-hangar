@@ -38,6 +38,19 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 _PROVIDER = Path(__file__).resolve().parents[1] / "slow_provider.py"
 _STARTUP_TIMEOUT_S = 30.0
 _HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+_MODERN = "2026-07-28"
+#: The per-request negotiation a 2026-07-28 request carries instead of a handshake.
+_MODERN_META = {
+    "io.modelcontextprotocol/protocolVersion": _MODERN,
+    "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
+    "io.modelcontextprotocol/clientCapabilities": {},
+}
+
+
+def _modern_headers(method: str, name: str | None = None) -> dict[str, str]:
+    return dict(
+        _HEADERS, **{"MCP-Protocol-Version": _MODERN, "Mcp-Method": method}, **({"Mcp-Name": name} if name else {})
+    )
 
 
 def _free_port() -> int:
@@ -104,37 +117,50 @@ def gateways() -> Iterator[list[Gateway]]:
             gateway.proc.wait()
 
 
-def _call_in_background(gateway: Gateway, seconds: float) -> tuple[threading.Thread, dict[str, Any]]:
-    """Call `sleep` through `hangar_call` on a thread; the dict gets the JSON-RPC answer, or the error."""
+def _call_in_background(
+    gateway: Gateway, seconds: float, *, modern: bool = False
+) -> tuple[threading.Thread, dict[str, Any]]:
+    """Call `sleep` through `hangar_call` on a thread; the dict gets the JSON-RPC answer, or the error.
+
+    `modern` calls on the 2026-07-28 era: no handshake, and an answer that is a
+    plain JSON body unless the call runs long enough to commit to a stream.
+    """
     outcome: dict[str, Any] = {}
     client = httpx.Client(timeout=60)
-    init = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}},
+    params: dict[str, Any] = {
+        "name": "hangar_call",
+        "arguments": {"calls": [{"mcp_server": "slow", "tool": "sleep", "arguments": {"seconds": seconds}}]},
     }
-    client.post(gateway.url, headers=_HEADERS, json=init).raise_for_status()
-    headers = dict(_HEADERS, **{"mcp-protocol-version": "2025-06-18"})
-    client.post(gateway.url, headers=headers, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
-    call = {
-        "jsonrpc": "2.0",
-        "id": 7,
-        "method": "tools/call",
-        "params": {
-            "name": "hangar_call",
-            "arguments": {"calls": [{"mcp_server": "slow", "tool": "sleep", "arguments": {"seconds": seconds}}]},
-        },
-    }
+    if modern:
+        headers = _modern_headers("tools/call", "hangar_call")
+        params["_meta"] = _MODERN_META
+    else:
+        init = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "t", "version": "1"},
+            },
+        }
+        client.post(gateway.url, headers=_HEADERS, json=init).raise_for_status()
+        headers = dict(_HEADERS, **{"mcp-protocol-version": "2025-06-18"})
+        client.post(gateway.url, headers=headers, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    call = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params}
 
     def run() -> None:
         try:
             with client.stream("POST", gateway.url, headers=headers, json=call) as response:
                 body = b"".join(response.iter_bytes()).decode()
-            frames = [line[len("data: ") :] for line in body.splitlines() if line.startswith("data: ")]
             outcome["status"] = response.status_code
             outcome["content_type"] = response.headers.get("content-type", "")
-            outcome["messages"] = [json.loads(frame) for frame in frames]
+            if outcome["content_type"].startswith("application/json"):
+                outcome["messages"] = [json.loads(body)]
+            else:
+                frames = [line[len("data: ") :] for line in body.splitlines() if line.startswith("data: ")]
+                outcome["messages"] = [json.loads(frame) for frame in frames]
         except httpx.HTTPError as exc:
             outcome["error"] = f"{type(exc).__name__}: {exc}"
         outcome["at"] = time.monotonic()
@@ -204,13 +230,14 @@ def test_a_call_that_finishes_within_the_bound_is_delivered(tmp_path: Path, gate
     assert exited_after < 8
 
 
+@pytest.mark.parametrize("modern", [False, True], ids=["2025-06-18", "2026-07-28"])
 def test_a_call_longer_than_the_bound_gets_an_error_and_the_gateway_exits(
-    tmp_path: Path, gateways: list[Gateway]
+    tmp_path: Path, gateways: list[Gateway], modern: bool
 ) -> None:
     bound_s = 1
     gateway = _start(tmp_path, bound_s=bound_s)
     gateways.append(gateway)
-    thread, outcome = _call_in_background(gateway, seconds=30)
+    thread, outcome = _call_in_background(gateway, seconds=30, modern=modern)
     sigterm_at = _stop_once_in_flight(gateway)
 
     thread.join(30)
@@ -222,7 +249,8 @@ def test_a_call_longer_than_the_bound_gets_an_error_and_the_gateway_exits(
     assert message["id"] == 7
     assert message["error"]["code"] == -32000, message
     assert message["error"]["data"]["reason"] == "shutdown"
-    assert outcome["content_type"].startswith("text/event-stream")
+    # Each era's own format: the handshake era's stream, the modern era's JSON body.
+    assert outcome["content_type"].startswith("application/json" if modern else "text/event-stream")
     assert bound_s <= outcome["at"] - sigterm_at < bound_s + 3
     assert exited_after < bound_s + 6
     # The upstream call was abandoned, not run to completion: its server is gone.
@@ -263,3 +291,38 @@ def test_an_open_list_changed_stream_does_not_hold_an_unbounded_stop(tmp_path: P
 
     assert ended_after < 3
     assert _exit_after(gateway, sigterm_at, timeout_s=30) < 5
+
+
+def test_an_open_listen_stream_does_not_lengthen_a_bounded_stop(tmp_path: Path, gateways: list[Gateway]) -> None:
+    # A 2026-07-28 `subscriptions/listen` POST stays open; it is not a call to
+    # wait for, so the stop ends at the bound as it did before, not after it.
+    bound_s = 2
+    gateway = _start(tmp_path, bound_s=bound_s, front_door=True)
+    gateways.append(gateway)
+    listen = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "subscriptions/listen",
+        "params": {"notifications": {"toolsListChanged": True}, "_meta": _MODERN_META},
+    }
+    acknowledged = threading.Event()
+
+    def read() -> None:  # a listening client reads all along
+        with httpx.Client(timeout=30) as client:
+            try:
+                headers = _modern_headers("subscriptions/listen")
+                with client.stream("POST", gateway.url, headers=headers, json=listen) as stream:
+                    for line in stream.iter_lines():
+                        if line.startswith("data: "):
+                            acknowledged.set()
+            except httpx.HTTPError:
+                pass
+
+    threading.Thread(target=read, daemon=True).start()
+    assert acknowledged.wait(10)
+    sigterm_at = time.monotonic()
+    gateway.proc.send_signal(signal.SIGTERM)
+    exited_after = _exit_after(gateway, sigterm_at, timeout_s=30)
+
+    assert exited_after < bound_s + 1.5
+    assert "http_shutdown_abandoned_calls" not in gateway.log.read_text()

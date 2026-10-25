@@ -445,6 +445,7 @@ class ServerLifecycle:
         self._context = context
         self._running = False
         self._shutdown_requested = False
+        self._http_exit_armed = False
         self._discovery_loop: asyncio.AbstractEventLoop | None = None
         self._discovery_thread: threading.Thread | None = None
         self._catalogue_retry = CatalogueRetry(context.runtime)
@@ -728,18 +729,15 @@ class ServerLifecycle:
         )
 
         async def run_server():
-            server = DrainingServer(config, drain)
+            server = DrainingServer(config, drain, on_overrun=self._stop_and_end_soon)
             logger.info("http_server_started", host=host, port=port, endpoint="/mcp")
             try:
                 await server.serve()
             finally:
                 self.shutdown()
                 logger.info("http_server_stopped")
-                if drain.abandoned:
-                    # An abandoned call may still hold a worker thread, which the
-                    # interpreter would wait for before exiting; stopping its
-                    # server above normally ends it first.
-                    _end_after(HTTP_EXIT_GRACE_S, event="http_exit_forced", reason="abandoned_calls_still_running")
+                if drain.abandoned or drain.overran:
+                    self._stop_and_end_soon()
 
         try:
             with SseDrainHeld():
@@ -755,6 +753,19 @@ class ServerLifecycle:
                 error_type=type(e).__name__,
             )
             sys.exit(1)
+
+    def _stop_and_end_soon(self) -> None:
+        """Stop the components, then end the process if it has not exited shortly after (#2097).
+
+        For a stop that went on with work still in flight -- calls abandoned at
+        the bound, requests that are not batches, or a force-quit. That work may
+        hold a worker thread the interpreter (or the SDK's task group) would wait
+        for; stopping the servers it waits on normally ends it first.
+        """
+        self.shutdown()
+        if not self._http_exit_armed:
+            self._http_exit_armed = True
+            _end_after(HTTP_EXIT_GRACE_S, event="http_exit_forced", reason="work_still_running_after_stop")
 
     def shutdown(self) -> None:
         """Graceful shutdown of all components.

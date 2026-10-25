@@ -1399,11 +1399,7 @@ class BatchExecutor:
 
         tracer = get_tracer(__name__)
 
-        # Completes if an HTTP stop runs out of its bound while this batch is in
-        # flight: the batch then returns without waiting for its calls (#2097).
-        abandon_signal = track_batch(cancel_event)
-        if abandon_signal is None:
-            raise batch_abandoned_error(batch_id)
+        abandon_signal: Future[None] | None = None
         abandoned = False
 
         # Track active batches for metrics
@@ -1436,6 +1432,12 @@ class BatchExecutor:
         # asyncio.to_thread copy both surfaces used to take -- would otherwise
         # hand the next call the headers this one routed on (#1503).
         try:
+            # Completes if an HTTP stop runs out of its bound while this batch
+            # is in flight: the batch then returns without waiting for its
+            # calls (#2097).
+            abandon_signal = track_batch(cancel_event)
+            if abandon_signal is None:
+                raise batch_abandoned_error(batch_id)
             with tracer.start_as_current_span("batch.execute") as batch_span:
                 batch_span.set_attribute("batch.id", batch_id)
                 batch_span.set_attribute("batch.call_count", len(calls))
@@ -1687,7 +1689,8 @@ class BatchExecutor:
                 )
 
         finally:
-            untrack_batch(abandon_signal)
+            if abandon_signal is not None:
+                untrack_batch(abandon_signal)
             release_routing_headers(routing_token)
             reset_current_protocol_negotiation(negotiation_token)
             with self._active_lock:

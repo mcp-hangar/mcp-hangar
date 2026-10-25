@@ -14,12 +14,21 @@ said.
 2. It waits for every MCP POST in flight to be answered, and for every batch
    in flight to end -- without a bound when none is set, as before, and for at
    most the bound when one is.
-3. When the bound runs out it abandons the batches in flight: each returns at
-   once and its caller is answered with a JSON-RPC error on the stream it is
-   waiting on. It then gives those answers :data:`ABANDON_GRACE_S` to be written.
-4. Only then does it let sse-starlette close the streams still open -- the
+3. When the bound runs out it abandons the batches in flight -- ``hangar_call``
+   and the front door's tool calls: each returns at once and its caller is
+   answered with a JSON-RPC error on the stream it is waiting on. It then gives
+   those answers :data:`ABANDON_GRACE_S` to be written.
+4. Anything still in flight after that is not a batch -- ``hangar_start``,
+   ``hangar_warm``, a cold ``hangar_tools``, a resource read -- and has no
+   answer to give. The server's components are stopped then, which ends the
+   upstream work they wait on, and the process is ended shortly after if
+   something still holds it. Those requests end with the connection.
+5. Only then does it let sse-starlette close the streams still open -- the
    ``list_changed`` GET streams, which never end on their own -- and hands the
    rest of the stop to uvicorn, with what is left of the bound.
+
+A 2026-07-28 ``subscriptions/listen`` POST is a stream that never ends on its
+own, so it is not waited for.
 """
 
 from __future__ import annotations
@@ -44,6 +53,16 @@ STREAM_CLOSE_GRACE_S = 1.0
 
 _POLL_S = 0.05
 
+#: Methods whose POST answers with a stream that stays open: not a request to wait for.
+_STREAM_METHODS = frozenset({"subscriptions/listen"})
+
+
+def _is_stream(scope: Any) -> bool:
+    # The 2026-07-28 era requires `Mcp-Method` and the SDK refuses a body that
+    # disagrees with it, so the header is what the request is.
+    method = next((value for key, value in scope.get("headers", ()) if key.lower() == b"mcp-method"), b"")
+    return method.decode("latin-1") in _STREAM_METHODS
+
 
 class McpRequestDrain:
     """ASGI wrapper around the MCP app that counts the POSTs it is still answering.
@@ -56,9 +75,12 @@ class McpRequestDrain:
         self._app = app
         self.in_flight = 0
         self.abandoned = 0
+        #: Whether the stop went on with requests still in flight: the bound ran
+        #: out, or uvicorn was told to quit at once.
+        self.overran = False
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or scope.get("method") != "POST":
+        if scope["type"] != "http" or scope.get("method") != "POST" or _is_stream(scope):
             await self._app(scope, receive, send)
             return
         self.in_flight += 1
@@ -87,21 +109,33 @@ class McpRequestDrain:
                 batches_in_flight=in_flight_batch_count(),
                 graceful_shutdown_timeout_s=bound_s,
             )
-        abandoned_at: float | None = None
-        while self._busy() and not force_exit():
+        abandoned = False
+        while self._busy():
+            if force_exit():
+                self.overran = True
+                return
             now = loop.time()
             if deadline is not None and now >= deadline:
-                if abandoned_at is not None:
-                    break
-                self.abandoned = abandon_in_flight_batches()
-                abandoned_at = now
-                deadline = now + ABANDON_GRACE_S
+                if not abandoned:
+                    abandoned = True
+                    self.abandoned = abandon_in_flight_batches()
+                    if self.abandoned:
+                        logger.warning(
+                            "http_shutdown_abandoned_calls",
+                            batches=self.abandoned,
+                            requests_in_flight=self.in_flight,
+                            graceful_shutdown_timeout_s=bound_s,
+                        )
+                        deadline = now + ABANDON_GRACE_S
+                        continue
+                self.overran = True
                 logger.warning(
-                    "http_shutdown_abandoned_calls",
-                    batches=self.abandoned,
+                    "http_shutdown_bound_exceeded",
                     requests_in_flight=self.in_flight,
+                    batches_in_flight=in_flight_batch_count(),
                     graceful_shutdown_timeout_s=bound_s,
                 )
+                return
             await asyncio.sleep(_POLL_S)
 
 
@@ -116,11 +150,22 @@ def _uvicorn_handle_exit() -> Callable[..., None]:
 
 
 class DrainingServer(uvicorn.Server):
-    """A ``uvicorn.Server`` whose stop drains the MCP requests in flight first."""
+    """A ``uvicorn.Server`` whose stop drains the MCP requests in flight first.
 
-    def __init__(self, config: uvicorn.Config, drain: McpRequestDrain) -> None:
+    Args:
+        config: The uvicorn configuration.
+        drain: The wrapper counting the MCP requests in flight.
+        on_overrun: Run on a worker thread when the bound ran out with requests
+            still in flight, before the rest of the stop: what ends the work
+            they wait on.
+    """
+
+    def __init__(
+        self, config: uvicorn.Config, drain: McpRequestDrain, on_overrun: Callable[[], None] | None = None
+    ) -> None:
         super().__init__(config)
         self._drain = drain
+        self._on_overrun = on_overrun
 
     def handle_exit(self, sig: int, frame: Any) -> None:
         # Not through sse-starlette's patch, which ends every SSE stream the
@@ -142,6 +187,8 @@ class DrainingServer(uvicorn.Server):
         bound = self.config.timeout_graceful_shutdown
         try:
             await self._drain.drain(bound, lambda: self.force_exit)
+            if self._drain.overran and not self.force_exit and self._on_overrun is not None:
+                await asyncio.to_thread(self._on_overrun)
         finally:
             # Nothing else ends the GET streams now: sse-starlette was told not to.
             _end_sse_streams()
