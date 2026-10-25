@@ -18,7 +18,7 @@ from ...domain.discovery import DiscoveryMode
 from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
-from .request_body import missing_fields
+from .request_body import json_body, missing_fields
 from .serializers import HangarJSONResponse
 
 #: The discovery source-management surface (register/update/deregister a source,
@@ -222,7 +222,7 @@ async def register_source(request: Request) -> HangarJSONResponse:
         DiscoveryNotConfigured: If discovery is not configured.
     """
     _require_orchestrator()  # Guard: discovery must be configured
-    body = await request.json()
+    body = await json_body(request)
     if (invalid := missing_fields(body, "source_type", "mode")) is not None:
         return invalid
     if (invalid := _invalid_mode(body["mode"])) is not None:
@@ -259,7 +259,9 @@ async def update_source(request: Request) -> HangarJSONResponse:
         McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     if (invalid := _invalid_mode(body.get("mode"))) is not None:
         return invalid
     result = await dispatch_command(
@@ -332,7 +334,7 @@ async def toggle_source(request: Request) -> HangarJSONResponse:
         McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
-    body = await request.json()
+    body = await json_body(request)
     if (invalid := missing_fields(body, "enabled")) is not None:
         return invalid
     result = await dispatch_command(

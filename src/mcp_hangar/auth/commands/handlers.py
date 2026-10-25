@@ -4,6 +4,7 @@ Implements CQRS command handlers for auth operations.
 All handlers emit domain events via the event bus.
 """
 
+from datetime import UTC
 from typing import Any
 
 from mcp_hangar.auth.commands.commands import (
@@ -67,7 +68,13 @@ class CreateApiKeyHandler(CommandHandler):
         raw_key = self._store.create_key(
             principal_id=command.principal_id,
             name=command.name,
-            expires_at=command.expires_at,
+            # An expiry without an offset is UTC, for every caller: the stores
+            # compare it with an aware "now" (#2046).
+            expires_at=(
+                command.expires_at.replace(tzinfo=UTC)
+                if command.expires_at is not None and command.expires_at.tzinfo is None
+                else command.expires_at
+            ),
             groups=command.groups,
             tenant_id=command.tenant_id,
             created_by=command.created_by,

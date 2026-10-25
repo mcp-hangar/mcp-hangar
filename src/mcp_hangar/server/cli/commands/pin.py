@@ -11,6 +11,11 @@ a tool list is what a server answers.
     mcp-hangar pin --write         # merge them into the config
     mcp-hangar pin --check         # exit 1 when the file and the servers disagree
 
+A `mode: group` entry is never started: it serves its members' tools. Its
+members are asked instead, and `--check` holds the group's own pins against
+every member that serves the pinned tool, as the gateway does. `--write` writes
+no pins into a group, nor into a member defined inline in one.
+
 Exit codes: 0 agreement (or a successful write), 1 drift, 2 the question could
 not be answered -- no such config, unreadable YAML, unknown `--server`, or a
 server that never came up.
@@ -180,8 +185,11 @@ def _report_write(
     as_json: bool,
     quiet: bool,
 ) -> None:
-    backup = write_config_with_pins(path, merge_pins(document, observations))
-    written = {o.mcp_server_id: len(o.digests) for o in observations if o.ok}
+    merged = merge_pins(document, observations)
+    backup = write_config_with_pins(path, merged)
+    # Only what `merge_pins` wrote: a member defined inline in a group was asked, not pinned.
+    declared = document.get("mcp_servers") or {}
+    written = {o.mcp_server_id: len(o.digests) for o in observations if o.ok and o.mcp_server_id in declared}
 
     if as_json:
         console.print_json(
@@ -224,6 +232,7 @@ def _report_check(
                             "tool": d.tool,
                             "expected": d.expected,
                             "observed": d.observed,
+                            **({"member": d.member} if d.member is not None else {}),
                         }
                         for d in drift
                     ],
@@ -234,8 +243,9 @@ def _report_check(
     else:
         for d in drift:
             observed = d.observed or "(no longer served)"
+            via = f" (member {d.member})" if d.member is not None else ""
             console.print(
-                f"[red]drift[/red] {d.mcp_server_id}.{d.tool}\n  pinned:   {d.expected}\n  serving:  {observed}"
+                f"[red]drift[/red] {d.mcp_server_id}.{d.tool}{via}\n  pinned:   {d.expected}\n  serving:  {observed}"
             )
         for observation in failed:
             console.print(f"[red]{observation.mcp_server_id}: {observation.error}[/red]")
