@@ -277,15 +277,7 @@ class DiscoveryService:
                 # "everything is gone". Only a source that reports itself
                 # healthy after the scan is trusted to have lost anything.
                 if source.mode == DiscoveryMode.AUTHORITATIVE and await source.health_check():
-                    for name, existing in self._conflict_resolver.get_all_registered().items():
-                        if existing.source_type != source_type or name in current_names:
-                            continue
-                        if existing.is_expired():
-                            self._conflict_resolver.deregister(name)
-                            result.deregistered_count += 1
-                            logger.info(f"Deregistered expired mcp_server: {name}")
-                        else:
-                            result.lost_names.add(name)
+                    self._remove_what_was_lost(source, source_type, current_names, result)
 
                 # Update tracked mcp_servers for this source
                 self._mcp_servers_by_source[source_type] = current_names
@@ -315,6 +307,55 @@ class DiscoveryService:
         )
 
         return result
+
+    def _remove_what_was_lost(
+        self, source: DiscoverySource, source_type: str, current_names: set[str], result: DiscoveryCycleResult
+    ) -> None:
+        """Deregister what an authoritative *source* stopped reporting and whose TTL ran out.
+
+        A name lost within its TTL goes into `result.lost_names`, so its
+        last sighting is not refreshed.
+        """
+        # Servers kept because the part of the scan that would have
+        # reported them failed this cycle (#2089), by that part.
+        kept: dict[str, list[DiscoveredMcpServer]] = {}
+        for name, existing in self._conflict_resolver.get_all_registered().items():
+            if existing.source_type != source_type or name in current_names:
+                continue
+            # A namespace that could not be listed or a file that
+            # could not be read says nothing about what is in it,
+            # just as a scan that fails as a whole does. The server
+            # is not removed, and stays out of `lost_names` so the
+            # lifecycle manager keeps it exactly as through a failed
+            # scan. Its sighting here is not refreshed, so once its
+            # part answers again without it, it leaves the resolver
+            # at once and the lifecycle manager removes it one TTL
+            # later, like any server that stops being reported.
+            part = source.unscanned_part(existing)
+            if part is not None:
+                kept.setdefault(part, []).append(existing)
+                continue
+            if existing.is_expired():
+                self._conflict_resolver.deregister(name)
+                result.deregistered_count += 1
+                logger.info(f"Deregistered expired mcp_server: {name}")
+            else:
+                result.lost_names.add(name)
+        # Every cycle, not once: a part that stays broken keeps its
+        # servers for as long as it does, and that must be visible.
+        for part, servers in kept.items():
+            logger.warning(
+                "discovery_part_failed_servers_kept",
+                source_type=source_type,
+                part=part,
+                kept=sorted(s.name for s in servers),
+                # Not reported by the source for longer than their TTL. The
+                # lifecycle manager keeps them meanwhile, as through a failed
+                # scan; once the part answers without them, they are removed
+                # one TTL later.
+                unreported_past_ttl=sorted(s.name for s in servers if s.is_expired()),
+                detail="this part of the scan failed, so what it registered is kept until it answers again",
+            )
 
     async def discover_from_source(self, source_type: str) -> list[DiscoveredMcpServer]:
         """Run discovery from a single source.

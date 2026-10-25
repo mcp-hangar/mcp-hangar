@@ -263,6 +263,29 @@ class DiscoverySource(ABC):
         """
         return None
 
+    def unscanned_part(self, mcp_server: DiscoveredMcpServer) -> str | None:
+        """The part of the last scan that failed and would have reported *mcp_server*, or None.
+
+        Optional, like `policy_violation`: a source whose scan either succeeds
+        or raises as a whole says nothing, and existing implementations keep
+        working unchanged. A source that scans several parts -- namespaces,
+        files -- and carries on when one of them fails overrides this, so an
+        authoritative source does not count a server as gone because the part
+        that would have listed it could not be read this cycle (#2089).
+
+        Called after `discover()` returned, for a server this source registered
+        earlier and did not report this time.
+
+        Args:
+            mcp_server: The server as it was last registered, including the
+                `metadata` the source put on it.
+
+        Returns:
+            A short label for the failed part, e.g. `namespace payments`, or
+            None when the server's part was scanned and the server is absent.
+        """
+        return None
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(type={self.source_type}, mode={self.mode})"
 
