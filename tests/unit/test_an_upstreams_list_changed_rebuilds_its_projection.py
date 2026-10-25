@@ -21,6 +21,7 @@ from mcp_hangar.application.read_models.tool_projection import (
     get_tool_projection_registry,
     reset_tool_projection_registry,
 )
+from mcp_hangar.domain.events import McpServerStarted
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.model.tool_catalog import ToolCatalog, ToolSchema
 from mcp_hangar.domain.services import subscription_relay, tool_catalogue_changes
@@ -131,6 +132,8 @@ def test_subscribing_wires_both_triggers() -> None:
 
     handler = subscribe_tool_projection(bus, _Repo())  # type: ignore[arg-type]
 
-    bus.subscribe.assert_called_once()
+    # The start, once; the other subscriptions drop a server that leaves the fleet (#2088).
+    starts = [c for c in bus.subscribe.call_args_list if c.args[0] is McpServerStarted]
+    assert len(starts) == 1
     assert tool_catalogue_changes.announce("unknown") is True  # taken, and a no-op for an unknown server
-    assert bus.subscribe.call_args.args[1] == handler.handle
+    assert starts[0].args[1] == handler.handle
