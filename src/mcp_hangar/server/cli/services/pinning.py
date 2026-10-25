@@ -54,6 +54,24 @@ class Drift:
     tool: str
     expected: str | None  # pin in the config; None when the tool has no pin
     observed: str | None  # digest now; None when the tool is no longer served
+    #: For a pin declared on a group: the member that serves *observed*; None when no member serves it.
+    member: str | None = None
+
+
+def is_group(spec: Any) -> bool:
+    """Whether an `mcp_servers` entry is a group, tested exactly as the loader tests it."""
+    return isinstance(spec, dict) and spec.get("mode", "subprocess") == "group"
+
+
+def group_members(config: dict[str, Any]) -> dict[str, list[str]]:
+    """Each group's member ids, in declaration order, as the loader reads them."""
+    members: dict[str, list[str]] = {}
+    for group_id, spec in (config.get("mcp_servers") or {}).items():
+        if not is_group(spec):
+            continue
+        ids = [str(m["id"]) for m in spec.get("members") or [] if isinstance(m, dict) and m.get("id")]
+        members[str(group_id)] = list(dict.fromkeys(ids))
+    return members
 
 
 def digest_tools(mcp_server: McpServer) -> dict[str, str]:
@@ -75,18 +93,58 @@ def observe_digests(
     Starting is the only way to ask: a tool list is what a server answers, not
     something the configuration knows. Each server is stopped again afterwards --
     this command is not a gateway.
+
+    A group is not a server and is never started: it serves its members' tools.
+    Selecting a group (by default every group is selected) observes its members
+    instead -- a member declared under `mcp_servers` once, a member defined inline
+    from its own entry, as the loader builds it -- so `find_drift` can hold the
+    group's own pins against each of them.
     """
     config = load_configuration(str(config_path))
-    servers: dict[str, Any] = config.get("mcp_servers", {}) or {}
+    every_entry: dict[str, Any] = config.get("mcp_servers", {}) or {}
+    _stop_what_loading_started(every_entry)
 
+    entries = every_entry
     if mcp_server_ids:
-        unknown = [name for name in mcp_server_ids if name not in servers]
+        unknown = [name for name in mcp_server_ids if name not in entries]
         if unknown:
             raise KeyError(", ".join(sorted(unknown)))
-        servers = {name: servers[name] for name in mcp_server_ids}
+        entries = {name: entries[name] for name in mcp_server_ids}
+
+    servers: dict[str, Any] = {}
+    for name, spec in entries.items():
+        if not is_group(spec):
+            servers.setdefault(name, spec)
+            continue
+        for member in spec.get("members") or []:
+            member_id = member.get("id") if isinstance(member, dict) else None
+            if not member_id:
+                continue
+            declared = every_entry.get(member_id)
+            # A member naming a declared server is that server; otherwise it is built from its own entry.
+            servers.setdefault(str(member_id), declared if declared is not None and not is_group(declared) else member)
 
     per_server_timeout = max(timeout_s / len(servers), MIN_PER_SERVER_TIMEOUT_SECONDS) if servers else timeout_s
     return [_observe_one(name, spec, per_server_timeout) for name, spec in servers.items()]
+
+
+def _stop_what_loading_started(entries: dict[str, Any]) -> None:
+    """Stop the members a group's `auto_start` started while the file was loaded.
+
+    The loader is the gateway's, and a gateway starts a group's members as it
+    builds the group. This command starts each server it asks itself and stops
+    it again; the loader's copies would otherwise keep running until it exits.
+    """
+    from ....server.state import GROUPS
+
+    for group_id, spec in entries.items():
+        group = GROUPS.get(group_id) if is_group(spec) else None
+        if group is None:
+            continue
+        try:
+            group.stop_all()
+        except Exception:  # noqa: BLE001 -- best-effort cleanup; observing does not depend on it
+            logger.warning("pin_group_members_not_stopped", group_id=group_id)
 
 
 def _observe_one(mcp_server_id: str, spec: dict[str, Any], timeout_s: float) -> Observation:
@@ -160,9 +218,10 @@ def find_drift(config: dict[str, Any], observations: list[Observation]) -> list[
     `--check` fail for every deployment that pins some of its surface.
     """
     pins = configured_pins(config)
+    groups = group_members(config)
     drift: list[Drift] = []
     for observation in observations:
-        if not observation.ok:
+        if not observation.ok or observation.mcp_server_id in groups:
             continue
         configured = pins.get(observation.mcp_server_id, {})
         bound = configured_upstreams(config).get(observation.mcp_server_id)
@@ -173,6 +232,49 @@ def find_drift(config: dict[str, Any], observations: list[Observation]) -> list[
             observed = observation.digests.get(tool)
             if observed != expected:
                 drift.append(Drift(observation.mcp_server_id, tool, expected, observed))
+    for group_id, member_ids in groups.items():
+        drift.extend(_group_drift(config, group_id, member_ids, pins.get(group_id, {}), observations))
+    return drift
+
+
+def _group_drift(
+    config: dict[str, Any],
+    group_id: str,
+    member_ids: list[str],
+    configured: dict[str, str],
+    observations: list[Observation],
+) -> list[Drift]:
+    """A group's own pins against each member that answered, as the gateway holds them.
+
+    The gateway applies a pin declared on a group to every member (the pin
+    re-check covers each member id, and the call gate compares the serving
+    member's digest and upstream). So every member that serves a pinned tool
+    must serve it at the pin. A member that does not serve the tool at all is
+    not drift -- a call is routed to a member that has it -- but a pinned tool
+    no member serves is, as for a server. A group is judged only when every
+    member was asked (the group was selected, not just one of its members), and
+    absence only when every member answered: one that could not be asked is
+    reported unreachable already, and it may be the one serving the tool.
+    """
+    by_id = {o.mcp_server_id: o for o in observations}
+    if not member_ids or any(m not in by_id for m in member_ids):
+        return []
+    if not (configured or configured_upstreams(config).get(group_id)):
+        return []
+    members = [by_id[m] for m in member_ids]
+    answered = [o for o in members if o.ok]
+    drift: list[Drift] = []
+    bound = configured_upstreams(config).get(group_id)
+    for member in answered:
+        if bound is not None and member.upstream is not None and bound != member.upstream:
+            drift.append(Drift(group_id, UPSTREAM_DRIFT, bound, member.upstream, member=member.mcp_server_id))
+    for tool, expected in sorted(configured.items()):
+        serving = [o for o in answered if tool in o.digests]
+        for member in serving:
+            if member.digests[tool] != expected:
+                drift.append(Drift(group_id, tool, expected, member.digests[tool], member=member.mcp_server_id))
+        if not serving and len(answered) == len(members):
+            drift.append(Drift(group_id, tool, expected, None))
     return drift
 
 
