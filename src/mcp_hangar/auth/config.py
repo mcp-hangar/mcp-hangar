@@ -203,12 +203,16 @@ class OPAConfig:
         url: URL of the OPA server.
         policy_path: Path to the policy decision endpoint.
         timeout: HTTP request timeout in seconds.
+        require_both: When True, RBAC and OPA must both allow, so OPA can only
+            refuse more. When False (the default), OPA is asked only when RBAC
+            denies, and its allow overrides that deny and its tenant scope (#2081).
     """
 
     enabled: bool = False
     url: str = "http://localhost:8181"
     policy_path: str = "v1/data/mcp/authz/allow"
     timeout: float = 5.0
+    require_both: bool = False
 
 
 @dataclass
@@ -371,6 +375,13 @@ def _clock_skew_leeway(value: Any, where: str) -> int:
     return value
 
 
+def _opa_require_both(raw: Any) -> bool:
+    """`auth.opa.require_both`, refused unless a boolean: a string "true" read as truthy would be a guess (#2081)."""
+    if not isinstance(raw, bool):
+        raise ConfigurationError(f"auth.opa.require_both must be true or false, got {raw!r}")
+    return raw
+
+
 def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     """Parse auth configuration from dictionary.
 
@@ -487,6 +498,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         url=opa_dict.get("url", "http://localhost:8181"),
         policy_path=opa_dict.get("policy_path", "v1/data/mcp/authz/allow"),
         timeout=opa_dict.get("timeout", 5.0),
+        require_both=_opa_require_both(opa_dict.get("require_both", False)),
     )
 
     # Parse role assignments

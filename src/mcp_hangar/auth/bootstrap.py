@@ -507,9 +507,20 @@ def bootstrap_auth(
         authorizer = CombinedAuthorizer(
             rbac_authorizer=rbac_authorizer,
             opa_authorizer=opa_authorizer,
-            require_both=False,  # RBAC first, OPA as fallback
+            # False keeps the default: RBAC first, OPA asked only when it denies.
+            require_both=config.opa.require_both,
         )
-        logger.info("opa_auth_enabled", url=config.opa.url)
+        logger.info("opa_auth_enabled", url=config.opa.url, require_both=config.opa.require_both)
+        if not config.opa.require_both:
+            # Not a default anyone would guess from `opa.enabled` (#2081).
+            logger.warning(
+                "opa_may_widen_rbac",
+                detail=(
+                    "OPA is asked only when RBAC denies, and an OPA allow overrides that deny and its tenant "
+                    "scope, so the policy can admit a principal RBAC refuses"
+                ),
+                hint="set auth.opa.require_both: true for OPA to be able only to refuse more",
+            )
 
     # Create authorization middleware
     authz_middleware = AuthorizationMiddleware(
