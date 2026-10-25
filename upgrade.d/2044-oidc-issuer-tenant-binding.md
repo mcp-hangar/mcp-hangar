@@ -21,6 +21,9 @@ auth:
 
 - A bound issuer's token is refused with `401` unless its tenant claim is a
   string in the list. A token naming no tenant is refused as well.
+- The list must name at least one tenant. An empty list, a bare string, or the
+  key with no value (YAML null) refuses the configuration rather than leaving
+  the issuer unbound.
 - The key is per issuer. Set at the top level of `auth.oidc` it refuses the
   configuration at boot, as does a bare string, an empty list or a non-string
   entry.

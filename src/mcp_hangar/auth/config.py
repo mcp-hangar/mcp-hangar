@@ -371,6 +371,9 @@ def _parse_allowed_tenants(raw: Any, issuer: str) -> tuple[str, ...]:
     it would reject every token the issuer signs.
     """
     where = f"oidc.issuers[{issuer!r}].allowed_tenants"
+    # Present but empty (YAML null, e.g. a template that rendered nothing) is
+    # refused too: read as absent it would leave the issuer unbound while the
+    # file looks bound.
     if not isinstance(raw, list) or not raw:
         raise ConfigurationError(f"{where} must be a non-empty list of tenant ids, got {raw!r}")
     for entry in raw:
@@ -496,7 +499,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                         _parse_allowed_tenants(
                             issuer_dict["allowed_tenants"], issuer_dict.get("issuer", oidc_dict.get("issuer", ""))
                         )
-                        if issuer_dict.get("allowed_tenants") is not None
+                        if "allowed_tenants" in issuer_dict
                         else None
                     ),
                 )

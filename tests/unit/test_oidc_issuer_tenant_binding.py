@@ -190,10 +190,14 @@ class TestAMalformedBindingRefusesTheConfig:
         with pytest.raises(ConfigurationError, match="allowed_tenants"):
             parse_auth_config({"oidc": {"enabled": True, "issuers": [_issuer_entry(_ISSUER_A, allowed_tenants=value)]}})
 
-    def test_null_is_the_same_as_absent(self):
-        config = parse_auth_config(
-            {"oidc": {"enabled": True, "issuers": [_issuer_entry(_ISSUER_A, allowed_tenants=None)]}}
-        )
+    def test_a_present_but_empty_key_refuses_the_config(self):
+        # YAML `allowed_tenants:` with nothing after it is null; read as absent
+        # it would leave the issuer unbound while the file looks bound.
+        with pytest.raises(ConfigurationError, match="allowed_tenants"):
+            parse_auth_config({"oidc": {"enabled": True, "issuers": [_issuer_entry(_ISSUER_A, allowed_tenants=None)]}})
+
+    def test_an_absent_key_leaves_the_issuer_unbound(self):
+        config = parse_auth_config({"oidc": {"enabled": True, "issuers": [_issuer_entry(_ISSUER_A)]}})
 
         assert config.oidc.issuers[0].allowed_tenants is None
 
