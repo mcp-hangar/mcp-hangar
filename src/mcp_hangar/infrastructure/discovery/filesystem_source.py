@@ -56,6 +56,17 @@ except ImportError:
     logger.debug("watchdog package not installed, file watching unavailable")
 
 
+def _read_only_mount(path: str) -> bool:
+    """Whether *path* is on a filesystem mounted read-only (POSIX); False where that cannot be asked."""
+    flag = getattr(os, "ST_RDONLY", None)
+    if flag is None or not hasattr(os, "statvfs"):
+        return False
+    try:
+        return bool(os.statvfs(path).f_flag & flag)
+    except OSError:
+        return False
+
+
 class FilesystemDiscoverySource(DiscoverySource):
     """Discover MCP mcp_servers from YAML files in a directory.
 
@@ -159,8 +170,9 @@ class FilesystemDiscoverySource(DiscoverySource):
 
         # A refused file that is gone warns again if it comes back.
         seen_keys = {str(p) for p in seen_files}
-        for key in [k for k in self._refused_files if k not in seen_keys]:
-            del self._refused_files[key]
+        # A copy: the watchdog thread can refuse a file while this runs.
+        for key in [k for k in list(self._refused_files) if k not in seen_keys]:
+            self._refused_files.pop(key, None)
 
         logger.debug(f"Filesystem discovery found {len(mcp_servers)} mcp_servers")
         return mcp_servers
@@ -298,13 +310,21 @@ class FilesystemDiscoverySource(DiscoverySource):
 
     @staticmethod
     def _world_writable(st: os.stat_result, resolved: str, root: str) -> str | None:
-        """Say why any local user could write or replace the file, or None."""
+        """Say why any local user could write or replace the file, or None.
+
+        A mode bit means nothing on a filesystem mounted read-only: nobody can
+        write there whatever it says. That is how a Kubernetes ConfigMap or
+        Secret volume arrives -- its root directory is 0777 (2777 with
+        `fsGroup`) on a read-only mount -- so such a mount is not refused.
+        """
+        if _read_only_mount(resolved):
+            return None
         if st.st_mode & stat.S_IWOTH:
             return f"is world-writable (mode {stat.S_IMODE(st.st_mode):o})"
         directory = os.path.dirname(resolved)
         while True:
             dir_mode = os.stat(directory).st_mode
-            if dir_mode & stat.S_IWOTH:
+            if dir_mode & stat.S_IWOTH and not _read_only_mount(directory):
                 return f"sits in {directory}, which is world-writable (mode {stat.S_IMODE(dir_mode):o})"
             if directory == root:
                 return None

@@ -22,3 +22,10 @@ chmod o-w /etc/mcp-hangar/mcp_servers.d /etc/mcp-hangar/mcp_servers.d/*.yaml
 A server the source registered before the upgrade may stay registered: review
 the servers described as `Discovered from filesystem` and delete any you did not
 expect. There is no setting to turn the checks off.
+
+A world-writable mode on a filesystem mounted read-only is not refused, since
+nobody can write there whatever the mode says. A Kubernetes ConfigMap or Secret
+volume is mounted read-only with a 0777 root (2777 with `fsGroup`), so it keeps
+working unchanged. An `emptyDir` is writable, and its 0777 root is refused: fill
+it from an init container into a subdirectory that is not world-writable, or
+mount a ConfigMap instead.

@@ -169,3 +169,28 @@ async def test_a_fifo_named_like_a_definition_is_refused_without_hanging(watched
     assert await _names(watched) == {"ok"}
     [refusal] = _refusals(warnings)
     assert refusal["reason"] == "is not a regular file"
+
+
+async def test_a_world_writable_root_on_a_read_only_mount_is_trusted(watched: Path, monkeypatch) -> None:
+    # A ConfigMap or Secret volume: kubelet makes its root 0777 (2777 with
+    # fsGroup) on a read-only mount, where nobody can add or change a file.
+    _write(watched / "cm.yaml", "configmap", 0o644)
+    os.chmod(watched, 0o777)
+    real_statvfs = os.statvfs
+
+    class _ReadOnly:
+        def __init__(self, result):
+            self._result = result
+
+        def __getattr__(self, name):
+            return getattr(self._result, name)
+
+        @property
+        def f_flag(self):
+            return self._result.f_flag | os.ST_RDONLY
+
+    monkeypatch.setattr(filesystem_source.os, "statvfs", lambda p: _ReadOnly(real_statvfs(p)))
+    try:
+        assert await _names(watched) == {"configmap"}
+    finally:
+        os.chmod(watched, 0o700)
