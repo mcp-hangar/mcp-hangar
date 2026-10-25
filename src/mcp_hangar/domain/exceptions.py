@@ -91,6 +91,28 @@ class McpServerDeclaredInConfigError(McpServerError):
         )
 
 
+class McpServerNotDiscoveredError(McpServerError):
+    """Discovery asked to delete a server that is no longer discovery's (#2113).
+
+    A discovered server re-pointed over the API, or deleted and created again
+    under the same name, is an operator's server from then on (HUMAN
+    provenance). Discovery still tracked the name, and when its source stopped
+    reporting it, the TTL ran out and discovery deleted the operator's server.
+    Only a delete discovery starts is refused; one made over the API goes
+    through as before.
+    """
+
+    def __init__(self, mcp_server_id: str):
+        super().__init__(
+            message=(
+                f"McpServer {mcp_server_id} was not registered by discovery (it was re-pointed or created "
+                "over the API); discovery does not delete it"
+            ),
+            mcp_server_id=mcp_server_id,
+            operation="delete",
+        )
+
+
 class McpServerStartError(McpServerError):
     """Raised when a mcp_server fails to start.
 

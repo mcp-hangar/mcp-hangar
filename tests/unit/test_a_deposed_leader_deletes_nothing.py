@@ -200,9 +200,12 @@ class TestTheCallPath:
 
         fleet = InMemoryMcpServerRepository()
         writer = _Writer()
-        for server_id in ("a", "b"):
+        # Discovery deletes only what it registered (#2113), so "a" is discovery's.
+        for server_id, provenance in (("a", Provenance.DISCOVERY), ("b", Provenance.HUMAN)):
             CreateMcpServerHandler(repository=fleet, event_bus=_Bus(), fleet_writer=writer).handle(
-                CreateMcpServerCommand(mcp_server_id=server_id, mode="subprocess", command=["python"])
+                CreateMcpServerCommand(
+                    mcp_server_id=server_id, mode="subprocess", command=["python"], provenance=provenance
+                )
             )
 
         handler = DeleteMcpServerHandler(repository=fleet, event_bus=_Bus(), fleet_writer=writer)
