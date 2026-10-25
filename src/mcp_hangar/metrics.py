@@ -630,7 +630,8 @@ PROVIDER_STARTS_TOTAL = Counter(
 #:   group's stop_all, process exit.
 #: - `user_request`: hangar_stop, or the REST stop without a reason.
 #: - `manual`: the REST stop with an empty reason, or one not in this list.
-#: - `failback`, `compensation`: the failover saga stopped a backup.
+#: - `failback`, `compensation`: the deprecated failover saga stopped a backup;
+#:   nothing in Hangar configures one (#2092).
 #: - `detection_enforcement:block`: a detection rule, or the REST block, stopped it.
 #: - `max_retries_exceeded`: the recovery saga gave up on the server, which is
 #:   now `dead` (`STOPPED_BY_GIVING_UP` in `domain.events`).

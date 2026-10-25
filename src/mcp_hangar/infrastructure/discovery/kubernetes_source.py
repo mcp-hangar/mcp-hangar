@@ -138,6 +138,8 @@ class KubernetesDiscoverySource(DiscoverySource):
 
         self._v1: client.CoreV1Api | None = None
         self._initialized = False
+        #: Namespaces the last scan could not list; see `unscanned_part`.
+        self._failed_namespaces: frozenset[str] = frozenset()
 
     def _ensure_initialized(self) -> None:
         """Ensure Kubernetes client is initialized."""
@@ -174,21 +176,38 @@ class KubernetesDiscoverySource(DiscoverySource):
         found: list[DiscoveredMcpServer] = []
 
         namespaces = self.namespaces or await self._get_all_namespaces()
+        # Namespaces whose pods could not be listed this cycle. What this source
+        # registered from one of them is not reported, and must not read as
+        # gone on an authoritative source (#2089).
+        failed: set[str] = set()
 
         for namespace in namespaces:
             try:
                 assert self._v1 is not None
                 pods = self._v1.list_namespaced_pod(namespace=namespace, label_selector=self.label_selector)
-
-                for pod in pods.items:
-                    mcp_server = self._parse_pod(pod, namespace)
-                    if mcp_server:
-                        found.append(mcp_server)
-
             except ApiException as e:
-                logger.warning(f"Failed to list pods in {namespace}: {e.reason}")
+                failed.add(namespace)
+                logger.warning(f"Failed to list pods in {namespace}: {getattr(e, 'reason', e)}")
+                continue
             except Exception as e:  # noqa: BLE001 -- infra-boundary: skip namespace on discovery error
+                failed.add(namespace)
                 logger.error(f"Error discovering in namespace {namespace}: {e}")
+                continue
+
+            for pod in pods.items:
+                # One pod whose annotations do not parse (a port that is not a
+                # number) used to abandon the rest of its namespace. It is
+                # skipped alone: the namespace was listed, so its other pods
+                # are reported and what is gone from it is gone.
+                try:
+                    mcp_server = self._parse_pod(pod, namespace)
+                except Exception as e:  # noqa: BLE001 -- infra-boundary: skip a pod that does not parse
+                    logger.error(f"Error parsing pod {getattr(pod.metadata, 'name', '?')} in {namespace}: {e}")
+                    continue
+                if mcp_server:
+                    found.append(mcp_server)
+
+        self._failed_namespaces = frozenset(failed)
 
         mcp_servers = self._one_entry_per_name(found)
         for mcp_server in mcp_servers:
@@ -341,14 +360,21 @@ class KubernetesDiscoverySource(DiscoverySource):
 
         Returns:
             List of namespace names
+
+        Raises:
+            ApiException: When the namespaces cannot be listed. It used to be
+                answered with an empty list, which an authoritative source read
+                as "every pod is gone" while the API itself still answered
+                health checks. Raised, the scan fails as a whole and removes
+                nothing (#2089).
         """
         try:
             assert self._v1 is not None
             namespaces = self._v1.list_namespace()
             return [ns.metadata.name for ns in namespaces.items]
         except ApiException as e:
-            logger.error(f"Failed to list namespaces: {e.reason}")
-            return []
+            logger.error(f"Failed to list namespaces: {getattr(e, 'reason', e)}")
+            raise
 
     async def start(self) -> None:
         """Start the Kubernetes discovery source."""
@@ -360,6 +386,13 @@ class KubernetesDiscoverySource(DiscoverySource):
         self._initialized = False
         self._v1 = None
         logger.info("Kubernetes discovery source stopped")
+
+    def unscanned_part(self, mcp_server: DiscoveredMcpServer) -> str | None:
+        """The namespace that would have reported *mcp_server*, when it could not be listed last scan."""
+        namespace = mcp_server.metadata.get("namespace")
+        if namespace in self._failed_namespaces:
+            return f"namespace {namespace}"
+        return None
 
     def policy_violation(self, mcp_server: DiscoveredMcpServer) -> SourcePolicyViolation | None:
         """Refuse a server from a namespace this source may not take from."""
