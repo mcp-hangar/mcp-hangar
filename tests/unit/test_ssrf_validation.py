@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_hangar.domain.security.ssrf import validate_no_ssrf
+from mcp_hangar.domain.security.ssrf import SsrfBlocked, validate_no_ssrf
 
 
 class TestSSRFValidation:
@@ -34,3 +34,18 @@ class TestSSRFValidation:
     def test_dns_failure_allowed(self):
         with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", side_effect=OSError):
             validate_no_ssrf("http://unresolvable.example")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://metadata.google.internal./",
+        "http://METADATA.GOOGLE.INTERNAL../computeMetadata",
+        "http://x.compute.internal./",
+    ],
+)
+def test_a_metadata_hostname_with_a_trailing_dot_is_refused_before_any_lookup(url):
+    # The same name, fully qualified (#2054). Refused on the name alone.
+    with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", side_effect=AssertionError("looked up")):
+        with pytest.raises(SsrfBlocked, match="metadata hostname"):
+            validate_no_ssrf(url)

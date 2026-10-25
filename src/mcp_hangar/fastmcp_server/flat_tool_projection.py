@@ -275,6 +275,22 @@ def _build_flat_map(tenant_id: str | None) -> dict[str, tuple[str, str]]:
     return read_as_one_set(functools.partial(_flat_map_now, tenant_id))
 
 
+def _reserved_names() -> frozenset[str]:
+    """The names of the gateway's own management tools, which no upstream tool may take (#2031).
+
+    Every tool the gateway registers itself -- the management tools and the
+    invoke-path ones such as `hangar_call` -- not only the ones a given caller
+    may see: whether a
+    name belongs to the gateway is not a per-caller question, and a name an
+    upstream could take for one caller would answer for the gateway to them.
+    """
+    # Imported lazily: `server.tools` reaches `server.bootstrap`, which imports
+    # this module back (#894).
+    from ..server.tools.tool_permissions import INVOKE_PATH_TOOLS, SELF_SCOPED_TOOLS, TOOL_PERMISSIONS
+
+    return frozenset(TOOL_PERMISSIONS) | SELF_SCOPED_TOOLS | INVOKE_PATH_TOOLS
+
+
 def _flat_map_now(
     tenant_id: str | None,
 ) -> dict[str, tuple[str, str]]:
@@ -299,6 +315,7 @@ def _flat_map_now(
     """
     registry = get_tool_projection_registry()
     group_of = _member_to_group()
+    reserved = _reserved_names()
 
     flat: dict[str, tuple[str, str]] = {}
     # Track names that collide so we can skip them without re-logging.
@@ -343,6 +360,18 @@ def _flat_map_now(
             continue
 
         flat_name = tool_name  # FLAT naming: tool name as-is, no server prefix.
+
+        if flat_name in reserved:
+            # The gateway's own management tool goes by this name. Projecting
+            # the upstream's would list the name twice and route a call to the
+            # upstream, so a `hangar_status` an upstream serves would answer for
+            # the gateway (#2031). The management tool keeps the name.
+            logger.warning(
+                "flat_tool_name_reserved flat_name=%s mcp_server=%s",
+                flat_name,
+                mcp_server,
+            )
+            continue
 
         if flat_name in collisions:
             # Already marked as collision; skip silently.
