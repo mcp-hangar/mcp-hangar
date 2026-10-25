@@ -19,7 +19,6 @@ from ..services.refusal_log import (
     EventStoreNotReadable,
     PinEntry,
     Refusal,
-    default_path,
     event_store_path,
     read_pin_history,
     read_refusals,
@@ -48,20 +47,23 @@ def _listed_keys(config: dict, server: str) -> list[str] | None:
 
 
 def _store_path(db: Path | None, global_opts: GlobalOptions) -> Path:
-    """The event store to read: --db, else the one the config names, else where init puts it."""
+    """The event store to read: --db, else the one the gateway writes for the config.
+
+    A config that names no store has the gateway write ``data/events.db`` under
+    its working directory, and so does a gateway started without a config; the
+    path ``init`` writes is read only when the config names it (#2085).
+    """
     if db is not None:
         return db
     resolved = resolve_config_path(global_opts.config).path
     if not resolved.is_file():
-        return default_path()
+        return event_store_path({})
     try:
         config = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise EventStoreNotReadable(f"{resolved} is not valid YAML: {exc}") from exc
     if not isinstance(config, dict):
         raise EventStoreNotReadable(f"{resolved} does not contain a configuration mapping.")
-    if not (config.get("event_store") or config.get("persistence")):
-        return default_path()
     return event_store_path(config)
 
 
