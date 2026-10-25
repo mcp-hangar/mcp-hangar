@@ -29,10 +29,18 @@ event cost (#922).
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any
 
 from ...application.read_models.tool_projection import get_tool_projection_registry
-from ...domain.events import McpServerStarted, ToolAdmissionRequested
+from ...domain.events import (
+    ConfigurationReloaded,
+    McpServerDeregistered,
+    McpServerHotUnloaded,
+    McpServerRegistered,
+    McpServerStarted,
+    ToolAdmissionRequested,
+)
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -57,6 +65,7 @@ class ToolProjectionPopulationHandler:
         self._event_bus = event_bus
         #: (server, tool, digest) already announced, so a re-listing asks once.
         self._requested: set[tuple[str, str, str]] = set()
+        self._requested_lock = threading.Lock()
 
     def handle(self, event: object) -> None:
         """On McpServerStarted, populate the registry from the server's tools."""
@@ -85,12 +94,88 @@ class ToolProjectionPopulationHandler:
         tools = catalog.list_tools()
         registry = get_tool_projection_registry()
         registry.build_from_tools(mcp_server_id, tools)
+        # A delete between the read above and the build would otherwise have
+        # its forget undone by this write (#2088).
+        if self._repository.get(mcp_server_id) is None:
+            self.forget(mcp_server_id)
+            return
         self._request_admission(registry, mcp_server_id)
         logger.debug(
             "tool_projection_populated_from_discovery",
             mcp_server_id=mcp_server_id,
             tool_count=len(tools),
         )
+
+    def forget(self, mcp_server_id: str) -> None:
+        """Drop *mcp_server_id*'s projections: it left the fleet (#2088).
+
+        The registry tells its change listeners, which is how a listing client
+        hears ``tools/list_changed``; nothing is published on the event bus. The
+        registry keeps the entries aside, for :meth:`restore` to put back if the
+        server is registered again. Its pending admission requests are forgotten
+        too, so a withheld tool of a server added back under the same name asks
+        again.
+        """
+        with self._requested_lock:
+            self._requested.difference_update({key for key in self._requested if key[0] == mcp_server_id})
+        if get_tool_projection_registry().forget_server(mcp_server_id):
+            logger.info("tool_projection_dropped_for_removed_server", mcp_server_id=mcp_server_id)
+
+    def handle_deregistered(self, event: object) -> None:
+        """On McpServerDeregistered, drop the server's projections, on every replica.
+
+        A REST or discovery delete. Reads only the event's server id, so it may
+        run on a peer's tailed event, where `FleetProjection` removes the server
+        from the local fleet on the same event.
+        """
+        if isinstance(event, McpServerDeregistered):
+            self.forget(event.mcp_server_id)
+
+    def restore(self, mcp_server_id: str) -> None:
+        """Put back the entries *mcp_server_id* had when it was removed, if it has none now.
+
+        A server registered again under a removed name is often not started by
+        this replica: a peer's create arrives as ``McpServerRegistered`` while
+        the start stays on the peer, and a discovery or operator re-create starts
+        nothing. Listed with its last known tools, the first flat call routes to
+        the new copy and starts it -- what a re-created server did before #2088,
+        when nothing was removed at all. A local start replaces the entries.
+        """
+        if get_tool_projection_registry().restore_server(mcp_server_id):
+            logger.info("tool_projection_restored_for_registered_server", mcp_server_id=mcp_server_id)
+
+    def handle_registered(self, event: object) -> None:
+        """On McpServerRegistered, restore a removed server's last entries, on every replica.
+
+        The counterpart of :meth:`handle_deregistered`, and the same kind. Only
+        for a server the local fleet holds: on a peer, `FleetProjection` may
+        decline the new copy, and its old tools must not be listed then.
+        """
+        if isinstance(event, McpServerRegistered) and self._repository.exists(event.mcp_server_id):
+            self.restore(event.mcp_server_id)
+
+    def handle_left_locally(self, event: object) -> None:
+        """On a reload or a hot unload, drop what left this replica's fleet, and restore what came back.
+
+        A removal drops only a server the local repository no longer holds: a
+        hot-loaded server never was in it, and a declared server by the same
+        name must keep its tools. A reload's rebuilt servers are not here; their
+        start replaces their projections. A server a reload adds under a removed
+        name gets its last entries back until its warm-up start, or a call,
+        replaces them.
+        """
+        if isinstance(event, ConfigurationReloaded):
+            removed = list(event.mcp_servers_removed)
+            for mcp_server_id in event.mcp_servers_added:
+                if self._repository.exists(mcp_server_id):
+                    self.restore(mcp_server_id)
+        elif isinstance(event, McpServerHotUnloaded):
+            removed = [event.mcp_server_id]
+        else:
+            return
+        for mcp_server_id in removed:
+            if not self._repository.exists(mcp_server_id):
+                self.forget(mcp_server_id)
 
     def _request_admission(self, registry: Any, mcp_server_id: str) -> None:
         """Publish ``ToolAdmissionRequested`` once for each tool the server withholds (#1801)."""
@@ -100,9 +185,10 @@ class ToolProjectionPopulationHandler:
             if not registry.is_unadmitted(mcp_server_id, projection.tool):
                 continue
             key = (mcp_server_id, projection.tool, projection.digest.sha256)
-            if key in self._requested:
-                continue
-            self._requested.add(key)
+            with self._requested_lock:
+                if key in self._requested:
+                    continue
+                self._requested.add(key)
             logger.warning(
                 "tool_withheld_until_admitted",
                 mcp_server_id=mcp_server_id,
