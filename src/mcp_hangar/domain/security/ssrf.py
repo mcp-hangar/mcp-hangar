@@ -190,7 +190,9 @@ def _resolve_and_validate(
     if not hostname:
         return []
 
-    lowered = hostname.lower()
+    # A trailing dot is the same name fully qualified, and resolves the same
+    # way; without stripping it `metadata.google.internal.` passed (#2054).
+    lowered = hostname.lower().rstrip(".")
     if lowered.endswith(_METADATA_SUFFIXES):
         raise SsrfBlocked(f"SSRF blocked: {hostname} is a cloud metadata hostname")
 
