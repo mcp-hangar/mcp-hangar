@@ -85,7 +85,7 @@ mcp-hangar/
 │   │   │   └── handlers.py        # Return read models (flattened projections)
 │   │   ├── event_handlers/        # Subscribers: logging, audit, cost, security, projections, detection
 │   │   ├── sagas/                 # Long-running transactions
-│   │   │   ├── mcp_server_failover_saga.py   # 3-step failover with compensation
+│   │   │   ├── mcp_server_failover_saga.py   # Deprecated, unreachable (#2092); a group's rotation fails over
 │   │   │   ├── mcp_server_recovery_saga.py   # Auto-restart degraded providers
 │   │   │   └── group_rebalance_saga.py     # Rebalance on member failure
 │   │   ├── ports/                 # ICommandBus, IQueryBus, ISagaManager
