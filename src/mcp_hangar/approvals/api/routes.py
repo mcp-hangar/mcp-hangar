@@ -22,6 +22,7 @@ from mcp_hangar.auth.http_middleware import get_principal_from_request
 from mcp_hangar.domain.exceptions import MissingCredentialsError
 from mcp_hangar.domain.value_objects.security import Principal
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.server.api.request_body import json_body, missing_fields
 from mcp_hangar.server.api.serializers import HangarJSONResponse
 from mcp_hangar.server.api.tenant_scope import confined_tenant
 from mcp_hangar.server.context import get_context
@@ -198,7 +199,9 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
         return _unavailable()
     approval_id = request.path_params["approval_id"]
 
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     decision = body.get("decision")
     reason = body.get("reason")
 
