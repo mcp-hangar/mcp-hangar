@@ -457,8 +457,13 @@ class DiscoveryOrchestrator:
                 result.source_results = cycle_result.source_results
                 cycle_span.set_attribute("discovery.discovered_count", result.discovered_count)
 
-                # Process discovered mcp_servers through validation
+                # Process discovered mcp_servers through validation. A server an
+                # authoritative source lost this cycle is left alone: processing
+                # it refreshes its last sighting, so its TTL could never run out
+                # and the lifecycle manager would never deregister it.
                 for mcp_server in self._discovery_service.get_registered_mcp_servers().values():
+                    if mcp_server.name in cycle_result.lost_names:
+                        continue
                     validation_result = await self._process_mcp_server(mcp_server)
 
                     if validation_result == "registered":
@@ -682,6 +687,10 @@ class DiscoveryOrchestrator:
             reason: Reason for deregistration
         """
         mcp_server = self._lifecycle_manager.get_mcp_server(name)
+        # Forget it in the resolver as well. An entry left there is processed
+        # again next cycle as a server nobody tracks, and registered anew: the
+        # removed server came straight back.
+        self._conflict_resolver.deregister(name)
         if mcp_server:
             self._validator.record_deregistration(mcp_server)
             main_metrics.record_discovery_deregistration(source_type=mcp_server.source_type, reason=reason)
