@@ -154,6 +154,9 @@ mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /
 > Over stdio, the process that spawned Hangar is the trust boundary -- there is
 > no channel for a credential -- so `auth.stdio.principal` declares the caller
 > ([ADR-026](https://mcp-hangar.io/docs/adr/ADR-026-stdio-is-an-authenticated-transport)).
+> Its `roles` bound the `hangar_*` management tools with `tool_access.mode:
+> front_door`, as above, or with `auth.enabled: true`; with neither, every
+> management tool is allowed and the boot log says so.
 > Over HTTP nothing is declared: Hangar refuses to bind a non-loopback interface
 > without auth. For a quick demo, pass `--unsafe-no-auth`; for anything real,
 > configure the `auth` block.

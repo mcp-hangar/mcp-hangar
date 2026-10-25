@@ -40,7 +40,7 @@ from ...domain.value_objects.mcp_server import McpServerMode
 from ...infrastructure.persistence.log_buffer import get_log_buffer
 from ..context import get_context
 from .middleware import dispatch_command, dispatch_query
-from .request_body import missing_fields
+from .request_body import json_body, missing_fields
 from .serializers import HangarJSONResponse
 from .tenant_scope import confined_tenant
 
@@ -378,7 +378,7 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
         ValidationError: If mcp_server_id already exists (-> 422).
     """
     _check_permission(request, resource_type="mcp_servers", action="write")
-    body = await request.json()
+    body = await json_body(request)
     if (invalid := missing_fields(body, "mcp_server_id", "mode")) is not None:
         return invalid
     # A local server runs the caller's command or image on the gateway host, so
@@ -458,7 +458,9 @@ async def update_mcp_server(request: Request) -> HangarJSONResponse:
     """
     _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     if body.get("env") is not None:
         # A local server reads its environment when it starts, and an
         # interpreter reads startup code from it: changing it is launching
@@ -554,7 +556,9 @@ async def set_l7_policy(request: Request) -> HangarJSONResponse:
     MCPEgressPolicy enforced its network half and silently dropped its L7 half.
     """
     mcp_server_id = request.path_params["mcp_server_id"]
-    body = await request.json()
+    body = await json_body(request)
+    if (invalid := missing_fields(body)) is not None:
+        return invalid
     try:
         policy = L7Policy.from_dict(body)
     except (ValueError, TypeError) as exc:
