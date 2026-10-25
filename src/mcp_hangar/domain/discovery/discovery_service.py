@@ -271,7 +271,12 @@ class DiscoveryService:
                 # holds for this source is checked on every cycle instead, until
                 # its TTL runs out. Reached only when discover() succeeded: a
                 # source that failed this cycle says nothing about what exists.
-                if source.mode == DiscoveryMode.AUTHORITATIVE:
+                # A source that cannot reach what it watches answers `[]` or a
+                # partial list rather than raising (Docker on a connection
+                # failure, a missing filesystem path), which would read as
+                # "everything is gone". Only a source that reports itself
+                # healthy after the scan is trusted to have lost anything.
+                if source.mode == DiscoveryMode.AUTHORITATIVE and await source.health_check():
                     for name, existing in self._conflict_resolver.get_all_registered().items():
                         if existing.source_type != source_type or name in current_names:
                             continue

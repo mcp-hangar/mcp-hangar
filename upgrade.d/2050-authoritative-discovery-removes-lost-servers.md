@@ -12,3 +12,18 @@ restart, whatever the mode.
 - A server that comes back within its TTL is left running. A source whose scan
   fails (daemon or API unreachable) removes nothing that cycle.
 - Static servers from the configuration are never touched.
+
+What counts as "no longer reported": a cycle in which the source answered and
+reports itself healthy afterwards. A source that raises, or that cannot reach what
+it watches -- Docker when the daemon does not answer, a filesystem path that is
+missing -- removes nothing, however long that lasts. Two cases still count as a
+real absence and remove the server once its TTL has run out:
+
+- a Kubernetes namespace whose pod listing fails while the API itself answers;
+- a discovery file that stops parsing.
+
+A server another change now refuses to discover -- a Kubernetes local mode, a
+Docker label volume outside `allowed_mount_paths`, a world-writable discovery
+file -- is no longer reported either, so on an authoritative source it is removed
+after its TTL rather than left registered.
+

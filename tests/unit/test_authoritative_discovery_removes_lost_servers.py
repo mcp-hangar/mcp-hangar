@@ -79,6 +79,9 @@ class _Source(DiscoverySource):
         super().__init__(mode=mode)
         self.names: set[str] = set()
         self.fail = False
+        #: How Docker and a missing filesystem path fail: an empty answer, and
+        #: health_check() reporting the source could not reach what it watches.
+        self.unreachable = False
 
     @property
     def source_type(self) -> str:
@@ -87,6 +90,8 @@ class _Source(DiscoverySource):
     async def discover(self) -> list[DiscoveredMcpServer]:
         if self.fail:
             raise RuntimeError("source unreachable")
+        if self.unreachable:
+            return []
         return [
             DiscoveredMcpServer.create(
                 name=name,
@@ -100,7 +105,7 @@ class _Source(DiscoverySource):
         ]
 
     async def health_check(self) -> bool:
-        return True
+        return not self.unreachable
 
 
 @pytest.fixture
@@ -249,6 +254,20 @@ class TestAuthoritativeRemovesWhatWentAway:
         await _tick(orchestrator, 0)
 
         source.fail = True
+        for _ in range(20):
+            await _tick(orchestrator, 5)
+
+        assert _listed(fleet.repo) == {"survivor"}
+        assert fleet.commands.of(DeleteMcpServerCommand) == []
+
+    async def test_a_source_that_answers_empty_while_unreachable_removes_nothing(self, fleet) -> None:
+        # Docker on a connection failure and a missing filesystem path answer
+        # `[]` instead of raising; that must not read as "everything is gone".
+        orchestrator, source = fleet.build(DiscoveryMode.AUTHORITATIVE)
+        source.names = {"survivor"}
+        await _tick(orchestrator, 0)
+
+        source.unreachable = True
         for _ in range(20):
             await _tick(orchestrator, 5)
 
