@@ -6,7 +6,10 @@ import pytest
 
 from mcp_hangar.application.read_models.tool_projection import ToolProjectionRegistry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
+from mcp_hangar.domain.services.access_decision import decide
+from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.value_objects import ToolDigest
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.server import config as config_module
 from mcp_hangar.server.config import ConfigurationError, _register_tool_projection_block
 
@@ -92,6 +95,64 @@ class TestWhatIsWithheld:
     def test_a_bad_policy_is_refused(self):
         with pytest.raises(ValueError, match="withhold"):
             ToolProjectionRegistry().set_new_tools_policy("srv", "maybe")
+
+
+class TestTheDecisionReadsItBeforeTheCatalogueHasIt:
+    """`withdrawal_status` is what `decide()` and the call gates read: an unadmitted tool is withdrawn uncatalogued."""
+
+    def test_a_tool_not_yet_catalogued_is_withdrawn_when_the_pins_do_not_admit_it(self):
+        registry = _registry("old")
+        _pin(registry, "old")
+        registry.set_new_tools_policy("srv", "withhold")
+
+        assert registry.withdrawal_status("srv", "not-yet-seen", None) is True
+        assert registry.withdrawal_status("srv", "not-yet-seen", "t1") is True
+        assert registry.withdrawal_status("srv", "old", None) is False
+
+    def test_a_tenant_pin_admits_it_uncatalogued_for_that_tenant_only(self):
+        registry = ToolProjectionRegistry()
+        _pin(registry, "old")
+        _pin(registry, "new", tenant="t1")
+        registry.set_new_tools_policy("srv", "withhold")
+
+        assert registry.withdrawal_status("srv", "new", "t1") is None
+        assert registry.withdrawal_status("srv", "new", "t2") is True
+
+    @pytest.mark.parametrize("policy", [None, "allow"])
+    def test_without_withhold_an_uncatalogued_tool_stays_unknown(self, policy):
+        registry = _registry("old")
+        _pin(registry, "old")
+        if policy is not None:
+            registry.set_new_tools_policy("srv", policy)
+
+        assert registry.withdrawal_status("srv", "not-yet-seen", None) is None
+
+    def test_a_group_that_withholds_withdraws_it_under_the_group_id(self):
+        """A group's projections live under its members, so under the group id every tool is uncatalogued."""
+        registry = _registry("old", "new")
+        registry.set_config_pin("grp", "old", None, ToolDigest(tool_name="old", sha256=SHA))
+        registry.set_new_tools_policy("grp", "withhold")
+
+        assert registry.withdrawal_status("grp", "new", None) is True
+        assert registry.withdrawal_status("grp", "old", None) is None
+        assert registry.withdrawal_status("srv", "new", None) is False
+
+    def test_the_call_decision_refuses_it_through_the_group_and_its_member(self):
+        registry = _registry("old", "new")
+        registry.set_config_pin("grp", "old", None, ToolDigest(tool_name="old", sha256=SHA))
+        registry.set_new_tools_policy("grp", "withhold")
+        resolver = ToolAccessResolver()
+
+        for target in (Target.group("grp", member_server="srv"), Target.server("srv", owning_groups=("grp",))):
+            assert decide(target, "new", Caller(), resolver=resolver, withdrawals=registry).withdrawn, target
+            assert decide(target, "old", Caller(), resolver=resolver, withdrawals=registry).allowed, target
+        assert decide(Target.server("srv"), "new", Caller(), resolver=resolver, withdrawals=registry).allowed
+
+    def test_without_pins_an_uncatalogued_tool_stays_unknown(self):
+        registry = _registry("old")
+        registry.set_new_tools_policy("srv", "withhold")
+
+        assert registry.withdrawal_status("srv", "not-yet-seen", None) is None
 
 
 class TestAReloadReplacesIt:
