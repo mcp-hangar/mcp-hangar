@@ -18,6 +18,7 @@ import difflib
 import hashlib
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,8 +78,10 @@ def remember_original(path: Path) -> Path | None:
     if path.is_file():
         data = path.read_bytes()
         backup = state_dir() / _BACKUP_DIR / f"{_sha256(key.encode())[:12]}-{path.name}"
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        backup.write_bytes(data)
+        # Owner-only directory, and a copy that keeps the original's mode: a client
+        # config often holds other servers' tokens, and its backup was 0644 (#2048).
+        backup.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.copy2(path, backup)
         entry["backup"] = str(backup)
         entry["original_sha256"] = _sha256(data)
     files[key] = entry

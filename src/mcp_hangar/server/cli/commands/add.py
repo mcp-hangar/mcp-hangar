@@ -130,6 +130,57 @@ def _report_hot_reload(reply: gateway_api.GatewayReply) -> None:
         console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new MCP server")
 
 
+def _collect_config_unless(mcp_server: McpServerDefinition, yes: bool) -> dict:
+    """The server's configuration, asked for unless *yes* or it needs none."""
+    if not mcp_server.requires_config or yes:
+        return {}
+    result = _collect_config(mcp_server)
+    if result is None:
+        raise typer.Abort()
+    return result
+
+
+def _already_configured(
+    config_mgr: ConfigFileManager,
+    mcp_server: McpServerDefinition,
+    config_value: str | None,
+    use_env: str | None,
+    *,
+    replace: bool,
+    json_output: bool = False,
+) -> bool:
+    """Whether the file already holds this exact entry; refuse a different one unless *replace*.
+
+    A server the file already has is not replaced behind the operator's back: its
+    pins, policy, args and env are not in the registry entry, and writing the
+    entry over it used to drop them all without a word (#2042).
+
+    Raises:
+        typer.Exit: The file holds a different entry and *replace* is not set.
+    """
+    existing = config_mgr.configured_entry(mcp_server.name)
+    if existing is None:
+        return False
+    proposed = config_mgr.build_mcp_server_entry(mcp_server, config_value=config_value, use_env=use_env)
+    if existing == proposed:
+        console.print(f"[green]{mcp_server.name} is already configured as the registry describes it.[/green]")
+        if json_output:
+            console.print(json.dumps({"added": None, "unchanged": mcp_server.name}))
+        return True
+    dropped = sorted(set(existing) - set(proposed))
+    changed = sorted(key for key in set(existing) & set(proposed) if existing[key] != proposed[key])
+    detail = ", ".join([*(f"drops {key}" for key in dropped), *(f"changes {key}" for key in changed)])
+    if not replace:
+        console.print(
+            f"[red]{mcp_server.name} is already in {config_mgr.config_path}.[/red] Adding it again would "
+            f"replace its entry: {detail}.\nRun `mcp-hangar add {mcp_server.name} --replace` to do that, "
+            "or edit the file."
+        )
+        raise typer.Exit(1)
+    console.print(f"[yellow]Replacing {mcp_server.name}: {detail}.[/yellow]")
+    return False
+
+
 def add_command(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="MCP server name or search query")],
@@ -144,6 +195,13 @@ def add_command(
     no_reload: Annotated[
         bool,
         typer.Option("--no-reload", help="Don't try to hot-reload the running server"),
+    ] = False,
+    replace: Annotated[
+        bool,
+        typer.Option(
+            "--replace",
+            help="Replace a server the config already has, dropping what the registry entry lacks (pins, env, args)",
+        ),
     ] = False,
 ):
     """Add an MCP server from the MCP Registry.
@@ -197,12 +255,14 @@ def add_command(
     console.print(f"[dim]Package: {mcp_server.package}[/dim]")
 
     # Collect configuration
-    mcp_server_config: dict = {}
-    if mcp_server.requires_config and not yes:
-        result = _collect_config(mcp_server)
-        if result is None:
-            raise typer.Abort()
-        mcp_server_config = result
+    mcp_server_config = _collect_config_unless(mcp_server, yes)
+
+    config_value = mcp_server_config.get("value")
+    use_env = mcp_server_config.get("use_env")
+    if _already_configured(
+        config_mgr, mcp_server, config_value, use_env, replace=replace, json_output=global_opts.json_output
+    ):
+        return
 
     # Confirm
     if not yes:
@@ -214,8 +274,6 @@ def add_command(
             raise typer.Abort()
 
     # Update config file
-    config_value = mcp_server_config.get("value")
-    use_env = mcp_server_config.get("use_env")
     config_mgr.add_mcp_server(mcp_server, config_value=config_value, use_env=use_env)
     console.print(f"[green]Added {mcp_server.name} to {config_mgr.config_path}[/green]")
     if config_value and mcp_server.env_var and mcp_server.config_type == "secret":
