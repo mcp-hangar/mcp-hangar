@@ -168,7 +168,7 @@ class TestOneNamespaceFails:
         assert _registered(orchestrator) == {"a1"}
         assert removed == ["b1"]
 
-    async def test_a_server_gone_while_its_namespace_failed_goes_once_it_answers(self) -> None:
+    async def test_a_server_gone_while_its_namespace_failed_goes_one_ttl_after_it_answers(self) -> None:
         cluster = _Cluster({"team-a": [_pod("a1", "10.0.0.1")]})
         orchestrator, removed = _orchestrator(_kubernetes(cluster, ["team-a"]))
         await _tick(orchestrator, 0)
@@ -180,9 +180,14 @@ class TestOneNamespaceFails:
 
         del cluster.failing["team-a"]
         cluster.pods["team-a"] = []
-        for _ in range(6):
+        # The lifecycle manager kept it alive while the namespace failed, as
+        # through a failed scan, so it gets one TTL from the answer, not none.
+        for _ in range(3):
             await _tick(orchestrator, 5)
+        assert removed == []
 
+        for _ in range(2):
+            await _tick(orchestrator, 5)
         assert removed == ["a1"]
 
     async def test_a_server_still_there_when_its_namespace_answers_again_stays(self) -> None:
@@ -215,9 +220,9 @@ class TestOneNamespaceFails:
         assert all(e["log_level"] == "warning" for e in kept)
         assert kept[0]["part"] == "namespace team-a"
         assert kept[0]["kept"] == ["a1"]
-        assert kept[0]["past_ttl"] == []
+        assert kept[0]["unreported_past_ttl"] == []
         # A part broken for longer than the TTL says so.
-        assert kept[-1]["past_ttl"] == ["a1"]
+        assert kept[-1]["unreported_past_ttl"] == ["a1"]
 
     async def test_listing_all_namespaces_failing_removes_nothing(self) -> None:
         # With no namespaces configured the source lists them first. That
@@ -335,6 +340,29 @@ class TestOneFileFails:
         await _tick(orchestrator, 0)
 
         (directory / "edited.yaml").chmod(0o666)
+        for _ in range(6):
+            await _tick(orchestrator, 5)
+
+        assert removed == ["edited"]
+
+    @pytest.mark.parametrize("change", ["delete", "make world-writable"])
+    async def test_a_definition_naming_an_unparseable_decoy_as_its_file_is_still_removed(
+        self, directory: Path, change: str
+    ) -> None:
+        # A definition's own `metadata` block lands in the server's metadata,
+        # `file_path` included. Pointing it at a file that never parses must
+        # not make the server outlive its own file.
+        decoy = directory / "decoy.yaml"
+        decoy.write_text("---\nkind: List\n---\nkind: List\n")
+        (directory / "edited.yaml").write_text(_definition("edited") + f"metadata:\n  file_path: {decoy}\n")
+        orchestrator, removed = _orchestrator(_filesystem(directory))
+        await _tick(orchestrator, 0)
+        assert _registered(orchestrator) == {"steady", "edited"}
+
+        if change == "delete":
+            (directory / "edited.yaml").unlink()
+        else:
+            (directory / "edited.yaml").chmod(0o666)
         for _ in range(6):
             await _tick(orchestrator, 5)
 

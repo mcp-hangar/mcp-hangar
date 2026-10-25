@@ -1,16 +1,19 @@
-### A failed namespace or unreadable discovery file no longer removes its servers
+### A failed namespace or unparseable discovery file no longer removes its servers
 
 On an authoritative source, two cases that used to count as a real absence
 now keep what they registered, as a scan that fails as a whole already did:
 
 - a Kubernetes namespace whose pod listing fails (forbidden, timeout, API
   error) while the API itself answers;
-- a discovery file that still exists but cannot be read or parsed.
+- a discovery file that still exists but is not valid YAML, or whose content
+  fails to load (a port that is not a number).
 
-Such a server is neither removed nor refreshed while its part keeps failing,
-and every cycle logs `discovery_part_failed_servers_kept` at WARNING with the
-part, the servers kept and those already past their TTL. Once the part answers
-again, a server that is no longer there is removed straight away.
+Such a server stays registered while its part keeps failing, and every cycle
+logs `discovery_part_failed_servers_kept` at WARNING with the part, the
+servers kept and, under `unreported_past_ttl`, those the source has not
+reported for longer than their TTL. Once the part answers again, a server that
+is no longer there is removed one TTL later, like any server a source stops
+reporting.
 
 What this changes for a setup that relied on the old behaviour:
 
@@ -31,5 +34,6 @@ What this changes for a setup that relied on the old behaviour:
   gone).
 
 Unchanged: a deleted file, a disabled definition and a file refused by the
-trust checks (world-writable, outside the discovery path) still remove the
+trust checks (world-writable, outside the discovery path, or a file that
+cannot be opened, such as one Hangar may not read) still remove the
 server after its TTL. Additive sources never remove anything.

@@ -325,10 +325,12 @@ class DiscoveryService:
             # A namespace that could not be listed or a file that
             # could not be read says nothing about what is in it,
             # just as a scan that fails as a whole does. The server
-            # is neither removed nor refreshed, and stays out of
-            # `lost_names` so it is kept exactly as through a failed
-            # scan; once its part answers again and the server is
-            # not there, its TTL has long run out and it goes.
+            # is not removed, and stays out of `lost_names` so the
+            # lifecycle manager keeps it exactly as through a failed
+            # scan. Its sighting here is not refreshed, so once its
+            # part answers again without it, it leaves the resolver
+            # at once and the lifecycle manager removes it one TTL
+            # later, like any server that stops being reported.
             part = source.unscanned_part(existing)
             if part is not None:
                 kept.setdefault(part, []).append(existing)
@@ -347,9 +349,12 @@ class DiscoveryService:
                 source_type=source_type,
                 part=part,
                 kept=sorted(s.name for s in servers),
-                past_ttl=sorted(s.name for s in servers if s.is_expired()),
-                detail="this part of the scan failed, so what it registered is neither removed nor "
-                "refreshed until it answers again",
+                # Not reported by the source for longer than their TTL. The
+                # lifecycle manager keeps them meanwhile, as through a failed
+                # scan; once the part answers without them, they are removed
+                # one TTL later.
+                unreported_past_ttl=sorted(s.name for s in servers if s.is_expired()),
+                detail="this part of the scan failed, so what it registered is kept until it answers again",
             )
 
     async def discover_from_source(self, source_type: str) -> list[DiscoveredMcpServer]:

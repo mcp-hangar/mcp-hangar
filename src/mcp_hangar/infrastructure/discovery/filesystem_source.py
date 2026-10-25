@@ -126,8 +126,11 @@ class FilesystemDiscoverySource(DiscoverySource):
         # file path -> reason it was last refused, so a refusal warns once
         # rather than on every scan, and again only when the reason changes.
         self._refused_files: dict[str, str] = {}
-        #: Files the last scan found but could not read or parse; see `unscanned_part`.
+        #: Files the last scan found but could not parse or load; see `unscanned_part`.
         self._unreadable_files: frozenset[str] = frozenset()
+        #: Server name -> the file it was last parsed from, kept by the source
+        #: itself: a definition's own `metadata` can set a `file_path` key.
+        self._file_of: dict[str, str] = {}
 
     @property
     def source_type(self) -> str:
@@ -155,7 +158,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             patterns.append("*.yml")
 
         seen_files = set()
-        # Files that exist but could not be read or parsed this scan. What one
+        # Files that exist but could not be parsed or loaded this scan. What one
         # of them registered before is not reported, and must not read as gone
         # on an authoritative source (#2089).
         unreadable: set[str] = set()
@@ -170,6 +173,7 @@ class FilesystemDiscoverySource(DiscoverySource):
                     if mcp_server:
                         mcp_servers.append(mcp_server)
                         self._cached_mcp_servers[mcp_server.name] = mcp_server
+                        self._file_of[mcp_server.name] = str(file_path)
                         await self.on_mcp_server_discovered(mcp_server)
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip malformed config file
                     unreadable.add(str(file_path))
@@ -262,13 +266,19 @@ class FilesystemDiscoverySource(DiscoverySource):
         )
 
     def unscanned_part(self, mcp_server: DiscoveredMcpServer) -> str | None:
-        """The definition file of *mcp_server*, when it still exists but could not be read last scan.
+        """The definition file of *mcp_server*, when it still exists but did not parse last scan.
 
         A deleted file is not one, and neither is a file the trust checks in
-        `_open_trusted` refuse: that refusal is meant to take the server away.
+        `_open_trusted` refuse (including one that cannot be opened): that
+        refusal is meant to take the server away.
+
+        The file is the one this source last parsed the server from, never
+        `metadata["file_path"]`: a definition's own `metadata` block is spread
+        over that key, so a file could otherwise name another, unparseable
+        file and be kept forever after it was deleted or refused.
         """
-        file_path = mcp_server.metadata.get("file_path")
-        if file_path in self._unreadable_files:
+        file_path = self._file_of.get(mcp_server.name)
+        if file_path is not None and file_path in self._unreadable_files:
             return f"file {file_path}"
         return None
 
