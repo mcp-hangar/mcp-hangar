@@ -247,6 +247,11 @@ PERMISSION_PROVIDERS_WRITE = Permission(resource_type="mcp_servers", action="wri
 PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="mcp_servers", action="lifecycle")
 #: Declare, change or remove an upstream's peer identity, its key list (ADR-030 §9).
 PERMISSION_MCP_SERVERS_PEER_IDENTITY = Permission(resource_type="mcp_servers", action="peer_identity")
+#: Register a server the gateway launches on its own host -- any mode but
+#: `remote` -- or change the `env` such a server starts with. The command, image
+#: and environment are the caller's choice, so this is running code on the
+#: gateway host, a narrower right than `mcp_servers:write` (#2025).
+PERMISSION_MCP_SERVERS_LOCAL_LAUNCH = Permission(resource_type="mcp_servers", action="local_launch")
 PERMISSION_POLICY_READ = Permission(resource_type="policy", action="read")
 PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
 PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")
