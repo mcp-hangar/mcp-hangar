@@ -2103,6 +2103,15 @@ def http_graceful_shutdown_timeout(full_config: dict[str, Any]) -> int | None:
     grace period. Absent keeps exactly that, so nobody's behaviour changes on
     upgrade.
 
+    Hangar enforces it itself (#2097). A stop waits for the MCP requests in
+    flight and delivers their responses rather than cutting their streams. When
+    the bound runs out first, each tool call still running -- ``hangar_call``
+    and the front door's tool calls -- is abandoned, and its caller gets a
+    JSON-RPC error saying so. Any other request still running then
+    (``hangar_start``, ``hangar_warm``, a cold ``hangar_tools``, a resource
+    read) gets no answer: the servers are stopped, its connection ends, and the
+    process exits within about the bound plus the component shutdown.
+
     Read when the HTTP server starts, and passed to uvicorn then. A reload
     checks the value, so a bad one refuses the reload like any other section,
     but the running server keeps the bound it started with until it restarts.
