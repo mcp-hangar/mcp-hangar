@@ -32,7 +32,9 @@ _INITIALIZE = {
 def _start(tmp_path: Path) -> subprocess.Popen[bytes]:
     config = tmp_path / "config.yaml"
     config.write_text("mcp_servers: {}\nevent_store:\n  driver: memory\n")
-    env = dict(os.environ, MCP_TRACING_ENABLED="false")
+    # faulthandler dumps every thread's stack on SIGABRT, which `_wait` sends
+    # to a gateway that did not exit (#2103).
+    env = dict(os.environ, MCP_TRACING_ENABLED="false", PYTHONFAULTHANDLER="1")
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -55,13 +57,28 @@ def _start(tmp_path: Path) -> subprocess.Popen[bytes]:
     return proc
 
 
+def _wait(proc: subprocess.Popen[bytes], tmp_path: Path) -> int:
+    """The gateway's exit code; a gateway still running after 30 s fails with its log and thread stacks."""
+    try:
+        return proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.send_signal(signal.SIGABRT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        log = (tmp_path / "stderr.log").read_text(errors="replace")
+        pytest.fail(f"the gateway was still running 30 s later; its stderr ends with:\n{log[-12000:]}")
+
+
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT])
 def test_the_gateway_exits_with_stdin_still_open(tmp_path: Path, signum: int) -> None:
     proc = _start(tmp_path)
     try:
         started = time.monotonic()
         proc.send_signal(signum)
-        rc = proc.wait(timeout=30)
+        rc = _wait(proc, tmp_path)
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -79,7 +96,7 @@ def test_closing_stdin_still_exits_on_its_own(tmp_path: Path) -> None:
     try:
         assert proc.stdin is not None
         proc.stdin.close()
-        rc = proc.wait(timeout=30)
+        rc = _wait(proc, tmp_path)
     finally:
         if proc.poll() is None:
             proc.kill()
