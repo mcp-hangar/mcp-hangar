@@ -175,7 +175,8 @@ def bootstrap_admin_command(
             exit_code=1,
         )
 
-    components = bootstrap_auth(auth_config, persistence_backend=persistence_backend)
+    # Add-only: a one-off command never revokes what another config's lines granted.
+    components = bootstrap_auth(auth_config, persistence_backend=persistence_backend, reconcile_role_assignments=False)
     store = components.api_key_store
     if not isinstance(store, IInitialAdminBootstrapStore):
         raise CLIError(

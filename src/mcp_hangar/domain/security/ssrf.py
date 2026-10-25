@@ -190,7 +190,9 @@ def _resolve_and_validate(
     if not hostname:
         return []
 
-    lowered = hostname.lower()
+    # A trailing dot is the same name fully qualified, and resolves the same
+    # way; without stripping it `metadata.google.internal.` passed (#2054).
+    lowered = hostname.lower().rstrip(".")
     if lowered.endswith(_METADATA_SUFFIXES):
         raise SsrfBlocked(f"SSRF blocked: {hostname} is a cloud metadata hostname")
 
@@ -301,8 +303,9 @@ def resolve_validated_addresses(
 
     Returns:
         The validated, resolved IP strings. Empty when the host is absent or does
-        not resolve -- there is then nothing to pin to, and the caller connects
-        by name and fails naturally.
+        not resolve -- there is then nothing to pin to, and the transport refuses
+        the connection rather than hand the name to a second, unchecked lookup
+        (#2027).
 
     Raises:
         SsrfBlocked: if any resolved address is refused.
