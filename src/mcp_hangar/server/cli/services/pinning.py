@@ -13,6 +13,7 @@ this output matches by construction rather than by two implementations agreeing.
 
 from __future__ import annotations
 
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -312,7 +313,9 @@ def write_config_with_pins(config_path: Path, merged: dict[str, Any]) -> Path:
     prints the same pins to stdout for anyone who would rather paste them.
     """
     backup = config_path.with_name(config_path.name + ".bak")
-    backup.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+    # A copy, not a rewrite, so the backup keeps the config's mode: a 0600 file's
+    # previous version was written 0644 under the umask (#2048).
+    shutil.copy2(config_path, backup)
     config_path.write_text(
         yaml.safe_dump(merged, default_flow_style=False, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

@@ -19,6 +19,7 @@ from starlette.routing import Route
 
 from ...application.commands.commands import ReloadConfigurationCommand
 from ...domain.exceptions import ConfigurationUnavailableError, ValidationError
+from ...domain.security.argument_redaction import redact_arguments
 from ..bootstrap.composition import get_running_config_path
 from ..config_serializer import serialize_full_config, write_config_backup
 from .actor import request_actor
@@ -41,15 +42,30 @@ def _requested_by(request: Request) -> str:
 
 
 def _sanitize(config: dict) -> dict:
-    """Strip sensitive keys from a config dict (non-recursive, top-level only).
+    """The served form of a configuration document: no secret, at any depth.
+
+    A top-level key whose name marks it sensitive is dropped, as before. Every
+    other section has its *contents* redacted the way `serialize_full_config`
+    redacts what export serves (`redact_arguments`: sensitive key names at every
+    level, and credential-shaped values). Top-level only used to be the whole
+    rule, and the only top-level key of `GET /config` is `mcp_servers`, so every
+    `env` value under it was served verbatim; the on-disk side of `GET
+    /config/diff` was served the same way after `${VAR}` interpolation (#2029).
+    The contents, not the pair, so a section such as `auth` keeps its harmless
+    settings, as on export.
 
     Args:
         config: Raw configuration dictionary.
 
     Returns:
-        Copy of config with sensitive keys removed.
+        A redacted copy; the input is not changed.
     """
-    return {k: v for k, v in config.items() if not any(frag in k.lower() for frag in _SENSITIVE_FRAGMENTS)}
+    served: dict = {}
+    for key, value in config.items():
+        if any(frag in key.lower() for frag in _SENSITIVE_FRAGMENTS):
+            continue
+        served[key] = redact_arguments({key: value})[key] if not isinstance(value, dict) else redact_arguments(value)
+    return served
 
 
 async def get_config(request: Request) -> HangarJSONResponse:
@@ -69,7 +85,8 @@ async def get_config(request: Request) -> HangarJSONResponse:
 
     if config_repository is not None:
         raw = await config_repository.get_all()
-        config_dict = {"mcp_servers": list(raw)} if raw else {}
+        # Plain dicts, so the redaction can walk into each record's `env`.
+        config_dict = {"mcp_servers": [snapshot.to_dict() for snapshot in raw]} if raw else {}
     else:
         # Fallback: minimal operational config
         config_dict = {"mcp_servers": []}
@@ -222,7 +239,13 @@ async def diff_config(request: Request) -> HangarJSONResponse:
         except (FileNotFoundError, ValueError):
             on_disk_raw = {}
 
-        in_memory = serialize_full_config()
+        # Both sides are redacted BEFORE the diff is computed: the diff string
+        # carries every changed line of the file, so redacting only the dicts
+        # served beside it left the secrets in the diff (#2029). The same rule
+        # on both sides keeps them comparable, so an unchanged file still
+        # reports no diff.
+        on_disk_raw = _sanitize(on_disk_raw)
+        in_memory = _sanitize(serialize_full_config())
 
         on_disk_yaml = yaml.safe_dump(on_disk_raw, default_flow_style=False, sort_keys=True, allow_unicode=True)
         in_memory_yaml = yaml.safe_dump(in_memory, default_flow_style=False, sort_keys=True, allow_unicode=True)
@@ -240,8 +263,8 @@ async def diff_config(request: Request) -> HangarJSONResponse:
         return {
             "has_diff": bool(diff_str),
             "diff": diff_str,
-            "on_disk": _sanitize(on_disk_raw),
-            "in_memory": _sanitize(in_memory),
+            "on_disk": on_disk_raw,
+            "in_memory": in_memory,
         }
 
     result = await run_in_threadpool(_compute_diff)

@@ -14,6 +14,7 @@ from mcp_hangar.domain.contracts.authorization import (
     AuthorizationResult,
     IAuthorizer,
     IRoleStore,
+    assigner_rank,
     validate_role_scope,
 )
 from mcp_hangar.domain.value_objects import Permission, Principal, Role
@@ -195,6 +196,8 @@ class InMemoryRoleStore(IRoleStore):
         self._roles: dict[str, Role] = dict(BUILTIN_ROLES)
         # principal_id -> scope -> set of role names
         self._assignments: dict[str, dict[str, set[str]]] = {}
+        # (principal_id, scope, role_name) -> who the assignment is recorded against
+        self._assigned_by: dict[tuple[str, str, str], str | None] = {}
 
     def get_role(self, role_name: str) -> Role | None:
         """Get role by name.
@@ -268,6 +271,16 @@ class InMemoryRoleStore(IRoleStore):
                     out.append({"principal_id": principal_id, "roles": names})
             return out
 
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """List every assignment with who it is recorded against."""
+        with self._lock:
+            return [
+                {"principal_id": p, "role_name": r, "scope": sc, "assigned_by": self._assigned_by.get((p, sc, r))}
+                for p, r, sc in sorted(
+                    (p, r, sc) for p, scopes in self._assignments.items() for sc, names in scopes.items() for r in names
+                )
+            ]
+
     def assign_role(
         self,
         principal_id: str,
@@ -297,7 +310,11 @@ class InMemoryRoleStore(IRoleStore):
             if scope not in self._assignments[principal_id]:
                 self._assignments[principal_id][scope] = set()
 
-            self._assignments[principal_id][scope].add(role_name)
+            key = (principal_id, scope, role_name)
+            held = self._assignments[principal_id][scope]
+            if role_name not in held or assigner_rank(assigned_by) > assigner_rank(self._assigned_by.get(key)):
+                self._assigned_by[key] = assigned_by
+            held.add(role_name)
 
             logger.info(
                 "role_assigned",
@@ -326,6 +343,7 @@ class InMemoryRoleStore(IRoleStore):
             if principal_id in self._assignments:
                 if scope in self._assignments[principal_id]:
                     self._assignments[principal_id][scope].discard(role_name)
+                    self._assigned_by.pop((principal_id, scope, role_name), None)
                     logger.info(
                         "role_revoked",
                         principal_id=principal_id,
