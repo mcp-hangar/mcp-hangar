@@ -348,7 +348,7 @@ class TestConfigParsing:
                 )
             )
 
-    def test_malformed_digest_is_skipped(self) -> None:
+    def test_malformed_digest_holds_the_tool_without_refusing_the_boot(self) -> None:
         self._load(
             self._spec(
                 {
@@ -361,13 +361,15 @@ class TestConfigParsing:
         )
 
         registry = get_tool_projection_registry()
-        # The malformed pin is warn-skipped (no raise), so no pin is registered.
-        assert registry.resolve_pin(_SERVER, _TOOL, "t1") is None
+        # The boot is not refused (#278), and the tool is not left unpinned
+        # either: it is pinned to a digest nothing matches, so `block` withholds
+        # it until the pin is fixed (#2036).
+        assert registry.resolve_pin(_SERVER, _TOOL, "t1").sha256 == "0" * 64
         assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
 
-    def test_non_string_pin_value_is_skipped(self) -> None:
-        # A non-string pin value (e.g. a number or nested mapping) is warn-skipped
-        # without raising, and registers no pin (#278).
+    def test_non_string_pin_value_holds_the_tool_without_refusing_the_boot(self) -> None:
+        # A non-string pin value (e.g. a number or nested mapping) does not
+        # refuse the boot (#278) and holds the tool as drifted (#2036).
         self._load(
             self._spec(
                 {
@@ -379,7 +381,7 @@ class TestConfigParsing:
         )
 
         registry = get_tool_projection_registry()
-        assert registry.resolve_pin(_SERVER, _TOOL, "t1") is None
+        assert registry.resolve_pin(_SERVER, _TOOL, "t1").sha256 == "0" * 64
 
     def test_enforcement_is_scoped_per_server(self) -> None:
         # digest_enforcement set for one server does not affect another (#278).

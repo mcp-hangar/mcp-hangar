@@ -63,6 +63,13 @@ WITHHELD_DIGEST_DRIFT = "digest_drift"
 #: the server's pins do not admit under ``new_tools: withhold`` (#2033).
 WITHHELD_WITHDRAWN = "withdrawn"
 
+#: The digest registered for a pin the configuration loader could not read
+#: (#2036). No definition hashes to it, so the tool reads as drifted from its pin
+#: -- withheld under `block`, reported under `audit` -- and, under
+#: `new_tools: withhold`, it does not admit the tool either: a typo must not let
+#: through what the operator meant to pin.
+UNREADABLE_PIN_SHA256 = "0" * 64
+
 #: The fields of an upstream tool definition a ``block`` pin vouches for: exactly
 #: the ones `compute_tool_digest` hashes (SEP-1766). An allow-list, so a field the
 #: spec adds later is withheld from a pinned tool until a pin covers it.
@@ -324,9 +331,14 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         if not has_baseline:
             return False
         key = (mcp_server, tool)
-        if key in self._config_pins_all_tenants:
+        everyone = self._config_pins_all_tenants.get(key)
+        if everyone is not None and everyone.sha256 != UNREADABLE_PIN_SHA256:
             return False
-        return tenant_id is None or tenant_id not in self._config_pins.get(key, {})
+        if tenant_id is None:
+            return True
+        theirs = self._config_pins.get(key, {}).get(tenant_id)
+        # A pin the loader could not read admits nothing (#2036).
+        return theirs is None or theirs.sha256 == UNREADABLE_PIN_SHA256
 
     def is_unadmitted(self, mcp_server: str, tool: str, tenant_id: str | None = None) -> bool:
         """Is *tool* withheld on *mcp_server* because it is not among the pins (#1801)?"""
