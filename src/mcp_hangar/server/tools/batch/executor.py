@@ -14,7 +14,7 @@ import contextvars
 import threading
 import time
 from collections.abc import Coroutine
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from functools import partial
@@ -99,6 +99,7 @@ from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .member_health import MemberOutcome, member_outcome
 from .models import BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
 from .relay_seam import upstream_task
+from .shutdown import batch_abandoned_error, track_batch, untrack_batch, wait_unless_abandoned
 from .tenant_admission import CONCURRENCY, NO_BUDGET, RATE, Grant, Refusal, Reservation, get_tenant_admission
 
 logger = get_logger(__name__)
@@ -1398,6 +1399,13 @@ class BatchExecutor:
 
         tracer = get_tracer(__name__)
 
+        # Completes if an HTTP stop runs out of its bound while this batch is in
+        # flight: the batch then returns without waiting for its calls (#2097).
+        abandon_signal = track_batch(cancel_event)
+        if abandon_signal is None:
+            raise batch_abandoned_error(batch_id)
+        abandoned = False
+
         # Track active batches for metrics
         with self._active_lock:
             self._active_batches += 1
@@ -1467,7 +1475,11 @@ class BatchExecutor:
                 # would otherwise provide.
                 # IMPORTANT: each call gets its own copy — a Context object
                 # cannot be entered by more than one thread simultaneously.
-                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                # Not a `with`: leaving one waits for every call, and an
+                # abandoned batch must not wait for the upstream (#2097).
+                executor = ThreadPoolExecutor(max_workers=effective_workers)
+                futures: dict[Future[CallResult], int] = {}
+                try:
                     futures = {
                         executor.submit(
                             contextvars.copy_context().run,
@@ -1481,8 +1493,17 @@ class BatchExecutor:
                         for call in calls
                     }
 
+                    # The abandonment signal is waited on with the calls, so
+                    # the loop ends once every call is in -- at once for none.
+                    left = len(futures)
+                    waited: list[Future[Any]] = [*futures, abandon_signal] if futures else []
                     try:
-                        for future in as_completed(futures, timeout=global_timeout):
+                        for future in as_completed(waited, timeout=global_timeout):
+                            if future is abandon_signal:
+                                abandoned = True
+                                logger.warning("batch_abandoned_on_shutdown", batch_id=batch_id)
+                                break
+                            left -= 1
                             index = futures[future]
                             try:
                                 result = future.result()
@@ -1534,6 +1555,9 @@ class BatchExecutor:
                                     BATCH_CANCELLATIONS_TOTAL.inc(reason="fail_fast")
                                     break
 
+                            if not left:
+                                break
+
                     except TimeoutError:
                         # Global timeout exceeded. The gate that stopped a call
                         # names it (#1541): a call not yet past the budget gate
@@ -1549,6 +1573,13 @@ class BatchExecutor:
                         )
                         cancel_event.set()
                         BATCH_CANCELLATIONS_TOTAL.inc(reason="timeout")
+                finally:
+                    # Every call is waited for, as leaving the `with` did, unless
+                    # the batch is abandoned meanwhile. A call still running then
+                    # keeps its thread until the upstream answers or its server is
+                    # stopped.
+                    abandoned = abandoned or wait_unless_abandoned(futures, abandon_signal)
+                    executor.shutdown(wait=not abandoned, cancel_futures=abandoned)
 
                 # After the ThreadPoolExecutor context manager exits (shutdown(wait=True)),
                 # some futures may have completed after as_completed timed out (e.g.
@@ -1636,6 +1667,9 @@ class BatchExecutor:
                 batch_span.set_attribute("batch.elapsed_ms", round(elapsed_ms, 2))
 
                 # Apply batch-level truncation if enabled
+                if abandoned:
+                    raise batch_abandoned_error(batch_id)
+
                 final_results = [r for r in results if r is not None]
                 final_results = self._apply_batch_truncation(
                     batch_id, final_results, frozenset(c.index for c in calls if c.whole_result)
@@ -1653,6 +1687,7 @@ class BatchExecutor:
                 )
 
         finally:
+            untrack_batch(abandon_signal)
             release_routing_headers(routing_token)
             reset_current_protocol_negotiation(negotiation_token)
             with self._active_lock:

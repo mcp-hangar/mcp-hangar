@@ -2103,6 +2103,10 @@ def http_graceful_shutdown_timeout(full_config: dict[str, Any]) -> int | None:
     grace period. Absent keeps exactly that, so nobody's behaviour changes on
     upgrade.
 
+    The MCP calls in flight are answered either way: a stop no longer cuts their
+    streams. When the bound runs out first, each batch still running is
+    abandoned and its caller gets a JSON-RPC error saying so (#2097).
+
     Read when the HTTP server starts, and passed to uvicorn then. A reload
     checks the value, so a bad one refuses the reload like any other section,
     but the running server keeps the bound it started with until it restarts.

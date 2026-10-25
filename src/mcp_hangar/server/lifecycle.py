@@ -35,6 +35,7 @@ from .bootstrap.workers import start_background_workers
 from .catalogue_readiness import CatalogueRetry
 from .cli.cli_compat import CLIConfig
 from .config import http_graceful_shutdown_timeout, load_config_from_file
+from .http_drain import DrainingServer, McpRequestDrain, SseDrainHeld
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 logger = get_logger(__name__)
@@ -564,7 +565,8 @@ class ServerLifecycle:
             settings.host = host
             settings.port = port
 
-        mcp_app = mcp_app_for_serving(mcp_server)
+        # Counts the MCP POSTs being answered, so a stop can wait for them (#2097).
+        mcp_app = drain = McpRequestDrain(mcp_app_for_serving(mcp_server))
 
         # Create auxiliary routes for /metrics, /health, /ready
         import time
@@ -720,21 +722,28 @@ class ServerLifecycle:
             proxy_headers=False,
             # `http.graceful_shutdown_timeout_s`: how long a stop waits for the
             # requests in flight before cancelling them. Unset passes None,
-            # which is uvicorn's own default, so nothing changes (#1447).
+            # which is uvicorn's own default: no bound (#1447). DrainingServer
+            # spends it on the MCP requests first and enforces it itself (#2097).
             timeout_graceful_shutdown=graceful_shutdown_timeout_s,
         )
 
         async def run_server():
-            server = uvicorn.Server(config)
+            server = DrainingServer(config, drain)
             logger.info("http_server_started", host=host, port=port, endpoint="/mcp")
             try:
                 await server.serve()
             finally:
                 self.shutdown()
                 logger.info("http_server_stopped")
+                if drain.abandoned:
+                    # An abandoned call may still hold a worker thread, which the
+                    # interpreter would wait for before exiting; stopping its
+                    # server above normally ends it first.
+                    _end_after(HTTP_EXIT_GRACE_S, event="http_exit_forced", reason="abandoned_calls_still_running")
 
         try:
-            asyncio.run(run_server())
+            with SseDrainHeld():
+                asyncio.run(run_server())
         except KeyboardInterrupt:
             logger.info("http_server_shutdown", reason="keyboard_interrupt")
         except asyncio.CancelledError:
@@ -914,8 +923,12 @@ class SignalReloader:
 #: before it is ended without waiting for the stdin reader (#2090).
 STDIO_EXIT_GRACE_S = 2.0
 
+#: How long ``serve --http`` may take to exit on its own once its servers are
+#: stopped after it abandoned calls on a bounded stop (#2097).
+HTTP_EXIT_GRACE_S = 2.0
 
-def _end_after(grace_s: float) -> None:
+
+def _end_after(grace_s: float, *, event: str = "stdio_exit_forced", reason: str = "stdin_reader_still_blocked") -> None:
     """End the process if it is still running *grace_s* from now.
 
     Over stdio the SDK reads stdin on a worker thread. While the client keeps
@@ -925,10 +938,14 @@ def _end_after(grace_s: float) -> None:
     SIGKILL. The timer is a daemon thread, which the join does not wait for: it
     flushes the logs and ends the process. When stdin is closed the process
     exits normally before it fires.
+
+    ``serve --http`` arms it too, after a bounded stop abandoned calls whose
+    worker threads would otherwise hold the exit (#2097); *event* and *reason*
+    name that case in the log.
     """
 
     def end() -> None:
-        logger.info("stdio_exit_forced", reason="stdin_reader_still_blocked", grace_s=grace_s)
+        logger.info(event, reason=reason, grace_s=grace_s)
         logging.shutdown()
         for stream in (sys.stdout, sys.stderr):
             try:
