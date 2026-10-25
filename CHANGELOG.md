@@ -5,6 +5,210 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.1...v2.34.2) (2026-10-25)
+
+### Fixed
+
+- **core:** `config.yaml.example` now sets `execution.default_mcp_server_concurrency`
+  instead of the pre-rename `default_provider_concurrency`, which nothing reads. The
+  shipped example failed `mcp-hangar config check` and was refused under
+  `HANGAR_CONFIG_STRICT=1`, and editing that line changed nothing. A test now runs
+  `config check` on the example ([#2078](https://github.com/mcp-hangar/mcp-hangar/pull/2078))
+- **core:** on a `front_door` gateway, a server a configuration reload adds is now
+  started as boot starts every configured server, so its tools are listed and
+  callable, and each client whose listing that changes, over a `GET /mcp` stream
+  or a stdio session, is sent `notifications/tools/list_changed`. A reload used to commit the added
+  server cold and start nothing, so its tools were never listed and a call to one
+  answered `-32601` until the gateway restarted. A server the reload rebuilds is
+  started again too, so the front door lists its new catalogue rather than the one
+  of the process the reload stopped. In `egress` a reload still starts nothing ([#2076](https://github.com/mcp-hangar/mcp-hangar/pull/2076))
+- **observability:** deleting a group now also drops its
+  `mcp_hangar_circuit_breaker_state` series. The group's circuit events write that
+  gauge under the group's id, and only `mcp_hangar_group_circuit_open` was removed,
+  so a group deleted with its circuit open read `state="open"` 1 forever ([#2074](https://github.com/mcp-hangar/mcp-hangar/pull/2074))
+- **core:** a SIGHUP reload no longer freezes the gateway, and reloads run one
+  at a time. The SIGHUP handler ran the reload itself, on the main thread that
+  serves HTTP and stdio, so while a graceful reload waited for calls in flight
+  (up to 30 s) the gateway answered nothing, not even `/health/live`, and a
+  second SIGHUP started a reload nested inside the first. The handler now only
+  asks a reloader thread for a reload, and any number of SIGHUPs that arrive
+  while one runs ask for exactly one more. Nothing serialised reloads either:
+  the file watcher, SIGHUP, the `hangar_reload_config` tool and
+  `POST /api/config/reload` could run at once, compute their diffs before any of
+  them stopped a server, and stop the same server twice. A reload asked for while
+  another runs now waits for it, then runs on the configuration it left and
+  returns its own result; the log says `config_reload_waiting` ([#2071](https://github.com/mcp-hangar/mcp-hangar/pull/2071))
+- **core:** `from mcp_hangar.observability import *` no longer raises
+  `AttributeError`: its `__all__` listed an empty string left behind when a name was
+  removed. A test now checks that every name every package's `__all__` exports
+  exists ([#2069](https://github.com/mcp-hangar/mcp-hangar/pull/2069))
+- **core:** a request body that is not JSON, not a JSON object, or lacks a field the
+  route reads now answers 400 (`invalid_body` or `missing_fields`, as the routes that already checked answer) on the REST routes that parsed it
+  unguarded -- server create, update and L7 policy, groups, discovery sources, the
+  auth key and role routes, tool access policies and approval resolution. Each
+  answered a generic 500 and was logged as an unhandled fault. ([#2067](https://github.com/mcp-hangar/mcp-hangar/pull/2067))
+- **cli:** `mcp-hangar pin` handles a `mode: group` entry. It used to build the group as a server, so any configuration with a group made `pin`, `pin --write` and `pin --check` exit 2 (`unsupported_mode: group`), real drift on another server was reported as 2 instead of 1, and the pins declared on the group itself were never compared. A group is no longer started: its members are asked, a member defined inline in the group included, and `pin --check` holds the group's own `tool_projection.pins` (and `upstream`) against every member that serves the pinned tool, as the gateway does. A drift on a group names the member in the text report and as `member` in `--json`. `--write` writes no pins into a group or into an inline member, and the members a group's `auto_start` started while the file was loaded are stopped again ([#2063](https://github.com/mcp-hangar/mcp-hangar/pull/2063))
+- **core:** a remote server whose `tls.verify_ssl` is not a boolean -- a quoted
+  `"false"` is the usual case -- now fails to start with an error naming
+  `tls.verify_ssl`. httpx read the string as a CA bundle path, so every start
+  failed with `No such file or directory` and the `tls_verification_disabled`
+  warning never appeared ([#2059](https://github.com/mcp-hangar/mcp-hangar/pull/2059))
+- **core:** registering or updating a `remote` server over REST with an endpoint
+  the HTTP launcher cannot dial -- a scheme other than http or https, or no host,
+  such as `file:///etc/passwd` -- now answers 422. It was accepted, stored and
+  listed, and failed at every start ([#2057](https://github.com/mcp-hangar/mcp-hangar/pull/2057))
+- **core:** a discovery source in `mode: authoritative` now removes a server it no
+  longer reports once that server's TTL has run out, as documented. It never did:
+  the lost name was checked once, before its TTL could expire, and every cycle
+  refreshed the TTL of every server discovery still held, so a deleted container,
+  pod or file stayed registered until the gateway restarted. The removal goes
+  through `DeleteMcpServerCommand`, records `McpServerDiscoveryLost` with reason
+  `ttl_expired` (which a TTL expiry never recorded before), and the removed
+  server is not re-created by the next cycle. A server that comes back before its
+  TTL keeps running, a source whose scan fails removes nothing, and `additive`
+  sources and static configuration are unchanged ([#2051](https://github.com/mcp-hangar/mcp-hangar/pull/2051))
+- **cli:** `mcp-hangar add` no longer replaces a server the config already has. It
+  wrote the registry entry over the existing one, dropping the server's
+  `tool_projection` (its digest pins and enforcement), `tools` policy, extra args and
+  `env` without a word, and with `-y` without asking. Adding a server that is
+  configured exactly as the registry describes it now changes nothing and exits 0;
+  one configured differently is refused with exit 1, naming what the replacement
+  would drop or change. `--replace` keeps the old behaviour and says what it dropped ([#2043](https://github.com/mcp-hangar/mcp-hangar/pull/2043))
+
+### Security
+
+- **security:** `auth.opa.require_both: true` makes OPA able only to refuse more:
+  RBAC and OPA must both allow. With OPA enabled the default is unchanged -- OPA is
+  asked only when RBAC denies, and its allow overrides that deny and its tenant
+  scope -- but it is no longer silent: the gateway logs `opa_may_widen_rbac` at boot.
+  A `require_both` that is not a boolean refuses the configuration ([#2082](https://github.com/mcp-hangar/mcp-hangar/pull/2082))
+- **security:** a declared stdio principal whose roles have no effect is now named at
+  boot. With `auth.enabled` false and `tool_access.mode` egress (the default), every
+  `hangar_*` management tool is allowed to the stdio caller before its declared
+  `roles` are consulted, so `roles: [viewer]` did nothing and nothing said so. The
+  gateway now logs `stdio_principal_roles_not_enforced` with the principal and its
+  roles, and how to have them enforced: `tool_access.mode: front_door` or
+  `auth.enabled: true`. Behaviour is unchanged ([#2080](https://github.com/mcp-hangar/mcp-hangar/pull/2080))
+- **security:** filesystem discovery now refuses a definition file any local user
+  could have written. A discovered file names the command the gateway runs, yet
+  any file matching the pattern was registered, including a world-writable one,
+  one under a world-writable directory, and a symlink pointing out of the
+  discovery directory. Such a file is now skipped with one
+  `filesystem_discovery_file_refused` warning that names the reason. The mode is
+  read from the descriptor the file is parsed from. Symlinks that stay inside the
+  directory, the layout of a mounted Kubernetes ConfigMap, are still followed, and
+  group-writable files and directories are still accepted. On Windows the mode
+  checks are skipped ([#2065](https://github.com/mcp-hangar/mcp-hangar/pull/2065))
+- **security:** a JWT sent as `Authorization: bearer <token>` (or any other casing of
+  the scheme) now authenticates. The scheme is case-insensitive, and the
+  `?token=` path already treated it so, but the header path compared it with
+  `Bearer` exactly and treated anything else as no credentials -- a 401, or, where
+  anonymous access is allowed, a valid caller served as anonymous ([#2061](https://github.com/mcp-hangar/mcp-hangar/pull/2061))
+- **security:** the SSRF policy's cloud-metadata hostname rule now also refuses the
+  name written with a trailing dot. `metadata.google.internal.` is the same name
+  fully qualified, and it passed the name check; the address check behind it still
+  refused the metadata IP, so this closes a defence-in-depth gap ([#2055](https://github.com/mcp-hangar/mcp-hangar/pull/2055))
+- **security:** a line removed from `auth.role_assignments` now loses its role at
+  the next boot. Every boot applied the file's entries and nothing ever took one
+  away, so with the `sqlite`, `postgresql` or `event_sourcing` auth store a
+  principal kept a role after its line was deleted from config.yaml, until
+  someone revoked it through `DELETE /api/auth/roles/revoke`. Grants the file
+  applies are now recorded against the reserved assigner
+  `config/auth.role_assignments`, which no principal id can spell, and a server
+  boot revokes the ones the file no longer lists. Grants made through the API or
+  `mcp-hangar auth bootstrap-admin` take over a matching file grant and are never
+  revoked by a boot; `bootstrap-admin` itself applies the file add-only and
+  revokes nothing. Grants written before this release record no assigner; one the
+  file lists is adopted by it, and one it does not list is kept and named in an
+  `untracked_role_assignment_not_in_config` warning at every boot. The SQLite and
+  PostgreSQL stores now also record `assigned_by` for every assignment, which
+  they used to leave empty, and `IRoleStore` gains `list_role_assignments()` ([#2053](https://github.com/mcp-hangar/mcp-hangar/pull/2053))
+- **cli:** a backup of a private file is private too. `mcp-hangar pin --write` kept
+  the previous config as `<config>.bak`, and `mcp-hangar init` copied the MCP
+  client's config into its state directory, both at the umask default (0644)
+  whatever the original's mode -- and a client config often holds other servers'
+  tokens. Both are now copies that keep the original's mode, and the init backup
+  directory is created owner-only ([#2049](https://github.com/mcp-hangar/mcp-hangar/pull/2049))
+- **security:** an API key created with an `expires_at` that has no UTC offset now
+  works until it expires. It was accepted and then every authentication with it
+  answered 500, because the store compared the offset-naive expiry with an aware
+  clock. Such a value is now read as UTC, when the key is created and when a key
+  stored that way before is read back, and an unparseable `expires_at` answers 422
+  instead of 500 ([#2047](https://github.com/mcp-hangar/mcp-hangar/pull/2047))
+- **security:** an `auth.oidc.issuers` entry can now be bound to the tenants it
+  may assert with `allowed_tenants`. With two or more trusted issuers, a token's
+  tenant claim was taken from whichever issuer signed it, so one customer's
+  identity provider could sign a token naming another customer's tenant and its
+  users. A bound issuer's token is refused with `401` unless its tenant claim is
+  one of the listed tenants; a token naming no tenant is refused too. Without the
+  key nothing changes, and boot now logs one `oidc_issuers_not_bound_to_tenants`
+  warning when two or more issuers are trusted and any of them is unbound ([#2045](https://github.com/mcp-hangar/mcp-hangar/pull/2045))
+- **infra:** the compose files that run the gateway with `--unsafe-no-auth` now
+  publish it on loopback only. `docker-compose.yml`, `examples/quickstart`,
+  `examples/otel-collector` and `examples/task_upstream` published `8080:8080`,
+  which Docker binds on every host interface, so anyone who could reach the host
+  had the unauthenticated management API. The quickstart's Prometheus and Grafana
+  (`admin/admin`) are on loopback too. The root file's healthcheck, which could
+  never fail, now probes `/health/ready`, and its obsolete `version:` key is gone ([#2041](https://github.com/mcp-hangar/mcp-hangar/pull/2041))
+- **security:** labels and annotations can no longer choose a process or host mounts
+  for Hangar to launch. A pod annotated `mcp-hangar.io/mode: subprocess` used to
+  register a subprocess server that ran `mcp-hangar.io/command` on the gateway host,
+  so anyone who could create a pod in a watched namespace chose a command the gateway
+  ran. The Kubernetes source now refuses every mode other than `http`, `sse` and
+  `remote` unless it sets `allow_local_modes: true`, and logs
+  `kubernetes_discovery_local_mode_refused` once per name. A Docker container in
+  `container` mode used to be run with the host mounts named in `mcp.hangar.volumes`,
+  read-write and without a read-only root. Container mode stays on by default, but a
+  `mcp.hangar.volumes` label is now honoured only for absolute host paths under the
+  source's new `allowed_mount_paths` (never `/` or a `*.sock` file). A container whose
+  label names anything else is refused and logged once as
+  `docker_discovery_label_volumes_refused`. A discovered container also gets a
+  read-only root unless labelled `mcp.hangar.read-only: "false"`. The shared container
+  volume check now refuses the host root `/` (and paths such as `/etc/..` that
+  normalise to it), for declared servers too. Remote discovery is unchanged. ([#2038](https://github.com/mcp-hangar/mcp-hangar/pull/2038))
+- **security:** a digest pin the loader cannot read no longer leaves its tool
+  unpinned. Under `tool_projection.pins` and `tenant_overrides.<tenant>.pins`, a pin
+  written in uppercase or as `sha256:<hex>` was dropped although it named the right
+  digest, any other unreadable pin was dropped with a warning, and a `pins` block
+  or `tenant_overrides` entry that was not a mapping was skipped with no log line,
+  each time serving the tool unpinned while the gateway booted. The two spellings
+  now pin the tool. Any other unreadable pin is logged at ERROR and pins the tool
+  to a value no definition matches, so it is withheld under `block` until fixed.
+  A `pins` or `tenant_overrides` block that is not a mapping is refused at boot and
+  by `mcp-hangar config check`. Under `new_tools: withhold` an unreadable pin does not admit its tool ([#2039](https://github.com/mcp-hangar/mcp-hangar/pull/2039))
+- **security:** `tool_projection.new_tools: withhold` held from the second call on, not the first, and the REST listings described what it withheld. A tool outside a server's pins that the catalogue did not hold yet -- every tool on a cold server, since the cold start builds the catalogue later in the call -- read as unknown, which the withdrawal gate lets through, so the first `hangar_call` of a tool the upstream added after the pins ran upstream and only the second was refused. The withdrawal status `decide()` reads now answers withdrawn for such a tool whether or not the catalogue holds it, so the first call is refused as the second is, before the server is started. `GET /api/mcp_servers/{id}/tools`, `GET /api/tools/` and `GET /api/mcp_servers/{id}` listed that tool, and a tool `withdrawn:` for every tenant, with its full description; they now show it as a drifted tool is shown, with its name, its digests and `withheld: "withdrawn"`, and without its description or input schema. Without `new_tools: withhold`, the only change is that REST listings drop the description and input schema of a tool `withdrawn:` for every tenant. ([#2035](https://github.com/mcp-hangar/mcp-hangar/pull/2035))
+- **security:** on the front door, an upstream tool named like one of the gateway's
+  own tools (`hangar_status`, `hangar_whoami`, `hangar_call`, ...) is no longer
+  projected. Its name was listed twice and a call of it went to the upstream, so
+  the upstream answered for the gateway and the real tool could not be reached.
+  The gateway's tool keeps the name, and `flat_tool_name_reserved` is logged naming
+  the server, as a collision is. Egress mode, where a tool is always named with its
+  server, is unchanged ([#2032](https://github.com/mcp-hangar/mcp-hangar/pull/2032))
+- **security:** `GET /api/config/` and `GET /api/config/diff` no longer serve secrets.
+  Both ran a sanitizer over top-level key names only, so `GET /config` returned
+  every API-registered server's `env` verbatim, and the diff -- computed from the
+  file after `${VAR}` interpolation -- carried the real value of an environment
+  secret in `on_disk` and in the unified `diff` string. Both now redact the way
+  `POST /api/config/export` does: sensitive key names at every level, and
+  credential-shaped values. Both sides of the diff are redacted before it is
+  computed, so an unchanged file still reports no diff ([#2030](https://github.com/mcp-hangar/mcp-hangar/pull/2030))
+- **security:** the connect-time SSRF guard no longer dials a remote server by name
+  when its own DNS lookup fails. It used to pass the request on with the hostname
+  intact, so httpcore resolved the name a second time with no check, and a
+  resolver that failed the first lookup and answered the second with a private or
+  metadata address got a connection the guard never judged. The request now fails
+  with a connection error. Servers without SSRF enforcement, and names that
+  resolve, are unaffected ([#2028](https://github.com/mcp-hangar/mcp-hangar/pull/2028))
+- **security:** registering a server the gateway launches on its own host now needs
+  `mcp_servers:local_launch`. A `subprocess`, `docker` or `container` server runs
+  a command or image the caller chooses, and its `env` is read when that process
+  starts, so `POST /api/mcp_servers/` for any mode but `remote`, and a
+  `PUT`/`PATCH` that sets `env` on such a server, used to let any holder of
+  `mcp_servers:write` -- the built-in `developer` role included -- run code on the
+  gateway host. `admin` and `provider-admin` hold the new permission; `developer`,
+  `kubernetes-operator` and the read-only roles do not. Registering a `remote`
+  server is unchanged ([#2026](https://github.com/mcp-hangar/mcp-hangar/pull/2026))
+
 ## [2.34.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.0...v2.34.1) (2026-10-24)
 
 ### Fixed
