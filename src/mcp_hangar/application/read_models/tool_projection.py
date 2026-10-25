@@ -58,6 +58,11 @@ def _projection_changed() -> None:
 #: Why a listing withholds a tool whose definition drifted from a blocking pin (#1776).
 WITHHELD_DIGEST_DRIFT = "digest_drift"
 
+#: Why an operator listing withholds a tool a call of it is refused as withdrawn
+#: for every caller: a config or runtime withdrawal for all tenants, or a tool
+#: the server's pins do not admit under ``new_tools: withhold`` (#2033).
+WITHHELD_WITHDRAWN = "withdrawn"
+
 #: The fields of an upstream tool definition a ``block`` pin vouches for: exactly
 #: the ones `compute_tool_digest` hashes (SEP-1766). An allow-list, so a field the
 #: spec adds later is withheld from a pinned tool until a pin covers it.
@@ -601,11 +606,20 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         executor's withdrawal gate read one status: ``None`` for a tool the
         catalogue does not know, which blocks nothing. A prompt or a resource
         answers as :meth:`is_withdrawn` does.
+
+        The exception is a tool the server's pins do not admit (#2033): it is
+        withdrawn whether or not the catalogue holds it yet. Before the cold
+        start that builds the catalogue, and for an upstream that answers a
+        call of a tool it leaves out of ``tools/list``, ``resolve`` knows no
+        such tool, and the first call of it ran.
         """
         if kind != "tool":
             return self.is_withdrawn(mcp_server, name, kind=kind, tenant_id=tenant_id)
-        projection = self.resolve(mcp_server, name, tenant_id)
-        return None if projection is None else projection.is_withdrawn_for(tenant_id)
+        with self._lock:
+            projection = self.resolve(mcp_server, name, tenant_id)
+            if projection is None:
+                return True if self._is_unadmitted(mcp_server, name, tenant_id) else None
+            return projection.is_withdrawn_for(tenant_id)
 
     def is_withdrawn(
         self,

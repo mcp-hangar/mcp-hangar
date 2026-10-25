@@ -153,6 +153,29 @@ class IAuthorizer(Protocol):
         ...
 
 
+CONFIG_ROLE_ASSIGNER = "config/auth.role_assignments"
+"""The ``assigned_by`` of a grant applied from ``auth.role_assignments`` in the config file.
+
+It holds a ``/``, which ``PrincipalId`` refuses, so no authenticated caller can
+be recorded under it: only a row carrying it is one the file owns, and only
+such a row is revoked when its line leaves the file.
+"""
+
+
+def assigner_rank(assigned_by: str | None) -> int:
+    """How strongly *assigned_by* owns a grant: 0 untracked, 1 the config file, 2 a named actor.
+
+    Untracked is ``None`` or ``system`` -- what every store recorded before the
+    config file was tagged, whoever made the grant. A repeat assignment of a
+    grant that already exists takes it over only by ranking higher, so the file
+    adopts an untracked grant it lists, and an API grant of the same role keeps
+    it when the line is removed from the file.
+    """
+    if assigned_by is None or assigned_by == "system":
+        return 0
+    return 1 if assigned_by == CONFIG_ROLE_ASSIGNER else 2
+
+
 @runtime_checkable
 class IRoleStore(Protocol):
     """Storage for roles and role assignments.
@@ -212,6 +235,17 @@ class IRoleStore(Protocol):
             sorted. Backs ``GET /api/auth/principals``, which read a private
             attribute only the in-memory store had and so answered ``[]`` for the
             others (#1672).
+        """
+        ...
+
+    @abstractmethod
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """List every role assignment with who it is recorded against.
+
+        Returns:
+            One ``{"principal_id", "role_name", "scope", "assigned_by"}`` per
+            assignment, ordered by principal, role and scope. ``assigned_by`` is
+            ``None`` where the store recorded nobody.
         """
         ...
 
@@ -504,6 +538,10 @@ class NullRoleStore:
 
     def list_principals(self) -> list[dict[str, Any]]:
         """Nobody holds a role."""
+        return []
+
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        """Nothing is assigned."""
         return []
 
     def get_role(self, role_name: str) -> Role | None:

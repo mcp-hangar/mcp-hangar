@@ -185,13 +185,18 @@ def _kubernetes(mode: DiscoveryMode, config: dict[str, Any]) -> DiscoverySource:
         in_cluster=config.get("in_cluster", True),
         allowed_namespaces=set(allowed) if allowed is not None else None,
         denied_namespaces=set(denied) if denied is not None else None,
+        allow_local_modes=config.get("allow_local_modes", False) is True,
     )
 
 
 def _docker(mode: DiscoveryMode, config: dict[str, Any]) -> DiscoverySource:
     from . import DockerDiscoverySource
 
-    return DockerDiscoverySource(mode=mode, socket_path=config.get("socket_path"))
+    return DockerDiscoverySource(
+        mode=mode,
+        socket_path=config.get("socket_path"),
+        allowed_mount_paths=list(config.get("allowed_mount_paths") or ()),
+    )
 
 
 def _filesystem(mode: DiscoveryMode, config: dict[str, Any]) -> DiscoverySource:

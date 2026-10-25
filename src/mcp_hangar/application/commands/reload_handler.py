@@ -1,5 +1,6 @@
 """Command handler for configuration reload."""
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +23,17 @@ logger = get_logger(__name__)
 
 #: How long a graceful reload waits, in all, for the calls in flight to the servers it is about to stop.
 GRACEFUL_DRAIN_TIMEOUT_S = 30.0
+
+#: One reload at a time, in the whole process, whoever asks: REST, the MCP tool,
+#: the file watcher or SIGHUP. Two reloads used to run at once and interleave:
+#: both computed their diff before either stopped a server, and one server was
+#: stopped twice. A plain lock, not a TrackedLock: it is the outermost lock of a
+#: reload, taken with no other lock held (every caller is a worker, threadpool or
+#: signal-reloader thread), and everything a reload locks -- servers, the event
+#: bus, the repository -- is locked inside it, so it adds no new order. Not
+#: reentrant on purpose: a reload that asked for a reload would deadlock here
+#: rather than nest; nothing a reload runs sends one.
+_RELOAD_LOCK = threading.Lock()
 
 #: Waits until one server has no call in flight, for at most the given seconds; True once idle.
 DrainFn = Callable[[str, float], bool]
@@ -117,7 +129,19 @@ class ReloadConfigurationHandler(CommandHandler):
             ConfigurationError: If configuration is invalid or cannot be loaded.
             ConfigurationRestartRequiredError: If the file changes
                 `tool_access.mode`. Nothing is changed.
+
+        A reload asked for while another runs waits for it, then runs on the
+        configuration that one left, and returns its own result.
         """
+        if not _RELOAD_LOCK.acquire(blocking=False):
+            logger.info("config_reload_waiting", requested_by=command.requested_by)
+            _RELOAD_LOCK.acquire()
+        try:
+            return self._handle(command)
+        finally:
+            _RELOAD_LOCK.release()
+
+    def _handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:
         start_time = time.perf_counter()
 
         # Determine config path

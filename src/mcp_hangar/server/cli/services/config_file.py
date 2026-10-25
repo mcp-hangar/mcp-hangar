@@ -5,6 +5,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -110,6 +111,21 @@ class ConfigFileManager:
         config["mcp_servers"][mcp_server.name] = mcp_server_entry
 
         self.save(config)
+
+    def configured_entry(self, name: str) -> dict[str, Any] | None:
+        """The entry the file holds for *name*, or None when it holds none."""
+        servers = self.load().get("mcp_servers") or {}
+        entry = servers.get(name)
+        return entry if isinstance(entry, dict) else None
+
+    def build_mcp_server_entry(
+        self,
+        mcp_server: McpServerDefinition,
+        config_value: str | None = None,
+        use_env: str | None = None,
+    ) -> dict[str, Any]:
+        """The entry `add_mcp_server` would write, without writing it (#2042)."""
+        return self._build_mcp_server_entry(mcp_server, config_value, use_env)
 
     def add_provider(
         self,
