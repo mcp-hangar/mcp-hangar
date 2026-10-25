@@ -32,3 +32,10 @@ mode without `allow_local_modes`, a Docker volume outside
 `allowed_mount_paths`, a definition file the trust checks refuse) is not
 reported at all. On an additive source the running server stays; on an
 authoritative source it is removed after its TTL, as before.
+
+In a cluster that shares a management lease, a manual discovery scan
+(`hangar_discover`, `POST /api/discovery/sources/{id}/scan`) and an approval
+of a pending or quarantined server (`POST /api/discovery/approve/{name}`,
+`hangar_approve`) are refused with `409` on an instance that does not hold the
+lease: send them to the instance that does. A standalone gateway, with no
+coordination configured, always holds it.
