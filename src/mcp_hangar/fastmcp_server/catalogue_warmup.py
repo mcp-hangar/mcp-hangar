@@ -12,7 +12,9 @@ mitigation before that existed, and it stays, deliberately, as a backstop for
 the two cases a notification does not cover: a ``tools/call`` naming a tool not
 projected yet, which no re-list precedes, and a client that ignores
 ``list_changed`` or has no channel to hear it on (front_door HTTP until the
-sessionless GET stream lands).
+sessionless GET stream lands). ``server/discover`` waits on the same condition:
+it promises the caller's ``tools/list`` surface, and a stateless client has no
+notification channel at all (#2101).
 
 So the fix is not to block the boot. It is to let the *listing* wait, briefly,
 for the warm-up that is already running -- and only in the one case where the

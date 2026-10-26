@@ -959,9 +959,9 @@ async def _catalogue_settled(tenant_id: str | None, projection_is_empty: bool) -
     True means the caller should re-read the projection: the warm-up finished
     while we waited, so what was empty a moment ago may not be now.
 
-    One function rather than the condition inline at both call sites, because
-    the two must not drift: the listing and the call path have to agree exactly
-    on when waiting is legitimate. Waiting where it is not costs a fail-closed
+    One function rather than the condition inline at each call site, because
+    they must not drift: the listing, the call path and ``server/discover``
+    (#2101) have to agree exactly on when waiting is legitimate. Waiting where it is not costs a fail-closed
     deny its speed, or delays a true `-32601` for a tool that does not exist.
     """
     if not projection_is_empty or not is_warming():
