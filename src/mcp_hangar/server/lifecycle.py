@@ -209,8 +209,9 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     anyway, logged per server, and reported by the empty-projection metric
     (#887). This warm-up is not retried. A server named in
     ``tool_access.required_catalogue`` is, by `catalogue_readiness.CatalogueRetry`,
-    which runs after this on the same thread and within the bounds that module
-    sets out (#1446); every other server that is down at boot stays down until a
+    which runs after this on the same thread, or apart from it once the
+    warm-up's bound passes (#2128), within the bounds that module sets out
+    (#1446); every other server that is down at boot stays down until a
     call starts it or the fleet is warmed again on the next restart.
 
     Args:
@@ -269,11 +270,14 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
 
 
 def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.Thread:
-    """Warm the front door's catalogue, then run *retry* on the servers it missed, on a thread of its own.
+    """Warm the front door's catalogue on a thread of its own, then run *retry* on the servers it missed.
 
-    One thread for both: the retry starts where the warm-up ends, and each
-    returns at once where it does not apply (``egress``, or no
-    ``tool_access.required_catalogue``, #1446). On a thread because a backend
+    Normally one thread for both: the retry starts where the warm-up ends, and
+    each returns at once where it does not apply (``egress``, or no
+    ``tool_access.required_catalogue``, #1446). A warm-up that outlives its
+    bound (#2122) would hold the retry back for as long as it hangs, so when the
+    bound passes the retry starts on a thread of its own instead (#2128); it
+    runs once, so the warm-up thread skips it if it ever gets there. On a thread because a backend
     handshake is I/O, and nothing may wait on it: `build_readiness_report`
     spells out why gating the serving path on a warm backend deadlocks the
     deployment. The front door serves a short list until this finishes, which
@@ -300,8 +304,17 @@ def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.T
     # listing waiting for the life of the process.
     to_warm = _servers_a_warm_up_will_start(runtime)
     marked = to_warm is not None
+
+    def retry_past_the_bound() -> None:
+        # A required server the hung warm-up failed, or has not reached, is
+        # retried anyway (#2128). Not the one it hangs on: that is
+        # `initializing`, which the retry leaves alone.
+        threading.Thread(target=retry.run, name="mcp-hangar-catalogue-retry", daemon=True).start()
+
     if to_warm is not None:
-        catalogue_warmup.warmup_started(warm_up_bound_s(runtime, to_warm), to_warm)
+        catalogue_warmup.warmup_started(
+            warm_up_bound_s(runtime, to_warm), to_warm, on_bound_passed=retry_past_the_bound
+        )
 
     def warm_up() -> None:
         try:

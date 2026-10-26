@@ -1,0 +1,1 @@
+**core:** A front-door warm-up that hangs on one server no longer stops `tool_access.required_catalogue` from retrying the required servers that failed. Once the warm-up bound passes, the retry starts on a thread of its own; a warm-up that finishes in time runs it as before.

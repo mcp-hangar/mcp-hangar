@@ -48,8 +48,14 @@ Both keep reporting what is missing after the window has ended.
 ## The retry
 
 The boot warm-up starts every server once. A required server it could not start
-is retried by ``CatalogueRetry``, on the warm-up's thread once the warm-up is
-done, until the list is met or the window ends. It does not fight the server
+is retried by ``CatalogueRetry`` until the list is met or the window ends. It
+runs on the warm-up's thread once the warm-up is done, or, when the warm-up
+outlives its bound (#2122), say on a handshake that never returns, on a thread
+of its own from the moment the bound passes (#2128). It runs once either way.
+It may then start a server the hung warm-up has not reached yet; the warm-up's
+own start of that server later joins or finds the one already made, since a
+server's start is single-flight (`McpServer.ensure_ready`), and the retry never
+starts a server that is ``initializing``. It does not fight the server
 lifecycle, which is how #1429 failed:
 
 - It starts a server the way a call does, not the way ``hangar_start`` does
@@ -496,9 +502,11 @@ def reset() -> None:
 class CatalogueRetry:
     """Retry, within the window, the required servers the boot warm-up could not project.
 
-    ``run`` is called on the warm-up's thread after the warm-up, and returns at
-    once unless this is a front door with a list in force. See the module
-    docstring for what it will and will not start.
+    ``run`` is called on the warm-up's thread after the warm-up, or on a thread
+    of its own once the warm-up's bound passes (#2128), and returns at once
+    unless this is a front door with a list in force. It runs once per
+    instance: a second call returns at once, so the two paths never run it
+    side by side. See the module docstring for what it will and will not start.
     """
 
     def __init__(self, runtime: Any, *, poll_s: float = RETRY_POLL_S, spacing_s: float = MIN_SPACING_S) -> None:
@@ -509,6 +517,8 @@ class CatalogueRetry:
         self._thread: threading.Thread | None = None
         self._next_at: dict[str, float] = {}
         self._attempts: Counter[str] = Counter()
+        self._claim = threading.Lock()
+        self._claimed = False
 
     def stop(self, timeout: float = STOP_JOIN_S) -> None:
         """Stop, and wait up to ``timeout`` for an attempt in flight. Safe to call more than once."""
@@ -521,6 +531,10 @@ class CatalogueRetry:
         """Retry until the list is met, nothing is left it may start, the window ends, or ``stop``."""
         if _gate.required() is None or self._stop.is_set() or not is_front_door():
             return
+        with self._claim:
+            if self._claimed:
+                return
+            self._claimed = True
         self._thread = threading.current_thread()
         _gate.set_retry("running")
         final = "failed"
