@@ -491,6 +491,25 @@ class DiscoveryService:
             logger.info(f"Approved pending mcp_server: {name}")
         return mcp_server
 
+    def put_back_pending(self, mcp_server: DiscoveredMcpServer, registered_before: DiscoveredMcpServer | None) -> None:
+        """Undo `approve_pending` of *mcp_server*, whose registration was refused (#2136).
+
+        It waits again unless a scan parked a newer definition meanwhile, and
+        the resolver holds *registered_before* again: left holding the refused
+        definition, the next scan reads it as registered and passes it on
+        unapproved.
+        """
+        self._pending.setdefault(mcp_server.name, mcp_server)
+        if self._conflict_resolver.get_registered(mcp_server.name) is mcp_server:
+            if registered_before is None:
+                self._conflict_resolver.deregister(mcp_server.name)
+            else:
+                self._conflict_resolver.register(registered_before)
+
+    def get_registered(self, name: str) -> DiscoveredMcpServer | None:
+        """The definition the resolver holds as registered under *name*, or None."""
+        return self._conflict_resolver.get_registered(name)
+
     def reject_pending(self, name: str) -> DiscoveredMcpServer | None:
         """Drop a pending mcp_server without registering it.
 

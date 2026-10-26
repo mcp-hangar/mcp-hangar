@@ -1234,7 +1234,10 @@ class DiscoveryOrchestrator:
         warning. Either way the definition passes the same command and
         source-policy checks an automatic registration does; one that fails
         them, or whose source is no longer registered, is refused and stays
-        where it waited.
+        where it waited. So does one whose registration the control plane
+        refuses, for instance because a server of that name already exists: it
+        answered "registered" and was gone from where it waited, though nothing
+        had changed (#2136).
 
         Args:
             name: McpServer name
@@ -1273,6 +1276,10 @@ class DiscoveryOrchestrator:
         if refusal is not None:
             return refusal
         running = self._lifecycle_manager.get_mcp_server(name)
+        # What a refused registration puts back (#2136), read with no await
+        # before the take below.
+        quarantined = self._lifecycle_manager.get_quarantined().get(name)
+        registered_before = self._discovery_service.get_registered(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False
         if mcp_server is None:
@@ -1285,11 +1292,23 @@ class DiscoveryOrchestrator:
         if mcp_server:
             # Register with main registry
             if self.on_register:
+                reason: str | None = None
                 try:
-                    await self.on_register(mcp_server)
+                    if not await self.on_register(mcp_server):
+                        # The callback logs why and answers only False.
+                        reason = "the control plane refused the registration; the gateway log says why"
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash approval
-                    logger.error(f"Error registering approved mcp_server {name}: {e}")
-                    return {"approved": False, "mcp_server": name, "error": str(e)}
+                    reason = str(e) or type(e).__name__
+                if reason is not None:
+                    self._put_back(mcp_server, running, None if was_pending else quarantined, registered_before)
+                    logger.warning(
+                        "discovery_approval_refused",
+                        mcp_server_name=name,
+                        source=mcp_server.source_type,
+                        definition_digest=mcp_server.definition_digest,
+                        reason=reason,
+                    )
+                    return {"approved": False, "mcp_server": name, "error": f"approval refused: {reason}"}
 
             if was_pending:
                 # Tracked from here on, so a later cycle sees it unchanged and its TTL runs.
@@ -1304,6 +1323,32 @@ class DiscoveryOrchestrator:
             "mcp_server": name,
             "error": "McpServer not found in quarantine or pending",
         }
+
+    def _put_back(
+        self,
+        mcp_server: DiscoveredMcpServer,
+        running: DiscoveredMcpServer | None,
+        quarantined: tuple[DiscoveredMcpServer, str, datetime] | None,
+        registered_before: DiscoveredMcpServer | None,
+    ) -> None:
+        """Undo the take of *mcp_server* by an approval whose registration was refused (#2136).
+
+        *quarantined* is the entry it was taken from, or None when it was pending.
+
+        It waits again where it waited, with the same reason and time, and
+        tracking and the resolver hold what they held before: left holding the
+        refused definition, the next cycle reads it as registered and unchanged,
+        and a pending one would be registered unapproved.
+        """
+        if self._lifecycle_manager.get_mcp_server(mcp_server.name) is mcp_server:
+            if running is None:
+                self._lifecycle_manager.remove_mcp_server(mcp_server.name)
+            else:
+                self._lifecycle_manager.add_mcp_server(running)
+        if quarantined is not None:
+            self._lifecycle_manager.put_back_quarantined(*quarantined)
+        else:
+            self._discovery_service.put_back_pending(mcp_server, registered_before)
 
     def _waiting(self, name: str) -> DiscoveredMcpServer | None:
         """The definition an approval of *name* would apply: from quarantine first, then pending, as `_approve`."""
