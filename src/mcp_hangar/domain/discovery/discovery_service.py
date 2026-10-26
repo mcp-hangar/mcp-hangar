@@ -500,11 +500,13 @@ class DiscoveryService:
         unapproved.
         """
         self._pending.setdefault(mcp_server.name, mcp_server)
-        if self._conflict_resolver.get_registered(mcp_server.name) is mcp_server:
-            if registered_before is None:
-                self._conflict_resolver.deregister(mcp_server.name)
-            else:
-                self._conflict_resolver.register(registered_before)
+        # Unconditionally: a scan during the refused registration may have
+        # refreshed the entry `approve_pending` made, and only an approval puts
+        # a name in the resolver where approval is required.
+        if registered_before is None:
+            self._conflict_resolver.deregister(mcp_server.name)
+        else:
+            self._conflict_resolver.register(registered_before)
 
     def get_registered(self, name: str) -> DiscoveredMcpServer | None:
         """The definition the resolver holds as registered under *name*, or None."""

@@ -1298,6 +1298,7 @@ class DiscoveryOrchestrator:
                         # The callback logs why and answers only False.
                         reason = "the control plane refused the registration; the gateway log says why"
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash approval
+                    logger.error(f"Error registering approved mcp_server {name}: {e}")
                     reason = str(e) or type(e).__name__
                 if reason is not None:
                     self._put_back(mcp_server, running, None if was_pending else quarantined, registered_before)
