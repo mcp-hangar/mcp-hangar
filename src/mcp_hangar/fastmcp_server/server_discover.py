@@ -33,8 +33,9 @@ from mcp_hangar.context import get_identity_context
 from mcp_hangar.logging_config import get_logger
 
 from ..protocol import HANGAR_SERVER_NAME
+from . import catalogue_warmup
 from .asgi import bind_caller_identity, release_caller_identity
-from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list
+from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list, _catalogue_settled
 from .governance_extensions import move_governance_to_extensions
 
 logger = get_logger(__name__)
@@ -202,6 +203,11 @@ async def server_discover_handler(request: Request, mcp: FastMCP | None = None) 
     token = bind_caller_identity(request_context)
     try:
         tenant_id = _caller_tenant_id()
+        # A discover that lands mid-warm-up waits for it exactly as `tools/list`
+        # does, on the same condition, or it answers an empty catalogue the
+        # listing a moment later does not (#1231, #2101).
+        if catalogue_warmup.is_warming():
+            await _catalogue_settled(tenant_id, not _build_flat_map(tenant_id))
         result = server_discover_result(tenant_id, mcp, request_context)
     finally:
         release_caller_identity(token)
