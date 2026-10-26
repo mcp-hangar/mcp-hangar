@@ -10,7 +10,8 @@ applied again and the approved change ran indefinitely.
 
 An approval and a cycle on the same name now take turns: the approval waits for
 the cycle to finish and then sees what it left. Different names do not wait for
-each other.
+each other. TTL expiry and a tenure rebuild do not wait for the cycle; a cycle
+that finds tracking changed under it writes nothing back.
 
 These drive the real orchestrator, service and lifecycle manager. Only the
 security validator is replaced, by one whose verdict the test sets and whose
@@ -222,4 +223,112 @@ class TestAnApprovalDuringACycle:
         assert result == {"approved": True, "mcp_server": "svc", "status": "updated"}
         assert running == {"svc": "b", "early": "other"}
         assert _tracked(orchestrator, "svc") == "b"
+        assert orchestrator._name_locks == {}
+
+
+def _discovered(name: str, module: str) -> DiscoveredMcpServer:
+    return DiscoveredMcpServer.create(
+        name=name,
+        source_type="filesystem",
+        mode="subprocess",
+        connection_info={"command": ["python", "-m", module]},
+        metadata={},
+    )
+
+
+@pytest.mark.asyncio
+class TestTrackingThatChangesDuringValidation:
+    """TTL expiry and a tenure rebuild do not take the name's lock; a cycle that sees either writes nothing back."""
+
+    async def test_a_deregistration_while_validating_leaves_nothing_tracked_until_reported_again(self) -> None:
+        source = _Source()
+        orchestrator, validator, running = _build(source)
+
+        async def _deregister(name: str, reason: str) -> None:
+            running.pop(name, None)
+
+        orchestrator.on_deregister = _deregister
+        # Wired by start(), which would also start the background loops.
+        orchestrator._lifecycle_manager.on_deregister = orchestrator._handle_deregister
+        source.defs["svc"] = "a"
+        await orchestrator.run_discovery_cycle()
+
+        validator.failing.add("c")
+        validator.held = "c"
+        source.defs["svc"] = "c"
+        cycle = asyncio.create_task(orchestrator.run_discovery_cycle())
+        try:
+            await asyncio.wait_for(validator.entered.wait(), WAIT)
+            await orchestrator._lifecycle_manager._deregister("svc", "ttl_expired")
+        finally:
+            validator.release.set()
+        await asyncio.wait_for(cycle, WAIT)
+
+        assert _tracked(orchestrator, "svc") is None
+        assert "svc" not in running
+
+        validator.held = None
+        validator.failing.clear()
+        await orchestrator.run_discovery_cycle()
+        assert running["svc"] == _tracked(orchestrator, "svc") == "c"
+
+    async def test_a_tenure_rebuild_while_validating_is_not_overwritten(self) -> None:
+        source = _Source()
+        holds = True
+        fleet: list[DiscoveredMcpServer] = []
+        config = DiscoveryConfig(auto_register=True)
+        orchestrator = DiscoveryOrchestrator(config=config, event_bus=_Bus(), may_manage=lambda: holds)
+        validator = _Validator()
+        orchestrator._validator.validate = validator.validate  # type: ignore[method-assign]
+
+        async def _register(server: DiscoveredMcpServer) -> bool:
+            return True
+
+        async def _update(server: DiscoveredMcpServer) -> None:
+            pass
+
+        orchestrator.on_register = _register
+        orchestrator.on_update = _update
+        orchestrator.restored_servers = lambda: list(fleet)
+        orchestrator.add_source(source)
+        source.defs["svc"] = "a"
+        await orchestrator.run_discovery_cycle()
+
+        validator.failing.add("c")
+        validator.held = "c"
+        source.defs["svc"] = "c"
+        cycle = asyncio.create_task(orchestrator.run_discovery_cycle())
+        try:
+            await asyncio.wait_for(validator.entered.wait(), WAIT)
+            # The lease is lost and regained; meanwhile a peer applied b.
+            fleet.append(_discovered("svc", "b"))
+            holds = False
+            orchestrator._manages()
+            holds = True
+            orchestrator._manages()
+            assert _tracked(orchestrator, "svc") == "b"
+        finally:
+            validator.release.set()
+        await asyncio.wait_for(cycle, WAIT)
+
+        assert _tracked(orchestrator, "svc") == "b"
+
+    async def test_a_cycle_cancelled_while_an_approval_waits_leaves_no_lock_behind(self) -> None:
+        source = _Source()
+        orchestrator, validator, running = _build(source)
+        await _running_a_with_b_quarantined(source, orchestrator, validator)
+        reviewed = _digest(orchestrator, "svc")
+
+        validator.held = "b"
+        cycle = asyncio.create_task(orchestrator.run_discovery_cycle())
+        await asyncio.wait_for(validator.entered.wait(), WAIT)
+        approval = asyncio.create_task(orchestrator.approve_mcp_server("svc", definition_digest=reviewed))
+        await _yield()
+        cycle.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cycle
+        result = await asyncio.wait_for(approval, WAIT)
+
+        assert result == {"approved": True, "mcp_server": "svc", "status": "updated"}
+        assert running["svc"] == _tracked(orchestrator, "svc") == "b"
         assert orchestrator._name_locks == {}
