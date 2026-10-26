@@ -272,6 +272,14 @@ class DiscoveryLifecycleManager:
             return mcp_server
         return None
 
+    def put_back_quarantined(self, mcp_server: DiscoveredMcpServer, reason: str, since: datetime) -> None:
+        """Quarantine *mcp_server* again as it was, after an approval that did not apply (#2136).
+
+        The reason and time are the original ones, and tracking is left to the
+        caller, which knows what it held before the approval.
+        """
+        self._quarantine.setdefault(mcp_server.name, (mcp_server, reason, since))
+
     def reject(self, name: str) -> DiscoveredMcpServer | None:
         """Reject and remove quarantined mcp_server.
 
