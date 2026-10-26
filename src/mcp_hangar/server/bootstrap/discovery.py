@@ -8,7 +8,12 @@ from typing import Any, cast
 from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from ...application.discovery import DiscoveryChangeRefused, DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.contracts.fleet import NotTheManagerError
-from ...domain.exceptions import PeerIdentityChangeDenied, PeerKeyNameTaken, ValidationError
+from ...domain.exceptions import (
+    McpServerNotDiscoveredError,
+    PeerIdentityChangeDenied,
+    PeerKeyNameTaken,
+    ValidationError,
+)
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance, discovered_description
 from ...infrastructure.discovery.registry import (
@@ -387,6 +392,12 @@ async def _on_mcp_server_deregister(name: str, reason: str):
         # to a key-pinned registration (ADR-030 §4f): discovery still sees the
         # old annotated pod go and asks to delete a server it no longer owns.
         logger.info("discovery_deregistration_refused_peer_key", mcp_server_name=name, detail=str(e))
+    except McpServerNotDiscoveredError as e:
+        # The server was re-pointed or created again over the API while
+        # discovery tracked its name (#2113): it is an operator's now, and stays.
+        # Logged once: the lifecycle manager stops tracking the name whatever
+        # this callback does, so no later cycle asks again.
+        logger.info("discovery_deregistration_refused_not_discovered", mcp_server_name=name, detail=str(e))
     except NotTheManagerError as e:
         # Expected in a cluster, and not a failure: this instance decided on the
         # deregistration under a tenure that has since ended, so the fleet it

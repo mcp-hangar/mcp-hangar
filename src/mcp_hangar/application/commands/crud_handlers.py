@@ -23,6 +23,7 @@ from ...domain.events import (
 )
 from ...domain.exceptions import (
     McpServerDeclaredInConfigError,
+    McpServerNotDiscoveredError,
     McpServerNotFoundError,
     PeerIdentityChangeDenied,
     PeerKeyNameTaken,
@@ -851,6 +852,8 @@ class DeleteMcpServerHandler(CommandHandler):
         Raises:
             McpServerNotFoundError: If mcp_server does not exist.
             McpServerDeclaredInConfigError: If the configuration declares it.
+            McpServerNotDiscoveredError: If discovery asked and the server is
+                not discovery's.
         """
         mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
@@ -866,6 +869,19 @@ class DeleteMcpServerHandler(CommandHandler):
         # downgrade it with `lifecycle` and `write` alone (ADR-030 §9).
         if isinstance(getattr(mcp_server, "_peer_identity", None), PeerIdentity):
             _require_peer_identity_authority(self._peer_identity_authority, command, "remove the peer identity of")
+
+        # Discovery deletes only what discovery registered (#2113), as it
+        # replaces only that (#2091). A discovered server re-pointed over the
+        # API, or deleted and created again under its name, is HUMAN now:
+        # discovery still tracked the name, and its TTL running out deleted the
+        # operator's server. Checked here rather than in the callback, so every
+        # deletion discovery starts is held to it. A deletion over the API is
+        # HUMAN and goes through whatever the server is.
+        if (
+            command.provenance is Provenance.DISCOVERY
+            and getattr(mcp_server, "provenance", None) is not Provenance.DISCOVERY
+        ):
+            raise McpServerNotDiscoveredError(command.mcp_server_id)
 
         # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
         # may still hold its connection (#1361). I/O (shutdown) is done outside
