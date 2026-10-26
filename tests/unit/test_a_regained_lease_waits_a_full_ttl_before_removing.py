@@ -18,8 +18,10 @@ import pytest
 
 from mcp_hangar.application.commands.crud_commands import DeleteMcpServerCommand
 from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryOrchestrator
+from mcp_hangar.application.discovery.security_validator import ValidationReport, ValidationResult
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode
+from mcp_hangar.domain.exceptions import McpServerNotHereError
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.value_objects.provenance import Provenance
 
@@ -105,6 +107,76 @@ class TestTakingTheLeaseBack:
         assert "mine" in gateway.repo.get_all_ids()
 
 
+def _health_check_fails_for(gateway, variant: str) -> dict[str, bool]:
+    """Fail validation of any definition whose command carries *variant*, until told otherwise."""
+    real = gateway.orchestrator._validator.validate
+    failing = {"on": True}
+
+    async def validate(mcp_server, source=None, *, replacing=False):
+        if failing["on"] and variant in " ".join(mcp_server.connection_info.get("command", [])):
+            return ValidationReport(result=ValidationResult.FAILED_HEALTH, mcp_server=mcp_server, reason="starting")
+        return await real(mcp_server, source, replacing=replacing)
+
+    gateway.orchestrator._validator.validate = validate
+    return failing
+
+
+async def _regained_with_a_change_in_quarantine(durable):
+    """A server whose changed definition waits in quarantine while the lease is lost and taken back."""
+    gateway = durable.boot()
+    gateway.source.names = {"s"}
+    await gateway.tick(0)
+    failing = _health_check_fails_for(gateway, "-v2")
+    gateway.source.variant = "-v2"
+    await gateway.tick()
+    assert gateway.orchestrator._lifecycle_manager.is_quarantined("s")
+
+    gateway.holds_the_lease = False
+    await gateway.tick()
+    gateway.holds_the_lease = True
+    await gateway.tick()
+    return gateway, failing
+
+
+def _command_of(gateway, name: str) -> str:
+    return " ".join(gateway.repo.get(name)._command)
+
+
+@pytest.mark.asyncio
+class TestAChangeInQuarantineWhenTheLeaseIsTakenBack:
+    # Its row is the definition that runs, so it is tracked again: dropped and
+    # skipped as quarantined, nothing governed it any more.
+    async def test_the_running_server_is_still_tracked_and_counted(self, durable) -> None:
+        gateway, _ = await _regained_with_a_change_in_quarantine(durable)
+
+        assert gateway.orchestrator.is_tracking("s")
+        assert gateway.orchestrator._validator._mcp_server_counts["filesystem"] == 1
+
+    async def test_the_change_is_applied_once_it_passes(self, durable) -> None:
+        gateway, failing = await _regained_with_a_change_in_quarantine(durable)
+
+        failing["on"] = False
+        await gateway.tick()
+
+        assert "-v2" in _command_of(gateway, "s")
+
+    async def test_approving_it_applies_it(self, durable) -> None:
+        gateway, _ = await _regained_with_a_change_in_quarantine(durable)
+
+        result = await gateway.orchestrator.approve_mcp_server("s")
+
+        assert result["status"] == "updated"
+        assert "-v2" in _command_of(gateway, "s")
+
+    async def test_an_authoritative_source_that_drops_it_removes_it(self, durable) -> None:
+        gateway, _ = await _regained_with_a_change_in_quarantine(durable)
+
+        gateway.source.names = set()
+        await gateway.run_past_the_ttl()
+
+        assert "s" not in gateway.repo.get_all_ids()
+
+
 def _server(name: str) -> DiscoveredMcpServer:
     return DiscoveredMcpServer.create(
         name=name,
@@ -169,3 +241,14 @@ class TestWithoutAFleetToTakeBack:
         _Clock.now += timedelta(seconds=TTL + 1)
         await gateway.expiry_check()
         assert gateway.removed == ["old"]
+
+
+@pytest.mark.asyncio
+async def test_an_approval_that_reaches_the_loop_after_the_lease_is_lost_is_refused(durable) -> None:
+    gateway, _ = await _regained_with_a_change_in_quarantine(durable)
+
+    gateway.holds_the_lease = False
+    with pytest.raises(McpServerNotHereError):
+        await gateway.orchestrator._approve("s")
+
+    assert gateway.orchestrator._lifecycle_manager.is_quarantined("s")

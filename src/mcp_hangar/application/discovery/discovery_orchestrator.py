@@ -342,13 +342,17 @@ class DiscoveryOrchestrator:
         instance may act on it. Taken at boot, it would run out while this
         instance waited for the lease, and the first expiry check after taking
         it would delete every discovered server before a cycle could see them.
+
+        A server whose changed definition waits in quarantine is taken back too:
+        its row is the definition that runs, and the change is approved, applied
+        or removed against it (#2111).
         """
         if self.restored_servers is None or self._took_back_restored or not self._manages():
             return
         self._took_back_restored = True
         taken = []
         for mcp_server in self.restored_servers():
-            if self.is_tracking(mcp_server.name) or self._lifecycle_manager.is_quarantined(mcp_server.name):
+            if self.is_tracking(mcp_server.name):
                 continue
             self._conflict_resolver.register(mcp_server)
             self._lifecycle_manager.add_mcp_server(mcp_server)
@@ -959,10 +963,14 @@ class DiscoveryOrchestrator:
         # before the hop onto discovery's loop, and a new tenure rebuilds state
         # that loop owns. The next gate on that loop observes it (#2111).
         if not self._may_manage():
-            raise McpServerNotHereError(
-                f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
-                "the instance that does. Send the request to that instance."
-            )
+            raise self._not_here(what)
+
+    @staticmethod
+    def _not_here(what: str) -> McpServerNotHereError:
+        return McpServerNotHereError(
+            f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
+            "the instance that does. Send the request to that instance."
+        )
 
     async def _on_discovery_loop(self, work: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
         """Await *work* on discovery's own loop when it runs one elsewhere, inline otherwise."""
@@ -1052,6 +1060,11 @@ class DiscoveryOrchestrator:
 
     async def _approve(self, name: str) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
+        # Asked again here, through the tenure observer: the lease may have
+        # changed hands while the request hopped onto this loop, and a new
+        # tenure rebuilds tracking before the approval reads it (#2111).
+        if not self._manages():
+            raise self._not_here(f"approve mcp_server {name!r}")
         running = self._lifecycle_manager.get_mcp_server(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False
