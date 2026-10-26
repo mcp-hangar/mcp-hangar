@@ -7,9 +7,10 @@ applied unreviewed -- including, since #2091, a change that replaces a running
 server. A change the source withdrew stayed approvable, and approval skipped
 the command and source-policy checks every automatic registration passes.
 
-An approval now names the fingerprint it reviewed and is refused (409) when the
-definition waiting has another. One without a fingerprint still works, and says
-in a warning that it is not bound. A withdrawn change is forgotten, and a
+An approval now names the `definition_digest` it reviewed -- the full SHA-256 of
+the definition, not the 64-bit fingerprint a source could collide -- and is
+refused (409) when the definition waiting has another. One without a digest
+still works, and says in a warning that it is not bound. A withdrawn change is forgotten, and a
 definition the checks refuse is not applied.
 """
 
@@ -44,6 +45,8 @@ class _Source(DiscoverySource):
     def __init__(self) -> None:
         super().__init__(mode=DiscoveryMode.ADDITIVE)
         self.defs: dict[str, str] = {}
+        #: Further (name, module) copies reported in the same scan.
+        self.copies: list[tuple[str, str]] = []
         self.refuse: set[str] = set()
         self.healthy = True
 
@@ -60,7 +63,7 @@ class _Source(DiscoverySource):
                 connection_info={"command": ["python", "-m", module]},
                 metadata={},
             )
-            for name, module in sorted(self.defs.items())
+            for name, module in [*sorted(self.defs.items()), *self.copies]
         ]
 
     async def health_check(self) -> bool:
@@ -105,8 +108,8 @@ def _pending(orchestrator: DiscoveryOrchestrator) -> dict[str, str]:
     return {p.name: p.connection_info["command"][-1] for p in orchestrator.get_pending_mcp_servers()}
 
 
-def _fingerprint(orchestrator: DiscoveryOrchestrator, name: str) -> str:
-    return next(p.fingerprint for p in orchestrator.get_pending_mcp_servers() if p.name == name)
+def _digest(orchestrator: DiscoveryOrchestrator, name: str) -> str:
+    return next(p.definition_digest for p in orchestrator.get_pending_mcp_servers() if p.name == name)
 
 
 async def _running_with_a_pending_change(source: _Source, orchestrator: DiscoveryOrchestrator) -> None:
@@ -118,14 +121,14 @@ async def _running_with_a_pending_change(source: _Source, orchestrator: Discover
 
 
 @pytest.mark.asyncio
-class TestAnApprovalBoundToAFingerprint:
+class TestAnApprovalBoundToADigest:
     async def test_the_reviewed_definition_is_applied(self) -> None:
         source = _Source()
         orchestrator = _build(source)
         source.defs["svc"] = "reviewed"
         await orchestrator.run_discovery_cycle()
 
-        result = await orchestrator.approve_mcp_server("svc", fingerprint=_fingerprint(orchestrator, "svc"))
+        result = await orchestrator.approve_mcp_server("svc", definition_digest=_digest(orchestrator, "svc"))
 
         assert result == {"approved": True, "mcp_server": "svc", "status": "registered"}
         assert orchestrator.registered == ["reviewed"]
@@ -136,29 +139,52 @@ class TestAnApprovalBoundToAFingerprint:
         orchestrator = _build(source)
         source.defs["svc"] = "reviewed"
         await orchestrator.run_discovery_cycle()
-        reviewed = _fingerprint(orchestrator, "svc")
+        reviewed = _digest(orchestrator, "svc")
         source.defs["svc"] = "edited"
         await orchestrator.run_discovery_cycle()
-        current = _fingerprint(orchestrator, "svc")
+        current = _digest(orchestrator, "svc")
 
         with pytest.raises(DiscoveredDefinitionChangedError) as refused:
-            await orchestrator.approve_mcp_server("svc", fingerprint=reviewed)
+            await orchestrator.approve_mcp_server("svc", definition_digest=reviewed)
 
         assert current in str(refused.value) and reviewed in str(refused.value)
-        assert refused.value.details == {"reviewed_fingerprint": reviewed, "current_fingerprint": current}
+        assert refused.value.details == {"reviewed_definition_digest": reviewed, "current_definition_digest": current}
         assert orchestrator.registered == []
         assert _pending(orchestrator) == {"svc": "edited"}
+
+    async def test_the_short_fingerprint_does_not_bind(self) -> None:
+        source = _Source()
+        orchestrator = _build(source)
+        source.defs["svc"] = "reviewed"
+        await orchestrator.run_discovery_cycle()
+        fingerprint = orchestrator.get_pending_mcp_servers()[0].fingerprint
+
+        with pytest.raises(DiscoveredDefinitionChangedError):
+            await orchestrator.approve_mcp_server("svc", definition_digest=fingerprint)
+
+        assert orchestrator.registered == []
+
+    async def test_the_digest_covers_what_the_fingerprint_leaves_out(self) -> None:
+        # The fingerprint covers connection and metadata only; the digest also
+        # covers the mode and the source, at full length.
+        one = DiscoveredMcpServer.create("svc", "filesystem", "subprocess", {"command": ["x"]}, {})
+        other_mode = DiscoveredMcpServer.create("svc", "filesystem", "stdio", {"command": ["x"]}, {})
+        other_source = DiscoveredMcpServer.create("svc", "docker", "subprocess", {"command": ["x"]}, {})
+
+        assert one.fingerprint == other_mode.fingerprint == other_source.fingerprint
+        assert len({one.definition_digest, other_mode.definition_digest, other_source.definition_digest}) == 3
+        assert len(one.definition_digest) == 64
 
     async def test_a_change_of_a_running_server_edited_again_is_refused(self) -> None:
         source = _Source()
         orchestrator = _build(source)
         await _running_with_a_pending_change(source, orchestrator)
-        reviewed = _fingerprint(orchestrator, "svc")
+        reviewed = _digest(orchestrator, "svc")
         source.defs["svc"] = "edited-again"
         await orchestrator.run_discovery_cycle()
 
         with pytest.raises(DiscoveredDefinitionChangedError):
-            await orchestrator.approve_mcp_server("svc", fingerprint=reviewed)
+            await orchestrator.approve_mcp_server("svc", definition_digest=reviewed)
 
         assert orchestrator.updated == []
         assert orchestrator._lifecycle_manager.get_mcp_server("svc").connection_info["command"][-1] == "approved"
@@ -170,19 +196,19 @@ class TestAnApprovalBoundToAFingerprint:
         orchestrator._validator.config.max_registration_rate = 0
         source.defs["svc"] = "reviewed"
         await orchestrator.run_discovery_cycle()
-        reviewed = orchestrator.get_quarantined()["svc"]["fingerprint"]
+        reviewed = orchestrator.get_quarantined()["svc"]["definition_digest"]
         source.defs["svc"] = "edited"
         await orchestrator.run_discovery_cycle()
 
         with pytest.raises(DiscoveredDefinitionChangedError):
-            await orchestrator.approve_mcp_server("svc", fingerprint=reviewed)
+            await orchestrator.approve_mcp_server("svc", definition_digest=reviewed)
 
         assert orchestrator.registered == []
         assert orchestrator.get_quarantined()["svc"]["mcp_server"]["connection_info"]["command"][-1] == "edited"
 
 
 @pytest.mark.asyncio
-class TestAnApprovalWithoutAFingerprint:
+class TestAnApprovalWithoutADigest:
     async def test_it_still_applies_and_warns_that_it_is_not_bound(self) -> None:
         source = _Source()
         orchestrator = _build(source)
@@ -196,7 +222,7 @@ class TestAnApprovalWithoutAFingerprint:
         assert orchestrator.registered == ["reviewed"]
         warnings = [e for e in captured if e["event"] == "discovery_approval_not_bound"]
         assert len(warnings) == 1 and warnings[0]["log_level"] == "warning"
-        assert warnings[0]["fingerprint"] == _fingerprint_of("reviewed")
+        assert warnings[0]["definition_digest"] == _digest_of("reviewed")
 
     async def test_a_bound_approval_does_not_warn(self) -> None:
         source = _Source()
@@ -205,7 +231,7 @@ class TestAnApprovalWithoutAFingerprint:
         await orchestrator.run_discovery_cycle()
 
         with structlog.testing.capture_logs() as captured:
-            await orchestrator.approve_mcp_server("svc", fingerprint=_fingerprint(orchestrator, "svc"))
+            await orchestrator.approve_mcp_server("svc", definition_digest=_digest(orchestrator, "svc"))
 
         assert not [e for e in captured if e["event"] == "discovery_approval_not_bound"]
 
@@ -239,6 +265,41 @@ class TestAWithdrawnChangeCannotBeApproved:
         assert _pending(orchestrator) == {}
         assert result["approved"] is False
         assert orchestrator.registered == []
+
+    async def test_a_pending_change_reported_beside_the_running_definition_stays(self) -> None:
+        # A rolling update: old and new pods side by side, one name twice in a scan.
+        source = _Source()
+        orchestrator = _build(source)
+        await _running_with_a_pending_change(source, orchestrator)
+
+        for copies in ([("svc", "approved")], [("svc", "approved")]):
+            source.copies = copies
+            await orchestrator.run_discovery_cycle()
+
+        assert _pending(orchestrator) == {"svc": "edited"}
+        source.copies = []
+        source.defs["svc"] = "approved"
+        await orchestrator.run_discovery_cycle()
+        assert _pending(orchestrator) == {}
+
+    async def test_an_approval_during_the_health_check_does_not_break_the_cycle(self) -> None:
+        source = _Source()
+        orchestrator = _build(source)
+        source.defs["svc"] = "new"
+        await orchestrator.run_discovery_cycle()
+        approvals: list[dict[str, Any]] = []
+
+        async def _approve_meanwhile() -> bool:
+            approvals.append(await orchestrator.approve_mcp_server("svc"))
+            return True
+
+        source.health_check = _approve_meanwhile  # type: ignore[method-assign]
+        del source.defs["svc"]
+        result = await orchestrator.run_discovery_cycle()
+
+        assert result.error_count == 0
+        assert approvals[0]["approved"] is True
+        assert _pending(orchestrator) == {}
 
     async def test_a_source_that_is_not_healthy_has_withdrawn_nothing(self) -> None:
         # A source that cannot reach what it watches answers an empty list.
@@ -339,6 +400,19 @@ class TestAnApprovalRunsTheChecksARegistrationRuns:
         assert orchestrator.updated == []
         assert orchestrator._lifecycle_manager.get_mcp_server("svc").connection_info["command"][-1] == "approved"
 
+    async def test_a_definition_whose_source_is_not_registered_is_refused(self) -> None:
+        source = _Source()
+        orchestrator = _build(source)
+        orchestrator._discovery_service._pending["svc"] = DiscoveredMcpServer.create(
+            "svc", "elsewhere", "subprocess", {"command": ["python", "-m", "unchecked"]}, {}
+        )
+
+        result = await orchestrator.approve_mcp_server("svc")
+
+        assert result["approved"] is False
+        assert "not registered" in result["error"]
+        assert orchestrator.registered == []
+
     async def test_a_command_the_input_validator_refuses_is_not_applied(self) -> None:
         source = _Source()
         orchestrator = _build(source, input_validator=_CommandValidator())
@@ -381,8 +455,22 @@ def _context(orchestrator: DiscoveryOrchestrator) -> MagicMock:
     return ctx
 
 
+def _rest(orchestrator: DiscoveryOrchestrator):
+    from mcp_hangar.server.api import create_api_router
+
+    ctx = _context(orchestrator)
+    patches = (
+        patch("mcp_hangar.server.api.middleware.get_context", return_value=ctx),
+        patch("mcp_hangar.server.api.discovery.get_context", return_value=ctx),
+    )
+    return patches, TestClient(Starlette(routes=[Mount("/api", app=create_api_router())]))
+
+
+STALE = "0" * 64
+
+
 @pytest.mark.asyncio
-class TestTheListingsShowTheFingerprint:
+class TestTheListingsShowTheDigest:
     async def test_the_tools_list_it_and_the_approve_tool_takes_it(self, waiting_orchestrator) -> None:
         from mcp_hangar.server.tools.discovery import register_discovery_tools
 
@@ -396,69 +484,133 @@ class TestTheListingsShowTheFingerprint:
         ):
             discovered = json.loads((await mcp.call_tool("hangar_discovered", {})).content[0].text)
             quarantined = json.loads((await mcp.call_tool("hangar_quarantine", {})).content[0].text)
-            stale = await mcp.call_tool("hangar_approve", {"mcp_server": "pending-one", "fingerprint": "0" * 16})
-            pending_fp = discovered["pending"][0]["fingerprint"]
-            approved = await mcp.call_tool("hangar_approve", {"mcp_server": "pending-one", "fingerprint": pending_fp})
+            stale = await mcp.call_tool("hangar_approve", {"mcp_server": "pending-one", "definition_digest": STALE})
+            digest = discovered["pending"][0]["definition_digest"]
+            approved = await mcp.call_tool("hangar_approve", {"mcp_server": "pending-one", "definition_digest": digest})
 
-        assert pending_fp == _fingerprint_of("pending")
-        assert quarantined["quarantined"][0]["fingerprint"] == _q()
+        assert digest == _digest_of("pending")
+        assert quarantined["quarantined"][0]["definition_digest"] == _digest_of("quarantined")
         refusal = json.loads(stale.content[0].text)
         assert refusal["error_type"] == "DiscoveredDefinitionChangedError"
-        assert pending_fp in refusal["error"]
+        assert digest in refusal["error"]
         assert json.loads(approved.content[0].text)["approved"] is True
 
-    async def test_the_rest_listings_show_it_and_a_stale_approval_answers_409(self, waiting_orchestrator) -> None:
-        from mcp_hangar.server.api import create_api_router
+    @pytest.mark.parametrize("value", ["abc123", "", "A" * 64])
+    async def test_the_approve_tool_refuses_what_is_not_a_digest(self, waiting_orchestrator, value: str) -> None:
+        from mcp_hangar.server.tools.discovery import register_discovery_tools
 
         orchestrator = await waiting_orchestrator()
+        mcp = FastMCP("test")
+        register_discovery_tools(mcp)
         ctx = _context(orchestrator)
         with (
-            patch("mcp_hangar.server.api.middleware.get_context", return_value=ctx),
-            patch("mcp_hangar.server.api.discovery.get_context", return_value=ctx),
+            patch("mcp_hangar.server.tools.discovery.get_context", return_value=ctx),
+            patch("mcp_hangar.server.validation.get_context", return_value=ctx),
         ):
-            client = TestClient(Starlette(routes=[Mount("/api", app=create_api_router())]))
+            try:
+                answer = await mcp.call_tool(
+                    "hangar_approve", {"mcp_server": "pending-one", "definition_digest": value}
+                )
+                refused = answer.is_error or "invalid_definition_digest" in answer.content[0].text
+            except Exception as e:  # noqa: BLE001 -- an invalid argument may surface as a raised error
+                refused = "invalid_definition_digest" in str(e)
+
+        assert refused
+        assert orchestrator.registered == []
+
+    async def test_the_rest_listings_show_it_and_a_stale_approval_answers_409(self, waiting_orchestrator) -> None:
+        orchestrator = await waiting_orchestrator()
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
             pending = client.get("/api/discovery/pending").json()["pending"]
             quarantined = client.get("/api/discovery/quarantined").json()["quarantined"]
-            stale = client.post("/api/discovery/approve/pending-one", json={"fingerprint": "0" * 16})
-            stale_query = client.post("/api/discovery/approve/pending-one?fingerprint=" + "0" * 16)
-            invalid = client.post("/api/discovery/approve/pending-one", json={"fingerprint": 7})
-            approved = client.post("/api/discovery/approve/quarantined-one", json={"fingerprint": _q()})
+            stale = client.post("/api/discovery/approve/pending-one", json={"definition_digest": STALE})
+            stale_query = client.post(f"/api/discovery/approve/pending-one?definition_digest={STALE}")
+            approved = client.post(
+                "/api/discovery/approve/quarantined-one", json={"definition_digest": _digest_of("quarantined")}
+            )
 
-        assert pending[0]["fingerprint"] == _fingerprint_of("pending")
-        assert quarantined["quarantined-one"]["fingerprint"] == _q()
+        assert pending[0]["definition_digest"] == _digest_of("pending")
+        assert quarantined["quarantined-one"]["definition_digest"] == _digest_of("quarantined")
         assert stale.status_code == 409 and stale_query.status_code == 409
         error = stale.json()["error"]
         assert error["code"] == "DiscoveredDefinitionChangedError"
-        assert error["details"]["current_fingerprint"] == _fingerprint_of("pending")
-        assert invalid.status_code == 400
+        assert error["details"]["current_definition_digest"] == _digest_of("pending")
         assert approved.status_code == 200 and approved.json()["approved"] is True
         assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["pending-one"]
 
     async def test_a_rest_approval_with_no_body_still_works(self, waiting_orchestrator) -> None:
-        from mcp_hangar.server.api import create_api_router
-
         orchestrator = await waiting_orchestrator()
-        ctx = _context(orchestrator)
-        with (
-            patch("mcp_hangar.server.api.middleware.get_context", return_value=ctx),
-            patch("mcp_hangar.server.api.discovery.get_context", return_value=ctx),
-        ):
-            client = TestClient(Starlette(routes=[Mount("/api", app=create_api_router())]))
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
             response = client.post("/api/discovery/approve/pending-one")
 
         assert response.status_code == 200 and response.json()["approved"] is True
 
 
-def _fingerprint_of(module: str) -> str:
-    """A definition's fingerprint: of its connection and metadata, not of its name."""
+@pytest.mark.asyncio
+class TestARestApprovalThatMightHaveMeantToBindIsRefused:
+    """Every probe used to fall through to an unbound approval and answer 200."""
+
+    @pytest.mark.parametrize(
+        ("kwargs", "error"),
+        [
+            ({"content": b"{not json", "headers": {"content-type": "application/json"}}, "invalid_body"),
+            ({"json": [STALE]}, "invalid_body"),
+            ({"json": "x"}, "invalid_body"),
+            ({"data": {"definition_digest": STALE}}, "invalid_body"),
+            ({"json": {"Definition_Digest": STALE}}, "unknown_fields"),
+            ({"json": {"fingerprint": "abc123"}}, "unknown_fields"),
+            ({"json": {"definition_digest": None}}, "invalid_definition_digest"),
+            ({"json": {"definition_digest": 7}}, "invalid_definition_digest"),
+            ({"json": {"definition_digest": ""}}, "invalid_definition_digest"),
+            ({"json": {"definition_digest": "abc123"}}, "invalid_definition_digest"),
+            ({"params": {"fingerprint": "abc123"}}, "unknown_fields"),
+            ({"params": {"Definition_Digest": STALE}}, "unknown_fields"),
+            ({"params": {"definition_digest": ""}}, "invalid_definition_digest"),
+            (
+                {"params": {"definition_digest": STALE}, "json": {"definition_digest": "1" * 64}},
+                "conflicting_definition_digest",
+            ),
+        ],
+    )
+    async def test_it_answers_400_and_changes_nothing(self, waiting_orchestrator, kwargs, error) -> None:
+        orchestrator = await waiting_orchestrator()
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
+            response = client.post("/api/discovery/approve/pending-one", **kwargs)
+
+        assert response.status_code == 400, response.text
+        assert response.json()["error"] == error
+        assert orchestrator.registered == []
+        assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["pending-one"]
+
+    async def test_query_and_body_that_agree_bind(self, waiting_orchestrator) -> None:
+        orchestrator = await waiting_orchestrator()
+        digest = _digest_of("pending")
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
+            response = client.post(
+                f"/api/discovery/approve/pending-one?definition_digest={digest}", json={"definition_digest": digest}
+            )
+
+        assert response.status_code == 200 and response.json()["approved"] is True
+
+    async def test_an_empty_json_object_is_an_unbound_approval(self, waiting_orchestrator) -> None:
+        orchestrator = await waiting_orchestrator()
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
+            response = client.post("/api/discovery/approve/pending-one", json={})
+
+        assert response.status_code == 200 and response.json()["approved"] is True
+
+
+def _digest_of(module: str) -> str:
+    """The digest of a definition this file's source reports for *module*."""
     return DiscoveredMcpServer.create(
         name="any",
         source_type="filesystem",
         mode="subprocess",
         connection_info={"command": ["python", "-m", module]},
         metadata={},
-    ).fingerprint
-
-
-def _q() -> str:
-    return _fingerprint_of("quarantined")
+    ).definition_digest

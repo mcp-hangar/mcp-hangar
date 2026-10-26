@@ -3,6 +3,8 @@
 Uses ApplicationContext for dependency injection (DIP).
 """
 
+import re
+
 from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
@@ -15,12 +17,18 @@ from ..validation import (
     validate_mcp_server_id_input,
 )
 
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
-def _validate_approve_input(mcp_server: str, fingerprint: str | None = None) -> None:
-    """The name as every tool checks it, and a fingerprint that is a string when given."""
+
+def _validate_approve_input(mcp_server: str, definition_digest: str | None = None) -> None:
+    """The name as every tool checks it, and the full digest a listing shows when one is given."""
     validate_mcp_server_id_input(mcp_server)
-    if fingerprint is not None and (not isinstance(fingerprint, str) or not fingerprint.strip()):
-        raise ValueError("invalid_fingerprint: a fingerprint is the non-empty string a listing shows")
+    if definition_digest is not None and (
+        not isinstance(definition_digest, str) or not _DIGEST.fullmatch(definition_digest)
+    ):
+        raise ValueError(
+            "invalid_definition_digest: the definition_digest is the 64-character lowercase hex digest a listing shows"
+        )
 
 
 def register_discovery_tools(mcp: FastMCP) -> None:
@@ -104,7 +112,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     source: str,
                     mode: str,
                     discovered_at: str,
-                    fingerprint: str
+                    fingerprint: str,
+                    definition_digest: str
                 }]
             }
             Not configured: {error: str}
@@ -112,7 +121,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         Example:
             hangar_discovered()
             # {"pending": [{"name": "new-mcp_server", "source": "kubernetes",
-            #   "mode": "remote", "discovered_at": "2024-01-15T10:30:00Z", "fingerprint": "abc123"}]}
+            #   "mode": "remote", "discovered_at": "2024-01-15T10:30:00Z", "fingerprint": "abc123",
+            #   "definition_digest": "9f86d0...0a08"}]}
 
             hangar_discovered()  # when no pending mcp_servers
             # {"pending": []}
@@ -133,6 +143,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     "mode": p.mode,
                     "discovered_at": p.discovered_at.isoformat(),
                     "fingerprint": p.fingerprint,
+                    "definition_digest": p.definition_digest,
                 }
                 for p in pending
             ]
@@ -166,7 +177,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     source: str,
                     reason: str,
                     quarantine_time: str,
-                    fingerprint: str
+                    fingerprint: str,
+                    definition_digest: str
                 }]
             }
             Not configured: {error: str}
@@ -175,7 +187,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             hangar_quarantine()
             # {"quarantined": [{"name": "broken-mcp_server", "source": "docker",
             #   "reason": "health_check_failed", "quarantine_time": "2024-01-15T10:30:00Z",
-            #   "fingerprint": "abc123"}]}
+            #   "fingerprint": "abc123", "definition_digest": "9f86d0...0a08"}]}
 
             hangar_quarantine()  # when no quarantined mcp_servers
             # {"quarantined": []}
@@ -195,7 +207,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     "source": data["mcp_server"]["source_type"],
                     "reason": data["reason"],
                     "quarantine_time": data["quarantine_time"],
-                    "fingerprint": data["mcp_server"]["fingerprint"],
+                    "fingerprint": data["fingerprint"],
+                    "definition_digest": data["definition_digest"],
                 }
                 for name, data in quarantined.items()
             ]
@@ -210,7 +223,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
-    async def hangar_approve(mcp_server: str, fingerprint: str | None = None) -> dict:
+    async def hangar_approve(mcp_server: str, definition_digest: str | None = None) -> dict:
         """Approve a pending or quarantined mcp_server for registration.
 
         CHOOSE THIS when: ready to register a mcp_server from pending or quarantine list.
@@ -222,20 +235,21 @@ def register_discovery_tools(mcp: FastMCP) -> None:
 
         Args:
             mcp_server: str - McpServer name (from hangar_discovered or hangar_quarantine output)
-            fingerprint: str | None - The fingerprint of the definition you reviewed, from the
-                same listing. Pass it: the approval then applies only that definition, and is
-                refused if the source has changed it since. Without it, whatever definition
-                waits under the name is applied, and a warning is logged.
+            definition_digest: str | None - The definition_digest of the definition you reviewed,
+                from the same listing (64 hex characters; not the shorter fingerprint). Pass it:
+                the approval then applies only that definition, and is refused if the source has
+                changed it since. Without it, whatever definition waits under the name is
+                applied, and a warning is logged.
 
         Returns:
             Success: {approved: true, mcp_server: str, status: "registered" | "updated"}
             Not found: {approved: false, mcp_server: str, error: str}
             Refused by the command or source-policy checks: {approved: false, mcp_server: str, error: str}
-            Changed since reviewed: tool error DiscoveredDefinitionChangedError naming the current fingerprint
+            Changed since reviewed: tool error DiscoveredDefinitionChangedError naming the current digest
             Not configured: {error: str}
 
         Example:
-            hangar_approve("my-new-mcp_server", fingerprint="abc123")
+            hangar_approve("my-new-mcp_server", definition_digest="9f86d0...0a08")
             # {"approved": true, "mcp_server": "my-new-mcp_server", "status": "registered"}
 
             hangar_approve("unknown")
@@ -248,7 +262,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         if orchestrator is None:
             return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
-        result = await orchestrator.approve_mcp_server(mcp_server, fingerprint=fingerprint)
+        result = await orchestrator.approve_mcp_server(mcp_server, definition_digest=definition_digest)
         return result
 
     @mcp.tool(name="hangar_sources")

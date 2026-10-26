@@ -1046,22 +1046,23 @@ class DiscoveryOrchestrator:
         """Get quarantined mcp_servers with reasons.
 
         Returns:
-            Dictionary of name -> {mcp_server, fingerprint, reason, quarantine_time}.
-            The fingerprint is the one an approval names to bind itself to this
-            definition (#2109), also found under ``mcp_server``.
+            Dictionary of name -> {mcp_server, fingerprint, definition_digest,
+            reason, quarantine_time}. ``definition_digest`` is what an approval
+            names to bind itself to this definition (#2109).
         """
         quarantined = self._lifecycle_manager.get_quarantined()
         return {
             name: {
                 "mcp_server": mcp_server.to_dict(),
                 "fingerprint": mcp_server.fingerprint,
+                "definition_digest": mcp_server.definition_digest,
                 "reason": reason,
                 "quarantine_time": qtime.isoformat(),
             }
             for name, (mcp_server, reason, qtime) in quarantined.items()
         }
 
-    async def approve_mcp_server(self, name: str, *, fingerprint: str | None = None) -> dict[str, Any]:
+    async def approve_mcp_server(self, name: str, *, definition_digest: str | None = None) -> dict[str, Any]:
         """Approve a quarantined or pending mcp_server.
 
         A server waits in one of two places: quarantine, where it failed
@@ -1081,30 +1082,34 @@ class DiscoveryOrchestrator:
         asked, and a cycle replacing the same server at the same time is then
         not possible.
 
-        Bound to what the operator reviewed when *fingerprint* is given (#2109):
-        a source re-reports its definition every cycle and overwrites the one
-        waiting, so the definition waiting now need not be the one listed. A
-        different one is refused and nothing changes. Without a fingerprint the
-        approval applies whatever waits under the name, as it always did, and
-        says so in a warning. Either way the definition passes the same command
-        and source-policy checks an automatic registration does; one that fails
-        them is refused and stays where it waited.
+        Bound to what the operator reviewed when *definition_digest* is given
+        (#2109): a source re-reports its definition every cycle and overwrites
+        the one waiting, so the definition waiting now need not be the one
+        listed. A different one is refused and nothing changes. The binding is
+        the full SHA-256 of the definition, not the 16-character `fingerprint`,
+        which a source could collide. Without a digest the approval applies
+        whatever waits under the name, as it always did, and says so in a
+        warning. Either way the definition passes the same command and
+        source-policy checks an automatic registration does; one that fails
+        them, or whose source is no longer registered, is refused and stays
+        where it waited.
 
         Args:
             name: McpServer name
-            fingerprint: The fingerprint of the definition the operator
-                reviewed, as `hangar_discovered` and the REST listings show it.
+            definition_digest: The `definition_digest` of the definition the
+                operator reviewed, as `hangar_discovered`, `hangar_quarantine`
+                and the REST listings show it.
 
         Returns:
             Result dictionary
 
         Raises:
-            DiscoveredDefinitionChangedError: *fingerprint* is not the one waiting.
+            DiscoveredDefinitionChangedError: *definition_digest* is not the one waiting.
         """
         self._refuse_unless_managing(f"approve mcp_server {name!r}")
-        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name, fingerprint)))
+        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name, definition_digest)))
 
-    async def _approve(self, name: str, fingerprint: str | None = None) -> dict[str, Any]:
+    async def _approve(self, name: str, definition_digest: str | None = None) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
         # Asked again here, through the tenure observer: the lease may have
         # changed hands while the request hopped onto this loop, and a new
@@ -1114,7 +1119,7 @@ class DiscoveryOrchestrator:
         # Checked before anything is taken out of quarantine or pending, with
         # no await in between, so a refusal changes nothing and a cycle cannot
         # swap the definition after it was checked.
-        refusal = self._approval_refusal(name, fingerprint)
+        refusal = self._approval_refusal(name, definition_digest)
         if refusal is not None:
             return refusal
         running = self._lifecycle_manager.get_mcp_server(name)
@@ -1157,37 +1162,41 @@ class DiscoveryOrchestrator:
             return quarantined[0]
         return next((p for p in self._discovery_service.get_pending_mcp_servers() if p.name == name), None)
 
-    def _approval_refusal(self, name: str, fingerprint: str | None) -> dict[str, Any] | None:
+    def _approval_refusal(self, name: str, definition_digest: str | None) -> dict[str, Any] | None:
         """Why the definition waiting under *name* may not be approved now, or None (#2109).
 
         Raises `DiscoveredDefinitionChangedError` when it is not the one with
-        *fingerprint*. Returns a refusal when it fails the checks an automatic
-        registration runs before validation: the input validator on its command
-        and its source's own policy. Approval overrides what quarantined a
+        *definition_digest*. Returns a refusal when it fails the checks an
+        automatic registration runs before validation: the input validator on
+        its command and its source's own policy, which cannot be asked of a
+        source no longer registered. Approval overrides what quarantined a
         definition -- a failed health check, a rate or count limit -- but not
-        those two; a pending definition never met them at all, because the
-        service parks it before the orchestrator sees it.
+        those; a pending definition never met them at all, because the service
+        parks it before the orchestrator sees it.
         """
         waiting = self._waiting(name)
         if waiting is None:
             return None  # `_approve` answers "not found", as it always did.
-        if fingerprint is None:
+        current = waiting.definition_digest
+        if definition_digest is None:
             logger.warning(
                 "discovery_approval_not_bound",
                 mcp_server_name=name,
-                fingerprint=waiting.fingerprint,
-                detail="approved without the fingerprint that was reviewed, so whatever waits under the name "
-                "is applied; pass the fingerprint from the listing to bind the approval to it",
+                definition_digest=current,
+                detail="approved without the definition_digest that was reviewed, so whatever waits under the "
+                "name is applied; pass the definition_digest from the listing to bind the approval to it",
             )
-        elif waiting.fingerprint != fingerprint:
-            raise DiscoveredDefinitionChangedError(name, reviewed=fingerprint, current=waiting.fingerprint)
+        elif current != definition_digest:
+            raise DiscoveredDefinitionChangedError(name, reviewed=definition_digest, current=current)
 
+        source = self._discovery_service.get_source(waiting.source_type)
         reason = self._command_refusal(waiting)
         if reason is not None:
             reason = f"command rejected: {reason}"
+        elif source is None:
+            reason = f"its source {waiting.source_type!r} is not registered, so its policy cannot be checked"
         else:
-            source = self._discovery_service.get_source(waiting.source_type)
-            violation = source.policy_violation(waiting) if source is not None else None
+            violation = source.policy_violation(waiting)
             reason = violation.reason if violation is not None else None
         if reason is None:
             return None
@@ -1195,7 +1204,7 @@ class DiscoveryOrchestrator:
             "discovery_approval_refused",
             mcp_server_name=name,
             source=waiting.source_type,
-            fingerprint=waiting.fingerprint,
+            definition_digest=current,
             reason=reason,
         )
         return {"approved": False, "mcp_server": name, "error": f"approval refused: {reason}"}
