@@ -184,6 +184,13 @@ class GroupMember:
     # start again (#1565); a member never started, or stopped with its group,
     # is left alone.
     evicted: bool = False
+    # Its server was deleted (#2107). A member is declared by id, so it stays in
+    # the group, but no call, rebalance, start or probe reaches the deleted
+    # copy it still holds. The next server registered under its id fills it,
+    # back in the rotation it had: `rotation_when_vacated` is (in_rotation,
+    # evicted) as they were.
+    vacant: bool = False
+    rotation_when_vacated: tuple[bool, bool] = (False, False)
 
     @property
     def id(self) -> str:
@@ -499,6 +506,75 @@ class McpServerGroup(AggregateRoot):
             member.mcp_server = mcp_server
             return True
 
+    def vacate_member(self, member_id: str) -> bool:
+        """Leave a member without a server, because its server was deleted (#2107).
+
+        The member keeps its place, weight and priority, and leaves rotation:
+        the copy it holds is stopped and out of the repository, and a group
+        that selected it would start it again where nothing manages it. It
+        counts toward no health figure until `fill_vacant_member`.
+
+        Returns:
+            Whether the group has the member.
+        """
+        with self._lock:
+            member = self._members.get(member_id)
+            if member is None:
+                return False
+            if member.vacant:
+                return True
+            member.rotation_when_vacated = (member.in_rotation, member.evicted)
+            member.vacant = True
+            member.evicted = False
+            member.consecutive_successes = 0
+            if member.in_rotation:
+                member.in_rotation = False
+                self._record_event(
+                    GroupMemberHealthChanged(
+                        group_id=self.id,
+                        member_id=member_id,
+                        in_rotation=False,
+                        reason="server_deregistered",
+                    )
+                )
+            self._update_state()
+            logger.info("group_member_vacated", group_id=self.id, member_id=member_id)
+            return True
+
+    def fill_vacant_member(self, member_id: str, mcp_server: McpServer) -> bool:
+        """Point a vacant member at the server registered again under its id (#2107).
+
+        The member takes back the rotation it had when its server was deleted,
+        as a member follows a replaced copy: in rotation, the new COLD copy is
+        started by the first call that selects it. A member that is not vacant
+        is left as it is.
+
+        Returns:
+            Whether the member was vacant and now holds *mcp_server*.
+        """
+        with self._lock:
+            member = self._members.get(member_id)
+            if member is None or not member.vacant:
+                return False
+            member.mcp_server = mcp_server
+            member.vacant = False
+            member.in_rotation, member.evicted = member.rotation_when_vacated
+            member.rotation_when_vacated = (False, False)
+            member.consecutive_failures = 0
+            member.consecutive_successes = 0
+            if member.in_rotation:
+                self._record_event(
+                    GroupMemberHealthChanged(
+                        group_id=self.id,
+                        member_id=member_id,
+                        in_rotation=True,
+                        reason="server_registered",
+                    )
+                )
+            self._update_state()
+            logger.info("group_member_filled", group_id=self.id, member_id=member_id)
+            return True
+
     def remove_member(self, member_id: str) -> bool:
         """
         Remove a mcp_server from the group.
@@ -568,8 +644,9 @@ class McpServerGroup(AggregateRoot):
 
         # Phase 2: Re-acquire group lock to update rotation state
         with self._lock:
-            # Member may have been removed by another thread during Phase 1
-            if member_id not in self._members:
+            # Member may have been removed, or its server deleted (#2107), by
+            # another thread during Phase 1
+            if member_id not in self._members or self._members[member_id].vacant:
                 return False
 
             current_member = self._members[member_id]
@@ -696,7 +773,11 @@ class McpServerGroup(AggregateRoot):
 
         A snapshot: the member's lock sits below this one's.
         """
-        return member.in_rotation and member.mcp_server.dead_reason_snapshot not in DEAD_NOT_ROUTED_BY_GROUPS
+        return (
+            member.in_rotation
+            and not member.vacant
+            and member.mcp_server.dead_reason_snapshot not in DEAD_NOT_ROUTED_BY_GROUPS
+        )
 
     def _check_circuit_recovery(self) -> None:
         """Check if circuit just recovered and emit event."""
@@ -777,7 +858,7 @@ class McpServerGroup(AggregateRoot):
 
     def _maybe_add_to_rotation(self, member: GroupMember, member_id: str) -> None:
         """Add member back to rotation if healthy threshold reached."""
-        if member.in_rotation:
+        if member.in_rotation or member.vacant:
             return
         if member.mcp_server.state_snapshot != McpServerState.READY:
             return
@@ -937,8 +1018,11 @@ class McpServerGroup(AggregateRoot):
         counted, so a rebalance of a group whose members had all been reaped
         took every one of them out of rotation and left nothing to select. A
         member never started, or stopped with its group, is not added. A
-        snapshot, as `_selectable` is.
+        snapshot, as `_selectable` is. A vacant member never is: a peer's
+        retired copy can still read `ready` (#2107).
         """
+        if member.vacant:
+            return False
         state = member.mcp_server.state_snapshot
         if state is McpServerState.READY:
             return True
@@ -962,7 +1046,11 @@ class McpServerGroup(AggregateRoot):
             members = list(self._members.values())
             if any(self._selectable(m) for m in members):
                 return []
-            return [m.mcp_server for m in members if not m.in_rotation and m.evicted and self._probe_may_start(m)]
+            return [
+                m.mcp_server
+                for m in members
+                if not m.in_rotation and m.evicted and not m.vacant and self._probe_may_start(m)
+            ]
 
     @staticmethod
     def _probe_may_start(member: GroupMember) -> bool:
@@ -1034,9 +1122,10 @@ class McpServerGroup(AggregateRoot):
         Returns:
             Number of members successfully started.
         """
-        # Phase 1: Snapshot members under lock
+        # Phase 1: Snapshot members under lock. Not a vacant one: its copy is
+        # the deleted server's (#2107).
         with self._lock:
-            members_snapshot = [(mid, m) for mid, m in self._members.items()]
+            members_snapshot = [(mid, m) for mid, m in self._members.items() if not m.vacant]
 
         # Phase 2: Start each member outside lock
         started = 0
@@ -1071,6 +1160,8 @@ class McpServerGroup(AggregateRoot):
                     self._members[member_id].in_rotation = False
                     # Stopped on purpose: not the probe's to start again.
                     self._members[member_id].evicted = False
+                    # Nor in rotation when its server is registered again.
+                    self._members[member_id].rotation_when_vacated = (False, False)
             self._update_state()
 
     def shutdown(self) -> None:
@@ -1174,8 +1265,10 @@ class McpServerGroup(AggregateRoot):
                 "members": [
                     {
                         "id": m.id,
-                        "state": m.mcp_server.state_snapshot.value,
+                        # A vacant member runs nothing, whatever its old copy reads.
+                        "state": McpServerState.COLD.value if m.vacant else m.mcp_server.state_snapshot.value,
                         "in_rotation": m.in_rotation,
+                        "vacant": m.vacant,
                         "weight": m.weight,
                         "priority": m.priority,
                         "consecutive_failures": m.consecutive_failures,

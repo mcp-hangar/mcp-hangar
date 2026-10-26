@@ -48,12 +48,14 @@ def register_group_tools(mcp: FastMCP) -> None:
                     total_members: int,
                     is_available: bool,
                     circuit_open: bool,
-                    members: [{id, state, in_rotation, weight, priority, consecutive_failures}]
+                    members: [{id, state, in_rotation, vacant, weight, priority, consecutive_failures}]
                 }]
             }
             healthy_count counts members that are ready and in rotation.
             members_in_rotation_count counts members in rotation in any state:
             a cold one is started by the next call through the group.
+            vacant is true for a member whose server was deleted: it is never
+            routed to until a server of its id is registered again.
 
         Example:
             hangar_group_list()
