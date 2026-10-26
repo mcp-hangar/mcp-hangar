@@ -307,11 +307,8 @@ class TestMiddleware:
     async def test_modern_era_request_passes_through_unbuffered(self):
         """A 2026-07-28 POST is the SDK's to route -- we must not touch its body.
 
-        The SDK's modern entry enforces header/body agreement itself AND watches
-        ``receive()`` for ``http.disconnect`` to cancel in-flight work. A replayed
-        body stream reports a disconnect once drained, so buffering here cancels
-        the request before it can answer (observed as a 500 with "ASGI callable
-        returned without starting response").
+        The SDK's modern entry enforces header/body agreement itself, so there
+        is nothing for the wrap to check, and the body goes through as it came.
         """
 
         body = _tools_call_body("search")
