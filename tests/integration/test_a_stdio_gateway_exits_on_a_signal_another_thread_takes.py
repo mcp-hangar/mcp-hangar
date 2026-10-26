@@ -97,7 +97,8 @@ def test_the_gateway_exits_when_another_thread_takes_the_signal(tmp_path: Path, 
     assert rc == 0
     assert time.monotonic() - started < 15
     log = (tmp_path / "stderr.log").read_text(errors="replace")
-    # The main thread slept through it: the wakeup fd is what reached the shutdown.
-    assert "shutdown_signal_received" in log and "wakeup_fd" in log
+    # The main thread slept through it until the wakeup watcher forwarded it there.
+    assert "shutdown_signal_forwarded" in log
+    assert "shutdown_signal_received" in log
     assert "server_lifecycle_shutdown_complete" in log
     assert "stdio_exit_forced" in log

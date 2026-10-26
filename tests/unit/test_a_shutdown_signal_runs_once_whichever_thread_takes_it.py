@@ -4,7 +4,8 @@ Over stdio a wakeup fd carries a SIGTERM/SIGINT that a thread other than the
 main one took to a watcher thread, because the main thread may never wake to run
 the Python handler. When it does wake, both see the same signal: the handler
 keeps today's path, the watcher leaves it a head start and stands down, and the
-one that started first owns the shutdown.
+one that started first owns the shutdown. A watcher that sees no handler sends
+the signal to the main thread once before it shuts down itself.
 """
 
 from __future__ import annotations
@@ -28,6 +29,13 @@ def end_after():
         yield end_after
 
 
+@pytest.fixture(autouse=True)
+def pthread_kill():
+    # A real forward would signal the test runner's own main thread.
+    with patch("mcp_hangar.server.lifecycle.signal.pthread_kill") as pthread_kill:
+        yield pthread_kill
+
+
 def _signals(lifecycle: MagicMock) -> _ShutdownSignals:
     return _ShutdownSignals(lifecycle, stdio=True, head_start_s=0.05)
 
@@ -44,12 +52,32 @@ def test_the_watcher_stands_down_when_the_handler_got_there(end_after: MagicMock
     end_after.assert_called_once()
 
 
-def test_the_watcher_shuts_down_when_the_handler_never_runs(end_after: MagicMock) -> None:
+def test_the_watcher_hands_the_signal_to_the_main_thread_first(end_after: MagicMock, pthread_kill: MagicMock) -> None:
+    lifecycle = MagicMock()
+    signals = _signals(lifecycle)
+
+    def the_main_thread_runs_the_handler(_ident: int, signum: int) -> None:
+        with pytest.raises(SystemExit):
+            signals.handler(signum, None)
+
+    pthread_kill.side_effect = the_main_thread_runs_the_handler
+    signals.on_wakeup(signal.SIGTERM)
+    # The forwarded signal's own byte.
+    signals.on_wakeup(signal.SIGTERM)
+
+    pthread_kill.assert_called_once_with(threading.main_thread().ident, signal.SIGTERM)
+    lifecycle.shutdown.assert_called_once()
+    end_after.assert_called_once()
+
+
+def test_the_watcher_shuts_down_when_the_handler_never_runs(end_after: MagicMock, pthread_kill: MagicMock) -> None:
     lifecycle = MagicMock()
     signals = _signals(lifecycle)
 
     signals.on_wakeup(signal.SIGTERM)
+    signals.on_wakeup(signal.SIGTERM)
 
+    pthread_kill.assert_called_once()
     lifecycle.shutdown.assert_called_once()
     end_after.assert_called_once()
 
@@ -88,13 +116,16 @@ def test_a_failed_shutdown_on_the_watcher_still_ends_the_process(end_after: Magi
     end_after.assert_called_once()
 
 
-def test_other_signals_on_the_wakeup_fd_are_left_to_their_own_handlers(end_after: MagicMock) -> None:
+def test_other_signals_on_the_wakeup_fd_are_left_to_their_own_handlers(
+    end_after: MagicMock, pthread_kill: MagicMock
+) -> None:
     lifecycle = MagicMock()
     signals = _signals(lifecycle)
 
     signals.on_wakeup(signal.SIGHUP)
     signals.on_wakeup(signal.SIGCHLD)
 
+    pthread_kill.assert_not_called()
     lifecycle.shutdown.assert_not_called()
     end_after.assert_not_called()
 

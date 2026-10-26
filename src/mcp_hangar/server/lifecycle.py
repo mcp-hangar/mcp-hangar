@@ -1027,10 +1027,12 @@ class _ShutdownSignals:
 
     `handler` is the Python handler, unchanged when it gets there first. On a
     shutdown signal's byte the watcher gives it `HANDLER_HEAD_START_S` to start,
-    which it does at once whenever the main thread took the signal or woke up,
-    and acts only if it did not. Whichever starts first owns the shutdown; the
-    other stands down. A second signal into the handler after it started still
-    runs it again, as before.
+    which it does at once whenever the main thread took the signal or woke up.
+    If it did not, the watcher sends the signal to the main thread once and
+    waits again; only if the handler still has not started does the watcher
+    shut down and end the process itself. Whichever starts first owns the
+    shutdown; the other stands down. A second signal into the handler after it
+    started still runs it again, as before.
 
     Args:
         lifecycle: The lifecycle to shut down.
@@ -1046,6 +1048,7 @@ class _ShutdownSignals:
         # interrupts the main thread cannot wait on it.
         self._claim = threading.Lock()
         self._owner: str | None = None
+        self._forwarded = False
 
     def handler(self, signum: int, _frame: Any) -> None:
         """The Python handler for SIGTERM and SIGINT; runs on the main thread."""
@@ -1066,11 +1069,21 @@ class _ShutdownSignals:
         if signum not in (signal.SIGTERM, signal.SIGINT):
             # SIGHUP and the rest have handlers of their own.
             return
-        deadline = time.monotonic() + self._head_start_s
-        while time.monotonic() < deadline:
-            if self._claim.locked():
+        if self._handler_started():
+            return
+        if not self._forwarded:
+            # Sent to the main thread, the signal interrupts its `select`, and
+            # the handler runs there as it does when the kernel picks that
+            # thread: the loop stops before the shutdown, and the exit runs the
+            # interpreter's own clean-up. The forwarded signal's byte comes back
+            # here and finds the handler started.
+            self._forwarded = True
+            logger.info("shutdown_signal_forwarded", signal=signal.Signals(signum).name)
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                signal.pthread_kill(main_ident, signum)
+            if self._handler_started():
                 return
-            time.sleep(0.01)
         if not self._claim.acquire(blocking=False):
             return
         self._owner = "wakeup_fd"
@@ -1081,6 +1094,15 @@ class _ShutdownSignals:
             # `sys.exit` would end only this thread; the main thread may never
             # wake, so the bounded exit ends the process.
             _end_after(STDIO_EXIT_GRACE_S)
+
+    def _handler_started(self) -> bool:
+        """Whether the handler starts within the head start."""
+        deadline = time.monotonic() + self._head_start_s
+        while time.monotonic() < deadline:
+            if self._claim.locked():
+                return True
+            time.sleep(0.01)
+        return self._claim.locked()
 
     def watch(self) -> bool:
         """Register a wakeup fd and read it on a daemon thread; POSIX main thread only.
