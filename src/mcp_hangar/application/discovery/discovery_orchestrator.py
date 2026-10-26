@@ -106,6 +106,11 @@ class DiscoveryChangeRefused(Exception):
     """
 
 
+def _origin_of(mcp_server: DiscoveredMcpServer | None) -> tuple[str, str] | None:
+    """The source and fingerprint of *mcp_server*: what the fleet records of a discovered server (#2116)."""
+    return None if mcp_server is None else (mcp_server.source_type, mcp_server.fingerprint)
+
+
 class DiscoveryOrchestrator:
     """Main coordination component for mcp_server discovery.
 
@@ -414,14 +419,65 @@ class DiscoveryOrchestrator:
         taken back, each server seen now, and removal waits a full TTL from
         taking the lease, as it does for a server restored at boot.
 
-        Without a fleet to take back from, what is tracked is seen now instead.
+        What waits for approval is then checked against the fleet (#2116).
+
+        Without a fleet to take back from, what is tracked is seen now instead,
+        and what waits is kept: there is nothing to tell it is out of date by.
         """
         if self.restored_servers is None:
             self._lifecycle_manager.refresh_all()
             return
+        ran = self._lifecycle_manager.get_all_mcp_servers()
         for mcp_server in self._lifecycle_manager.drop_all():
             self._validator.record_deregistration(mcp_server)
         self._take_back_restored()
+        self._drop_what_waits_on_another_fleet(ran)
+
+    def _drop_what_waits_on_another_fleet(self, ran: dict[str, DiscoveredMcpServer]) -> None:
+        """Forget what waits for approval where the fleet changed while this instance followed (#2116).
+
+        Quarantine and pending are this instance's, in memory, and a definition
+        waiting in either was judged against what ran under its name then
+        (*ran*, tracked in the earlier tenure). A peer holding the lease
+        meanwhile may have approved it, applied a newer one, or removed the
+        server. Kept, the entry stays listed as waiting, and approving it --
+        bound to its `definition_digest` or not, since the digest is unchanged
+        -- would apply it over what the peer chose.
+
+        So an entry is kept only when the fleet runs, under its name, what this
+        instance ran when the entry was made: a change still waiting for the
+        approval it needs. Otherwise it is dropped. Nothing is lost by that:
+        the next cycle decides again against what runs now, and a definition
+        its source still reports and that still fails validation waits again.
+        Within a tenure no peer can apply anything, so this is the one point
+        where an entry can go out of date this way.
+
+        Compared by fingerprint and source, as `_process_held` tells an
+        unchanged definition: the fleet records the origin's fingerprint, not
+        the connection details `definition_digest` covers. A match only ever
+        drops an entry, never applies one.
+        """
+        now = self._lifecycle_manager.get_all_mcp_servers()
+        waiting = [
+            (s, self._lifecycle_manager.reject) for s, _, _ in self._lifecycle_manager.get_quarantined().values()
+        ]
+        waiting += [
+            (s, self._discovery_service.reject_pending) for s in self._discovery_service.get_pending_mcp_servers()
+        ]
+        for mcp_server, drop in waiting:
+            runs, before = _origin_of(now.get(mcp_server.name)), _origin_of(ran.get(mcp_server.name))
+            if runs == before:
+                continue
+            drop(mcp_server.name)
+            logger.info(
+                "discovery_waiting_dropped_on_new_tenure",
+                mcp_server_name=mcp_server.name,
+                source=mcp_server.source_type,
+                fingerprint=mcp_server.fingerprint,
+                reason="approved elsewhere"
+                if runs == _origin_of(mcp_server)
+                else "the fleet runs another definition under the name now",
+            )
 
     def is_tracking(self, name: str) -> bool:
         """Whether discovery governs *name* in this process."""
