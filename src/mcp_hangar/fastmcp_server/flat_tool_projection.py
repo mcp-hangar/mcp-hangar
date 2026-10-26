@@ -956,8 +956,11 @@ def _classify_empty_projection(tenant_id: str | None) -> str:
 async def _catalogue_settled(tenant_id: str | None, projection_is_empty: bool) -> bool:
     """Wait out the boot warm-up when an empty answer would be knowably wrong (#1231).
 
-    True means the caller should re-read the projection: the warm-up finished
-    while we waited, so what was empty a moment ago may not be now.
+    True means it waited, so the caller must re-read the projection: what was
+    empty a moment ago may not be now. That holds when the deadline passed too.
+    The warm-up projects one server at a time, so a wait that outlived the
+    deadline may have seen some of them land, and the answer is then whatever
+    exists now, not the empty one read before the wait (#2133).
 
     One function rather than the condition inline at each call site, because
     they must not drift: the listing, the call path and ``server/discover``
@@ -968,7 +971,9 @@ async def _catalogue_settled(tenant_id: str | None, projection_is_empty: bool) -
         return False
     if _classify_empty_projection(tenant_id) != EMPTY_NOTHING_DISCOVERED:
         return False
-    return await wait_for_catalogue()
+    # Whether the warm-up finished or the deadline passed, the caller re-reads.
+    await wait_for_catalogue()
+    return True
 
 
 async def _settled_flat_map(mcp_ctx: Any, tenant_id: str | None) -> Mapping[str, tuple[str, str]]:
