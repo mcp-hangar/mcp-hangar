@@ -55,8 +55,15 @@ _in_flight: threading.Event | None = None
 
 
 def warmup_started() -> None:
-    """Record that the boot-time warm-up has begun."""
+    """Record that the boot-time warm-up has begun.
+
+    Called before the warm-up thread is started, and again by the warm-up
+    itself; a warm-up already marked keeps its mark, so nothing waiting on it
+    is handed a fresh one.
+    """
     global _in_flight
+    if is_warming():
+        return
     _in_flight = threading.Event()
 
 

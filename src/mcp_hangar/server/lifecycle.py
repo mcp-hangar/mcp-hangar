@@ -224,12 +224,17 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
 
     warmed = failed = skipped = 0
 
-    # A listing that arrives before this finishes would be answered with an
-    # empty catalogue the client then caches forever (#1231). It waits instead,
-    # briefly and only when the answer would otherwise be knowably wrong.
-    catalogue_warmup.warmup_started()
     try:
-        for mcp_server_id in runtime.repository.get_all_ids():
+        mcp_server_ids = runtime.repository.get_all_ids()
+        # A listing that arrives before this finishes would be answered with an
+        # empty catalogue the client then caches forever (#1231). It waits instead,
+        # briefly and only when the answer would otherwise be knowably wrong.
+        # `start_front_door_warm_up` has already marked it, before the thread ran
+        # (#2119); this keeps a direct, synchronous call marked too. No server,
+        # nothing to warm, nothing for a listing to wait on.
+        if mcp_server_ids:
+            catalogue_warmup.warmup_started()
+        for mcp_server_id in mcp_server_ids:
             server = runtime.repository.get(mcp_server_id)
             if server is not None and server.state.value == "dead":
                 # Restored DEAD from the event log. A warm-up of everything is not
@@ -279,13 +284,46 @@ def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.T
         The started thread.
     """
 
+    from ..fastmcp_server import catalogue_warmup
+
+    # Marked here, before the thread exists, and so before the caller goes on to
+    # serve: marked from inside the thread, a listing that landed before the
+    # thread's first statement read "not warming" and answered only the
+    # `hangar_*` tools instead of waiting (#2119). Not marked where no warm-up
+    # will run (`egress`, or no configured server), so nothing waits there.
+    marked = _a_warm_up_will_run(runtime)
+    if marked:
+        catalogue_warmup.warmup_started()
+
     def warm_up() -> None:
-        warm_the_front_door_catalogue(runtime)
+        try:
+            warm_the_front_door_catalogue(runtime)
+        finally:
+            # However the warm-up ended, even before its own `try`, it is over.
+            catalogue_warmup.warmup_finished()
         retry.run()
 
-    thread = threading.Thread(target=warm_up, name="mcp-hangar-front-door-warmup", daemon=True)
-    thread.start()
+    try:
+        thread = threading.Thread(target=warm_up, name="mcp-hangar-front-door-warmup", daemon=True)
+        thread.start()
+    except BaseException:
+        # No thread, no warm-up: a listing must not wait on one.
+        if marked:
+            catalogue_warmup.warmup_finished()
+        raise
     return thread
+
+
+def _a_warm_up_will_run(runtime: Any) -> bool:
+    """Will `warm_the_front_door_catalogue` warm anything: a front door with at least one server?"""
+    from ..domain.services.tool_access_resolver import is_front_door
+
+    if not is_front_door():
+        return False
+    try:
+        return bool(runtime.repository.get_all_ids())
+    except Exception:  # noqa: BLE001 -- the warm-up meets the same failure on its thread, and its `finally` ends the mark
+        return True
 
 
 def start_coordination() -> None:
