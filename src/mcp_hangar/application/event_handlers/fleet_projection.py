@@ -46,6 +46,7 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot
 from ...domain.value_objects.peer_identity import PeerIdentity, connection_declaration
 from ...logging_config import get_logger
+from ..group_membership import fill_vacant_member, vacate_member
 from ..ports.async_task import IAsyncTaskSubmitter, IBlockingAsyncRunner
 
 logger = get_logger(__name__)
@@ -186,7 +187,12 @@ class FleetProjection:
         if names is None or self._contradicts(mcp_server_id, snapshot, names):
             return
 
-        self._repository.add(mcp_server_id, server_from_snapshot(snapshot))
+        mcp_server = server_from_snapshot(snapshot)
+        self._repository.add(mcp_server_id, mcp_server)
+        # A member left vacant by its server's deletion holds this copy now,
+        # if discovery registered it (#2107). Its group's events wait for the next drain: the projection
+        # publishes nothing.
+        fill_vacant_member(self._groups, mcp_server_id, mcp_server)
         logger.info("fleet_projection_registered", mcp_server_id=mcp_server_id, produced_by=produced_by)
 
     def _apply_update(self, mcp_server_id: str) -> bool:
@@ -265,9 +271,24 @@ class FleetProjection:
 
     def _deregister(self, mcp_server_id: str, produced_by: str) -> None:
         self._unread.discard(mcp_server_id)
-        if not self._repository.exists(mcp_server_id):
+        local = self._repository.get(mcp_server_id)
+        if local is None:
+            return
+        if self._declared_in_config is not None and self._declared_in_config(mcp_server_id):
+            # This replica's file declares it, as in `_apply_update`: it leaves
+            # when the file does, never on another replica's deletion of a
+            # server of the same name (#2107).
+            logger.info("fleet_projection_deregistration_of_declared_server_ignored", mcp_server_id=mcp_server_id)
             return
         self._repository.remove(mcp_server_id)
+        # No group routes to the dropped copy, and its client is closed: the
+        # copy is out of the fleet, and a group that selected it would start it
+        # where nothing manages it (#2107). Only here, where this replica held
+        # the server: the replica that deleted or replaced it has already
+        # removed it, and seeing it absent leaves its groups as they are.
+        vacate_member(self._groups, mcp_server_id)
+        if isinstance(local, McpServer):
+            self._retire(local)
         logger.info("fleet_projection_deregistered", mcp_server_id=mcp_server_id, produced_by=produced_by)
 
     def _read(self, mcp_server_id: str) -> Any:

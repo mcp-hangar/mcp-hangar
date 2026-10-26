@@ -40,6 +40,7 @@ from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
 from ..group_events import publish_group_events
+from ..group_membership import fill_vacant_member, vacate_member
 from ..ports.log_buffers import ILogBuffers
 from ..ports.peer_identity import IPeerIdentityAuthority
 from .crud_commands import (
@@ -230,7 +231,8 @@ class CreateMcpServerHandler(CommandHandler):
                 call in flight; what a graceful reload waits on. Used before a
                 discovered server is replaced (#2091). None stops it at once.
             groups: The groups, whose members hold a server by reference and
-                follow a replaced discovered server to its new copy.
+                follow a replaced discovered server to its new copy, or fill
+                with a server created under a deleted one's id (#2107).
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -342,6 +344,12 @@ class CreateMcpServerHandler(CommandHandler):
         if self._log_buffers is not None and self._log_buffers.attach(command.mcp_server_id, mcp_server):
             logger.info("log_buffer_attached_to_mcp_server", mcp_server_id=command.mcp_server_id)
         self._repository.add(command.mcp_server_id, mcp_server)
+        if replaced is None:
+            # A server of this name deleted earlier left its members vacant;
+            # they hold this one now if discovery registered it (#2107). A
+            # replaced one's members already followed it, in `_retire`.
+            for group in fill_vacant_member(self._groups, command.mcp_server_id, mcp_server):
+                publish_group_events(self._event_bus, group)
 
         self._event_bus.publish(
             McpServerRegistered(
@@ -819,6 +827,7 @@ class DeleteMcpServerHandler(CommandHandler):
         log_buffers: ILogBuffers | None = None,
         declared_in_config: Callable[[str], bool] | None = None,
         peer_identity_authority: IPeerIdentityAuthority | None = None,
+        groups: dict | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -832,6 +841,8 @@ class DeleteMcpServerHandler(CommandHandler):
                 id that is free again -- what deleting did before #1506.
             declared_in_config: Whether the gateway configuration declares a
                 server; such a server is refused (#1744). Omitted means none is.
+            groups: The groups, whose members hold a server by reference: a
+                deleted server's member is left vacant (#2107).
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -839,6 +850,7 @@ class DeleteMcpServerHandler(CommandHandler):
         self._log_buffers = log_buffers
         self._declared_in_config = declared_in_config
         self._peer_identity_authority = peer_identity_authority
+        self._groups = groups
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -883,30 +895,31 @@ class DeleteMcpServerHandler(CommandHandler):
         ):
             raise McpServerNotDiscoveredError(command.mcp_server_id)
 
-        # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
-        # may still hold its connection (#1361). I/O (shutdown) is done outside
-        # the repository lock to respect the no-I/O-under-lock rule.
-        if mcp_server.state is not McpServerState.COLD:
-            mcp_server.shutdown()
-            # Persist and publish any lifecycle events emitted by shutdown()
-            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
-
-        # Before it leaves the fleet, for the same reason registration records
-        # before joining it: a failure here must leave the server as it was,
-        # rather than removed from memory and still on record.
-        #
-        # A convergence loop's deletion is fenced; an operator's is not. See
-        # `IFleetWriter.delete` for the sequence that distinction exists for --
-        # briefly, a stalled leader whose decision is about a fleet that has
-        # since changed hands, and which cannot notice on its own because it was
-        # frozen at the moment it would have had to.
-        if self._fleet_writer is not None:
-            self._fleet_writer.delete(
-                command.mcp_server_id,
-                fenced=command.provenance is Provenance.DISCOVERY,
-            )
+        # Out of every group first, so no call through a group selects it while
+        # it stops and starts it again where nothing manages it (#2107). Put
+        # back if the deletion does not go through.
+        vacated = vacate_member(self._groups, command.mcp_server_id)
+        try:
+            self._stop_and_unrecord(mcp_server, command)
+        except Exception:
+            for group in vacated:
+                group.fill_vacant_member(command.mcp_server_id, mcp_server)
+            raise
 
         self._repository.remove(command.mcp_server_id)
+
+        if vacated:
+            # A call that selected it before it left its groups refuses rather
+            # than starting it again. One that restarted it while it stopped
+            # left a client, which is closed here.
+            client = mcp_server.retire()
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001 -- fault-barrier: the server is deleted; a close failure is logged
+                    logger.warning("deleted_mcp_server_client_close_failed", mcp_server_id=command.mcp_server_id)
+            for group in vacated:
+                publish_group_events(self._event_bus, group)
 
         # The buffer registry is a process-wide dict that the removal above does
         # not reach, so a deleted server's output stayed registered under an id
@@ -932,6 +945,30 @@ class DeleteMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "deleted": True}
+
+    def _stop_and_unrecord(self, mcp_server: McpServer, command: DeleteMcpServerCommand) -> None:
+        # Stop mcp_server unless it is COLD. A DEAD one too: a crashed process
+        # may still hold its connection (#1361). I/O (shutdown) is done outside
+        # the repository lock to respect the no-I/O-under-lock rule.
+        if mcp_server.state is not McpServerState.COLD:
+            mcp_server.shutdown()
+            # Persist and publish any lifecycle events emitted by shutdown()
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
+
+        # Before it leaves the fleet, for the same reason registration records
+        # before joining it: a failure here must leave the server as it was,
+        # rather than removed from memory and still on record.
+        #
+        # A convergence loop's deletion is fenced; an operator's is not. See
+        # `IFleetWriter.delete` for the sequence that distinction exists for --
+        # briefly, a stalled leader whose decision is about a fleet that has
+        # since changed hands, and which cannot notice on its own because it was
+        # frozen at the moment it would have had to.
+        if self._fleet_writer is not None:
+            self._fleet_writer.delete(
+                command.mcp_server_id,
+                fenced=command.provenance is Provenance.DISCOVERY,
+            )
 
 
 # =============================================================================
@@ -1285,6 +1322,7 @@ def register_crud_handlers(
             log_buffers=log_buffers,
             declared_in_config=declared_in_config,
             peer_identity_authority=peer_identity_authority,
+            groups=groups,
         ),
     )
 
