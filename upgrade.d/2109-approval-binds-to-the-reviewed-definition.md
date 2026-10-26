@@ -30,8 +30,10 @@ unbound approval. Anything that looks like an attempt to bind but cannot be read
 as exactly one digest answers 400 instead of being approved unbound:
 
 - a body that is not a JSON object (malformed JSON, an array, a form body);
-- a key other than `definition_digest`, including `fingerprint` and other
-  spellings;
+- in the body, any key other than `definition_digest`; in the query string, a
+  key that reads as a misspelt binding (`fingerprint`, `digest`,
+  `definition-digest` and other spellings of `definition_digest`), while other
+  query parameters, such as a proxy's cache-buster, are ignored as before;
 - a `definition_digest` that is `null` or not a 64-character lowercase hex
   string;
 - a query and body that disagree.

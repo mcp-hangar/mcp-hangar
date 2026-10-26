@@ -567,6 +567,8 @@ class TestARestApprovalThatMightHaveMeantToBindIsRefused:
             ({"json": {"definition_digest": "abc123"}}, "invalid_definition_digest"),
             ({"params": {"fingerprint": "abc123"}}, "unknown_fields"),
             ({"params": {"Definition_Digest": STALE}}, "unknown_fields"),
+            ({"params": {"definition-digest": STALE}}, "unknown_fields"),
+            ({"params": {"DefinitionDigest": STALE}}, "unknown_fields"),
             ({"params": {"definition_digest": ""}}, "invalid_definition_digest"),
             (
                 {"params": {"definition_digest": STALE}, "json": {"definition_digest": "1" * 64}},
@@ -584,6 +586,14 @@ class TestARestApprovalThatMightHaveMeantToBindIsRefused:
         assert response.json()["error"] == error
         assert orchestrator.registered == []
         assert [p.name for p in orchestrator.get_pending_mcp_servers()] == ["pending-one"]
+
+    async def test_an_unrelated_query_parameter_is_ignored(self, waiting_orchestrator) -> None:
+        orchestrator = await waiting_orchestrator()
+        patches, client = _rest(orchestrator)
+        with patches[0], patches[1]:
+            response = client.post("/api/discovery/approve/pending-one?_=123&traceparent=00-x-y-01")
+
+        assert response.status_code == 200 and response.json()["approved"] is True
 
     async def test_query_and_body_that_agree_bind(self, waiting_orchestrator) -> None:
         orchestrator = await waiting_orchestrator()

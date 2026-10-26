@@ -155,7 +155,13 @@ _BINDING = "definition_digest"
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 #: Spellings that mean to bind and are not the binding. Ignoring one would
 #: approve unbound what the caller meant to bind, so each is refused.
-_NEAR_BINDING = {"definition_digest", "fingerprint", "definitiondigest", "digest"}
+#: Query keys that read as an attempt to bind, compared with every non-letter
+#: removed (`definition-digest`, `Definition_Digest`, `fingerprint`, ...).
+_NEAR_BINDING = {"definitiondigest", "fingerprint", "digest"}
+
+
+def _near_binding(key: str) -> bool:
+    return re.sub(r"[^a-z]", "", key.lower()) in _NEAR_BINDING
 
 
 def _refused(error: str, detail: str) -> HangarJSONResponse:
@@ -171,7 +177,7 @@ async def _approval_binding(request: Request) -> str | None | HangarJSONResponse
     as "no binding" and approved unbound. A request with no body and no
     query keeps working, unbound.
     """
-    near = sorted(k for k in request.query_params if k != _BINDING and k.lower() in _NEAR_BINDING)
+    near = sorted(k for k in request.query_params if k != _BINDING and _near_binding(k))
     values: list[object] = list(request.query_params.getlist(_BINDING))
     if (await request.body()).strip():
         body = await json_body(request)
