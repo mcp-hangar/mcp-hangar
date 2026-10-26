@@ -206,6 +206,10 @@ class FrontDoorRoutingMiddleware:
             return
 
         body = await _buffer_body(receive)
+        if body is None:
+            # The client left before its body arrived: there is nothing to
+            # route and nobody to answer.
+            return
         try:
             payload = json.loads(body) if body else None
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -260,12 +264,19 @@ def _stash_route(scope: Scope, decision: RouteDecision) -> None:
         scope["mcp_route"] = decision
 
 
-async def _buffer_body(receive: Receive) -> bytes:
-    """Consume the full HTTP request body from ``receive``."""
+async def _buffer_body(receive: Receive) -> bytes | None:
+    """Consume the full HTTP request body from ``receive``; None if the client left first.
+
+    A client that disconnects mid-upload gets ``http.disconnect`` from every
+    later ``receive()``. Skipping it, as this loop used to, spun on it for good
+    and held a CPU for the connection (#2123).
+    """
     chunks: list[bytes] = []
     more_body = True
     while more_body:
         message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
         if message["type"] != "http.request":
             continue
         chunks.append(message.get("body", b""))
