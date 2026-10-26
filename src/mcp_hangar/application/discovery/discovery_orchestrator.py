@@ -24,7 +24,7 @@ from mcp_hangar.domain.events import (
     McpServerDiscoveryLost,
     McpServerQuarantined,
 )
-from mcp_hangar.domain.exceptions import McpServerNotHereError
+from mcp_hangar.domain.exceptions import DiscoveredDefinitionChangedError, McpServerNotHereError
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.conventions import Discovery
 from mcp_hangar.observability.tracing import get_tracer, record_handled_failure
@@ -286,7 +286,15 @@ class DiscoveryOrchestrator:
         Returns:
             Removed source, or None if not found
         """
-        return self._discovery_service.unregister_source(source_type)
+        removed = self._discovery_service.unregister_source(source_type)
+        if removed is not None:
+            # What it left waiting is reported by nobody now, and its policy can
+            # no longer be asked: approving it would apply an unchecked
+            # definition no source stands behind (#2109).
+            for name, (waiting, _, _) in self._lifecycle_manager.get_quarantined().items():
+                if waiting.source_type == source_type:
+                    self._lifecycle_manager.reject(name)
+        return removed
 
     def add_source_live(self, source: DiscoverySource) -> None:
         """Add a source to a running orchestrator and start it, from a synchronous caller (#1674).
@@ -649,7 +657,14 @@ class DiscoveryOrchestrator:
         # Check if already tracked
         existing = self._lifecycle_manager.get_mcp_server(mcp_server.name)
         if existing:
-            if existing.fingerprint == mcp_server.fingerprint or self._refused_before(existing, mcp_server):
+            if existing.fingerprint == mcp_server.fingerprint:
+                # Back to the running definition: a change still waiting in
+                # quarantine was withdrawn, and approving it would apply what
+                # the source no longer reports (#2109).
+                self._drop_withdrawn_change(mcp_server)
+                self._lifecycle_manager.update_seen(mcp_server.name)
+                return "skipped"
+            if self._refused_before(existing, mcp_server):
                 # Just update last_seen
                 self._lifecycle_manager.update_seen(mcp_server.name)
                 return "skipped"
@@ -804,6 +819,20 @@ class DiscoveryOrchestrator:
         if not validation_result.valid:
             return "; ".join(i.message for i in validation_result.issues)
         return None
+
+    def _drop_withdrawn_change(self, running: DiscoveredMcpServer) -> None:
+        """Forget a quarantined change of *running*, whose source reports the running definition again."""
+        quarantined = self._lifecycle_manager.get_quarantined().get(running.name)
+        if quarantined is None or quarantined[0].fingerprint == running.fingerprint:
+            return
+        self._lifecycle_manager.reject(running.name)
+        logger.info(
+            "discovery_change_withdrawn",
+            mcp_server_name=running.name,
+            source=running.source_type,
+            running_fingerprint=running.fingerprint,
+            withdrawn_fingerprint=quarantined[0].fingerprint,
+        )
 
     def _refused_before(self, existing: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer) -> bool:
         """Record a changed definition once, and say whether it was already refused for good (#2091).
@@ -1017,19 +1046,22 @@ class DiscoveryOrchestrator:
         """Get quarantined mcp_servers with reasons.
 
         Returns:
-            Dictionary of name -> {mcp_server, reason, quarantine_time}
+            Dictionary of name -> {mcp_server, fingerprint, reason, quarantine_time}.
+            The fingerprint is the one an approval names to bind itself to this
+            definition (#2109), also found under ``mcp_server``.
         """
         quarantined = self._lifecycle_manager.get_quarantined()
         return {
             name: {
                 "mcp_server": mcp_server.to_dict(),
+                "fingerprint": mcp_server.fingerprint,
                 "reason": reason,
                 "quarantine_time": qtime.isoformat(),
             }
             for name, (mcp_server, reason, qtime) in quarantined.items()
         }
 
-    async def approve_mcp_server(self, name: str) -> dict[str, Any]:
+    async def approve_mcp_server(self, name: str, *, fingerprint: str | None = None) -> dict[str, Any]:
         """Approve a quarantined or pending mcp_server.
 
         A server waits in one of two places: quarantine, where it failed
@@ -1049,22 +1081,42 @@ class DiscoveryOrchestrator:
         asked, and a cycle replacing the same server at the same time is then
         not possible.
 
+        Bound to what the operator reviewed when *fingerprint* is given (#2109):
+        a source re-reports its definition every cycle and overwrites the one
+        waiting, so the definition waiting now need not be the one listed. A
+        different one is refused and nothing changes. Without a fingerprint the
+        approval applies whatever waits under the name, as it always did, and
+        says so in a warning. Either way the definition passes the same command
+        and source-policy checks an automatic registration does; one that fails
+        them is refused and stays where it waited.
+
         Args:
             name: McpServer name
+            fingerprint: The fingerprint of the definition the operator
+                reviewed, as `hangar_discovered` and the REST listings show it.
 
         Returns:
             Result dictionary
+
+        Raises:
+            DiscoveredDefinitionChangedError: *fingerprint* is not the one waiting.
         """
         self._refuse_unless_managing(f"approve mcp_server {name!r}")
-        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name)))
+        return cast(dict[str, Any], await self._on_discovery_loop(lambda: self._approve(name, fingerprint)))
 
-    async def _approve(self, name: str) -> dict[str, Any]:
+    async def _approve(self, name: str, fingerprint: str | None = None) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
         # Asked again here, through the tenure observer: the lease may have
         # changed hands while the request hopped onto this loop, and a new
         # tenure rebuilds tracking before the approval reads it (#2111).
         if not self._manages():
             raise self._not_here(f"approve mcp_server {name!r}")
+        # Checked before anything is taken out of quarantine or pending, with
+        # no await in between, so a refusal changes nothing and a cycle cannot
+        # swap the definition after it was checked.
+        refusal = self._approval_refusal(name, fingerprint)
+        if refusal is not None:
+            return refusal
         running = self._lifecycle_manager.get_mcp_server(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False
@@ -1097,6 +1149,56 @@ class DiscoveryOrchestrator:
             "mcp_server": name,
             "error": "McpServer not found in quarantine or pending",
         }
+
+    def _waiting(self, name: str) -> DiscoveredMcpServer | None:
+        """The definition an approval of *name* would apply: from quarantine first, then pending, as `_approve`."""
+        quarantined = self._lifecycle_manager.get_quarantined().get(name)
+        if quarantined is not None:
+            return quarantined[0]
+        return next((p for p in self._discovery_service.get_pending_mcp_servers() if p.name == name), None)
+
+    def _approval_refusal(self, name: str, fingerprint: str | None) -> dict[str, Any] | None:
+        """Why the definition waiting under *name* may not be approved now, or None (#2109).
+
+        Raises `DiscoveredDefinitionChangedError` when it is not the one with
+        *fingerprint*. Returns a refusal when it fails the checks an automatic
+        registration runs before validation: the input validator on its command
+        and its source's own policy. Approval overrides what quarantined a
+        definition -- a failed health check, a rate or count limit -- but not
+        those two; a pending definition never met them at all, because the
+        service parks it before the orchestrator sees it.
+        """
+        waiting = self._waiting(name)
+        if waiting is None:
+            return None  # `_approve` answers "not found", as it always did.
+        if fingerprint is None:
+            logger.warning(
+                "discovery_approval_not_bound",
+                mcp_server_name=name,
+                fingerprint=waiting.fingerprint,
+                detail="approved without the fingerprint that was reviewed, so whatever waits under the name "
+                "is applied; pass the fingerprint from the listing to bind the approval to it",
+            )
+        elif waiting.fingerprint != fingerprint:
+            raise DiscoveredDefinitionChangedError(name, reviewed=fingerprint, current=waiting.fingerprint)
+
+        reason = self._command_refusal(waiting)
+        if reason is not None:
+            reason = f"command rejected: {reason}"
+        else:
+            source = self._discovery_service.get_source(waiting.source_type)
+            violation = source.policy_violation(waiting) if source is not None else None
+            reason = violation.reason if violation is not None else None
+        if reason is None:
+            return None
+        logger.warning(
+            "discovery_approval_refused",
+            mcp_server_name=name,
+            source=waiting.source_type,
+            fingerprint=waiting.fingerprint,
+            reason=reason,
+        )
+        return {"approved": False, "mcp_server": name, "error": f"approval refused: {reason}"}
 
     async def _approve_change(
         self, running: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, was_pending: bool

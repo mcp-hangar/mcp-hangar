@@ -255,7 +255,7 @@ class TestApproveProvider:
         """POST /api/discovery/approve/pending-1 calls approve_provider on orchestrator."""
         response = api_client.post("/api/discovery/approve/pending-1")
         assert response.status_code == 200
-        mock_context.discovery_orchestrator.approve_mcp_server.assert_called_once_with("pending-1")
+        mock_context.discovery_orchestrator.approve_mcp_server.assert_called_once_with("pending-1", fingerprint=None)
 
     def test_returns_404_when_discovery_not_configured(self, no_discovery_client):
         """POST /api/discovery/approve/name returns 404 when discovery not configured."""

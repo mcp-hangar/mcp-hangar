@@ -145,20 +145,39 @@ async def list_quarantined(request: Request) -> HangarJSONResponse:
 
 
 async def approve_mcp_server(request: Request) -> HangarJSONResponse:
-    """Approve a pending mcp_server for registration.
+    """Approve a pending or quarantined mcp_server for registration.
 
     Path params:
         name: McpServer name to approve.
+
+    Query params or JSON body (optional):
+        fingerprint: The fingerprint of the definition the operator reviewed, as
+            ``GET /pending`` and ``GET /quarantined`` show it (#2109). Given,
+            the approval applies only that definition. Absent, whatever waits
+            under the name is applied, as before, and a warning is logged. A
+            request with no body keeps working.
 
     Returns:
         JSON with approval result from orchestrator.
 
     Raises:
         DiscoveryNotConfiguredError: If discovery is not configured.
+        DiscoveredDefinitionChangedError: The definition waiting is not the one
+            with *fingerprint* (-> 409, naming the current fingerprint).
     """
     name = request.path_params["name"]
     orchestrator = _require_orchestrator()
-    result = await orchestrator.approve_mcp_server(name)
+    fingerprint = request.query_params.get("fingerprint")
+    if fingerprint is None:
+        body = await json_body(request)
+        if isinstance(body, dict):
+            fingerprint = body.get("fingerprint")
+    if fingerprint is not None and (not isinstance(fingerprint, str) or not fingerprint.strip()):
+        return HangarJSONResponse(
+            {"error": "invalid_fingerprint", "detail": "fingerprint must be the non-empty string a listing shows"},
+            status_code=400,
+        )
+    result = await orchestrator.approve_mcp_server(name, fingerprint=fingerprint)
     return HangarJSONResponse(result)
 
 

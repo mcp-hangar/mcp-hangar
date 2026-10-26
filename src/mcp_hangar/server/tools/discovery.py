@@ -16,6 +16,13 @@ from ..validation import (
 )
 
 
+def _validate_approve_input(mcp_server: str, fingerprint: str | None = None) -> None:
+    """The name as every tool checks it, and a fingerprint that is a string when given."""
+    validate_mcp_server_id_input(mcp_server)
+    if fingerprint is not None and (not isinstance(fingerprint, str) or not fingerprint.strip()):
+        raise ValueError("invalid_fingerprint: a fingerprint is the non-empty string a listing shows")
+
+
 def register_discovery_tools(mcp: FastMCP) -> None:
     """Register discovery tools with MCP server."""
 
@@ -158,7 +165,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     name: str,
                     source: str,
                     reason: str,
-                    quarantine_time: str
+                    quarantine_time: str,
+                    fingerprint: str
                 }]
             }
             Not configured: {error: str}
@@ -166,7 +174,8 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         Example:
             hangar_quarantine()
             # {"quarantined": [{"name": "broken-mcp_server", "source": "docker",
-            #   "reason": "health_check_failed", "quarantine_time": "2024-01-15T10:30:00Z"}]}
+            #   "reason": "health_check_failed", "quarantine_time": "2024-01-15T10:30:00Z",
+            #   "fingerprint": "abc123"}]}
 
             hangar_quarantine()  # when no quarantined mcp_servers
             # {"quarantined": []}
@@ -186,6 +195,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
                     "source": data["mcp_server"]["source_type"],
                     "reason": data["reason"],
                     "quarantine_time": data["quarantine_time"],
+                    "fingerprint": data["mcp_server"]["fingerprint"],
                 }
                 for name, data in quarantined.items()
             ]
@@ -196,29 +206,36 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         tool_name="hangar_approve",
         rate_limit_key=lambda *_a, **_k: "hangar_approve",
         check_rate_limit=RateLimited("hangar_approve"),
-        validate=validate_mcp_server_id_input,
+        validate=_validate_approve_input,
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
-    async def hangar_approve(mcp_server: str) -> dict:
+    async def hangar_approve(mcp_server: str, fingerprint: str | None = None) -> dict:
         """Approve a pending or quarantined mcp_server for registration.
 
         CHOOSE THIS when: ready to register a mcp_server from pending or quarantine list.
         CHOOSE hangar_discovered when: you need to review pending mcp_servers first.
         CHOOSE hangar_quarantine when: you need to see why a mcp_server was quarantined.
 
-        Side effects: Registers the mcp_server in cold state. Removes from pending/quarantine.
+        Side effects: Registers the mcp_server in cold state, or replaces the running
+        definition with the approved change. Removes from pending/quarantine.
 
         Args:
             mcp_server: str - McpServer name (from hangar_discovered or hangar_quarantine output)
+            fingerprint: str | None - The fingerprint of the definition you reviewed, from the
+                same listing. Pass it: the approval then applies only that definition, and is
+                refused if the source has changed it since. Without it, whatever definition
+                waits under the name is applied, and a warning is logged.
 
         Returns:
-            Success: {approved: true, mcp_server: str, status: "registered"}
+            Success: {approved: true, mcp_server: str, status: "registered" | "updated"}
             Not found: {approved: false, mcp_server: str, error: str}
+            Refused by the command or source-policy checks: {approved: false, mcp_server: str, error: str}
+            Changed since reviewed: tool error DiscoveredDefinitionChangedError naming the current fingerprint
             Not configured: {error: str}
 
         Example:
-            hangar_approve("my-new-mcp_server")
+            hangar_approve("my-new-mcp_server", fingerprint="abc123")
             # {"approved": true, "mcp_server": "my-new-mcp_server", "status": "registered"}
 
             hangar_approve("unknown")
@@ -231,7 +248,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         if orchestrator is None:
             return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
-        result = await orchestrator.approve_mcp_server(mcp_server)
+        result = await orchestrator.approve_mcp_server(mcp_server, fingerprint=fingerprint)
         return result
 
     @mcp.tool(name="hangar_sources")

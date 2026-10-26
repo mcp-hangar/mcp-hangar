@@ -426,11 +426,28 @@ class TestARefusedChangeKeepsTheRunningDefinition:
         assert len(_not_applied(captured)) == 1
         assert not fleet.events.of(McpServerDiscoveryLost)
 
-        # Approving the quarantined change applies it.
+        # The source's own policy refused it, and an approval does not
+        # override that (#2109): the old definition keeps running.
+        result = await orchestrator.approve_mcp_server("svc")
+
+        assert result["approved"] is False
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "old"]
+
+    async def test_approving_a_change_quarantined_by_a_limit_applies_it(self, fleet) -> None:
+        source = _Source(DiscoveryMode.AUTHORITATIVE)
+        orchestrator = fleet.build(source)
+        source.defs["svc"] = _subprocess("old")
+        await _tick(orchestrator)
+
+        orchestrator._validator.config.max_registration_rate = 0
+        source.defs["svc"] = _subprocess("new")
+        await _tick(orchestrator)
+        assert "svc" in orchestrator.get_quarantined()
+
         result = await orchestrator.approve_mcp_server("svc")
 
         assert result["approved"] is True
-        assert _command_of(fleet.repo, "svc") == ["python", "-m", "refused"]
+        assert _command_of(fleet.repo, "svc") == ["python", "-m", "new"]
 
 
 @pytest.mark.asyncio

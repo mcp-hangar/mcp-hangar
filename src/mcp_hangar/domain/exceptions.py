@@ -280,6 +280,35 @@ class McpServerNotReadyError(McpServerError):
         self.current_state = current_state
 
 
+class DiscoveredDefinitionChangedError(McpServerNotReadyError):
+    """An approval named a discovered definition that is no longer the one waiting (#2109).
+
+    A source re-reports its definition every cycle, so the one waiting under a
+    name can change between the operator reviewing it and approving it. An
+    approval that names the fingerprint it reviewed applies only that one;
+    otherwise it is refused, nothing changes, and the operator reviews again.
+
+    A subclass of `McpServerNotReadyError` for its HTTP status, 409: the request
+    is well formed and asks for something the current state does not allow. Its
+    own class so the response's `code` names what happened.
+    """
+
+    def __init__(self, mcp_server_id: str, reviewed: str, current: str) -> None:
+        McpServerError.__init__(
+            self,
+            message=(
+                f"the definition of {mcp_server_id!r} you reviewed (fingerprint {reviewed}) is not the one waiting "
+                f"for approval, which has fingerprint {current}. Review it again and approve that fingerprint."
+            ),
+            mcp_server_id=mcp_server_id,
+            operation="approve",
+            details={"reviewed_fingerprint": reviewed, "current_fingerprint": current},
+        )
+        self.current_state = "changed"
+        self.reviewed_fingerprint = reviewed
+        self.current_fingerprint = current
+
+
 class InvalidStateTransitionError(McpServerError):
     """Raised when an invalid state transition is attempted."""
 
