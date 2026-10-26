@@ -666,6 +666,8 @@ def register_load_tools(mcp: FastMCP) -> None:
         CHOOSE hangar_start when: mcp_server is already configured, just needs starting.
         CHOOSE hangar_call when: mcp_server is configured and you want to invoke it directly.
         NOTE: Loaded mcp_servers are ephemeral (lost on restart). Browse: https://mcp.so/servers
+        NOTE: On a front door (`tool_access.mode: front_door`) a loaded server's tools are not listed,
+            and a flat call of one answers -32601; the answer says so in `warnings`.
 
         Side effects: Downloads and starts mcp_server process. Adds to runtime registry.
 
@@ -682,7 +684,8 @@ def register_load_tools(mcp: FastMCP) -> None:
         Returns:
             Success: {status: "loaded", message: str, mcp_server_id: str, mcp_server_name: str,
                 tools: [{name: str}], warnings?: list[str]}
-            Already loaded: {status: "already_loaded", message: str, mcp_server_id: str}
+            Already loaded: {status: "already_loaded", message: str, mcp_server_id: str,
+                warnings?: list[str]}
             Ambiguous: {status: "ambiguous", message: str, matches: list[str]}
             Not found: {status: "not_found", message: str}
             Missing secrets: {status: "missing_secrets", mcp_server_name: str, missing: list[str],

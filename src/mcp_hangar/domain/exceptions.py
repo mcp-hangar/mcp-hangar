@@ -280,6 +280,36 @@ class McpServerNotReadyError(McpServerError):
         self.current_state = current_state
 
 
+class DiscoveredDefinitionChangedError(McpServerNotReadyError):
+    """An approval named a discovered definition that is no longer the one waiting (#2109).
+
+    A source re-reports its definition every cycle, so the one waiting under a
+    name can change between the operator reviewing it and approving it. An
+    approval that names the `definition_digest` it reviewed applies only that
+    one; otherwise it is refused, nothing changes, and the operator reviews
+    again.
+
+    A subclass of `McpServerNotReadyError` for its HTTP status, 409: the request
+    is well formed and asks for something the current state does not allow. Its
+    own class so the response's `code` names what happened.
+    """
+
+    def __init__(self, mcp_server_id: str, reviewed: str, current: str) -> None:
+        McpServerError.__init__(
+            self,
+            message=(
+                f"the definition of {mcp_server_id!r} you reviewed (definition_digest {reviewed}) is not the one "
+                f"waiting for approval, which has definition_digest {current}. Review it again and approve that one."
+            ),
+            mcp_server_id=mcp_server_id,
+            operation="approve",
+            details={"reviewed_definition_digest": reviewed, "current_definition_digest": current},
+        )
+        self.current_state = "changed"
+        self.reviewed_definition_digest = reviewed
+        self.current_definition_digest = current
+
+
 class InvalidStateTransitionError(McpServerError):
     """Raised when an invalid state transition is attempted."""
 

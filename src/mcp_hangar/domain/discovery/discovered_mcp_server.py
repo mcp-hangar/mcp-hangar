@@ -146,6 +146,30 @@ class DiscoveredMcpServer:
             ttl_seconds=self.ttl_seconds,
         )
 
+    @property
+    def definition_digest(self) -> str:
+        """The full SHA-256 of the whole definition, which an approval binds to (#2109).
+
+        Not `fingerprint`: that is 64 bits over input the source controls, so a
+        source could search for a colliding pair -- one to show, one to run --
+        in about 2^32 tries. It stays what it is for change detection and the
+        rows already persisted with it. This covers everything that decides
+        what runs, at full length, in canonical JSON. Computed, not stored, so
+        nothing persisted changes.
+        """
+        canonical = json.dumps(
+            {
+                "connection_info": self.connection_info,
+                "metadata": self.metadata,
+                "mode": self.mode,
+                "source_type": self.source_type,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
     def has_changed(self, other: "DiscoveredMcpServer") -> bool:
         """Check if configuration has changed by comparing fingerprints.
 

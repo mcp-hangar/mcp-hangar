@@ -21,6 +21,7 @@ from ...domain.exceptions import (
 from ...domain.model.mcp_server_config import parse_tools_access_config
 from ...domain.security.hot_load_trust import HotLoadTrust
 from ...domain.services import get_tool_access_resolver
+from ...domain.services.tool_access_resolver import is_front_door
 from ...domain.value_objects import ToolAccessPolicy
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
@@ -32,6 +33,21 @@ from ..services.secrets_resolver import SecretsResolver
 from .commands import LoadMcpServerCommand, UnloadMcpServerCommand
 
 logger = get_logger(__name__)
+
+#: What a load answers on a front door (#2100). The front door lists and routes
+#: only the servers the configuration declares: a hot-loaded server cannot be
+#: pinned, withheld or given a per-tenant policy, because those are declared on
+#: the server's entry in the file, and it lives on one replica only. Said rather
+#: than left for the caller to find as a `-32601`.
+FRONT_DOOR_WARNING = (
+    "This gateway is a front door (`tool_access.mode: front_door`): a hot-loaded server's tools are not "
+    "listed on it, and a call of one answers -32601. Declare the server in config.yaml to serve it there."
+)
+
+
+def _front_door_warnings() -> list[str]:
+    """The warning a load carries on a front door, read per load so a reload that changes the mode applies."""
+    return [FRONT_DOOR_WARNING] if is_front_door() else []
 
 
 @dataclass
@@ -308,6 +324,7 @@ class LoadMcpServerHandler(CommandHandler):
                     status="already_loaded",
                     mcp_server_id=sanitized_name,
                     message=f"McpServer '{command.name}' is already loaded",
+                    warnings=_front_door_warnings() or None,
                 )
 
             if self._mcp_server_repository.exists(command.name) or self._mcp_server_repository.exists(sanitized_name):
@@ -328,6 +345,7 @@ class LoadMcpServerHandler(CommandHandler):
             server = await self._find_server(command.name)
 
             warnings.extend(self._refuse_unless_verified(server, command, trust))
+            warnings.extend(_front_door_warnings())
 
             # Keyed on the exact registry name: the sanitized id is lossy, and
             # a colliding name would otherwise inherit another server's secrets.

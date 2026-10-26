@@ -2018,6 +2018,10 @@ def _init_hot_load_trust_from_config(full_config: dict[str, Any]) -> None:
     only the ones listed here for its exact registry name are looked up. Read
     by the load handler on every load, so a reload that narrows either list
     applies to the next load; an absent section trusts and binds nothing.
+
+    A front door (`tool_access.mode: front_door`) does not serve a hot-loaded
+    server: none of its tools are listed there, and `hangar_load` says so in its
+    answer (#2100).
     """
     trust = _hot_load_trust(full_config)
     set_hot_load_trust(trust)
