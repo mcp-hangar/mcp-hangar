@@ -227,7 +227,7 @@ class TestGeneratingHasNoSideEffects:
         assert registry.all() == catalogue, "generating a projection changed the catalogue"
         assert _registered_policies(resolver) == policies, "generating a projection registered a policy"
         # Private on purpose: `is_warming()` cannot tell "never started" from "finished".
-        assert catalogue_warmup._in_flight is None, "generating a projection started a warm-up"
+        assert catalogue_warmup._current is None, "generating a projection started a warm-up"
 
     def test_generating_is_not_counted_as_a_listing(self) -> None:
         """PROJECTED_TOOLS and EMPTY_PROJECTION_TOTAL measure what a client was handed."""
