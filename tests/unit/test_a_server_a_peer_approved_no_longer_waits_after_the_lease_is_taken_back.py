@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand
+from mcp_hangar.application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryOrchestrator
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.model.mcp_server import McpServer
@@ -150,6 +150,18 @@ class TestAChangeAPeerSupersededWhileThisReplicaFollowed:
         # Dropped at the new tenure, quarantined again by the cycle after it.
         assert set(gateway.orchestrator.get_quarantined()) == {"s"}
         assert "-v3" in _command_of(gateway, "s")
+
+    async def test_one_whose_server_a_peer_removed_no_longer_waits(self, durable) -> None:
+        gateway = await _a_change_waits_then_the_lease_is_lost(durable)
+        digest = gateway.orchestrator.get_quarantined()["s"]["definition_digest"]
+        gateway.commands.send(DeleteMcpServerCommand(mcp_server_id="s", source="discovery:filesystem"))
+
+        gateway.holds_the_lease = True
+        await gateway.expiry_check()
+
+        assert _waiting(gateway) == set()
+        assert (await gateway.orchestrator.approve_mcp_server("s", definition_digest=digest))["approved"] is False
+        assert "s" not in gateway.repo.get_all_ids()
 
 
 @pytest.mark.asyncio

@@ -456,6 +456,9 @@ class DiscoveryOrchestrator:
         unchanged definition: the fleet records the origin's fingerprint, not
         the connection details `definition_digest` covers. A match only ever
         drops an entry, never applies one.
+
+        Should the lease be lost again before take-back reads the fleet, what
+        waits on a tracked server is dropped too; that errs the same safe way.
         """
         now = self._lifecycle_manager.get_all_mcp_servers()
         waiting = [
