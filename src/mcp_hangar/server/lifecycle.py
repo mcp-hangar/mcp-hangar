@@ -19,6 +19,7 @@ import queue
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -1079,27 +1080,225 @@ def _end_after(grace_s: float, *, event: str = "stdio_exit_forced", reason: str 
     timer.start()
 
 
+#: How long the wakeup watcher leaves a shutdown signal to the Python handler
+#: on the main thread before it acts on the signal itself (#2103).
+HANDLER_HEAD_START_S = 0.25
+
+
+class _ShutdownSignals:
+    """Shuts the gateway down on SIGTERM/SIGINT; over stdio, whichever thread took the signal (#2103).
+
+    On Linux a process-directed signal may be taken by any thread that does not
+    block it. CPython's C handler then only sets a flag for the main thread, and
+    a stdio gateway's main thread sleeps in the event loop's `select` with no
+    timeout and nothing to wake it: the Python handler never ran, and the gateway
+    ignored the SIGTERM. A wakeup fd makes the C handler also write the signal
+    number to a pipe, whatever thread it runs on; `watch()` reads it on a thread
+    of its own.
+
+    `handler` is the Python handler, unchanged when it gets there first. On a
+    shutdown signal's byte the watcher gives it `HANDLER_HEAD_START_S` to start,
+    which it does at once whenever the main thread took the signal or woke up.
+    If it did not, the watcher sends the signal to the main thread once and
+    waits again; only if the handler still has not started does the watcher
+    shut down and end the process itself. Whichever starts first owns the
+    shutdown; the other stands down. A second signal into the handler after it
+    started still runs it again, as before.
+
+    Args:
+        lifecycle: The lifecycle to shut down.
+        stdio: Whether the exit after a shutdown is bounded by `STDIO_EXIT_GRACE_S`.
+        head_start_s: How long the watcher waits for the handler.
+    """
+
+    def __init__(self, lifecycle: ServerLifecycle, *, stdio: bool, head_start_s: float = HANDLER_HEAD_START_S) -> None:
+        self._lifecycle = lifecycle
+        self._stdio = stdio
+        self._head_start_s = head_start_s
+        # Taken once and never released, without blocking: a handler that
+        # interrupts the main thread cannot wait on it.
+        self._claim = threading.Lock()
+        self._owner: str | None = None
+        self._forwarded = False
+        self._write_fd: int | None = None
+        self._thread: threading.Thread | None = None
+        self._stopped = False
+
+    def handler(self, signum: int, _frame: Any) -> None:
+        """The Python handler for SIGTERM and SIGINT; runs on the main thread."""
+        if self._claim.acquire(blocking=False):
+            self._owner = "handler"
+        elif self._owner != "handler":
+            # The watcher took the signal over while this thread slept.
+            return
+        sig_name = signal.Signals(signum).name
+        logger.info("shutdown_signal_received", signal=sig_name)
+        self._lifecycle.shutdown()
+        if self._stdio:
+            _end_after(STDIO_EXIT_GRACE_S)
+        sys.exit(0)
+
+    def on_wakeup(self, signum: int) -> None:
+        """Act on a signal number read from the wakeup fd; runs on the watcher thread."""
+        if self._stopped or signum not in (signal.SIGTERM, signal.SIGINT):
+            # SIGHUP and the rest have handlers of their own.
+            return
+        if self._handler_started():
+            return
+        if not self._forwarded:
+            # Sent to the main thread, the signal interrupts its `select`, and
+            # the handler runs there as it does when the kernel picks that
+            # thread: the loop stops before the shutdown, and the exit runs the
+            # interpreter's own clean-up. The forwarded signal's byte comes back
+            # here and finds the handler started.
+            if self._stopped:
+                return
+            self._forwarded = True
+            logger.info("shutdown_signal_forwarded", signal=signal.Signals(signum).name)
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                signal.pthread_kill(main_ident, signum)
+            if self._handler_started():
+                return
+        if self._stopped or not self._claim.acquire(blocking=False):
+            return
+        self._owner = "wakeup_fd"
+        logger.info("shutdown_signal_received", signal=signal.Signals(signum).name, via="wakeup_fd")
+        try:
+            self._lifecycle.shutdown()
+        finally:
+            # `sys.exit` would end only this thread; the main thread may never
+            # wake, so the bounded exit ends the process.
+            _end_after(STDIO_EXIT_GRACE_S)
+
+    def _handler_started(self) -> bool:
+        """Whether the handler starts within the head start."""
+        deadline = time.monotonic() + self._head_start_s
+        while time.monotonic() < deadline:
+            if self._claim.locked():
+                return True
+            time.sleep(0.01)
+        return self._claim.locked()
+
+    def watch(self) -> bool:
+        """Register a wakeup fd and read it on a daemon thread; POSIX main thread only.
+
+        Returns:
+            Whether the watcher runs. It does not on Windows, off the main
+            thread, or where a wakeup fd is already registered: whoever did that
+            is woken by it.
+        """
+        if sys.platform == "win32" or threading.current_thread() is not threading.main_thread():
+            return False
+        read_fd, write_fd = os.pipe()
+        os.set_blocking(write_fd, False)
+        try:
+            previous = signal.set_wakeup_fd(write_fd, warn_on_full_buffer=False)
+        except (OSError, ValueError) as e:
+            os.close(read_fd)
+            os.close(write_fd)
+            logger.warning("signal_wakeup_fd_unavailable", error=str(e), error_type=type(e).__name__)
+            return False
+        if previous != -1:
+            signal.set_wakeup_fd(previous)
+            os.close(read_fd)
+            os.close(write_fd)
+            logger.info("signal_wakeup_fd_already_set", previous_fd=previous)
+            return False
+        _reset_the_wakeup_fd_in_forked_children()
+        self._write_fd = write_fd
+        self._thread = threading.Thread(target=self._read, args=(read_fd,), name="signal-wakeup", daemon=True)
+        self._thread.start()
+        logger.debug("signal_wakeup_watcher_started")
+        return True
+
+    def stop_watching(self) -> None:
+        """Unregister the wakeup fd and end the watcher thread; safe to call more than once.
+
+        The watcher acts on this instance's lifecycle, so one left behind by a
+        `run_server` that returned would forward the next signal and could end
+        the process for a lifecycle that is gone. Off the main thread the fd
+        cannot be unregistered, so it stays open and the watcher only stops
+        acting on what it reads.
+        """
+        self._stopped = True
+        write_fd = self._write_fd
+        if write_fd is None or threading.current_thread() is not threading.main_thread():
+            return
+        self._write_fd = None
+        current = signal.set_wakeup_fd(-1)
+        if current != write_fd:
+            # Someone registered theirs after ours: it stays.
+            signal.set_wakeup_fd(current)
+        # The watcher reads EOF, closes its end and returns.
+        os.close(write_fd)
+
+    def _read(self, read_fd: int) -> None:
+        try:
+            while True:
+                try:
+                    data = os.read(read_fd, 64)
+                except InterruptedError:
+                    continue
+                if not data:
+                    return
+                for signum in data:
+                    self.on_wakeup(signum)
+        finally:
+            os.close(read_fd)
+
+
+_wakeup_fd_reset_at_fork = False
+
+
+def _reset_the_wakeup_fd_in_forked_children() -> None:
+    """Have a child forked without exec drop the wakeup fd it inherits, once per process.
+
+    Its signals would otherwise write into this process's pipe, and the watcher
+    would act on them as this gateway's own.
+    """
+    global _wakeup_fd_reset_at_fork
+    if _wakeup_fd_reset_at_fork or not hasattr(os, "register_at_fork"):
+        return
+    _wakeup_fd_reset_at_fork = True
+
+    def reset() -> None:
+        try:
+            signal.set_wakeup_fd(-1)
+        except ValueError:
+            pass
+
+    os.register_at_fork(after_in_child=reset)
+
+
+#: The wakeup watcher `_setup_signal_handlers` started, for `run_server` to stop.
+_signal_watcher: _ShutdownSignals | None = None
+
+
+def _stop_signal_watcher() -> None:
+    """Stop the wakeup watcher of the last stdio `_setup_signal_handlers`, if one runs."""
+    global _signal_watcher
+    watcher, _signal_watcher = _signal_watcher, None
+    if watcher is not None:
+        watcher.stop_watching()
+
+
 def _setup_signal_handlers(lifecycle: ServerLifecycle, *, stdio: bool = False) -> SignalReloader | None:
     """Setup graceful shutdown on SIGTERM/SIGINT and reload on SIGHUP.
 
     Args:
         lifecycle: ServerLifecycle instance to shutdown on signal.
         stdio: Whether this process serves over stdio, where the exit after a
-            shutdown signal is bounded by `STDIO_EXIT_GRACE_S`.
+            shutdown signal is bounded by `STDIO_EXIT_GRACE_S` and a wakeup fd
+            carries a signal any thread took to the shutdown (#2103).
 
     Returns:
         The thread SIGHUP's reloads run on, for the caller to stop; None where
         there is no SIGHUP.
     """
+    global _signal_watcher
     reloader: SignalReloader | None = None
-
-    def shutdown_handler(signum, _frame):
-        sig_name = signal.Signals(signum).name
-        logger.info("shutdown_signal_received", signal=sig_name)
-        lifecycle.shutdown()
-        if stdio:
-            _end_after(STDIO_EXIT_GRACE_S)
-        sys.exit(0)
+    shutdown_signals = _ShutdownSignals(lifecycle, stdio=stdio)
 
     def reload_handler(signum, _frame):
         """Handle SIGHUP: ask for a reload, and return at once.
@@ -1114,8 +1313,14 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle, *, stdio: bool = False) -
         if reloader is not None:
             reloader.request()
 
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_signals.handler)
+    signal.signal(signal.SIGINT, shutdown_signals.handler)
+    if stdio:
+        # Only over stdio does the main thread sleep with nothing to wake it;
+        # `serve --http` runs uvicorn's handlers, on a loop that ticks (#2103).
+        _stop_signal_watcher()
+        if shutdown_signals.watch():
+            _signal_watcher = shutdown_signals
 
     # SIGHUP is not available on Windows
     if hasattr(signal, "SIGHUP"):
@@ -1267,6 +1472,7 @@ def run_server(cli_config: CLIConfig) -> None:
         lifecycle.shutdown()
         if reloader is not None:
             reloader.stop()
+        _stop_signal_watcher()
 
 
 __all__ = [
