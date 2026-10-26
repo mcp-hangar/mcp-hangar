@@ -346,8 +346,8 @@ class CreateMcpServerHandler(CommandHandler):
         self._repository.add(command.mcp_server_id, mcp_server)
         if replaced is None:
             # A server of this name deleted earlier left its members vacant;
-            # they hold this one now (#2107). A replaced one's members already
-            # followed it, in `_retire`.
+            # they hold this one now if discovery registered it (#2107). A
+            # replaced one's members already followed it, in `_retire`.
             for group in fill_vacant_member(self._groups, command.mcp_server_id, mcp_server):
                 publish_group_events(self._event_bus, group)
 
@@ -910,8 +910,14 @@ class DeleteMcpServerHandler(CommandHandler):
 
         if vacated:
             # A call that selected it before it left its groups refuses rather
-            # than starting it again. No client to close: it was shut down.
-            mcp_server.retire()
+            # than starting it again. One that restarted it while it stopped
+            # left a client, which is closed here.
+            client = mcp_server.retire()
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001 -- fault-barrier: the server is deleted; a close failure is logged
+                    logger.warning("deleted_mcp_server_client_close_failed", mcp_server_id=command.mcp_server_id)
             for group in vacated:
                 publish_group_events(self._event_bus, group)
 

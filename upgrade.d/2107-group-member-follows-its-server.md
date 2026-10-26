@@ -1,4 +1,4 @@
-### A deleted server's group member is vacant until a server of its id comes back
+### A deleted server's group member is vacant until discovery brings its server back
 
 Deleting a server that is a member of a group (`DELETE /api/mcp_servers/{id}`,
 or discovery removing it when its TTL runs out) no longer leaves the group
@@ -17,10 +17,13 @@ What you may notice:
   in rotation reads `partial` after one of them is deleted, where it read
   `healthy` because the stopped copy still counted. An alert on group state
   can fire on it.
-- Creating a server under the same id again (over the API, or discovery seeing
-  it again) puts it back in the group with the weight, priority and rotation
-  the member had. A key-pinned server is not put in a group this way, as it
-  cannot be added to one; its member stays vacant.
+- When discovery registers a server under the same id again, it goes back in
+  the group with the weight, priority and rotation the member had: the case
+  of a discovered server that drops out and comes back.
+- Re-creating a server over the API leaves the member vacant; re-add it with
+  the group API (`POST /api/groups/{id}/members`). Deleting and re-creating a
+  server is not a way to change a group's members. A key-pinned server never
+  fills a member either, as it cannot be added to a group.
 - To take the member out of the group for good, remove it with
   `DELETE /api/groups/{id}/members/{member_id}`.
 

@@ -515,14 +515,13 @@ class McpServerGroup(AggregateRoot):
         counts toward no health figure until `fill_vacant_member`.
 
         Returns:
-            Whether the group has the member.
+            Whether this call vacated the member: False when the group has no
+            such member, or it was vacant already.
         """
         with self._lock:
             member = self._members.get(member_id)
-            if member is None:
+            if member is None or member.vacant:
                 return False
-            if member.vacant:
-                return True
             member.rotation_when_vacated = (member.in_rotation, member.evicted)
             member.vacant = True
             member.evicted = False

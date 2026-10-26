@@ -189,8 +189,8 @@ class FleetProjection:
 
         mcp_server = server_from_snapshot(snapshot)
         self._repository.add(mcp_server_id, mcp_server)
-        # A member left vacant by its server's deletion holds this copy now
-        # (#2107). Its group's events wait for the next drain: the projection
+        # A member left vacant by its server's deletion holds this copy now,
+        # if discovery registered it (#2107). Its group's events wait for the next drain: the projection
         # publishes nothing.
         fill_vacant_member(self._groups, mcp_server_id, mcp_server)
         logger.info("fleet_projection_registered", mcp_server_id=mcp_server_id, produced_by=produced_by)
@@ -273,6 +273,12 @@ class FleetProjection:
         self._unread.discard(mcp_server_id)
         local = self._repository.get(mcp_server_id)
         if local is None:
+            return
+        if self._declared_in_config is not None and self._declared_in_config(mcp_server_id):
+            # This replica's file declares it, as in `_apply_update`: it leaves
+            # when the file does, never on another replica's deletion of a
+            # server of the same name (#2107).
+            logger.info("fleet_projection_deregistration_of_declared_server_ignored", mcp_server_id=mcp_server_id)
             return
         self._repository.remove(mcp_server_id)
         # No group routes to the dropped copy, and its client is closed: the

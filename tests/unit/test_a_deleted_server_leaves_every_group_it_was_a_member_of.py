@@ -9,7 +9,8 @@ where nothing managed it. On a peer, the fleet projection removed the copy
 without telling the groups, and without closing its client.
 
 The member stays in the group, vacant: members are declared by id, as in the
-configuration file, and the next server registered under that id fills it.
+configuration file. The next server discovery registers under that id fills it;
+one created over the API does not, and is added through the group API.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from mcp_hangar.domain.exceptions import ConfigurationError, McpServerNotReadyEr
 from mcp_hangar.domain.model import McpServer, McpServerGroup
 from mcp_hangar.domain.model.mcp_server_group import RouteReason
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.domain.services.tool_access_resolver import reset_tool_access_resolver
 from mcp_hangar.domain.value_objects import McpServerState
 from mcp_hangar.domain.value_objects.peer_identity import PeerIdentity
@@ -181,12 +183,12 @@ class TestADeleteOverTheApi:
 
 
 class TestARecreatedServer:
-    def test_the_group_routes_to_the_new_copy(self, gateway, launches) -> None:
-        old = gateway.create("left")
+    def test_a_server_discovery_registers_again_fills_the_member(self, gateway, launches) -> None:
+        old = gateway.create("left", provenance=Provenance.DISCOVERY)
         group = gateway.pool("left")
         gateway.commands.send(DeleteMcpServerCommand(mcp_server_id="left", source="api"))
 
-        new = gateway.create("left")
+        new = gateway.create("left", provenance=Provenance.DISCOVERY)
 
         assert new is not old
         assert _call_through(group) is new
@@ -194,39 +196,96 @@ class TestARecreatedServer:
         member = group.get_member("left")
         assert member is not None and member.mcp_server is new and not member.vacant
 
-    def test_a_member_never_in_rotation_stays_out_of_it(self, gateway) -> None:
-        gateway.create("left")
-        group = McpServerGroup(group_id="pool", auto_start=False)
-        group.add_member(gateway.repository.get("left"))
-        gateway.groups["pool"] = group
+    def test_a_server_created_over_the_api_leaves_the_member_vacant(self, gateway, launches) -> None:
+        old = gateway.create("left")
+        group = gateway.pool("left")
         gateway.commands.send(DeleteMcpServerCommand(mcp_server_id="left", source="api"))
 
         gateway.create("left")
 
         member = group.get_member("left")
+        assert member is not None and member.vacant and member.mcp_server is old
+        assert _call_through(group) is None and launches == []
+
+    def test_a_member_never_in_rotation_stays_out_of_it(self, gateway) -> None:
+        gateway.create("left", provenance=Provenance.DISCOVERY)
+        group = McpServerGroup(group_id="pool", auto_start=False)
+        group.add_member(gateway.repository.get("left"))
+        gateway.groups["pool"] = group
+        gateway.commands.send(DeleteMcpServerCommand(mcp_server_id="left", source="api"))
+
+        gateway.create("left", provenance=Provenance.DISCOVERY)
+
+        member = group.get_member("left")
         assert member is not None and member.mcp_server is gateway.repository.get("left")
         assert member.in_rotation is False
 
-    def test_a_key_pinned_server_does_not_fill_the_member(self) -> None:
+
+class _RefusingWriter:
+    """A fleet store whose delete does not go through."""
+
+    def save_versioned(self, snapshot: Any, expected: Any) -> None:
+        pass
+
+    def delete(self, mcp_server_id: str, *, fenced: bool) -> None:
+        raise RuntimeError("store unavailable")
+
+
+class TestADeleteThatDoesNotGoThrough:
+    def test_the_member_is_put_back_as_it_was(self, launches) -> None:
         repository = InMemoryMcpServerRepository()
-        events = EventBus()
-        old = McpServer(mcp_server_id="left", mode="remote", endpoint=ENDPOINT)
-        repository.add("left", old)
+        server = McpServer(mcp_server_id="left", mode="subprocess", command=["python", "-m", "left"])
+        repository.add("left", server)
         group = McpServerGroup(group_id="pool", auto_start=False)
-        group.add_member(old)
-        groups = {"pool": group}
-        DeleteMcpServerHandler(repository, events, groups=groups).handle(DeleteMcpServerCommand(mcp_server_id="left"))
+        group.add_member(server, weight=2)
+        member = group.get_member("left")
+        assert member is not None
+        member.in_rotation = True
+        handler = DeleteMcpServerHandler(repository, EventBus(), fleet_writer=_RefusingWriter(), groups={"pool": group})
 
-        pinned = McpServer(mcp_server_id="left", mode="remote", endpoint=ENDPOINT)
-        # What the check reads: a key-pinned create needs a durable store and an authority.
-        pinned._peer_identity = PeerIdentity(key_ref="payments-key", spki_sha256=frozenset({"sha256:" + "a" * 64}))
+        with pytest.raises(RuntimeError):
+            handler.handle(DeleteMcpServerCommand(mcp_server_id="left"))
 
-        from mcp_hangar.application.group_membership import fill_vacant_member
+        assert repository.get("left") is server and not server.is_retired
+        assert member.mcp_server is server and not member.vacant and member.in_rotation
+        assert _call_through(group) is server
 
-        fill_vacant_member(groups, "left", pinned)
+    def test_a_member_another_delete_vacated_is_not_filled_with_the_copy(self) -> None:
+        repository = InMemoryMcpServerRepository()
+        server = McpServer(mcp_server_id="left", mode="subprocess", command=["python", "-m", "left"])
+        repository.add("left", server)
+        group = McpServerGroup(group_id="pool", auto_start=False)
+        group.add_member(server)
+        # What a delete running at the same time did first.
+        assert group.vacate_member("left") is True
+        handler = DeleteMcpServerHandler(repository, EventBus(), fleet_writer=_RefusingWriter(), groups={"pool": group})
+
+        with pytest.raises(RuntimeError):
+            handler.handle(DeleteMcpServerCommand(mcp_server_id="left"))
 
         member = group.get_member("left")
-        assert member is not None and member.vacant and member.mcp_server is old
+        assert member is not None and member.vacant
+
+    def test_a_client_a_racing_call_left_is_closed(self) -> None:
+        repository = InMemoryMcpServerRepository()
+        server = McpServer(mcp_server_id="left", mode="subprocess", command=["python", "-m", "left"])
+        repository.add("left", server)
+        group = McpServerGroup(group_id="pool", auto_start=False)
+        group.add_member(server)
+        raced = _Client()
+
+        def shutdown_raced_by_a_call() -> None:
+            server._state = McpServerState.COLD
+            server._client = raced  # a call restarted it while it stopped
+
+        server._state = McpServerState.READY
+        server.shutdown = shutdown_raced_by_a_call  # type: ignore[method-assign]
+
+        DeleteMcpServerHandler(repository, EventBus(), groups={"pool": group}).handle(
+            DeleteMcpServerCommand(mcp_server_id="left")
+        )
+
+        assert server.is_retired and raced.closed
 
 
 class TestADiscoveredServerWhoseTtlRanOut:
@@ -264,12 +323,19 @@ class _Closer:
 class _Replica:
     """One gateway: its fleet and groups, the shared row store and event log, its tail."""
 
-    def __init__(self, name: str, configs, log) -> None:
+    def __init__(self, name: str, configs, log, declared: frozenset[str] = frozenset()) -> None:
         self.fleet = InMemoryMcpServerRepository()
         self.groups: dict[str, McpServerGroup] = {}
         self.bus = EventBus()
         self.bus.set_event_store(log)
-        projection = FleetProjection(self.fleet, configs, _SyncLoop(), closer=_Closer(), groups=self.groups)
+        projection = FleetProjection(
+            self.fleet,
+            configs,
+            _SyncLoop(),
+            closer=_Closer(),
+            declared_in_config=declared.__contains__,
+            groups=self.groups,
+        )
         for event in (McpServerRegistered, McpServerUpdated, McpServerDeregistered):
             self.bus.subscribe(event, projection.handle, kind=HandlerKind.PROJECTION)
         self.tailer = EventTailer(log, self.bus, name)
@@ -284,8 +350,8 @@ def replicas(tmp_path):
     log = SQLiteEventStore(tmp_path / "events.db")
     made: list[_Replica] = []
 
-    def replica(name: str) -> _Replica:
-        made.append(_Replica(name, configs, log))
+    def replica(name: str, declared: frozenset[str] = frozenset()) -> _Replica:
+        made.append(_Replica(name, configs, log, declared))
         return made[-1]
 
     yield replica
@@ -321,7 +387,26 @@ class TestOnAPeer:
         assert copy.is_retired and client.closed
         assert _call_through(group) is None and launches == []
 
-    def test_a_server_registered_again_fills_the_member(self, replicas, launches) -> None:
+    def test_a_server_discovery_registers_again_fills_the_member(self, replicas, launches) -> None:
+        a, b = replicas("gateway-a"), replicas("gateway-b")
+        group, copy, _ = _peer_pool(a, b, provenance=Provenance.DISCOVERY)
+        a.commands.send(DeleteMcpServerCommand(mcp_server_id="payments", source="api"))
+        b.tailer.tick()
+
+        a.commands.send(
+            CreateMcpServerCommand(
+                mcp_server_id="payments", mode="remote", endpoint=ENDPOINT, provenance=Provenance.DISCOVERY
+            )
+        )
+        b.tailer.tick()
+
+        new = b.fleet.get("payments")
+        assert isinstance(new, McpServer) and new is not copy
+        member = group.get_member("payments")
+        assert member is not None and member.mcp_server is new and member.weight == 3
+        assert _call_through(group) is new and launches == [new]
+
+    def test_a_server_created_over_the_api_leaves_the_member_vacant(self, replicas, launches) -> None:
         a, b = replicas("gateway-a"), replicas("gateway-b")
         group, copy, _ = _peer_pool(a, b)
         a.commands.send(DeleteMcpServerCommand(mcp_server_id="payments", source="api"))
@@ -330,11 +415,48 @@ class TestOnAPeer:
         a.commands.send(CreateMcpServerCommand(mcp_server_id="payments", mode="remote", endpoint=ENDPOINT))
         b.tailer.tick()
 
-        new = b.fleet.get("payments")
-        assert isinstance(new, McpServer) and new is not copy
+        assert isinstance(b.fleet.get("payments"), McpServer)
         member = group.get_member("payments")
-        assert member is not None and member.mcp_server is new and member.weight == 3
-        assert _call_through(group) is new and launches == [new]
+        assert member is not None and member.vacant and member.mcp_server is copy
+        assert _call_through(group) is None and launches == []
+
+    def test_a_key_pinned_server_does_not_fill_the_member(self, replicas, launches) -> None:
+        a, b = replicas("gateway-a"), replicas("gateway-b")
+        group, copy, _ = _peer_pool(a, b, provenance=Provenance.DISCOVERY)
+        a.commands.send(DeleteMcpServerCommand(mcp_server_id="payments", source="api"))
+        b.tailer.tick()
+
+        # No command registers a key-pinned server as discovery's (ADR-030 §9),
+        # so the row is written as another replica's would be, and announced.
+        pinned = McpServer(
+            mcp_server_id="payments",
+            mode="remote",
+            endpoint=ENDPOINT,
+            provenance=Provenance.DISCOVERY,
+            tls={"peer_identity": {"key_ref": "payments-key", "spki_sha256": ["sha256:" + "a" * 64]}},
+        )
+        a.writer.save_versioned(snapshot_of(pinned), None)
+        a.bus.publish(McpServerRegistered(mcp_server_id="payments", source="discovery", mode="remote"))
+        b.tailer.tick()
+
+        registered = b.fleet.get("payments")
+        assert isinstance(registered, McpServer) and isinstance(registered._peer_identity, PeerIdentity)
+        assert registered.provenance is Provenance.DISCOVERY
+        member = group.get_member("payments")
+        assert member is not None and member.vacant and member.mcp_server is copy
+        assert _call_through(group) is None and launches == []
+
+    def test_a_server_this_replicas_file_declares_stays(self, replicas) -> None:
+        a, b = replicas("gateway-a"), replicas("gateway-b", declared=frozenset({"payments"}))
+        group, copy, client = _peer_pool(a, b)
+
+        a.commands.send(DeleteMcpServerCommand(mcp_server_id="payments", source="api"))
+        b.tailer.tick()
+
+        assert b.fleet.get("payments") is copy
+        assert not copy.is_retired and not client.closed
+        member = group.get_member("payments")
+        assert member is not None and not member.vacant and member.in_rotation
 
     def test_a_replaced_discovered_server_is_followed_and_its_old_client_closed(self, replicas, launches) -> None:
         a, b = replicas("gateway-a"), replicas("gateway-b")
