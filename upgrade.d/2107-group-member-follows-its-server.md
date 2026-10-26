@@ -30,3 +30,9 @@ What you may notice:
 Servers the configuration file declares cannot be deleted over the API, and a
 reload never leaves a vacant member: a reload whose group names a server the
 file no longer declares is refused, as before.
+
+In a cluster whose replicas run different configuration files, a server one
+replica's file declares is no longer dropped from that replica when another
+replica deletes a server with the same name over the API: it stays until its
+own file no longer declares it, as an update from another replica already
+left it alone.
