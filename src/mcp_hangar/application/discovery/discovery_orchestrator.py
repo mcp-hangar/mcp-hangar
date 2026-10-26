@@ -174,8 +174,10 @@ class DiscoveryOrchestrator:
             drain_timeout=self.config.drain_timeout_s,
             # TTL expiry *deregisters* servers. Of everything discovery does it
             # is the most destructive, and the one a follower running on a stale
-            # view would get most wrong.
-            may_manage=lambda: self._may_manage(),
+            # view would get most wrong. Asked through the tenure observer, so
+            # that whichever loop sees a new tenure first rebuilds tracking
+            # before this loop's expiry check runs (#2111).
+            may_manage=lambda: self._manages(),
         )
 
         # Callbacks for registry integration
@@ -195,6 +197,8 @@ class DiscoveryOrchestrator:
         #: of each management tenure (#2106). None takes back nothing.
         self.restored_servers: Callable[[], list[DiscoveredMcpServer]] | None = None
         self._took_back_restored = False
+        #: The lease as last observed: None before the first look (#2111).
+        self._holding: bool | None = None
 
         # Discovery loop state
         self._running = False
@@ -338,13 +342,17 @@ class DiscoveryOrchestrator:
         instance may act on it. Taken at boot, it would run out while this
         instance waited for the lease, and the first expiry check after taking
         it would delete every discovered server before a cycle could see them.
+
+        A server whose changed definition waits in quarantine is taken back too:
+        its row is the definition that runs, and the change is approved, applied
+        or removed against it (#2111).
         """
-        if self.restored_servers is None or self._took_back_restored or not self._may_manage():
+        if self.restored_servers is None or self._took_back_restored or not self._manages():
             return
         self._took_back_restored = True
         taken = []
         for mcp_server in self.restored_servers():
-            if self.is_tracking(mcp_server.name) or self._lifecycle_manager.is_quarantined(mcp_server.name):
+            if self.is_tracking(mcp_server.name):
                 continue
             self._conflict_resolver.register(mcp_server)
             self._lifecycle_manager.add_mcp_server(mcp_server)
@@ -352,6 +360,54 @@ class DiscoveryOrchestrator:
             taken.append(mcp_server.name)
         if taken:
             logger.info("discovery_restored_servers_tracked", mcp_server_ids=sorted(taken))
+
+    def _manages(self) -> bool:
+        """Whether this instance holds the management lease, and the one place that asks (#2111).
+
+        Every gate on discovery's loop goes through here -- the discovery loop,
+        the lifecycle manager's expiry loop and take-back -- so a new
+        tenure is noticed by whichever looks first, and tracking is rebuilt
+        before anything can act on it.
+
+        Only code on discovery's loop may come here: a new tenure rebuilds state
+        that loop owns.
+
+        The first look is not a new tenure: tracking is still empty then, and a
+        standalone gateway, which always holds, never sees one at all. A loss
+        and regain shorter than `check_interval_s` can fall between two looks
+        and go unseen. With the defaults a reported server was last seen well
+        within its TTL at that point; a TTL below the refresh interval plus the
+        check interval is not covered.
+        """
+        holds = self._may_manage()
+        began = holds and self._holding is False
+        self._holding = holds
+        if not holds:
+            # The next tenure takes the fleet back as it is then.
+            self._took_back_restored = False
+        elif began:
+            self._begin_tenure()
+        return holds
+
+    def _begin_tenure(self) -> None:
+        """Rebuild tracking from the fleet as it is now, when this instance takes the lease back (#2111).
+
+        What was tracked in an earlier tenure was last seen before it ended. Its
+        TTL ran out while this instance followed, and the first expiry check in
+        the new tenure would deregister every server before a cycle could see
+        it. It may also be out of date: a peer may have removed a server, or an
+        operator re-pointed it over the API. So it is dropped and the fleet
+        taken back, each server seen now, and removal waits a full TTL from
+        taking the lease, as it does for a server restored at boot.
+
+        Without a fleet to take back from, what is tracked is seen now instead.
+        """
+        if self.restored_servers is None:
+            self._lifecycle_manager.refresh_all()
+            return
+        for mcp_server in self._lifecycle_manager.drop_all():
+            self._validator.record_deregistration(mcp_server)
+        self._take_back_restored()
 
     def is_tracking(self, name: str) -> bool:
         """Whether discovery governs *name* in this process."""
@@ -459,7 +515,7 @@ class DiscoveryOrchestrator:
         is worth one -- "it started working again" being the fact an operator
         most often has to establish from absence.
         """
-        if self._may_manage():
+        if self._manages():
             skipped = self._idle.run_length
             if self._idle.recovered():
                 logger.info(
@@ -468,8 +524,6 @@ class DiscoveryOrchestrator:
                 )
                 self._trace_lease_transition(Discovery.HOLDER, skipped)
             return True
-        # The next tenure takes the fleet back as it is then.
-        self._took_back_restored = False
         if self._idle.failed():
             logger.info(
                 "discovery_idle_not_the_lease_holder",
@@ -905,11 +959,18 @@ class DiscoveryOrchestrator:
         from a view that is no longer the fleet's (#2091). A standalone gateway
         is always its own manager.
         """
+        # A read, not the tenure observer: this runs on the caller's thread,
+        # before the hop onto discovery's loop, and a new tenure rebuilds state
+        # that loop owns. The next gate on that loop observes it (#2111).
         if not self._may_manage():
-            raise McpServerNotHereError(
-                f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
-                "the instance that does. Send the request to that instance."
-            )
+            raise self._not_here(what)
+
+    @staticmethod
+    def _not_here(what: str) -> McpServerNotHereError:
+        return McpServerNotHereError(
+            f"cannot {what} here: this instance does not hold the management lease, and discovery runs only on "
+            "the instance that does. Send the request to that instance."
+        )
 
     async def _on_discovery_loop(self, work: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
         """Await *work* on discovery's own loop when it runs one elsewhere, inline otherwise."""
@@ -999,6 +1060,11 @@ class DiscoveryOrchestrator:
 
     async def _approve(self, name: str) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
+        # Asked again here, through the tenure observer: the lease may have
+        # changed hands while the request hopped onto this loop, and a new
+        # tenure rebuilds tracking before the approval reads it (#2111).
+        if not self._manages():
+            raise self._not_here(f"approve mcp_server {name!r}")
         running = self._lifecycle_manager.get_mcp_server(name)
         mcp_server = self._lifecycle_manager.approve(name)
         was_pending = False

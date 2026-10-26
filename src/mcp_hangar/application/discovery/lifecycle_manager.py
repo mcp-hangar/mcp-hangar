@@ -187,6 +187,21 @@ class DiscoveryLifecycleManager:
             return updated
         return None
 
+    def refresh_all(self) -> None:
+        """Mark every tracked mcp_server seen now, restarting its TTL."""
+        for name in list(self._mcp_servers):
+            self.update_seen(name)
+
+    def drop_all(self) -> list[DiscoveredMcpServer]:
+        """Stop tracking every mcp_server not being deregistered, and return them.
+
+        Quarantine is kept. A server mid-deregistration is left to finish.
+        """
+        dropped = [s for name, s in self._mcp_servers.items() if name not in self._draining]
+        for mcp_server in dropped:
+            del self._mcp_servers[mcp_server.name]
+        return dropped
+
     def update_mcp_server(self, mcp_server: DiscoveredMcpServer) -> None:
         """Update mcp_server configuration.
 
