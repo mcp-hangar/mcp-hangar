@@ -1,5 +1,289 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.34.4
+
+### A failed namespace or unparseable discovery file no longer removes its servers
+
+On an authoritative source, two cases that used to count as a real absence
+now keep what they registered, as a scan that fails as a whole already did:
+
+- a Kubernetes namespace whose pod listing fails (forbidden, timeout, API
+  error) while the API itself answers;
+- a discovery file that still exists but is not valid YAML, or whose content
+  fails to load (a port that is not a number).
+
+Such a server stays registered while its part keeps failing, and every cycle
+logs `discovery_part_failed_servers_kept` at WARNING with the part, the
+servers kept and, under `unreported_past_ttl`, those the source has not
+reported for longer than their TTL. Once the part answers again, a server that
+is no longer there is removed one TTL later, like any server a source stops
+reporting.
+
+What this changes for a setup that relied on the old behaviour:
+
+- Revoking Hangar's permission to list pods in a namespace no longer removes
+  that namespace's servers; they stay, with the warning, until you also drop
+  the namespace from the source's `namespaces` list.
+- Deleting a namespace depends on how Hangar may list pods. With a
+  ClusterRole and ClusterRoleBinding (as in
+  `examples/discovery/kubernetes-deployment.yaml`) a deleted namespace lists
+  as empty and its servers are removed after their TTL, as before. With a
+  Role and RoleBinding per namespace, deleting the namespace deletes the
+  RoleBinding too, the listing is forbidden from then on, and its servers are
+  kept with the warning: drop the namespace from `namespaces` to let them go.
+- Breaking a discovery file no longer removes its server; delete the file or
+  set `enabled: false` in it to remove the server.
+- With `namespaces` unset, a failure to list the namespaces makes the whole
+  scan fail, so nothing is removed that cycle (it used to read as every pod
+  gone).
+
+Unchanged: a deleted file, a disabled definition and a file refused by the
+trust checks (world-writable, outside the discovery path, or a file that
+cannot be opened, such as one Hangar may not read) still remove the
+server after its TTL. Additive sources never remove anything.
+
+### A changed discovered definition now replaces the running server
+
+When a discovery source reports a new definition for a server it registered
+(an edited definition file, changed Docker labels, changed pod annotations),
+Hangar now replaces the server on the next cycle: it waits up to 30 seconds
+for the calls in flight, stops the server, and registers the new definition.
+Before, the change was refused with `McpServer already exists` on every cycle
+until the server's TTL ran out; then the server was removed and created again
+from the new definition.
+
+What this changes for a setup that relied on the old behaviour:
+
+- An edit takes effect within one refresh interval instead of after a
+  TTL-long outage. If you edit definition files in place, the server restarts on
+  every edit that changes its definition.
+- A changed definition that the control plane refuses (an endpoint the SSRF
+  policy refuses, a local mode on a gateway that shares its state) is no longer
+  applied after the TTL. The running definition keeps running, and one
+  `discovery_change_not_applied` WARNING names the reason. Fix or revert the
+  definition.
+- With `auto_register: false`, a change waits in `hangar_discovered` until it
+  is approved, and the definition approved before keeps running. Approving it
+  replaces the server; before, approval reported success and changed nothing.
+- A changed definition that fails validation is quarantined while the running
+  definition keeps running, and stays registered past its TTL.
+- A server that is not registered by discovery is never replaced, even when a
+  source reports the same name: a server created over the API, re-pointed over
+  the API, or declared in the configuration file.
+
+Unchanged: a definition a source refuses at parse time (a Kubernetes local
+mode without `allow_local_modes`, a Docker volume outside
+`allowed_mount_paths`, a definition file the trust checks refuse) is not
+reported at all. On an additive source the running server stays; on an
+authoritative source it is removed after its TTL, as before.
+
+In a cluster that shares a management lease, a manual discovery scan
+(`hangar_discover`, `POST /api/discovery/sources/{id}/scan`) and an approval
+of a pending or quarantined server (`POST /api/discovery/approve/{name}`,
+`hangar_approve`) are refused with `409` on an instance that does not hold the
+lease: send them to the instance that does. A standalone gateway, with no
+coordination configured, always holds it.
+
+### a bounded HTTP stop abandons the calls still running when the bound runs out
+
+`http.graceful_shutdown_timeout_s` used to bound nothing in practice. On a stop, every MCP call in flight lost its stream at once, so the client saw a transport error such as `peer closed connection without sending complete message body`, and the call ran on upstream to completion, however long that took. The process stayed up until then too.
+
+Now the stop waits for those calls and delivers their responses. Without a bound it waits as long as they take, as before, but now the client gets its result. With a bound, the tool calls still running when the bound runs out (`hangar_call`, and the front door's tool calls) are abandoned. Each caller gets a JSON-RPC error on its own stream instead of a transport error:
+
+```json
+{"jsonrpc": "2.0", "id": 7, "error": {"code": -32000, "message": "The gateway is shutting down and abandoned this call before it finished; it may or may not have taken effect upstream", "data": {"reason": "shutdown", "batch_id": "..."}}}
+```
+
+Other requests still running at the bound (`hangar_start`, `hangar_warm`, a cold `hangar_tools`, a resource read) get no answer; their connection ends, as before. After that the upstream servers are stopped and the process exits, so an abandoned call may never finish upstream. Before, it always ran to completion.
+
+What to check:
+
+- A client that retries on transport errors only does not see this error as retryable. Treat `error.data.reason == "shutdown"` as "the gateway went away; the call may or may not have run".
+- If calls must be allowed to finish, set the bound above your longest call, or leave it unset. In Kubernetes, keep the pod's `terminationGracePeriodSeconds` above the bound plus a few seconds for the component shutdown, so the kubelet's SIGKILL does not land first.
+
+### Discovered servers are no longer protected as static after a restart
+
+Applies only with a durable storage backend (`persistence.backend: sqlite` or
+`postgresql`) and discovery enabled.
+
+Before, every server restored from storage at startup was treated as declared
+in the configuration, including those discovery had registered. From the first
+restart on, discovery could not remove or replace such a server.
+
+Now a server that discovery registered stays with the source that registered
+it after a restart. Rows written from this version on record that source and
+the definition it reported. For those:
+
+- On an authoritative source, a server the source no longer reports is removed
+  one TTL (`discovery.lifecycle.default_ttl_s`, 90 s by default) after the
+  instance takes the management lease, including one that went away while the
+  gateway was down. Its row is deleted too.
+- On an additive source it stays, as it did without a restart.
+- A definition that changed while the gateway was down is handled as a change.
+
+Rows written by an earlier version record no source. That is every discovered
+row at the first restart after the upgrade:
+
+- If the row's description is still the one discovery gave it, `Discovered
+  from <source>`, only that source can take the server over, when it next
+  reports it. The source then follows its mode, and the row records the origin
+  for the next restart. Until it reports the server, the server stays, even on
+  an authoritative source. A definition that changed while the gateway was down
+  is not compared on takeover; it is handled as a change the next time the
+  source changes it.
+- If the description was changed, nothing says which source registered the
+  server, and it stays static as before.
+
+Servers declared in the configuration file and servers created over the API or
+the CLI are unaffected, and so are rows written before provenance was recorded:
+they read as API-created and stay protected.
+
+During a rolling upgrade, a replica still on the previous version drops the
+recorded origin from any row it writes. Such a row is then treated like one
+written by an earlier version, as above.
+
+A restored server from a `filesystem` source is not covered by the rule that
+keeps the servers of a definition file that exists but cannot be parsed until
+the source has reported the server again after the restart. If its file is
+unparseable from the restart on, an authoritative `filesystem` source removes
+it one TTL after taking the lease.
+
+If you relied on a discovered server surviving after its source stopped
+reporting it, do one of the following:
+
+- set `mode: additive` on that discovery source, which never removes what it
+  registered; or
+- declare the server in the configuration file, which discovery never touches.
+
+### A deleted server's group member is vacant until discovery brings its server back
+
+Deleting a server that is a member of a group (`DELETE /api/mcp_servers/{id}`,
+or discovery removing it when its TTL runs out) no longer leaves the group
+routing to it. Before, a call through the group selected the stopped copy and
+started the deleted server's command or image again, outside the fleet.
+
+What you may notice:
+
+- The member stays in the group, with `"vacant": true`, `"state": "cold"` and
+  `"in_rotation": false` in the group status (`GET /api/groups/{id}`,
+  `hangar_group_list`). It still counts in `total_members`, as the stopped copy
+  did, and no longer counts as in rotation.
+- A group whose only member is deleted now goes `inactive` and refuses calls,
+  where it used to start the deleted server.
+- The group's state follows: a group with `min_healthy` equal to its members
+  in rotation reads `partial` after one of them is deleted, where it read
+  `healthy` because the stopped copy still counted. An alert on group state
+  can fire on it.
+- When discovery registers a server under the same id again, it goes back in
+  the group with the weight, priority and rotation the member had: the case
+  of a discovered server that drops out and comes back.
+- Re-creating a server over the API leaves the member vacant; re-add it with
+  the group API (`POST /api/groups/{id}/members`). Deleting and re-creating a
+  server is not a way to change a group's members. A key-pinned server never
+  fills a member either, as it cannot be added to a group.
+- To take the member out of the group for good, remove it with
+  `DELETE /api/groups/{id}/members/{member_id}`.
+
+Servers the configuration file declares cannot be deleted over the API, and a
+reload never leaves a vacant member: a reload whose group names a server the
+file no longer declares is refused, as before.
+
+In a cluster whose replicas run different configuration files, a server one
+replica's file declares is no longer dropped from that replica when another
+replica deletes a server with the same name over the API: it stays until its
+own file no longer declares it, as an update from another replica already
+left it alone.
+
+### Approve a discovered server with the definition_digest you reviewed
+
+A source re-reports its definition every cycle, so the definition waiting for
+approval under a name can change between listing it and approving it. Every
+listing now shows a `definition_digest`: the full SHA-256 of the definition
+(its connection, metadata, mode and source). Pass the one you reviewed, and the
+approval applies only that definition:
+
+- MCP: `hangar_approve(mcp_server="svc", definition_digest="<digest>")`, with the
+  digest from `hangar_discovered` or `hangar_quarantine`.
+- REST: `POST /api/discovery/approve/svc?definition_digest=<digest>`, or the same
+  with the JSON body `{"definition_digest": "<digest>"}`, with the digest from
+  `GET /api/discovery/pending` or `GET /api/discovery/quarantined`.
+
+Use `definition_digest`, not `fingerprint`. The 16-character fingerprint stays
+in the listings for change detection, but it is too short to bind an approval
+to: a source could produce two definitions that share one. Passed as the
+digest, it is refused.
+
+When the definition waiting has another digest, the approval is refused and
+nothing changes. REST answers 409 with the code
+`DiscoveredDefinitionChangedError` and `details.current_definition_digest`. The
+tool answers that error type, with the current digest in its message. Review the
+definition again and approve its current digest.
+
+This is the recommended form. An approval without a digest still works as
+before, but logs `discovery_approval_not_bound` at WARNING; it may be required
+in a later release. A REST request with no body, or with `{}`, is such an
+unbound approval. Anything that looks like an attempt to bind but cannot be read
+as exactly one digest answers 400 instead of being approved unbound:
+
+- a body that is not a JSON object (malformed JSON, an array, a form body);
+- in the body, any key other than `definition_digest`; in the query string, a
+  key that reads as a misspelt binding (`fingerprint`, `digest`,
+  `definition-digest` and other spellings of `definition_digest`), while other
+  query parameters, such as a proxy's cache-buster, are ignored as before;
+- a `definition_digest` that is `null` or not a 64-character lowercase hex
+  string;
+- a query and body that disagree.
+
+On the tool, a value that is not such a digest is an invalid argument. Passing
+`null` there is the same as leaving the argument out.
+
+#### Manual approval (`auto_register: false`) now runs the checks a registration runs
+
+With `auto_register: false`, a discovered definition waits in pending without
+ever going through the input validator or the source's own policy. An approval
+used to register it anyway. An approval now runs both checks, for pending and
+quarantined definitions alike, and refuses a definition that fails them, or one
+whose source is no longer registered. The refusal answers
+`{"approved": false, "error": "approval refused: <reason>"}`, and the definition
+stays where it waited, so a reject can remove it. Examples are a command the
+input validator refuses, or a Kubernetes namespace the source may not take
+from.
+
+With automatic registration, a definition the source's policy refuses is
+quarantined, and approving it used to register it. That approval is now refused
+too. Approval still overrides the other reasons a definition is quarantined: a
+failed health or schema check, and the rate and count limits.
+
+#### Withdrawn definitions are no longer approvable
+
+A pending entry is cleared once a scan no longer reports that definition, in
+either of two cases:
+
+- the source reports the running definition again, or reports another one under
+  the name;
+- a source that is healthy after the scan stops reporting the name.
+
+A definition still reported next to another under the same name is kept. This
+happens, for example, during a rolling update with old and new pods side by side.
+
+A quarantined change is cleared when its source reports the running definition
+again. Removing a source clears what it left in pending and quarantine.
+Approving any of these afterwards answers "not found", as for any name that is
+not waiting.
+
+### Discovery no longer removes a server re-pointed or re-created over the API
+
+A discovered server that is re-pointed over the API, or deleted and created
+again over the API under the same name, is an operator's server from then on.
+Discovery used to delete it anyway once its source stopped reporting the name
+and the TTL ran out. It now leaves it in place, logs
+`discovery_deregistration_refused_not_discovered` at INFO once, and stops
+tracking the name.
+
+If you relied on discovery cleaning such a server up when its container, pod
+or file went away, delete it yourself with `DELETE /api/mcp_servers/{id}`. Servers discovery
+registered and nobody changed are removed exactly as before.
+
 ## Upgrade to 2.34.3
 
 ### `mcp-hangar why` reads `data/events.db` for a configuration that names no event store
