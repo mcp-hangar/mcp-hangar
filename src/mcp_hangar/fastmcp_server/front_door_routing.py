@@ -20,11 +20,11 @@ backward-compatible behavior for pre-SEP-2243 clients.
 
 Era scope: this middleware covers HANDSHAKE-era requests only. A 2026-07-28
 request is routed by the SDK's own modern entry, which enforces header/body
-agreement itself (``HEADER_MISMATCH``) and watches ``receive()`` for
-``http.disconnect`` to cancel in-flight work -- so buffering and replaying its
-body here would both duplicate the check and, because a replayed stream reports a
-disconnect once drained, cancel the request before it can answer. Modern-era
-requests therefore pass through untouched.
+agreement itself (``HEADER_MISMATCH``), duplicated routing headers included, so
+buffering its body here would only repeat that check. Modern-era requests
+therefore pass through untouched. (The replay used to invent a disconnect once
+drained, which cancelled modern requests and, until #2108, emptied legacy ones;
+it now defers to the server's ``receive`` after the body.)
 """
 
 from __future__ import annotations
@@ -80,6 +80,24 @@ def _decoded_routing_header(value: bytes) -> str | None:
     raw = value.decode("latin-1").strip()
     decoded = decode_header_value(raw) if raw else None
     return (raw if decoded is None else decoded).strip() or None
+
+
+def duplicated_route_header(raw_headers: Iterable[tuple[bytes, bytes]]) -> str | None:
+    """Return the name of an ``Mcp-Method`` / ``Mcp-Name`` header sent more than once, else ``None``.
+
+    Only the raw ASGI header list shows a duplicate; a first-copy reader and a
+    last-copy reader would route the same request differently, so it is refused
+    the way the SDK's modern entry refuses it. ``MCP-Protocol-Version`` is not
+    checked here: the era routing above does not refuse a repeated one today.
+    """
+    seen: set[bytes] = set()
+    for key, _ in raw_headers:
+        lowered = key.lower()
+        if lowered in (MCP_METHOD_HEADER, MCP_NAME_HEADER):
+            if lowered in seen:
+                return lowered.decode("latin-1")
+            seen.add(lowered)
+    return None
 
 
 def extract_route_headers(raw_headers: Iterable[tuple[bytes, bytes]]) -> tuple[str | None, str | None]:
@@ -161,8 +179,9 @@ class FrontDoorRoutingMiddleware:
 
     The middleware only engages for HTTP ``POST`` requests to the MCP path that
     carry an ``Mcp-Method`` or ``Mcp-Name`` header. For those it buffers and
-    parses the JSON body, enforces header/body consistency (rejecting mismatches
-    with a JSON-RPC error), records the :class:`RouteDecision` on the ASGI scope
+    parses the JSON body, refuses a repeated ``Mcp-Method`` or ``Mcp-Name``,
+    enforces header/body consistency (rejecting mismatches with a JSON-RPC
+    error), records the :class:`RouteDecision` on the ASGI scope
     state for downstream routing/observability, and replays the body unchanged.
 
     Every other request -- GET/SSE, non-MCP paths, and pre-SEP-2243 clients that
@@ -187,11 +206,20 @@ class FrontDoorRoutingMiddleware:
             return
 
         body = await _buffer_body(receive)
+        if body is None:
+            # The client left before its body arrived: there is nothing to
+            # route and nobody to answer.
+            return
         try:
             payload = json.loads(body) if body else None
         except (json.JSONDecodeError, UnicodeDecodeError):
             payload = None
         body_method, body_name = route_from_body(payload)
+
+        duplicated = duplicated_route_header(scope.get("headers", []))
+        if duplicated is not None:
+            await _reject(scope, send, f"{duplicated} header appears more than once", payload)
+            return
 
         try:
             decision = resolve_route(header_method, header_name, body_method, body_name)
@@ -200,7 +228,7 @@ class FrontDoorRoutingMiddleware:
             return
 
         _stash_route(scope, decision)
-        await self.app(scope, _replay(body), send)
+        await self.app(scope, _replay(body, receive), send)
 
     def _should_engage(self, scope: Scope) -> bool:
         if scope.get("type") != "http" or scope.get("method", "").upper() != "POST":
@@ -236,12 +264,19 @@ def _stash_route(scope: Scope, decision: RouteDecision) -> None:
         scope["mcp_route"] = decision
 
 
-async def _buffer_body(receive: Receive) -> bytes:
-    """Consume the full HTTP request body from ``receive``."""
+async def _buffer_body(receive: Receive) -> bytes | None:
+    """Consume the full HTTP request body from ``receive``; None if the client left first.
+
+    A client that disconnects mid-upload gets ``http.disconnect`` from every
+    later ``receive()``. Skipping it, as this loop used to, spun on it for good
+    and held a CPU for the connection (#2123).
+    """
     chunks: list[bytes] = []
     more_body = True
     while more_body:
         message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
         if message["type"] != "http.request":
             continue
         chunks.append(message.get("body", b""))
@@ -249,8 +284,16 @@ async def _buffer_body(receive: Receive) -> bytes:
     return b"".join(chunks)
 
 
-def _replay(body: bytes) -> Receive:
-    """Return a ``receive`` callable that yields the buffered ``body`` once."""
+def _replay(body: bytes, upstream: Receive | None = None) -> Receive:
+    """Return a ``receive`` callable that yields the buffered ``body`` once.
+
+    After the body, calls go to ``upstream`` -- the server's own ``receive`` --
+    so a disconnect is reported only when the client really leaves. Inventing
+    one instead made the handshake-era SSE response, which listens for it, stop
+    before writing a byte: every POST this wrap engaged on got an empty stream
+    and uvicorn logged "ASGI callable returned without completing response"
+    (#2108). Without ``upstream`` (the refusal path) a disconnect follows the body.
+    """
     sent = False
 
     async def receive() -> Message:
@@ -258,6 +301,8 @@ def _replay(body: bytes) -> Receive:
         if not sent:
             sent = True
             return {"type": "http.request", "body": body, "more_body": False}
+        if upstream is not None:
+            return await upstream()
         return {"type": "http.disconnect"}
 
     return receive
@@ -288,6 +333,7 @@ __all__ = [
     "MCP_PROTOCOL_VERSION_HEADER",
     "RouteDecision",
     "HeaderBodyMismatchError",
+    "duplicated_route_header",
     "extract_route_headers",
     "route_from_body",
     "resolve_route",
