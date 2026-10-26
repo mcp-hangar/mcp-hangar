@@ -7,7 +7,8 @@ Manages discovery sources, validation, and integration with the registry.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -199,6 +200,11 @@ class DiscoveryOrchestrator:
         self._took_back_restored = False
         #: The lease as last observed: None before the first look (#2111).
         self._holding: bool | None = None
+        #: One lock per server name, with how many hold or wait for it (#2129).
+        #: A cycle processing a name and an approval of it both read what is
+        #: tracked, await, and write it back; each holds the name's lock across
+        #: all three, so neither writes over what the other applied meanwhile.
+        self._name_locks: dict[str, tuple[asyncio.Lock, int]] = {}
 
         # Discovery loop state
         self._running = False
@@ -645,8 +651,39 @@ class DiscoveryOrchestrator:
 
         return result
 
+    @asynccontextmanager
+    async def _one_at_a_time(self, name: str) -> AsyncIterator[None]:
+        """Hold the lock of *name*, so that what is tracked under it cannot change meanwhile (#2129).
+
+        Taken by `_process_mcp_server` and `_approve`, each of which reads the
+        tracked definition, awaits validation or the control plane, and then
+        writes tracking from what it read. Without it an approval landing while
+        a cycle awaited validation applied its change, and the cycle then
+        tracked the definition it had read before, which no longer ran.
+
+        Different names do not wait for each other. A lock nobody holds or
+        waits for is dropped, so the map holds only names in use, and no lock
+        outlives the loop it was used on.
+        """
+        lock, users = self._name_locks.get(name, (None, 0))
+        if lock is None:
+            lock = asyncio.Lock()
+        self._name_locks[name] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, users = self._name_locks[name]
+            if users == 1:
+                del self._name_locks[name]
+            else:
+                self._name_locks[name] = (lock, users - 1)
+
     async def _process_mcp_server(self, mcp_server: DiscoveredMcpServer) -> str:
         """Process a discovered mcp_server through validation.
+
+        Holds the lock of its name throughout: `existing` is read once and
+        written back after the awaits below (#2129).
 
         Args:
             mcp_server: McpServer to process
@@ -654,6 +691,11 @@ class DiscoveryOrchestrator:
         Returns:
             Status string: "registered", "updated", "quarantined", "skipped", "rejected"
         """
+        async with self._one_at_a_time(mcp_server.name):
+            return await self._process_held(mcp_server)
+
+    async def _process_held(self, mcp_server: DiscoveredMcpServer) -> str:
+        """`_process_mcp_server`, with the lock of the name held."""
         # Check if already tracked
         existing = self._lifecycle_manager.get_mcp_server(mcp_server.name)
         if existing:
@@ -700,6 +742,9 @@ class DiscoveryOrchestrator:
                 # A takeover by another source is a new server for that source's count.
                 replacing=existing is not None and existing.source_type == mcp_server.source_type,
             )
+            if self._tracking_moved(existing, mcp_server):
+                prov_span.set_attribute("discovery.result", "skipped")
+                return "skipped"
 
             main_metrics.record_discovery_validation_duration(
                 source_type=mcp_server.source_type,
@@ -807,6 +852,33 @@ class DiscoveryOrchestrator:
         span.set_attribute("discovery.result", "skipped")
         return "skipped"
 
+    def _tracking_moved(self, existing: DiscoveredMcpServer | None, mcp_server: DiscoveredMcpServer) -> bool:
+        """Whether tracking of *mcp_server*'s name changed since *existing* was read, across an await.
+
+        The name's lock keeps approvals out (#2129), but not TTL expiry, which
+        deregisters on the lifecycle manager's loop, nor a tenure rebuild, which
+        drops and retakes tracking from the fleet. Writing *existing* back after
+        either would track a definition that no longer runs, so the caller
+        writes nothing and the next cycle starts from what is tracked then.
+
+        Compared by fingerprint: a sighting refreshed meanwhile is the same
+        definition, and writing it back is harmless.
+        """
+        current = self._lifecycle_manager.get_mcp_server(mcp_server.name)
+        if existing is None:
+            moved = current is not None
+        else:
+            moved = current is None or current.fingerprint != existing.fingerprint
+        if moved:
+            logger.debug(
+                "discovery_tracking_changed_during_processing",
+                mcp_server_name=mcp_server.name,
+                read_fingerprint=None if existing is None else existing.fingerprint,
+                tracked_fingerprint=None if current is None else current.fingerprint,
+                detail="left as it is now; the next cycle processes it again",
+            )
+        return moved
+
     def _command_refusal(self, mcp_server: DiscoveredMcpServer) -> str | None:
         """Why the input validator refuses the command of *mcp_server*, or None."""
         command = mcp_server.connection_info.get("command", [])
@@ -862,10 +934,17 @@ class DiscoveryOrchestrator:
         try:
             await self.on_update(mcp_server)
         except DiscoveryChangeRefused as e:
+            if self._tracking_moved(existing, mcp_server):
+                span.set_attribute("discovery.result", "skipped")
+                return "skipped"
             self._keep_running_definition(existing, mcp_server, str(e), final=True)
             span.set_attribute("discovery.result", "rejected")
             return "rejected"
         except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed update callback must not crash discovery
+            if self._tracking_moved(existing, mcp_server):
+                span.set_attribute("discovery.result", "skipped")
+                record_handled_failure(span, e)
+                return "skipped"
             self._keep_running_definition(existing, mcp_server, f"{type(e).__name__}: {e}", final=False)
             span.set_attribute("discovery.result", "skipped")
             record_handled_failure(span, e)
@@ -1079,8 +1158,12 @@ class DiscoveryOrchestrator:
         Refused on an instance that does not hold the management lease. Run on
         discovery's own loop when it has one, as a manual scan is: the replace
         waits for calls in flight, which must not freeze the request loop that
-        asked, and a cycle replacing the same server at the same time is then
-        not possible.
+        asked. A cycle runs on that loop too, but yields at every await, so
+        the approval also holds the lock of the name: one that arrives while a
+        cycle is processing the same server waits for it to finish, and then
+        sees what it left (#2129). The definition the cycle reported may then
+        be the one waiting, and an approval bound to the earlier one is
+        refused.
 
         Bound to what the operator reviewed when *definition_digest* is given
         (#2109): a source re-reports its definition every cycle and overwrites
@@ -1111,14 +1194,22 @@ class DiscoveryOrchestrator:
 
     async def _approve(self, name: str, definition_digest: str | None = None) -> dict[str, Any]:
         """Approve *name* on the loop discovery runs on; see `approve_mcp_server`."""
-        # Asked again here, through the tenure observer: the lease may have
-        # changed hands while the request hopped onto this loop, and a new
-        # tenure rebuilds tracking before the approval reads it (#2111).
+        # Held from the checks to the end: a cycle processing the same name
+        # finishes first, and none starts until this has applied (#2129).
+        async with self._one_at_a_time(name):
+            return await self._approve_held(name, definition_digest)
+
+    async def _approve_held(self, name: str, definition_digest: str | None) -> dict[str, Any]:
+        """`_approve`, with the lock of the name held."""
+        # Asked again here, after any wait for the lock, through the tenure
+        # observer: the lease may have changed hands while the request hopped
+        # onto this loop, and a new tenure rebuilds tracking before the
+        # approval reads it (#2111).
         if not self._manages():
             raise self._not_here(f"approve mcp_server {name!r}")
         # Checked before anything is taken out of quarantine or pending, with
-        # no await in between, so a refusal changes nothing and a cycle cannot
-        # swap the definition after it was checked.
+        # no await in between, so a refusal changes nothing; the lock keeps a
+        # cycle on this name from swapping the definition after it was checked.
         refusal = self._approval_refusal(name, definition_digest)
         if refusal is not None:
             return refusal
