@@ -14,6 +14,21 @@ import pytest
 
 from mcp_hangar.application.discovery.discovery_orchestrator import DiscoveryConfig, DiscoveryOrchestrator
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
+from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
+
+
+class _DockerSource(DiscoverySource):
+    """The source that reported the servers: an approval asks its policy (#2109)."""
+
+    @property
+    def source_type(self) -> str:
+        return "docker"
+
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        return []
+
+    async def health_check(self) -> bool:
+        return True
 
 
 class _Bus:
@@ -43,6 +58,7 @@ def orchestrator():
         return True
 
     orch.on_register = _accept
+    orch.add_source(_DockerSource())
     return orch
 
 

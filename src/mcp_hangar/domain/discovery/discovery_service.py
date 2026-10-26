@@ -180,6 +180,9 @@ class DiscoveryService:
         if source:
             self._mcp_servers_by_source.pop(source_type, None)
             self._source_status.pop(source_type, None)
+            # Withdrawn with the source that reported them (#2109).
+            for waiting in [p for p in self._pending.values() if p.source_type == source_type]:
+                self._drop_pending(waiting, "its source was removed")
             logger.info(f"Unregistered discovery source: {source_type}")
         return source
 
@@ -238,6 +241,11 @@ class DiscoveryService:
 
                 # Track mcp_servers from this source
                 current_names = set()
+                # Definitions this scan would hold for approval, by name. What
+                # waits and is not among them was withdrawn (#2109); decided
+                # after the whole scan, because one name can be reported twice
+                # in it -- old and new pods side by side in a rolling update.
+                awaiting: dict[str, set[str]] = {}
 
                 for mcp_server in mcp_servers:
                     result.discovered_count += 1
@@ -245,6 +253,8 @@ class DiscoveryService:
 
                     # Resolve conflicts
                     conflict_result = self._conflict_resolver.resolve(mcp_server)
+                    if conflict_result.should_register and conflict_result.winner:
+                        awaiting.setdefault(mcp_server.name, set()).add(conflict_result.winner.definition_digest)
 
                     if conflict_result.should_register:
                         if conflict_result.resolution == ConflictResolution.REGISTERED:
@@ -276,8 +286,12 @@ class DiscoveryService:
                 # failure, a missing filesystem path), which would read as
                 # "everything is gone". Only a source that reports itself
                 # healthy after the scan is trusted to have lost anything.
-                if source.mode == DiscoveryMode.AUTHORITATIVE and await source.health_check():
-                    self._remove_what_was_lost(source, source_type, current_names, result)
+                healthy: bool | None = None
+                if source.mode == DiscoveryMode.AUTHORITATIVE:
+                    healthy = await source.health_check()
+                    if healthy:
+                        self._remove_what_was_lost(source, source_type, current_names, result)
+                await self._drop_withdrawn_pending(source, source_type, current_names, awaiting, healthy)
 
                 # Update tracked mcp_servers for this source
                 self._mcp_servers_by_source[source_type] = current_names
@@ -307,6 +321,67 @@ class DiscoveryService:
         )
 
         return result
+
+    def _drop_pending(self, waiting: DiscoveredMcpServer, why: str) -> None:
+        """Forget *waiting*, if it is still what waits under its name.
+
+        An approval may have taken it, or a newer definition replaced it, while
+        the caller awaited a health check.
+        """
+        if self._pending.get(waiting.name) is not waiting:
+            return
+        del self._pending[waiting.name]
+        logger.info(
+            "discovery_pending_withdrawn",
+            mcp_server_name=waiting.name,
+            source=waiting.source_type,
+            fingerprint=waiting.fingerprint,
+            reason=why,
+        )
+
+    async def _drop_withdrawn_pending(
+        self,
+        source: DiscoverySource,
+        source_type: str,
+        current_names: set[str],
+        awaiting: dict[str, set[str]],
+        healthy: bool | None,
+    ) -> None:
+        """Forget what waits for approval from *source* and its scan no longer reports (#2109).
+
+        A name the scan reported with other definitions only -- the registered
+        one again, or one another source wins -- is withdrawn outright: the
+        source answered for that name. A name the scan did not report at all is
+        withdrawn in either mode, since a definition waiting for approval is not
+        running and has no TTL to wait out; but only when the source is healthy
+        after the scan, and not when the part of the scan that covers it failed,
+        as in `_remove_what_was_lost`.
+        """
+        withdrawn = [
+            waiting
+            for waiting in self._pending.values()
+            if waiting.source_type == source_type and waiting.definition_digest not in awaiting.get(waiting.name, set())
+        ]
+        unreported = []
+        for waiting in withdrawn:
+            if waiting.name in current_names:
+                self._drop_pending(waiting, "the source reports another definition under its name")
+            elif source.unscanned_part(waiting) is None:
+                unreported.append(waiting)
+        if not unreported:
+            return
+        if healthy is None:
+            # Asked only when there is something to drop, so a cycle with
+            # nothing waiting costs an additive source no health check. A check
+            # that fails keeps what waits; it must not fail a scan that worked.
+            try:
+                healthy = await source.health_check()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed health check means "not healthy", nothing more
+                logger.debug(f"Health check of {source_type} failed, pending entries kept: {e}")
+                healthy = False
+        if healthy:
+            for waiting in unreported:
+                self._drop_pending(waiting, "the source no longer reports it")
 
     def _remove_what_was_lost(
         self, source: DiscoverySource, source_type: str, current_names: set[str], result: DiscoveryCycleResult
