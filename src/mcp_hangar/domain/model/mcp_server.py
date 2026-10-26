@@ -669,6 +669,11 @@ class McpServer(AggregateRoot):
         return self._mode
 
     @property
+    def http_config(self) -> dict[str, Any] | None:
+        """A copy of the declared ``http`` transport block (remote mode), or None."""
+        return dict(self._http_config) if self._http_config else None
+
+    @property
     def l7_policy(self) -> "L7Policy | None":
         """The L7 egress policy enforced on tool calls, or None if unset."""
         return self._l7_policy

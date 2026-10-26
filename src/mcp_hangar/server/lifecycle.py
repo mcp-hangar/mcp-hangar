@@ -226,7 +226,7 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
     warmed = failed = skipped = 0
 
     try:
-        mcp_server_ids = runtime.repository.get_all_ids()
+        mcp_server_ids = list(runtime.repository.get_all_ids())
         # A listing that arrives before this finishes would be answered with an
         # empty catalogue the client then caches forever (#1231). It waits instead,
         # briefly and only when the answer would otherwise be knowably wrong.
@@ -234,26 +234,30 @@ def warm_the_front_door_catalogue(runtime: Any) -> None:
         # (#2119); this keeps a direct, synchronous call marked too. No server,
         # nothing to warm, nothing for a listing to wait on.
         if mcp_server_ids:
-            catalogue_warmup.warmup_started()
+            catalogue_warmup.warmup_started(warm_up_bound_s(runtime, mcp_server_ids), mcp_server_ids)
         for mcp_server_id in mcp_server_ids:
-            server = runtime.repository.get(mcp_server_id)
-            if server is not None and server.state.value == "dead":
-                # Restored DEAD from the event log. A warm-up of everything is not
-                # a deliberate start of each server, and only a deliberate start
-                # revives a dead one (#1361).
-                skipped += 1
-                continue
             try:
-                runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
-                warmed += 1
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
-                failed += 1
-                # The type only: a start failure's text can carry what the upstream printed.
-                logger.warning(
-                    "front_door_warmup_failed",
-                    mcp_server_id=mcp_server_id,
-                    error_type=bounded_error_type(type(e).__qualname__),
-                )
+                server = runtime.repository.get(mcp_server_id)
+                if server is not None and server.state.value == "dead":
+                    # Restored DEAD from the event log. A warm-up of everything is not
+                    # a deliberate start of each server, and only a deliberate start
+                    # revives a dead one (#1361).
+                    skipped += 1
+                    continue
+                try:
+                    runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
+                    warmed += 1
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
+                    failed += 1
+                    # The type only: a start failure's text can carry what the upstream printed.
+                    logger.warning(
+                        "front_door_warmup_failed",
+                        mcp_server_id=mcp_server_id,
+                        error_type=bounded_error_type(type(e).__qualname__),
+                    )
+            finally:
+                # So a warm-up that outlives its bound names only the servers it is still on.
+                catalogue_warmup.server_warmed(mcp_server_id)
     finally:
         # In `finally`: a warm-up that dies must not leave every later listing
         # waiting out the full deadline for something that will never finish.
@@ -292,9 +296,12 @@ def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.T
     # thread's first statement read "not warming" and answered only the
     # `hangar_*` tools instead of waiting (#2119). Not marked where no warm-up
     # will run (`egress`, or no configured server), so nothing waits there.
-    marked = _a_warm_up_will_run(runtime)
-    if marked:
-        catalogue_warmup.warmup_started()
+    # Bounded too (#2122): a warm-up that hangs must not keep every empty
+    # listing waiting for the life of the process.
+    to_warm = _servers_a_warm_up_will_start(runtime)
+    marked = to_warm is not None
+    if to_warm is not None:
+        catalogue_warmup.warmup_started(warm_up_bound_s(runtime, to_warm), to_warm)
 
     def warm_up() -> None:
         try:
@@ -315,16 +322,80 @@ def start_front_door_warm_up(runtime: Any, retry: CatalogueRetry) -> threading.T
     return thread
 
 
-def _a_warm_up_will_run(runtime: Any) -> bool:
-    """Will `warm_the_front_door_catalogue` warm anything: a front door with at least one server?"""
+def _servers_a_warm_up_will_start(runtime: Any) -> list[str] | None:
+    """The servers `warm_the_front_door_catalogue` will start, or None where it warms nothing.
+
+    Nothing is warmed outside a front door, or on one with no server.
+    """
     from ..domain.services.tool_access_resolver import is_front_door
 
     if not is_front_door():
-        return False
+        return None
     try:
-        return bool(runtime.repository.get_all_ids())
+        return list(runtime.repository.get_all_ids()) or None
     except Exception:  # noqa: BLE001 -- the warm-up meets the same failure on its thread, and its `finally` ends the mark
-        return True
+        return []
+
+
+#: A start makes two upstream calls that wait on an answer: ``initialize`` and ``tools/list``.
+_START_CALLS = 2
+#: How long a stdio call waits for its answer (`StdioClient.call`).
+_STDIO_CALL_TIMEOUT_S = 15.0
+#: No server's share is less than this: `McpServer.ensure_ready` gives a start
+#: in progress 30 s before a caller waiting on it gives up.
+_START_FLOOR_S = 30.0
+#: Added once to the whole warm-up, for what is not a call: launching a process,
+#: building the clients, the command bus itself.
+_WARM_UP_MARGIN_S = 30.0
+
+
+def warm_up_bound_s(runtime: Any, mcp_server_ids: list[str]) -> float:
+    """How long listings may wait on a front-door warm-up of *mcp_server_ids* (#2122).
+
+    The warm-up starts one server at a time, so its bound is the sum of each
+    server's start budget, plus a margin. A server's budget is one attempt at
+    each of its start's two calls under its own configuration: the stdio
+    client's 15 s, or, for a ``remote`` server, its ``http.connect_timeout``
+    plus ``http.read_timeout``; never less than the 30 s a caller waits on a
+    start.
+
+    It is not a promise that every start fits: an image pull, a ``remote``
+    call retried under ``http.max_retries``, or an upstream that pages a long
+    ``tools/list`` can take longer. That costs little. Past
+    the bound, listings stop waiting and answer with what is projected; the
+    warm-up goes on, and what it starts late is projected and announced as
+    before. A server the repository no longer holds gets the floor.
+    """
+    total = _WARM_UP_MARGIN_S
+    for mcp_server_id in mcp_server_ids:
+        try:
+            server = runtime.repository.get(mcp_server_id)
+        except Exception:  # noqa: BLE001 -- a bound must come out of any repository; the warm-up reports the failure itself
+            server = None
+        total += _start_budget_s(server)
+    return total
+
+
+def _start_budget_s(server: Any) -> float:
+    """How long *server*'s start may legitimately take, by its configuration."""
+    from ..http_client import HttpClientConfig
+
+    per_call = _STDIO_CALL_TIMEOUT_S
+    if getattr(getattr(server, "mode", None), "value", None) == "remote":
+        defaults = HttpClientConfig()
+        http = getattr(server, "http_config", None)
+        http = http if isinstance(http, dict) else {}
+        per_call = _positive(http.get("connect_timeout"), defaults.connect_timeout) + _positive(
+            http.get("read_timeout"), defaults.read_timeout
+        )
+    return max(_START_FLOOR_S, _START_CALLS * per_call)
+
+
+def _positive(value: Any, default: float) -> float:
+    """*value* if it is a positive number, else *default*."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return default
+    return float(value)
 
 
 def start_coordination() -> None:

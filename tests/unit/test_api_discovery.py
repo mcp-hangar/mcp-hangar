@@ -33,6 +33,7 @@ def _make_discovered_provider(name: str = "my-provider") -> Mock:
     provider.mode = "subprocess"
     provider.discovered_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
     provider.metadata = {"version": "1.0"}
+    provider.definition_digest = "d" * 64
     provider.to_dict.return_value = {
         "name": name,
         "source_type": "docker",
@@ -255,7 +256,9 @@ class TestApproveProvider:
         """POST /api/discovery/approve/pending-1 calls approve_provider on orchestrator."""
         response = api_client.post("/api/discovery/approve/pending-1")
         assert response.status_code == 200
-        mock_context.discovery_orchestrator.approve_mcp_server.assert_called_once_with("pending-1")
+        mock_context.discovery_orchestrator.approve_mcp_server.assert_called_once_with(
+            "pending-1", definition_digest=None
+        )
 
     def test_returns_404_when_discovery_not_configured(self, no_discovery_client):
         """POST /api/discovery/approve/name returns 404 when discovery not configured."""

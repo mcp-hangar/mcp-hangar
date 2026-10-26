@@ -4,6 +4,9 @@ Implements GET/POST endpoints for auto-discovery management:
 sources, pending mcp_servers, quarantined mcp_servers, approve/reject.
 """
 
+import re
+from typing import cast
+
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -116,7 +119,8 @@ async def list_pending(request: Request) -> HangarJSONResponse:
     """List mcp_servers pending approval.
 
     Returns:
-        JSON with {"pending": [...]} array of discovered mcp_server dicts.
+        JSON with {"pending": [...]} array of discovered mcp_server dicts, each
+        with the ``definition_digest`` an approval binds to.
 
     Raises:
         DiscoveryNotConfiguredError: If discovery is not configured.
@@ -125,7 +129,8 @@ async def list_pending(request: Request) -> HangarJSONResponse:
 
     orchestrator = _require_orchestrator()
     pending = await run_in_threadpool(orchestrator.get_pending_mcp_servers)
-    return HangarJSONResponse({"pending": [p.to_dict() for p in pending]})
+    # `definition_digest` is what an approval binds to (#2109).
+    return HangarJSONResponse({"pending": [{**p.to_dict(), "definition_digest": p.definition_digest} for p in pending]})
 
 
 async def list_quarantined(request: Request) -> HangarJSONResponse:
@@ -144,21 +149,84 @@ async def list_quarantined(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"quarantined": quarantined})
 
 
+#: The parameter an approval binds itself with (#2109), and what it must look
+#: like: the full SHA-256 a listing shows, never the 16-character fingerprint.
+_BINDING = "definition_digest"
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+#: Spellings that mean to bind and are not the binding. Ignoring one would
+#: approve unbound what the caller meant to bind, so each is refused.
+#: Query keys that read as an attempt to bind, compared with every non-letter
+#: removed (`definition-digest`, `Definition_Digest`, `fingerprint`, ...).
+_NEAR_BINDING = {"definitiondigest", "fingerprint", "digest"}
+
+
+def _near_binding(key: str) -> bool:
+    return re.sub(r"[^a-z]", "", key.lower()) in _NEAR_BINDING
+
+
+def _refused(error: str, detail: str) -> HangarJSONResponse:
+    return HangarJSONResponse({"error": error, "detail": detail}, status_code=400)
+
+
+async def _approval_binding(request: Request) -> str | None | HangarJSONResponse:
+    """The digest an approval binds to, None for an unbound one, or a 400.
+
+    Fails closed: anything that might have meant to bind and cannot be read
+    as exactly one digest -- a body that is not a JSON object, a misspelt or
+    null key, a query and body that disagree -- is refused rather than read
+    as "no binding" and approved unbound. A request with no body and no
+    query keeps working, unbound.
+    """
+    near = sorted(k for k in request.query_params if k != _BINDING and _near_binding(k))
+    values: list[object] = list(request.query_params.getlist(_BINDING))
+    if (await request.body()).strip():
+        body = await json_body(request)
+        if (invalid := missing_fields(body)) is not None:
+            return invalid
+        near += sorted(k for k in body if k != _BINDING)
+        if _BINDING in body:
+            values.append(body[_BINDING])
+    if near:
+        return _refused("unknown_fields", f"unknown field(s): {', '.join(near)}; the only one accepted is {_BINDING!r}")
+    for value in values:
+        if not isinstance(value, str) or not _DIGEST.fullmatch(value):
+            return _refused(
+                "invalid_definition_digest",
+                f"{_BINDING} must be the 64-character lowercase hex digest a listing shows",
+            )
+    if len(set(values)) > 1:
+        return _refused("conflicting_definition_digest", f"the query and body name different {_BINDING} values")
+    return cast(str, values[0]) if values else None
+
+
 async def approve_mcp_server(request: Request) -> HangarJSONResponse:
-    """Approve a pending mcp_server for registration.
+    """Approve a pending or quarantined mcp_server for registration.
 
     Path params:
         name: McpServer name to approve.
+
+    Query param or JSON body (optional):
+        definition_digest: The ``definition_digest`` of the definition the
+            operator reviewed, as ``GET /pending`` and ``GET /quarantined``
+            show it (#2109). Given, the approval applies only that definition.
+            Absent, whatever waits under the name is applied, as before, and a
+            warning is logged. A request with no body keeps working; a body
+            that is present must be a JSON object holding only this key.
 
     Returns:
         JSON with approval result from orchestrator.
 
     Raises:
         DiscoveryNotConfiguredError: If discovery is not configured.
+        DiscoveredDefinitionChangedError: The definition waiting is not the one
+            with *definition_digest* (-> 409, naming the current digest).
     """
     name = request.path_params["name"]
     orchestrator = _require_orchestrator()
-    result = await orchestrator.approve_mcp_server(name)
+    binding = await _approval_binding(request)
+    if isinstance(binding, HangarJSONResponse):
+        return binding
+    result = await orchestrator.approve_mcp_server(name, definition_digest=binding)
     return HangarJSONResponse(result)
 
 
