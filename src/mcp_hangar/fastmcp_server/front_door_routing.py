@@ -20,11 +20,11 @@ backward-compatible behavior for pre-SEP-2243 clients.
 
 Era scope: this middleware covers HANDSHAKE-era requests only. A 2026-07-28
 request is routed by the SDK's own modern entry, which enforces header/body
-agreement itself (``HEADER_MISMATCH``) and watches ``receive()`` for
-``http.disconnect`` to cancel in-flight work -- so buffering and replaying its
-body here would both duplicate the check and, because a replayed stream reports a
-disconnect once drained, cancel the request before it can answer. Modern-era
-requests therefore pass through untouched.
+agreement itself (``HEADER_MISMATCH``), duplicated routing headers included, so
+buffering its body here would only repeat that check. Modern-era requests
+therefore pass through untouched. (The replay used to invent a disconnect once
+drained, which cancelled modern requests and, until #2108, emptied legacy ones;
+it now defers to the server's ``receive`` after the body.)
 """
 
 from __future__ import annotations

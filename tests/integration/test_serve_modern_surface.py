@@ -87,9 +87,9 @@ def client():
 
     Mirrors ``run_http``'s composition, front-door wrap included -- not just the
     bare ``streamable_http_app()``. That wrap is load-bearing here: it buffers and
-    replays request bodies, and a replayed stream reports a disconnect once
-    drained, which the modern SDK entry reads as "client gone" and cancels on. A
-    fixture over the unwrapped app passes while the served app 500s.
+    replays request bodies, and a replay that invented a disconnect once drained
+    made the modern SDK entry cancel ("client gone") and left legacy answers empty
+    (#2108). A fixture over the unwrapped app passes while the served app fails.
 
     Module-scoped because the SDK's ``StreamableHTTPSessionManager.run()`` -- the
     app's lifespan -- may be entered only once per instance. Every probe below is
