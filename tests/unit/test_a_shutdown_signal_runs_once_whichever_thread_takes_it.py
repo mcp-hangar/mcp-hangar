@@ -153,3 +153,52 @@ def test_a_wakeup_fd_someone_else_registered_is_left_in_place() -> None:
         signal.set_wakeup_fd(previous)
         os.close(read_fd)
         os.close(write_fd)
+
+
+def _main_thread_only() -> None:
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("set_wakeup_fd needs the main thread")
+
+
+def test_stopping_the_watcher_unregisters_the_fd_and_ends_its_thread(end_after: MagicMock) -> None:
+    _main_thread_only()
+    lifecycle = MagicMock()
+    signals = _signals(lifecycle)
+    assert signals.watch() is True
+    thread = signals._thread
+    assert thread is not None and thread.is_alive()
+
+    signals.stop_watching()
+    signals.stop_watching()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert signal.set_wakeup_fd(-1) == -1
+    # A byte still in flight is not acted on.
+    signals.on_wakeup(signal.SIGTERM)
+    lifecycle.shutdown.assert_not_called()
+
+
+def test_a_second_stdio_setup_stops_the_first_watcher() -> None:
+    _main_thread_only()
+    from mcp_hangar.server import lifecycle as module
+
+    handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    reloaders = []
+    try:
+        reloaders.append(module._setup_signal_handlers(MagicMock(), stdio=True))
+        first = module._signal_watcher
+        assert first is not None and first._thread is not None
+        reloaders.append(module._setup_signal_handlers(MagicMock(), stdio=True))
+        first._thread.join(timeout=5)
+
+        assert not first._thread.is_alive()
+        assert module._signal_watcher is not None and module._signal_watcher is not first
+    finally:
+        module._stop_signal_watcher()
+        for reloader in reloaders:
+            if reloader is not None:
+                reloader.stop(join_timeout_s=5.0)
+        for signum, handler in handlers.items():
+            signal.signal(signum, handler)
+    assert signal.set_wakeup_fd(-1) == -1
