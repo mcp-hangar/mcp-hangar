@@ -46,7 +46,7 @@ asking for the notification path, which is the complete fix.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from ..logging_config import get_logger
@@ -74,6 +74,8 @@ class _WarmUp:
     #: True once the warm-up itself has ended, however late.
     finished: bool = False
     timer: threading.Timer | None = None
+    #: Called once if the bound passes before the warm-up finishes (#2128).
+    on_bound_passed: Callable[[], None] | None = None
 
 
 #: The current warm-up. ``None`` means none was ever started -- an ``egress``
@@ -82,7 +84,11 @@ _current: _WarmUp | None = None
 _lock = threading.Lock()
 
 
-def warmup_started(bound_s: float | None = None, mcp_server_ids: Iterable[str] = ()) -> None:
+def warmup_started(
+    bound_s: float | None = None,
+    mcp_server_ids: Iterable[str] = (),
+    on_bound_passed: Callable[[], None] | None = None,
+) -> None:
     """Record that the boot-time warm-up has begun.
 
     Called before the warm-up thread is started, and again by the warm-up
@@ -96,12 +102,15 @@ def warmup_started(bound_s: float | None = None, mcp_server_ids: Iterable[str] =
             passes, listings stop waiting, and a WARNING names the servers that
             were still warming. ``None`` sets no bound.
         mcp_server_ids: The servers the warm-up will start, for that WARNING.
+        on_bound_passed: Called once, on the timer's thread, if the bound passes
+            before the warm-up finishes; never when it finishes in time. The
+            front door starts the required-catalogue retry from it (#2128).
     """
     global _current
     with _lock:
         if _current is not None and not _current.finished:
             return
-        warm_up = _WarmUp(pending=set(mcp_server_ids))
+        warm_up = _WarmUp(pending=set(mcp_server_ids), on_bound_passed=on_bound_passed)
         if bound_s is not None:
             # A daemon: a hung warm-up must not also hold the process open on exit.
             warm_up.timer = threading.Timer(bound_s, _bound_passed, args=(warm_up, bound_s))
@@ -146,6 +155,13 @@ def _bound_passed(warm_up: _WarmUp, bound_s: float) -> None:
         bound_s=bound_s,
         still_warming=still_warming,
     )
+    # Outside the lock, and only on the path that released the warm-up, so it
+    # runs at most once and never for a warm-up that finished in time.
+    if warm_up.on_bound_passed is not None:
+        try:
+            warm_up.on_bound_passed()
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the timer thread must log, not die silently
+            logger.error("front_door_warmup_bound_callback_failed", error_type=type(e).__name__)
 
 
 def is_warming() -> bool:
