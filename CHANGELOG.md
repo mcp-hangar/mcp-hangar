@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.4...v2.34.5) (2026-10-27)
+
+### Fixed
+
+- **core:** An approval of a changed definition of a running discovered server whose replacement is refused or fails now answers `approved: false` with the reason, in the shape of the other approval refusals, and the change keeps waiting in quarantine (with its reason and time) or pending with the same `definition_digest`, while the running server is untouched. It answered with a bare error and the change was gone from `hangar_quarantine`, `GET /quarantined` and the pending listing until the next discovery cycle parked it again. ([#2142](https://github.com/mcp-hangar/mcp-hangar/pull/2142))
+- **core:** An approval of a discovered server whose registration the control plane refuses, for instance because a server of that name already exists, now answers `approved: false` with the reason, and the server keeps waiting in quarantine or pending with the same `definition_digest`. It answered `approved: true, status: registered` and dropped the entry, though nothing had changed and nothing was left to approve. ([#2137](https://github.com/mcp-hangar/mcp-hangar/pull/2137))
+
 ## [2.34.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.3...v2.34.4) (2026-10-26)
 
 ### Deprecated
