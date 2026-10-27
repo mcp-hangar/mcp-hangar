@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.6](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.5...v2.34.6) (2026-10-27)
+
+### Fixed
+
+- **core:** A changed discovered definition refused after its server was deleted over the API no longer leaves discovery tracking a server that does not run. Discovery used to keep tracking the deleted definition, so nothing ran under the name and its next unchanged report was skipped. It now stops tracking the name, and the next report registers it as a new server. A refused approval of such a change leaves the change waiting, as before, with nothing tracked. ([#2144](https://github.com/mcp-hangar/mcp-hangar/pull/2144))
+
 ## [2.34.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.4...v2.34.5) (2026-10-27)
 
 ### Fixed
