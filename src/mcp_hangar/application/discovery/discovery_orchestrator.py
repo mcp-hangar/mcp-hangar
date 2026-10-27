@@ -106,6 +106,18 @@ class DiscoveryChangeRefused(Exception):
     """
 
 
+class DiscoveryServerGone(Exception):
+    """A changed definition was refused, and no server runs under its name any more (#2143).
+
+    Raised by an update callback when the running server was already out of
+    the fleet -- deleted over the API, say -- so the change went in as a new
+    registration and that was refused. Tracking the running definition on would
+    keep a server nothing runs, and its next unchanged report would be skipped,
+    so the orchestrator stops tracking the name and the next report registers
+    it as new.
+    """
+
+
 def _origin_of(mcp_server: DiscoveredMcpServer | None) -> tuple[str, str] | None:
     """The source and fingerprint of *mcp_server*: what the fleet records of a discovered server (#2116)."""
     return None if mcp_server is None else (mcp_server.source_type, mcp_server.fingerprint)
@@ -992,6 +1004,13 @@ class DiscoveryOrchestrator:
         assert self.on_update is not None
         try:
             await self.on_update(mcp_server)
+        except DiscoveryServerGone as e:
+            if self._tracking_moved(existing, mcp_server):
+                span.set_attribute("discovery.result", "skipped")
+                return "skipped"
+            self._forget_gone(existing, mcp_server, str(e))
+            span.set_attribute("discovery.result", "rejected")
+            return "rejected"
         except DiscoveryChangeRefused as e:
             if self._tracking_moved(existing, mcp_server):
                 span.set_attribute("discovery.result", "skipped")
@@ -1031,6 +1050,32 @@ class DiscoveryOrchestrator:
             mcp_server_name=mcp_server.name,
             source=mcp_server.source_type,
             fingerprint=mcp_server.fingerprint,
+        )
+
+    def _forget_gone(self, running: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, reason: str) -> None:
+        """Stop tracking *running*, which no longer runs: its change *mcp_server* was refused (#2143).
+
+        Forgotten in tracking, the resolver and the counts, as a deregistration
+        forgets it, so the next report of the name -- the change or the running
+        definition -- is a new server to register (or park for approval) rather
+        than an unchanged one to skip.
+        """
+        self._conflict_resolver.deregister(running.name)
+        if self._lifecycle_manager.get_mcp_server(running.name) is not None:
+            self._lifecycle_manager.remove_mcp_server(running.name)
+            self._validator.record_deregistration(running)
+        for pending_change in (self._change_announced, self._change_refused, self._change_logged):
+            pending_change.pop(running.name, None)
+        logger.warning(
+            "discovery_change_not_applied",
+            mcp_server_name=mcp_server.name,
+            source=mcp_server.source_type,
+            running_fingerprint=running.fingerprint,
+            refused_fingerprint=mcp_server.fingerprint,
+            reason=reason,
+            retried=True,
+            detail="no server runs under the name any more; it is no longer tracked, and the next report "
+            "registers it as a new server",
         )
 
     def _keep_running_definition(
@@ -1430,6 +1475,10 @@ class DiscoveryOrchestrator:
             logger.error(f"Error applying approved change of mcp_server {mcp_server.name}: {e}")
             reason = str(e) or type(e).__name__
             self._put_back(mcp_server, running, quarantined, registered_before)
+            if isinstance(e, DiscoveryServerGone):
+                # The change waits again, but the running definition is not
+                # tracked on: nothing runs under the name (#2143).
+                self._forget_gone(running, mcp_server, reason)
             logger.warning(
                 "discovery_approval_refused",
                 mcp_server_name=mcp_server.name,
