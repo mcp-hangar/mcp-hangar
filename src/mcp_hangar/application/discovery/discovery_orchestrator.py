@@ -1212,7 +1212,8 @@ class DiscoveryOrchestrator:
         A changed definition of a server that already runs waits in the same
         two places, while the running definition keeps running (#2091). Its
         approval replaces the running server; refused, the running definition
-        stays and the change is not approved.
+        stays, the change is not approved, and it waits again where it waited
+        (#2138).
 
         Refused on an instance that does not hold the management lease. Run on
         discovery's own loop when it has one, as a manual scan is: the replace
@@ -1287,7 +1288,9 @@ class DiscoveryOrchestrator:
             was_pending = mcp_server is not None
 
         if mcp_server and running and self.on_update and running.fingerprint != mcp_server.fingerprint:
-            return await self._approve_change(running, mcp_server, was_pending)
+            return await self._approve_change(
+                running, mcp_server, None if was_pending else quarantined, registered_before
+            )
 
         if mcp_server:
             # Register with main registry
@@ -1332,7 +1335,7 @@ class DiscoveryOrchestrator:
         quarantined: tuple[DiscoveredMcpServer, str, datetime] | None,
         registered_before: DiscoveredMcpServer | None,
     ) -> None:
-        """Undo the take of *mcp_server* by an approval whose registration was refused (#2136).
+        """Undo the take of *mcp_server* by an approval whose registration or change was refused (#2136, #2138).
 
         *quarantined* is the entry it was taken from, or None when it was pending.
 
@@ -1406,20 +1409,35 @@ class DiscoveryOrchestrator:
         return {"approved": False, "mcp_server": name, "error": f"approval refused: {reason}"}
 
     async def _approve_change(
-        self, running: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, was_pending: bool
+        self,
+        running: DiscoveredMcpServer,
+        mcp_server: DiscoveredMcpServer,
+        quarantined: tuple[DiscoveredMcpServer, str, datetime] | None,
+        registered_before: DiscoveredMcpServer | None,
     ) -> dict[str, Any]:
-        """Apply an approved change of a running server, or put everything back as it was."""
+        """Apply an approved change of a running server, or put everything back as it was.
+
+        *quarantined* is the entry the change was taken from, or None when it
+        was pending. Refused, it waits again where it waited (#2138): it was
+        gone from the listings until the next cycle parked it again, and a
+        cycle that then found it valid applied it without the approval being
+        asked again.
+        """
         assert self.on_update is not None
         try:
             await self.on_update(mcp_server)
         except Exception as e:  # noqa: BLE001 -- fault-barrier: a failed update callback must not crash approval
             logger.error(f"Error applying approved change of mcp_server {mcp_server.name}: {e}")
-            self._lifecycle_manager.add_mcp_server(running)
-            if was_pending:
-                # Back to the running definition, so the next cycle parks the
-                # change in pending again rather than applying it unapproved.
-                self._conflict_resolver.register(running)
-            return {"approved": False, "mcp_server": mcp_server.name, "error": str(e)}
+            reason = str(e) or type(e).__name__
+            self._put_back(mcp_server, running, quarantined, registered_before)
+            logger.warning(
+                "discovery_approval_refused",
+                mcp_server_name=mcp_server.name,
+                source=mcp_server.source_type,
+                definition_digest=mcp_server.definition_digest,
+                reason=reason,
+            )
+            return {"approved": False, "mcp_server": mcp_server.name, "error": f"approval refused: {reason}"}
         self._applied(running, mcp_server)
         main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
         return {"approved": True, "mcp_server": mcp_server.name, "status": "updated"}
