@@ -59,7 +59,8 @@ jobs:
   live:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30 for the live tiers, and about 15 for the parity property's nightly budget.
+    timeout-minutes: 45
     # T4 runs two gateways over one PostgreSQL; each module creates and drops
     # a database of its own on this server.
     services:
@@ -92,3 +93,12 @@ jobs:
           MCP_HANGAR_LIVE_VERIFY: "1"
           HANGAR_TEST_POSTGRES_DSN: "host=127.0.0.1 port=55432 user=hangar password=hangar dbname=hangar"
         run: uv run pytest tests/live -m "${{ github.event.inputs.marker || 'live' }}" --timeout=180 -ra
+
+      # The listing/call parity property (#1785) runs on every PR with a small
+      # example budget (ci-core); here it gets the large one. Not a live tier:
+      # it boots the app in-process, so it needs no running gateway.
+      - name: Run the listing/call parity property at the nightly budget
+        if: ${{ !cancelled() }}
+        env:
+          HANGAR_PARITY_EXAMPLES: "300"
+        run: uv run pytest tests/integration/test_what_a_caller_is_shown_is_what_it_may_call.py --timeout=1800 -ra
