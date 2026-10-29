@@ -1565,7 +1565,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.3" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "docker", specifier = ">=7.1.0" },
-    { name = "fpdf2", marker = "extra == 'full'", specifier = ">=2.8.0" },
+    { name = "fpdf2", marker = "extra == 'full'", specifier = ">=2.8.8" },
     { name = "httpx", specifier = ">=0.25.0,<1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.90.0" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = "==2.15" },
