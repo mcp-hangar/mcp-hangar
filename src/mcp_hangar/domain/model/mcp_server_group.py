@@ -974,20 +974,22 @@ class McpServerGroup(AggregateRoot):
 
     # --- State Management ---
 
+    def _state_for(self, live_in_rotation: int) -> GroupState:
+        """The group state *live_in_rotation* members (in rotation, not DEAD) give."""
+        if self._circuit_breaker.is_open:
+            return GroupState.DEGRADED
+        if live_in_rotation == 0:
+            return GroupState.INACTIVE
+        if live_in_rotation < self._min_healthy:
+            return GroupState.PARTIAL
+        return GroupState.HEALTHY
+
     def _update_state(self) -> None:
         """Update group state from the members in rotation that are not DEAD."""
         old_state = self._state
         in_rotation = self._live_rotation_count()
         total = len(self._members)
-
-        if self._circuit_breaker.is_open:
-            new_state = GroupState.DEGRADED
-        elif in_rotation == 0:
-            new_state = GroupState.INACTIVE
-        elif in_rotation < self._min_healthy:
-            new_state = GroupState.PARTIAL
-        else:
-            new_state = GroupState.HEALTHY
+        new_state = self._state_for(in_rotation)
 
         if new_state != old_state:
             self._state = new_state
@@ -1243,38 +1245,76 @@ class McpServerGroup(AggregateRoot):
     def to_status_dict(self) -> dict[str, Any]:
         """The group's status, read under its lock: one instant.
 
-        `GET /api/groups/{id}`, `hangar_details`, `hangar_group_list` and
-        `hangar_list` return this dict as it is; `hangar_status` and
-        `hangar_health` report its counts. `healthy_count` counts members that
-        are ready and in rotation, `members_in_rotation_count` members in
-        rotation whatever their state (#1356).
+        `GET /api/groups/{id}`, `hangar_group_list` and `hangar_list` return
+        this dict as it is, and so does `hangar_details` for a caller without
+        a tenant; `hangar_status` and `hangar_health` report its counts.
+        `healthy_count` counts members that are ready and in rotation,
+        `members_in_rotation_count` members in rotation whatever their state
+        (#1356). :meth:`status_for_tenant` is the same dict cut down to one
+        tenant's members.
         """
         with self._lock:
-            return {
-                "group_id": self.id,
-                "description": self._description,
-                "state": self._state.value,
-                "strategy": self._strategy.value,
-                "min_healthy": self._min_healthy,
-                "healthy_count": self.healthy_count,
-                "members_in_rotation_count": self.members_in_rotation_count,
-                "total_members": len(self._members),
-                "is_available": self.is_available,
-                "circuit_open": self._circuit_breaker.is_open,
-                "members": [
-                    {
-                        "id": m.id,
-                        # A vacant member runs nothing, whatever its old copy reads.
-                        "state": McpServerState.COLD.value if m.vacant else m.mcp_server.state_snapshot.value,
-                        "in_rotation": m.in_rotation,
-                        "vacant": m.vacant,
-                        "weight": m.weight,
-                        "priority": m.priority,
-                        "consecutive_failures": m.consecutive_failures,
-                    }
-                    for m in self._members.values()
-                ],
-            }
+            status = self._status_of(list(self._members.values()))
+            status.update(
+                state=self._state.value,
+                healthy_count=self.healthy_count,
+                members_in_rotation_count=self.members_in_rotation_count,
+                is_available=self.is_available,
+            )
+            return status
+
+    def status_for_tenant(self, tenant_id: str) -> dict[str, Any]:
+        """:meth:`to_status_dict` as *tenant_id* is shown it: only the members its calls may be routed to (#2019).
+
+        Those are :meth:`route_candidates`, read under the same lock: the
+        pinned or canary member alone, else every member in rotation; none
+        when no member is selectable. Every count, the state and
+        `is_available` are taken over those members alone, so the dict tells
+        the tenant nothing of a member it is not shown.
+        """
+        with self._lock:
+            routed = {server.mcp_server_id for server in self.route_candidates(tenant_id)}
+            shown = [m for m in self._members.values() if m.id in routed]
+            live = sum(1 for m in shown if m.in_rotation and m.mcp_server.state_snapshot is not McpServerState.DEAD)
+            state = self._state_for(live)
+            status = self._status_of(shown)
+            status.update(
+                state=state.value,
+                healthy_count=sum(
+                    1 for m in shown if m.in_rotation and m.mcp_server.state_snapshot is McpServerState.READY
+                ),
+                members_in_rotation_count=sum(1 for m in shown if m.in_rotation),
+                is_available=not self._circuit_breaker.is_open and state.can_accept_requests and live >= 1,
+            )
+            return status
+
+    def _status_of(self, members: list[GroupMember]) -> dict[str, Any]:
+        """The status keys, in their order, with *members* listed; the counts are the caller's to fill."""
+        return {
+            "group_id": self.id,
+            "description": self._description,
+            "state": None,
+            "strategy": self._strategy.value,
+            "min_healthy": self._min_healthy,
+            "healthy_count": None,
+            "members_in_rotation_count": None,
+            "total_members": len(members),
+            "is_available": None,
+            "circuit_open": self._circuit_breaker.is_open,
+            "members": [
+                {
+                    "id": m.id,
+                    # A vacant member runs nothing, whatever its old copy reads.
+                    "state": McpServerState.COLD.value if m.vacant else m.mcp_server.state_snapshot.value,
+                    "in_rotation": m.in_rotation,
+                    "vacant": m.vacant,
+                    "weight": m.weight,
+                    "priority": m.priority,
+                    "consecutive_failures": m.consecutive_failures,
+                }
+                for m in members
+            ],
+        }
 
 
 # legacy aliases

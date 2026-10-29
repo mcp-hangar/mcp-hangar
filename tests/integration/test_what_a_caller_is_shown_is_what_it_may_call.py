@@ -41,12 +41,7 @@ DEFAULT_EXAMPLES = "5"
 
 #: Known divergences, each with the issue that owns it. strict: the day one is
 #: fixed, its test passes, and the xfail must go.
-KNOWN = {
-    "hangar_details_group": (
-        "#2019: hangar_details on a group returns group.to_status_dict() unfiltered, so a pinned tenant "
-        "is shown every member, not only the one its calls are routed to"
-    ),
-}
+KNOWN: dict[str, str] = {}
 
 
 def _cases() -> list[Any]:
