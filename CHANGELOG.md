@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.7](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.6...v2.34.7) (2026-10-29)
+
+### Fixed
+
+- **deps:** the `dev` extra now caps pytest below 9.2. pytest 9.2 removed
+  `Item._nodeid`, and the latest pytest-benchmark (5.3.0) still uses it, so every
+  test using the `benchmark` fixture failed at setup. The v2.34.6 release job, which
+  installs `.[dev]` without the lockfile, failed for this reason and never published. ([#2147](https://github.com/mcp-hangar/mcp-hangar/pull/2147))
+
+### Security
+
+- **deps:** the `full` extra now requires fpdf2 2.8.8 or later, the first release
+  that fixes CVE-2026-114609 (implicit image dereference) and CVE-2026-114610 (SVG
+  `<use>` expansion causing unbounded memory growth). The lockfile already resolved
+  2.8.9. The old floor of 2.8.0 let an existing install keep a vulnerable version
+  across an upgrade. ([#2150](https://github.com/mcp-hangar/mcp-hangar/pull/2150))
+
+## [2.34.6](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.5...v2.34.6) (2026-10-27)
+
+### Fixed
+
+- **core:** A changed discovered definition refused after its server was deleted over the API no longer leaves discovery tracking a server that does not run. Discovery used to keep tracking the deleted definition, so nothing ran under the name and its next unchanged report was skipped. It now stops tracking the name, and the next report registers it as a new server. A refused approval of such a change leaves the change waiting, as before, with nothing tracked. ([#2144](https://github.com/mcp-hangar/mcp-hangar/pull/2144))
+
+## [2.34.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.4...v2.34.5) (2026-10-27)
+
+### Fixed
+
+- **core:** An approval of a changed definition of a running discovered server whose replacement is refused or fails now answers `approved: false` with the reason, in the shape of the other approval refusals, and the change keeps waiting in quarantine (with its reason and time) or pending with the same `definition_digest`, while the running server is untouched. It answered with a bare error and the change was gone from `hangar_quarantine`, `GET /quarantined` and the pending listing until the next discovery cycle parked it again. ([#2142](https://github.com/mcp-hangar/mcp-hangar/pull/2142))
+- **core:** An approval of a discovered server whose registration the control plane refuses, for instance because a server of that name already exists, now answers `approved: false` with the reason, and the server keeps waiting in quarantine or pending with the same `definition_digest`. It answered `approved: true, status: registered` and dropped the entry, though nothing had changed and nothing was left to approve. ([#2137](https://github.com/mcp-hangar/mcp-hangar/pull/2137))
+
 ## [2.34.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.3...v2.34.4) (2026-10-26)
 
 ### Deprecated

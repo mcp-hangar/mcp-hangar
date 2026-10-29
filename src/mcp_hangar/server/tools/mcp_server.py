@@ -437,7 +437,11 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
                 circuit_open: bool,
                 members: [{id, state, in_rotation, weight, priority, consecutive_failures}]
             }
-            A group is the same dict GET /api/groups/{id} returns. healthy_count
+            A group is the same dict GET /api/groups/{id} returns; for a
+            caller with a tenant, members and every count, state and
+            is_available cover only the members its calls may be routed to
+            (the pinned or canary member, else every member in rotation;
+            none when no member is selectable). healthy_count
             counts members that are ready and in rotation;
             members_in_rotation_count counts members in rotation in any state.
             dead is null unless state is "dead". reason is "given_up",
@@ -472,7 +476,10 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
         if ctx.group_exists(mcp_server):
             group = ctx.get_group(mcp_server)
             assert group is not None
-            return group.to_status_dict()
+            # A tenant is shown the members its calls may be routed to, as
+            # hangar_tools decides on them (#2019); no tenant, the whole group.
+            tenant_id = _caller_tenant_id()
+            return group.to_status_dict() if tenant_id is None else group.status_for_tenant(tenant_id)
 
         if not ctx.mcp_server_exists(mcp_server):
             raise ValueError(f"unknown_mcp_server: {mcp_server}")

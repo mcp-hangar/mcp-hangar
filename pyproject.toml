@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.34.4"
+version = "2.34.7"
 description = "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT."
 readme = "README.md"
 license = {text = "MIT"}
@@ -92,7 +92,11 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.3",  # security floor: CVE-2025-71176 (tmpdir handling)
+    # Floor: CVE-2025-71176 (tmpdir handling). Ceiling: pytest 9.2 dropped
+    # `Item._nodeid`, which the benchmark fixture of pytest-benchmark 5.3.0 still
+    # reads, so every benchmark test errors at setup (#2146). Lift it when a
+    # pytest-benchmark release supports 9.2.
+    "pytest>=9.0.3,<9.2",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=1.3.0",  # first release that admits pytest 9 (the pytest floor above)
     "pytest-timeout>=2.2.0",
@@ -154,7 +158,7 @@ redis = [
     "redis>=5.0.0",
 ]
 full = [
-    "fpdf2>=2.8.0",
+    "fpdf2>=2.8.8",  # security floor: CVE-2026-114609 (image dereference), CVE-2026-114610 (SVG <use> expansion)
 ]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"

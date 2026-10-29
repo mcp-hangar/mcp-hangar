@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
-from ...application.discovery import DiscoveryChangeRefused, DiscoveryConfig, DiscoveryOrchestrator
+from ...application.discovery import (
+    DiscoveryChangeRefused,
+    DiscoveryConfig,
+    DiscoveryOrchestrator,
+    DiscoveryServerGone,
+)
 from ...domain.contracts.fleet import NotTheManagerError
 from ...domain.exceptions import (
     McpServerNotDiscoveredError,
@@ -330,11 +335,16 @@ async def _on_mcp_server_update(mcp_server) -> None:
     Raises:
         DiscoveryChangeRefused: The change is refused; the running server is
             untouched. The orchestrator does not retry this definition.
+        DiscoveryServerGone: The change is refused, and no server runs under
+            its name; the orchestrator stops tracking it.
         Exception: Anything else (a lost lease, storage) is retried next cycle.
     """
     command = _create_command(mcp_server, replace=True)
     if command is None:
-        raise DiscoveryChangeRefused("the changed definition cannot be registered; see the line above")
+        reason = "the changed definition cannot be registered; see the line above"
+        if not get_runtime().repository.exists(mcp_server.name):
+            raise DiscoveryServerGone(reason)
+        raise DiscoveryChangeRefused(reason)
     try:
         get_runtime().command_bus.send(command)
     except NotTheManagerError as e:
@@ -343,11 +353,13 @@ async def _on_mcp_server_update(mcp_server) -> None:
         raise
     except (ValidationError, ValueError) as e:
         # ValueError covers SsrfBlocked and a value object that refuses a field.
-        # A refusal only while the running server is still there: one raised
-        # after it was taken out (its record write refused, say) is retried, and
-        # the next cycle registers the change as a new server.
+        # The handler refuses before it touches the running server, so a server
+        # missing now was gone before the change came: deleted over the API, say,
+        # which made the change a new registration. Re-raised as it was, the
+        # orchestrator tracked a definition nothing ran, and skipped its next
+        # unchanged report (#2143).
         if not get_runtime().repository.exists(mcp_server.name):
-            raise
+            raise DiscoveryServerGone(str(e)) from e
         raise DiscoveryChangeRefused(str(e)) from e
     logger.info("discovery_replaced_mcp_server", mcp_server_name=mcp_server.name, mode=command.mode)
 
