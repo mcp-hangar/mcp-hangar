@@ -974,13 +974,14 @@ class McpServerGroup(AggregateRoot):
 
     # --- State Management ---
 
-    def _state_for(self, live_in_rotation: int) -> GroupState:
-        """The group state *live_in_rotation* members (in rotation, not DEAD) give."""
-        if self._circuit_breaker.is_open:
+    @staticmethod
+    def _state_for(live_in_rotation: int, min_healthy: int, circuit_open: bool) -> GroupState:
+        """The group state *live_in_rotation* members (in rotation, not DEAD) give against *min_healthy*."""
+        if circuit_open:
             return GroupState.DEGRADED
         if live_in_rotation == 0:
             return GroupState.INACTIVE
-        if live_in_rotation < self._min_healthy:
+        if live_in_rotation < min_healthy:
             return GroupState.PARTIAL
         return GroupState.HEALTHY
 
@@ -989,7 +990,7 @@ class McpServerGroup(AggregateRoot):
         old_state = self._state
         in_rotation = self._live_rotation_count()
         total = len(self._members)
-        new_state = self._state_for(in_rotation)
+        new_state = self._state_for(in_rotation, self._min_healthy, self._circuit_breaker.is_open)
 
         if new_state != old_state:
             self._state = new_state
@@ -1271,12 +1272,19 @@ class McpServerGroup(AggregateRoot):
         when no member is selectable. Every count, the state and
         `is_available` are taken over those members alone, so the dict tells
         the tenant nothing of a member it is not shown.
+
+        The state is judged against `min_healthy` capped at the number of
+        members shown, so a tenant pinned to one live member reads `healthy`.
+        `min_healthy` and `circuit_open` are left out: the one counts members
+        the tenant is not shown, the other opens on failures of any member and
+        never refuses a call while a member is selectable, and the tenant is
+        shown none when none is.
         """
         with self._lock:
             routed = {server.mcp_server_id for server in self.route_candidates(tenant_id)}
             shown = [m for m in self._members.values() if m.id in routed]
             live = sum(1 for m in shown if m.in_rotation and m.mcp_server.state_snapshot is not McpServerState.DEAD)
-            state = self._state_for(live)
+            state = self._state_for(live, min(self._min_healthy, len(shown)), circuit_open=False)
             status = self._status_of(shown)
             status.update(
                 state=state.value,
@@ -1284,8 +1292,9 @@ class McpServerGroup(AggregateRoot):
                     1 for m in shown if m.in_rotation and m.mcp_server.state_snapshot is McpServerState.READY
                 ),
                 members_in_rotation_count=sum(1 for m in shown if m.in_rotation),
-                is_available=not self._circuit_breaker.is_open and state.can_accept_requests and live >= 1,
+                is_available=state.can_accept_requests and live >= 1,
             )
+            del status["min_healthy"], status["circuit_open"]
             return status
 
     def _status_of(self, members: list[GroupMember]) -> dict[str, Any]:
