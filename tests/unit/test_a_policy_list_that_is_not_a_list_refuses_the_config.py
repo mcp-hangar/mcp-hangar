@@ -23,9 +23,11 @@ from mcp_hangar.application.commands import ReloadConfigurationCommand
 from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import ServerConfigLoader, load_configuration
 from mcp_hangar.server.state import GROUPS, get_runtime
+from tests._access_decisions import may
 
 pytestmark = pytest.mark.security
 
@@ -135,7 +137,7 @@ class TestTheReproRefusesToBoot:
     def test_the_same_policy_written_as_a_list_boots_and_denies(self, gateway: _Gateway) -> None:
         gateway.boot({SERVER: _server(tools={"deny_list": ["add"]})})
 
-        assert not get_tool_access_resolver().is_tool_allowed(SERVER, "add")
+        assert not may(get_tool_access_resolver(), Target.server(SERVER), "add")
 
 
 class TestEverySiteRefusesAListThatIsNotAList:
@@ -168,4 +170,4 @@ class TestARefusedReloadKeepsThePreviousPolicy:
             gateway.reload({SERVER: _server(tools={"deny_list": ["add"], field: "add"})})
 
         assert get_tool_access_resolver().iter_registered_policies() == before
-        assert not get_tool_access_resolver().is_tool_allowed(SERVER, "add")
+        assert not may(get_tool_access_resolver(), Target.server(SERVER), "add")

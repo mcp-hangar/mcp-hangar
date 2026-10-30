@@ -23,6 +23,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.server.tools.batch.executor import BatchExecutor
 from mcp_hangar.server.tools.batch.models import CallResult, CallSpec
 
@@ -37,6 +38,17 @@ def _call(**overrides) -> CallSpec:
     }
     data.update(overrides)
     return CallSpec(**data)
+
+
+@pytest.fixture(autouse=True)
+def _the_merge_asks_the_fake_resolver(monkeypatch):
+    """The merge is functions over a resolver (#1784); the fake here answers for them."""
+    monkeypatch.setattr(_policy_merge, "is_allowed", lambda resolver, *a, **k: resolver.is_allowed(*a, **k))
+    monkeypatch.setattr(
+        _policy_merge,
+        "resolve_effective_policy",
+        lambda resolver, *a, **k: resolver.resolve_effective_policy(*a, **k),
+    )
 
 
 def _resolver(*, allowed=True, unrestricted=False, raises=None):

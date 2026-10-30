@@ -18,8 +18,11 @@ is being built, is `test_a_reload_applies_the_whole_configuration.py`.
 
 from __future__ import annotations
 
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Target
+from tests._access_decisions import may
 
 DENY_X = ToolAccessPolicy(deny_list=("x",))
 DENY_Y = ToolAccessPolicy(deny_list=("y",))
@@ -48,7 +51,7 @@ def _file(
 
 
 def _denies(resolver: ToolAccessResolver, server: str, tool: str) -> bool:
-    return not resolver.is_tool_allowed(server, tool)
+    return not may(resolver, Target.server(server), tool)
 
 
 class TestAReloadReplacesTheFilesPolicies:
@@ -104,7 +107,7 @@ class TestAReloadReplacesTheFilesPolicies:
         _file(resolver, replace=True, servers={"a": DENY_X})
 
         assert resolver.topology_mode == "front_door"
-        assert not resolver.resolve_effective_policy("a").is_tool_allowed("anything")
+        assert not _policy_merge.resolve_effective_policy(resolver, "a").is_tool_allowed("anything")
 
 
 class TestAPolicySetAtRuntimeAcrossAReload:

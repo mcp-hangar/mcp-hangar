@@ -21,6 +21,7 @@ from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.fastmcp_server.flat_tool_projection import (
     EMPTY_FILTERED,
     EMPTY_NO_IDENTITY,
@@ -29,6 +30,7 @@ from mcp_hangar.fastmcp_server.flat_tool_projection import (
     _report_empty_projection,
 )
 from mcp_hangar.logging_config import reset_log_throttle, should_log_now
+from tests._access_decisions import may
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +55,7 @@ class TestTheDenyAllBranchSpeaks:
         resolver.set_topology_mode("front_door")
 
         with caplog.at_level(logging.WARNING):
-            allowed = resolver.is_tool_allowed(mcp_server_id="payments", tool_name="pay", member_id=None)
+            allowed = may(resolver, Target.server("payments"), "pay")
 
         assert allowed is False
         assert "front_door_denied_no_tenant" in caplog.text
@@ -69,7 +71,7 @@ class TestTheDenyAllBranchSpeaks:
         resolver.set_topology_mode("front_door")
 
         with caplog.at_level(logging.WARNING):
-            resolver.is_tool_allowed(mcp_server_id="payments", tool_name="pay", member_id="tenant:a")
+            may(resolver, Target.server("payments"), "pay", Caller(tenant_id="tenant:a"))
 
         assert "front_door_denied_no_tenant" not in caplog.text
 
@@ -78,7 +80,7 @@ class TestTheDenyAllBranchSpeaks:
         resolver = ToolAccessResolver()
 
         with caplog.at_level(logging.WARNING):
-            resolver.is_tool_allowed(mcp_server_id="payments", tool_name="pay", member_id=None)
+            may(resolver, Target.server("payments"), "pay")
 
         assert "front_door_denied_no_tenant" not in caplog.text
 
@@ -89,7 +91,7 @@ class TestTheDenyAllBranchSpeaks:
 
         with caplog.at_level(logging.WARNING):
             for _ in range(50):
-                resolver.is_tool_allowed(mcp_server_id="payments", tool_name="pay", member_id=None)
+                may(resolver, Target.server("payments"), "pay")
 
         assert caplog.text.count("front_door_denied_no_tenant") == 1
 

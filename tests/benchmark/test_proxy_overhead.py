@@ -37,15 +37,18 @@ from mcp_hangar.domain.model import McpServer, McpServerState
 from mcp_hangar.domain.model.health_tracker import HealthTracker
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     ToolAccessResolver,
     reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
+from tests._access_decisions import may
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -190,7 +193,7 @@ class TestToolAccessResolver:
         resolver = ToolAccessResolver()
 
         def check():
-            return resolver.is_tool_allowed("provider-a", "read_file")
+            return may(resolver, Target.server("provider-a"), "read_file")
 
         result = benchmark(check)
         assert result is True
@@ -204,7 +207,7 @@ class TestToolAccessResolver:
         )
 
         def check():
-            return resolver.is_tool_allowed("provider-a", "read_file")
+            return may(resolver, Target.server("provider-a"), "read_file")
 
         result = benchmark(check)
         assert result is True
@@ -218,7 +221,7 @@ class TestToolAccessResolver:
         )
 
         def check():
-            return resolver.is_tool_allowed("provider-a", "read_file")
+            return may(resolver, Target.server("provider-a"), "read_file")
 
         result = benchmark(check)
         assert result is True
@@ -241,7 +244,9 @@ class TestToolAccessResolver:
         )
 
         def check():
-            return resolver.is_tool_allowed("provider-a", "read_file", group_id="group-1", member_id="member-1")
+            return _policy_merge.is_allowed(
+                resolver, "provider-a", "read_file", group_id="group-1", member_id="member-1"
+            )
 
         result = benchmark(check)
         assert result is True

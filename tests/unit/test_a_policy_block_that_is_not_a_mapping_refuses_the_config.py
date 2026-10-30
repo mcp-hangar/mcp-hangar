@@ -22,9 +22,11 @@ from mcp_hangar.application.commands import ReloadConfigurationCommand
 from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import ServerConfigLoader, load_configuration
 from mcp_hangar.server.state import GROUPS, get_runtime
+from tests._access_decisions import may
 
 pytestmark = pytest.mark.security
 
@@ -213,4 +215,4 @@ class TestARefusedReloadKeepsThePreviousPolicy:
             gateway.reload(servers)
 
         assert get_tool_access_resolver().iter_registered_policies() == before
-        assert not get_tool_access_resolver().is_tool_allowed(SERVER, "add")
+        assert not may(get_tool_access_resolver(), Target.server(SERVER), "add")

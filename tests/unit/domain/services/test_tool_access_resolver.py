@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     ToolAccessResolver,
     get_tool_access_resolver,
@@ -34,7 +35,7 @@ class TestToolAccessResolverBasic:
 
     def test_no_policy_returns_unrestricted(self, resolver):
         """Provider without policy should return unrestricted policy."""
-        policy = resolver.resolve_effective_policy("test-provider")
+        policy = _policy_merge.resolve_effective_policy(resolver, "test-provider")
         assert policy.is_unrestricted()
 
     def test_set_mcp_server_policy(self, resolver):
@@ -42,7 +43,7 @@ class TestToolAccessResolverBasic:
         policy = ToolAccessPolicy(deny_list=("delete_*",))
         resolver.set_mcp_server_policy("grafana", policy)
 
-        effective = resolver.resolve_effective_policy("grafana")
+        effective = _policy_merge.resolve_effective_policy(resolver, "grafana")
         assert not effective.is_unrestricted()
         assert not effective.is_tool_allowed("delete_dashboard")
         assert effective.is_tool_allowed("get_dashboard")
@@ -53,7 +54,7 @@ class TestToolAccessResolverBasic:
         resolver.set_mcp_server_policy("grafana", policy)
         resolver.remove_provider_policy("grafana")
 
-        effective = resolver.resolve_effective_policy("grafana")
+        effective = _policy_merge.resolve_effective_policy(resolver, "grafana")
         assert effective.is_unrestricted()
 
     def test_set_unrestricted_policy_removes_it(self, resolver):
@@ -64,7 +65,7 @@ class TestToolAccessResolverBasic:
         # Set unrestricted
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy())
 
-        effective = resolver.resolve_effective_policy("grafana")
+        effective = _policy_merge.resolve_effective_policy(resolver, "grafana")
         assert effective.is_unrestricted()
 
 
@@ -77,7 +78,9 @@ class TestToolAccessResolverGroupMerge:
         resolver.set_group_policy("monitoring", group_policy)
         resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), mcp_server_id="grafana")
 
-        effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
+        effective = _policy_merge.resolve_effective_policy(
+            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+        )
         assert not effective.is_tool_allowed("delete_dashboard")
         assert effective.is_tool_allowed("get_dashboard")
 
@@ -89,7 +92,9 @@ class TestToolAccessResolverGroupMerge:
         resolver.set_group_policy("monitoring", group_policy)
         resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
-        effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
+        effective = _policy_merge.resolve_effective_policy(
+            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+        )
         # Both group and member denials should apply
         assert not effective.is_tool_allowed("delete_dashboard")
         assert not effective.is_tool_allowed("create_alert_rule")
@@ -102,7 +107,9 @@ class TestToolAccessResolverGroupMerge:
         # No explicit member policy set
         resolver.set_member_policy("monitoring", "grafana-staging", ToolAccessPolicy(), mcp_server_id="grafana")
 
-        effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-staging")
+        effective = _policy_merge.resolve_effective_policy(
+            resolver, "grafana", group_id="monitoring", member_id="grafana-staging"
+        )
         assert not effective.is_tool_allowed("delete_dashboard")
         assert effective.is_tool_allowed("get_dashboard")
 
@@ -120,7 +127,9 @@ class TestToolAccessResolverThreeLevelMerge:
         resolver.set_group_policy("monitoring", group_policy)
         resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
-        effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
+        effective = _policy_merge.resolve_effective_policy(
+            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+        )
 
         # Provider allows get_*, list_*, create_*, update_*
         # Group denies create_alert_*, update_alert_*
@@ -142,7 +151,7 @@ class TestToolAccessResolverThreeLevelMerge:
         resolver.set_group_policy("compute", group_policy)
 
         # Call without group context
-        effective = resolver.resolve_effective_policy("math")
+        effective = _policy_merge.resolve_effective_policy(resolver, "math")
         assert not effective.is_tool_allowed("delete_value")
         assert effective.is_tool_allowed("create_value")  # Group policy not applied
 
@@ -156,9 +165,9 @@ class TestToolAccessResolverCache:
         resolver.set_mcp_server_policy("grafana", policy)
 
         # First call computes and caches
-        result1 = resolver.resolve_effective_policy("grafana")
+        result1 = _policy_merge.resolve_effective_policy(resolver, "grafana")
         # Second call should hit cache
-        result2 = resolver.resolve_effective_policy("grafana")
+        result2 = _policy_merge.resolve_effective_policy(resolver, "grafana")
 
         assert result1 is result2  # Same object from cache
 
@@ -167,14 +176,14 @@ class TestToolAccessResolverCache:
         policy1 = ToolAccessPolicy(deny_list=("delete_*",))
         resolver.set_mcp_server_policy("grafana", policy1)
 
-        result1 = resolver.resolve_effective_policy("grafana")
+        result1 = _policy_merge.resolve_effective_policy(resolver, "grafana")
         assert not result1.is_tool_allowed("delete_dashboard")
 
         # Change policy
         policy2 = ToolAccessPolicy(deny_list=("create_*",))
         resolver.set_mcp_server_policy("grafana", policy2)
 
-        result2 = resolver.resolve_effective_policy("grafana")
+        result2 = _policy_merge.resolve_effective_policy(resolver, "grafana")
         assert result2.is_tool_allowed("delete_dashboard")
         assert not result2.is_tool_allowed("create_dashboard")
 
@@ -184,7 +193,7 @@ class TestToolAccessResolverCache:
         resolver.set_mcp_server_policy("grafana", policy)
 
         # First resolve - populates cache
-        result1 = resolver.resolve_effective_policy("grafana")
+        result1 = _policy_merge.resolve_effective_policy(resolver, "grafana")
 
         # Verify cache is populated
         assert len(resolver._policy_cache) == 1
@@ -196,7 +205,7 @@ class TestToolAccessResolverCache:
         assert len(resolver._policy_cache) == 0
 
         # Second resolve - should recompute
-        result2 = resolver.resolve_effective_policy("grafana")
+        result2 = _policy_merge.resolve_effective_policy(resolver, "grafana")
 
         # Verify cache is repopulated
         assert len(resolver._policy_cache) == 1
@@ -209,8 +218,8 @@ class TestToolAccessResolverCache:
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
         resolver.set_mcp_server_policy("prometheus", ToolAccessPolicy(deny_list=("create_*",)))
 
-        resolver.resolve_effective_policy("grafana")
-        resolver.resolve_effective_policy("prometheus")
+        _policy_merge.resolve_effective_policy(resolver, "grafana")
+        _policy_merge.resolve_effective_policy(resolver, "prometheus")
 
         resolver.invalidate_cache(None)  # Invalidate all
 
@@ -225,11 +234,11 @@ class TestToolAccessResolverFiltering:
         """is_tool_allowed should check against effective policy."""
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
 
-        assert resolver.is_tool_allowed("grafana", "get_dashboard")
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert _policy_merge.is_allowed(resolver, "grafana", "get_dashboard")
+        assert not _policy_merge.is_allowed(resolver, "grafana", "delete_dashboard")
 
     def test_filter_tools(self, resolver):
-        """filter_tools should return only allowed ToolSchema objects."""
+        """Only the tool schemas the effective policy allows should remain."""
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*", "create_alert_*")))
 
         tools = [
@@ -239,14 +248,14 @@ class TestToolAccessResolverFiltering:
             ToolSchema(name="list_datasources", description="List datasources", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("grafana", tools)
+        filtered = [t for t in tools if _policy_merge.is_allowed(resolver, "grafana", t.name)]
 
         assert len(filtered) == 2
         assert filtered[0].name == "get_dashboard"
         assert filtered[1].name == "list_datasources"
 
     def test_filter_tool_dicts(self, resolver):
-        """filter_tool_dicts should return only allowed tool dictionaries."""
+        """Only the tool dictionaries the effective policy allows should remain."""
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(allow_list=("get_*", "list_*")))
 
         tools = [
@@ -255,7 +264,7 @@ class TestToolAccessResolverFiltering:
             {"name": "list_datasources", "description": "List datasources"},
         ]
 
-        filtered = resolver.filter_tool_dicts("grafana", tools)
+        filtered = [t for t in tools if _policy_merge.is_allowed(resolver, "grafana", t["name"])]
 
         assert len(filtered) == 2
         assert filtered[0]["name"] == "get_dashboard"
@@ -268,7 +277,7 @@ class TestToolAccessResolverFiltering:
             ToolSchema(name="delete_dashboard", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("unrestricted-provider", tools)
+        filtered = [t for t in tools if _policy_merge.is_allowed(resolver, "unrestricted-provider", t.name)]
         assert len(filtered) == 2
 
 
@@ -282,7 +291,7 @@ class TestToolAccessResolverThreadSafety:
         results = []
 
         def resolve():
-            policy = resolver.resolve_effective_policy("grafana")
+            policy = _policy_merge.resolve_effective_policy(resolver, "grafana")
             results.append(policy.is_tool_allowed("get_dashboard"))
             results.append(not policy.is_tool_allowed("delete_dashboard"))
 
@@ -300,7 +309,7 @@ class TestToolAccessResolverThreadSafety:
         def update_and_check(i):
             policy = ToolAccessPolicy(deny_list=(f"tool_{i}",))
             resolver.set_mcp_server_policy("test", policy)
-            effective = resolver.resolve_effective_policy("test")
+            effective = _policy_merge.resolve_effective_policy(resolver, "test")
             # Just verify it doesn't raise
             return effective is not None
 
@@ -329,7 +338,7 @@ class TestToolAccessResolverGlobalSingleton:
 
         resolver2 = get_tool_access_resolver()
         # New instance should not have the policy
-        assert resolver2.resolve_effective_policy("test").is_unrestricted()
+        assert _policy_merge.resolve_effective_policy(resolver2, "test").is_unrestricted()
 
 
 class TestToolAccessResolverPolicySummary:
@@ -366,45 +375,45 @@ class TestToolAccessResolverGlobalPolicy:
     def test_global_deny_applies_to_provider_without_policy(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
 
-        assert not resolver.is_tool_allowed("any-provider", "delete_something")
-        assert resolver.is_tool_allowed("any-provider", "get_something")
+        assert not _policy_merge.is_allowed(resolver, "any-provider", "delete_something")
+        assert _policy_merge.is_allowed(resolver, "any-provider", "get_something")
 
     def test_global_allow_list_applies_to_provider_without_policy(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(allow_list=("get_*", "list_*")))
 
-        assert resolver.is_tool_allowed("any-provider", "get_data")
-        assert not resolver.is_tool_allowed("any-provider", "delete_data")
+        assert _policy_merge.is_allowed(resolver, "any-provider", "get_data")
+        assert not _policy_merge.is_allowed(resolver, "any-provider", "delete_data")
 
     def test_provider_policy_merges_with_global(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
         resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("create_alert_*",)))
 
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
-        assert not resolver.is_tool_allowed("grafana", "create_alert_rule")
-        assert resolver.is_tool_allowed("grafana", "get_dashboard")
+        assert not _policy_merge.is_allowed(resolver, "grafana", "delete_dashboard")
+        assert not _policy_merge.is_allowed(resolver, "grafana", "create_alert_rule")
+        assert _policy_merge.is_allowed(resolver, "grafana", "get_dashboard")
 
     def test_global_deny_cannot_be_overridden_by_provider_allow(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("rm_*",)))
         resolver.set_mcp_server_policy("dangerous", ToolAccessPolicy(allow_list=("rm_prod", "rm_staging")))
 
-        assert not resolver.is_tool_allowed("dangerous", "rm_prod")
-        assert not resolver.is_tool_allowed("dangerous", "rm_staging")
+        assert not _policy_merge.is_allowed(resolver, "dangerous", "rm_prod")
+        assert not _policy_merge.is_allowed(resolver, "dangerous", "rm_staging")
 
     def test_global_allow_list_intersects_with_provider_allow_list(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(allow_list=("get_*", "add")))
         resolver.set_mcp_server_policy("math", ToolAccessPolicy(allow_list=("add", "multiply")))
 
-        assert resolver.is_tool_allowed("math", "add")
-        assert not resolver.is_tool_allowed("math", "multiply")
-        assert not resolver.is_tool_allowed("math", "get_data")
+        assert _policy_merge.is_allowed(resolver, "math", "add")
+        assert not _policy_merge.is_allowed(resolver, "math", "multiply")
+        assert not _policy_merge.is_allowed(resolver, "math", "get_data")
 
     def test_no_policy_without_global_is_still_unrestricted(self, resolver):
-        policy = resolver.resolve_effective_policy("provider-with-no-policy")
+        policy = _policy_merge.resolve_effective_policy(resolver, "provider-with-no-policy")
         assert policy.is_unrestricted()
 
     def test_global_approval_list_applies_to_provider_without_policy(self, resolver):
         resolver.set_mcp_server_policy("_global", ToolAccessPolicy(approval_list=("power_*",)))
-        policy = resolver.resolve_effective_policy("any-provider")
+        policy = _policy_merge.resolve_effective_policy(resolver, "any-provider")
 
         assert policy.requires_approval("power_delete")
         assert not policy.requires_approval("get_data")
@@ -426,7 +435,7 @@ class TestUnloadingAServerRetiresEveryKind:
         resolver.remove_mcp_server_policy("srv")
 
         for kind in ("tool", "prompt", "resource"):
-            assert resolver.resolve_effective_policy("srv", kind=kind).is_unrestricted(), (
+            assert _policy_merge.resolve_effective_policy(resolver, "srv", kind=kind).is_unrestricted(), (
                 f"{kind} policy survived the unload"
             )
 
@@ -435,7 +444,7 @@ class TestUnloadingAServerRetiresEveryKind:
         resolver.remove_mcp_server_policy("srv")
 
         # A new server takes the id and declares nothing about prompts.
-        assert resolver.is_allowed("srv", "any_prompt", kind="prompt")
+        assert _policy_merge.is_allowed(resolver, "srv", "any_prompt", kind="prompt")
 
     def test_another_server_is_untouched(self, resolver):
         resolver.set_mcp_server_policy("other", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")
@@ -443,7 +452,7 @@ class TestUnloadingAServerRetiresEveryKind:
 
         resolver.remove_mcp_server_policy("srv")
 
-        assert not resolver.is_allowed("other", "secret_x", kind="prompt")
+        assert not _policy_merge.is_allowed(resolver, "other", "secret_x", kind="prompt")
 
 
 class TestRemovingAGroupOrMemberRetiresEveryKind:
@@ -467,12 +476,12 @@ class TestRemovingAGroupOrMemberRetiresEveryKind:
         for kind in ("tool", "prompt", "resource"):
             resolver.set_member_policy("grp", "m1", ToolAccessPolicy(deny_list=("secret_*",)), "srv", kind=kind)
         # Warm the prompt cache entry so a stale hit would be visible.
-        assert not resolver.is_allowed("srv", "secret_x", group_id="grp", member_id="m1", kind="prompt")
+        assert not _policy_merge.is_allowed(resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_id="m1")
 
         resolver.remove_member_policy("grp", "m1")
 
         assert not [s for s, _ in resolver.iter_registered_policies(kind=None) if s.startswith("group:grp")]
-        assert resolver.is_allowed("srv", "secret_x", group_id="grp", member_id="m1", kind="prompt")
+        assert _policy_merge.is_allowed(resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_id="m1")
 
     def test_another_group_and_member_are_untouched(self, resolver):
         resolver.set_group_policy("other", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")

@@ -47,6 +47,7 @@ from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_pol
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
 from mcp_hangar.infrastructure.persistence.log_buffer import get_log_buffer, remove_log_buffer
@@ -62,6 +63,7 @@ from mcp_hangar.server.tools.batch.concurrency import (
     get_concurrency_manager,
     reset_concurrency_manager,
 )
+from tests._access_decisions import may
 
 SERVER = "store"
 TENANT = "tenant:a"
@@ -166,8 +168,8 @@ class TestTheTopologyModeSurvivesAReload:
 
         resolver = get_tool_access_resolver()
         assert resolver.topology_mode == "front_door"
-        assert not resolver.is_tool_allowed(SERVER, "anything"), "a caller with no tenant is still denied"
-        assert resolver.is_tool_allowed(SERVER, "anything", member_id=TENANT)
+        assert not may(resolver, Target.server(SERVER), "anything"), "a caller with no tenant is still denied"
+        assert may(resolver, Target.server(SERVER), "anything", Caller(tenant_id=TENANT))
 
 
 class TestAModeChangeIsRefused:
@@ -328,7 +330,7 @@ GOVERNED = _server(
 def _governance(mcp_server_id: str) -> dict[str, bool]:
     registry = get_tool_projection_registry()
     return {
-        "denies_x": not get_tool_access_resolver().is_tool_allowed(mcp_server_id, "x"),
+        "denies_x": not may(get_tool_access_resolver(), Target.server(mcp_server_id), "x"),
         "withdrawn": registry.is_withdrawn(mcp_server_id, "w"),
         "pinned": registry.resolve_pin(mcp_server_id, "p", None) is not None,
         "header_exposure": get_header_exposure_policy(mcp_server_id) is not None,
@@ -642,7 +644,7 @@ class TestTheStoredPoliciesAcrossAReload:
                 store.reading.clear()
                 time.sleep(0.05)
                 started = time.monotonic()
-                get_tool_access_resolver().is_tool_allowed(SERVER, "z", member_id=TENANT)
+                may(get_tool_access_resolver(), Target.server(SERVER), "z", Caller(tenant_id=TENANT))
                 waits.append(time.monotonic() - started)
 
         caller = threading.Thread(target=a_policy_check_during_each_read)
@@ -703,7 +705,7 @@ class TestNoCallSeesAGap:
             "late_is_served": False,
         }
         assert get_runtime().repository.get("late") is not None
-        assert not get_tool_access_resolver().is_tool_allowed("late", "x")
+        assert not may(get_tool_access_resolver(), Target.server("late"), "x")
         assert _group_rules() == {"y_allowed": False, "gw_allowed": False}
 
     def test_a_reload_that_fails_while_building_changes_nothing(

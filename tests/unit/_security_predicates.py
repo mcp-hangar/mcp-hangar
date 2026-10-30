@@ -38,8 +38,8 @@ from mcp_hangar.application.validators.payload_size import PayloadSizeValidator
 from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import evaluate_headers
+from mcp_hangar.domain.services._policy_merge import is_allowed
 from mcp_hangar.domain.services.access_decision import decide
-from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.services.ui_resource_guard import UiResourceGuard
 from mcp_hangar.fastmcp_server.flat_tool_projection import _authorize_flat_call, is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
@@ -292,7 +292,7 @@ PREDICATES: tuple[Predicate, ...] = (
     # Tool-access policy: the decision every surface shares, the executor's
     # call-time check included (#1784).
     Predicate(
-        ToolAccessResolver.is_allowed,
+        is_allowed,
         by="kind",
         paths={
             **_each(_EXECUTOR_PATHS, "tool"),
@@ -434,18 +434,14 @@ EXEMPT: dict[str, str] = {
     "application/read_models/tool_projection.py::ToolProjectionRegistry._is_withdrawn_for": (
         "The overlay lookup behind is_withdrawn and resolve(); ToolProjection.is_withdrawn_for is registered."
     ),
-    "domain/services/tool_access_resolver.py::ToolAccessResolver.is_tool_allowed": (
-        "The tool-kind spelling of is_allowed, which is registered. Every surface asks decide(), which asks "
-        "is_allowed; this one is retired with the loose-string signatures (#1784)."
-    ),
     "domain/services/task_ownership.py::TaskOwnershipRegistry.authorize": (
         "The ownership rule GovernedTaskStore.authorize applies. That method is registered."
     ),
     "domain/value_objects/tool_access_policy.py::ToolAccessPolicy.is_tool_allowed": (
-        "A policy's pattern match, asked by ToolAccessResolver.is_allowed, which is registered."
+        "A policy's pattern match, asked by _policy_merge.is_allowed, which is registered."
     ),
     "domain/value_objects/tool_access_policy.py::_CompositePolicy.is_tool_allowed": (
-        "A policy's pattern match, asked by ToolAccessResolver.is_allowed, which is registered."
+        "A policy's pattern match, asked by _policy_merge.is_allowed, which is registered."
     ),
     "domain/value_objects/ui_resource.py::UiResourcePolicy.is_allowed": (
         "The ui:// allowlist match, asked by UiResourceGuard.evaluate, which is registered."

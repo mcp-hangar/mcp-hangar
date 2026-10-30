@@ -16,12 +16,15 @@ from unittest.mock import patch
 
 import pytest
 
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
     reset_tool_access_resolver,
 )
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
+from tests._access_decisions import may
 
 _GROUP = "secure-pool"
 _MEMBER = "full-access"
@@ -52,19 +55,15 @@ def _configured_pool():
 def test_member_deny_list_refuses_a_call_routed_to_that_member():
     resolver = _configured_pool()
 
-    assert not resolver.is_tool_allowed(
-        _GROUP, "admin_reset", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER
-    )
-    assert resolver.is_tool_allowed(_GROUP, "query_rows", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER)
+    assert not may(resolver, Target.group(_GROUP, member_server=_MEMBER), "admin_reset", Caller(tenant_id=_TENANT))
+    assert may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_rows", Caller(tenant_id=_TENANT))
 
 
 def test_a_sibling_member_is_not_governed_by_it():
     """The deny is the member's own, not the group's."""
     resolver = _configured_pool()
 
-    assert resolver.is_tool_allowed(
-        _GROUP, "admin_reset", group_id=_GROUP, member_id=_TENANT, member_server_id=_OTHER_MEMBER
-    )
+    assert may(resolver, Target.group(_GROUP, member_server=_OTHER_MEMBER), "admin_reset", Caller(tenant_id=_TENANT))
 
 
 def test_the_member_server_policy_is_merged_too():
@@ -72,9 +71,7 @@ def test_the_member_server_policy_is_merged_too():
     resolver = _configured_pool()
     resolver.set_mcp_server_policy(_MEMBER, ToolAccessPolicy(deny_list=("query_secrets",)))
 
-    assert not resolver.is_tool_allowed(
-        _GROUP, "query_secrets", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER
-    )
+    assert not may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_secrets", Caller(tenant_id=_TENANT))
 
 
 def test_the_callers_tenant_policy_on_the_member_is_merged_too():
@@ -82,31 +79,25 @@ def test_the_callers_tenant_policy_on_the_member_is_merged_too():
     resolver = _configured_pool()
     resolver.set_standalone_member_policy(_MEMBER, _TENANT, ToolAccessPolicy(deny_list=("query_pii",)))
 
-    assert not resolver.is_tool_allowed(
-        _GROUP, "query_pii", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER
-    )
-    assert resolver.is_tool_allowed(
-        _GROUP, "query_pii", group_id=_GROUP, member_id="tenant:b", member_server_id=_MEMBER
-    )
+    assert not may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_pii", Caller(tenant_id=_TENANT))
+    assert may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_pii", Caller(tenant_id="tenant:b"))
 
 
 def test_two_members_under_one_tenant_do_not_share_a_cache_entry():
     """The verdict is per (member, tenant), so the cache key must be too."""
     resolver = _configured_pool()
 
-    allowed_first = resolver.is_tool_allowed(
-        _GROUP, "admin_reset", group_id=_GROUP, member_id=_TENANT, member_server_id=_OTHER_MEMBER
+    allowed_first = may(
+        resolver, Target.group(_GROUP, member_server=_OTHER_MEMBER), "admin_reset", Caller(tenant_id=_TENANT)
     )
-    denied_second = resolver.is_tool_allowed(
-        _GROUP, "admin_reset", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER
-    )
+    denied_second = may(resolver, Target.group(_GROUP, member_server=_MEMBER), "admin_reset", Caller(tenant_id=_TENANT))
 
     assert allowed_first and not denied_second
 
 
 def test_a_policy_set_after_a_resolve_invalidates_the_cached_verdict():
     resolver = _configured_pool()
-    assert resolver.is_tool_allowed(_GROUP, "query_rows", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER)
+    assert may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_rows", Caller(tenant_id=_TENANT))
 
     resolver.set_member_policy(
         group_id=_GROUP,
@@ -115,9 +106,7 @@ def test_a_policy_set_after_a_resolve_invalidates_the_cached_verdict():
         mcp_server_id=_MEMBER,
     )
 
-    assert not resolver.is_tool_allowed(
-        _GROUP, "query_rows", group_id=_GROUP, member_id=_TENANT, member_server_id=_MEMBER
-    )
+    assert not may(resolver, Target.group(_GROUP, member_server=_MEMBER), "query_rows", Caller(tenant_id=_TENANT))
 
 
 def test_the_front_door_decides_a_groups_tool_on_the_members_a_call_may_select():
@@ -163,4 +152,4 @@ def test_the_resolvers_own_vocabulary_still_resolves():
     """A caller passing the member id as `member_id` (the pre-#1164 tests)."""
     resolver = _configured_pool()
 
-    assert not resolver.is_tool_allowed(_MEMBER, "admin_reset", group_id=_GROUP, member_id=_MEMBER)
+    assert not _policy_merge.is_allowed(resolver, _MEMBER, "admin_reset", group_id=_GROUP, member_id=_MEMBER)

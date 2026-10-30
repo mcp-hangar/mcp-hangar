@@ -46,6 +46,7 @@ from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
@@ -235,7 +236,7 @@ class _PausedReload:
 
     def window(self) -> None:
         """The window itself: the new policy no longer denies `t`, and the old withdrawals do not withdraw it yet."""
-        assert get_tool_access_resolver().is_tool_allowed(SERVER, TOOL, member_id=TENANT)
+        assert _policy_merge.is_allowed(get_tool_access_resolver(), SERVER, TOOL, member_id=TENANT)
         assert not get_tool_projection_registry().is_withdrawn(SERVER, TOOL, tenant_id=TENANT)
 
     def call_in_the_window(self, call: Callable[[], Any]) -> Any:
@@ -281,8 +282,8 @@ class _PausedBeforeTheGroups(_PausedReload):
     def window(self) -> None:
         """The window itself: group A withdraws `t` rather than denying it, and `member` is still in group A."""
         assert executor._groups_owning(MEMBER) == (GROUP_A,)
-        assert get_tool_access_resolver().is_tool_allowed(
-            GROUP_A, TOOL, group_id=GROUP_A, member_id=TENANT, member_server_id=MEMBER
+        assert _policy_merge.is_allowed(
+            get_tool_access_resolver(), GROUP_A, TOOL, group_id=GROUP_A, member_id=TENANT, member_server_id=MEMBER
         )
         assert get_tool_projection_registry().is_withdrawn(GROUP_A, TOOL, tenant_id=TENANT)
 

@@ -8,8 +8,9 @@ server id could be put in the tenant slot without a type error (#1763).
 with a :class:`Decision` in the ADR-029 gate vocabulary. It asks in the order
 the executor's gates do -- tool access over every scope, deny wins; then
 withdrawal -- and, when both pass, which policy routes the name to a human.
-The resolver's merge, cache and invalidation are unchanged: the scope keys are
-byte-identical with the executor's.
+The merge, cache and invalidation are unchanged: the scope keys are
+byte-identical with the executor's. The merge is ``_policy_merge``, private to
+this package, and this module is the only one that imports it (#1784).
 
 ``decide()`` is pure. Choosing a group's member advances the group's strategy,
 so that is done once, before, and arrives as ``Target.member_server``. It reads
@@ -29,6 +30,7 @@ from collections.abc import Callable
 from ..contracts.withdrawals import IWithdrawalOverlay
 from ..value_objects.access import GATE_TOOL_ACCESS, GATE_WITHDRAWAL, Caller, Decision, Target
 from ..value_objects.tool_access_policy import ToolAccessPolicy
+from . import _policy_merge
 from .governance_overlays import read_as_one_set
 from .tool_access_resolver import ToolAccessResolver, get_tool_access_resolver
 
@@ -79,8 +81,14 @@ def _decide_now(
 ) -> Decision:
     tenant_id = caller.tenant_id
     allowed = all(
-        resolver.is_allowed(
-            server_id, name, kind=target.kind, group_id=group_id, member_id=tenant_id, member_server_id=member_server
+        _policy_merge.is_allowed(
+            resolver,
+            server_id,
+            name,
+            kind=target.kind,
+            group_id=group_id,
+            member_id=tenant_id,
+            member_server_id=member_server,
         )
         for server_id, group_id, member_server in target.policy_scopes()
     )
@@ -115,8 +123,8 @@ def _approval_policy(
     second lookup: `_compute_effective_policy` merges `_global` into every scope.
     """
     for server_id, group_id, member_server in target.policy_scopes():
-        scoped = resolver.resolve_effective_policy(
-            server_id, group_id, tenant_id, member_server_id=member_server, kind=target.kind
+        scoped = _policy_merge.resolve_effective_policy(
+            resolver, server_id, group_id, tenant_id, member_server_id=member_server, kind=target.kind
         )
         if not scoped.is_unrestricted() and scoped.requires_approval(name):
             return scoped

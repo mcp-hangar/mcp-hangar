@@ -58,6 +58,25 @@ def hexagon(contract: configparser.ConfigParser) -> dict[str, str]:
     return dict(contract[section])
 
 
+def _listed(value: str) -> list[str]:
+    return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+class TestThePolicyMergeStaysBehindDecide:
+    """A deleted or widened boundary leaves `lint-imports` green, as a deleted layer does (#1784)."""
+
+    def test_the_merge_is_protected(self, contract):
+        section = "importlinter:contract:policy-merge-boundary"
+        assert contract.has_section(section), "the policy merge boundary is gone from .importlinter"
+        assert contract[section]["type"] == "protected"
+        assert _listed(contract[section]["protected_modules"]) == ["mcp_hangar.domain.services._policy_merge"]
+
+    def test_only_the_decision_may_import_it(self, contract):
+        """Not the `domain.services` package: its `__init__` could then re-export the merge."""
+        importers = contract["importlinter:contract:policy-merge-boundary"]["allowed_importers"]
+        assert _listed(importers) == ["mcp_hangar.domain.services.access_decision"]
+
+
 def _layer_lines(hexagon: dict[str, str]) -> list[str]:
     return [line.strip() for line in hexagon["layers"].splitlines() if line.strip()]
 

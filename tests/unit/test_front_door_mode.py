@@ -14,14 +14,17 @@ from unittest.mock import Mock, patch
 import pytest
 
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.services import _policy_merge
+from mcp_hangar.domain.services._policy_merge import _DENY_ALL_POLICY
 from mcp_hangar.domain.services.tool_access_resolver import (
-    _DENY_ALL_POLICY,
     ToolAccessResolver,
     reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
+from tests._access_decisions import may
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -97,7 +100,7 @@ class TestTopologyModeResolver:
     def test_default_mode_is_egress(self, resolver):
         """Unset mode defaults to egress — backward compat, no regression."""
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy(deny_list=("bad_tool",)))
-        policy = resolver.resolve_effective_policy("srv")
+        policy = _policy_merge.resolve_effective_policy(resolver, "srv")
         # Egress: server policy returned; bad_tool blocked, good_tool allowed.
         assert not policy.is_tool_allowed("bad_tool")
         assert policy.is_tool_allowed("good_tool")
@@ -106,7 +109,7 @@ class TestTopologyModeResolver:
         """egress + member_id=None → server-level policy."""
         resolver.set_topology_mode("egress")
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy(allow_list=("safe_tool",)))
-        policy = resolver.resolve_effective_policy("srv")
+        policy = _policy_merge.resolve_effective_policy(resolver, "srv")
         assert policy.is_tool_allowed("safe_tool")
         assert not policy.is_tool_allowed("other_tool")
 
@@ -115,7 +118,7 @@ class TestTopologyModeResolver:
         resolver.set_topology_mode("front_door")
         # Even with a permissive server policy, unauthenticated caller is denied.
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy(allow_list=("safe_tool",)))
-        policy = resolver.resolve_effective_policy("srv")
+        policy = _policy_merge.resolve_effective_policy(resolver, "srv")
         assert not policy.is_tool_allowed("safe_tool")
         assert not policy.is_tool_allowed("anything")
 
@@ -124,14 +127,14 @@ class TestTopologyModeResolver:
         resolver.set_topology_mode("front_door")
         resolver.set_mcp_server_policy("grpsrv", ToolAccessPolicy())  # permissive
         # Unauthenticated caller targeting a GROUP (group_id present, member_id None).
-        policy = resolver.resolve_effective_policy("grpsrv", group_id="grpsrv", member_id=None)
+        policy = _policy_merge.resolve_effective_policy(resolver, "grpsrv", group_id="grpsrv", member_id=None)
         assert not policy.is_tool_allowed("any_tool")
 
     def test_egress_group_call_without_member_not_denied_by_mode(self, resolver):
         """egress + group target + no tenant → mode does not deny (regression guard for the fix)."""
         resolver.set_topology_mode("egress")
         resolver.set_mcp_server_policy("grpsrv", ToolAccessPolicy())
-        policy = resolver.resolve_effective_policy("grpsrv", group_id="grpsrv", member_id=None)
+        policy = _policy_merge.resolve_effective_policy(resolver, "grpsrv", group_id="grpsrv", member_id=None)
         assert policy.is_tool_allowed("any_tool")
 
     def test_opposite_defaults_for_same_unauthenticated_call(self, resolver):
@@ -139,12 +142,12 @@ class TestTopologyModeResolver:
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy())
 
         resolver.set_topology_mode("egress")
-        egress_policy = resolver.resolve_effective_policy("srv")
+        egress_policy = _policy_merge.resolve_effective_policy(resolver, "srv")
 
         # Invalidate cache before switching mode
         resolver.invalidate_cache("srv")
         resolver.set_topology_mode("front_door")
-        fd_policy = resolver.resolve_effective_policy("srv")
+        fd_policy = _policy_merge.resolve_effective_policy(resolver, "srv")
 
         assert egress_policy.is_tool_allowed("any_tool")
         assert not fd_policy.is_tool_allowed("any_tool")
@@ -159,14 +162,14 @@ class TestTopologyModeResolver:
         resolver.set_standalone_member_policy("srv", "tenant:alice", ToolAccessPolicy(deny_list=("write",)))
 
         # Authenticated caller: member merge applies, NOT deny-all.
-        assert resolver.is_tool_allowed("srv", "read", member_id="tenant:alice")
-        assert not resolver.is_tool_allowed("srv", "write", member_id="tenant:alice")
+        assert may(resolver, Target.server("srv"), "read", Caller(tenant_id="tenant:alice"))
+        assert not may(resolver, Target.server("srv"), "write", Caller(tenant_id="tenant:alice"))
 
     def test_set_topology_mode_invalidates_no_member_cache(self, resolver):
         """Switching topology mode flushes the no-member cache entries."""
         resolver.set_topology_mode("egress")
         # Populate cache
-        resolver.resolve_effective_policy("srv")
+        _policy_merge.resolve_effective_policy(resolver, "srv")
         with resolver._lock:
             # Keyed (kind, scope) since #1028; "tool" is what a bare resolve means.
             assert ("tool", "mcp_server:srv") in resolver._policy_cache
@@ -187,7 +190,7 @@ class TestTopologyModeResolver:
         resolver.clear_all()
 
         assert resolver.topology_mode == "front_door"
-        assert not resolver.resolve_effective_policy("srv").is_tool_allowed("any_tool")
+        assert not _policy_merge.resolve_effective_policy(resolver, "srv").is_tool_allowed("any_tool")
 
     def test_reset_puts_the_topology_mode_back_to_egress(self, resolver):
         """reset() is the full reset: no policies and the default mode."""
@@ -195,7 +198,7 @@ class TestTopologyModeResolver:
         resolver.reset()
         # After reset, unauthenticated caller gets server policy (egress default).
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy())
-        policy = resolver.resolve_effective_policy("srv")
+        policy = _policy_merge.resolve_effective_policy(resolver, "srv")
         assert policy.is_tool_allowed("any_tool")
 
 

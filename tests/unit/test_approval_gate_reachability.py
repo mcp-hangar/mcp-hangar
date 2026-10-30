@@ -29,6 +29,7 @@ from mcp_hangar.domain.model.mcp_server_config import (
     ToolsConfig,
     parse_tools_access_config,
 )
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
     reset_tool_access_resolver,
@@ -185,7 +186,7 @@ class TestApprovalListReachesThePolicy:
             }
         )
 
-        policy = get_tool_access_resolver().resolve_effective_policy("math")
+        policy = _policy_merge.resolve_effective_policy(get_tool_access_resolver(), "math")
         assert policy.requires_approval("multiply") is True
         assert policy.approval_timeout_seconds == 42
         # Approval-gated is still *allowed* -- visible, held, not denied.
@@ -206,7 +207,9 @@ class TestApprovalListReachesThePolicy:
             }
         )
 
-        policy = get_tool_access_resolver().resolve_effective_policy("member-a", group_id="pool", member_id="member-a")
+        policy = _policy_merge.resolve_effective_policy(
+            get_tool_access_resolver(), "member-a", group_id="pool", member_id="member-a"
+        )
         assert policy.requires_approval("delete_everything") is True
 
     def test_group_member_level_yaml_registers_an_approval_policy(self):
@@ -228,7 +231,9 @@ class TestApprovalListReachesThePolicy:
             }
         )
 
-        policy = get_tool_access_resolver().resolve_effective_policy("member-a", group_id="pool", member_id="member-a")
+        policy = _policy_merge.resolve_effective_policy(
+            get_tool_access_resolver(), "member-a", group_id="pool", member_id="member-a"
+        )
         assert policy.requires_approval("risky_thing") is True
 
     def test_per_tenant_tool_access_yaml_registers_an_approval_policy(self):
@@ -244,7 +249,7 @@ class TestApprovalListReachesThePolicy:
             }
         )
 
-        policy = get_tool_access_resolver().resolve_effective_policy("notion", member_id="tenant:a")
+        policy = _policy_merge.resolve_effective_policy(get_tool_access_resolver(), "notion", member_id="tenant:a")
         assert policy.requires_approval("update_page") is True
 
     def test_mcp_server_config_from_dict_carries_the_approval_list(self):

@@ -37,6 +37,7 @@ from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.security.ssrf import set_trusted_networks, trusted_networks
 from mcp_hangar.domain.services import get_tool_access_resolver
 from mcp_hangar.domain.services.ui_resource_guard import get_ui_resource_guard, reset_ui_resource_guard
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.fastmcp_server import resource_link_read_through
 from mcp_hangar.fastmcp_server.flat_tool_projection import param_validation_required, set_param_validation_required
 from mcp_hangar.server import config_schema
@@ -48,6 +49,7 @@ from mcp_hangar.server.state import get_runtime
 from mcp_hangar.server.tools import batch
 from mcp_hangar.server.tools.batch.concurrency import get_concurrency_manager, reset_concurrency_manager
 from mcp_hangar.server.tools.batch.tenant_admission import configure_tenant_limits, get_tenant_admission
+from tests._access_decisions import may
 
 #: The package, not the `bootstrap` function `mcp_hangar.server` re-exports under the same name.
 bootstrap_package = importlib.import_module("mcp_hangar.server.bootstrap")
@@ -131,7 +133,7 @@ def _from_context_config(section: str) -> Callable[[ApplicationContext], Any]:
 PROBES: dict[str, Callable[[ApplicationContext], Any]] = {
     "mcp_servers": lambda context: (
         get_runtime().repository.exists(SERVER),
-        get_tool_access_resolver().is_tool_allowed(SERVER, "divide"),
+        may(get_tool_access_resolver(), Target.server(SERVER), "divide"),
     ),
     "approvals": lambda context: context.approval_service is not None,
     "auth": lambda context: context.auth_components.enabled,

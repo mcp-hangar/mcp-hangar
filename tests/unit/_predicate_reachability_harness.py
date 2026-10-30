@@ -28,7 +28,7 @@ each is evaluated.
 
 Only the call is recorded: the spy is installed before the boot, so every thread
 inherits it, and records between the request and its answer. ``--mutate`` wraps
-``ToolAccessResolver.is_allowed`` so it is asked with the server id in the tenant
+``_policy_merge.is_allowed`` so it is asked with the server id in the tenant
 slot; the gate must notice.
 """
 
@@ -89,14 +89,14 @@ def _allow_all_l7(runtime: Any) -> None:
 
 def _mutate() -> None:
     """Ask the tool-access decision with the server id where the tenant goes."""
-    from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
+    from mcp_hangar.domain.services import _policy_merge
 
-    original = ToolAccessResolver.is_allowed
+    original = _policy_merge.is_allowed
 
-    def server_in_the_tenant_slot(self, mcp_server_id, name, **kwargs):  # type: ignore[no-untyped-def]
-        return original(self, mcp_server_id, name, **{**kwargs, "member_id": mcp_server_id})
+    def server_in_the_tenant_slot(resolver, mcp_server_id, name, **kwargs):  # type: ignore[no-untyped-def]
+        return original(resolver, mcp_server_id, name, **{**kwargs, "member_id": mcp_server_id})
 
-    ToolAccessResolver.is_allowed = server_in_the_tenant_slot  # type: ignore[method-assign]
+    _policy_merge.is_allowed = server_in_the_tenant_slot
 
 
 # --- the facade ------------------------------------------------------------------
