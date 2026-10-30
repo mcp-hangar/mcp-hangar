@@ -83,6 +83,15 @@ class IConfigLoader(ABC):
         """
 
     @abstractmethod
+    def declared_mcp_server_ids(self) -> frozenset[str]:
+        """The servers the configuration in force declares, group members included.
+
+        What a reload may remove: anything else in the fleet came from the API
+        or a discovery source, and the file has no say in it (#2169). A server
+        edited at runtime is still in here: an edit does not change who owns it.
+        """
+
+    @abstractmethod
     def prepare_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> PreparedServers:
         """Build and check a mcp_servers section, and put none of it in force.
 

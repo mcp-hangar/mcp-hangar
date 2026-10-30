@@ -42,7 +42,14 @@ class TestTheAdapterSatisfiesThePort:
 
     @pytest.mark.parametrize(
         "method",
-        ["load_from_file", "check_process_config", "apply_process_config", "prepare_mcp_servers", "commit_mcp_servers"],
+        [
+            "load_from_file",
+            "check_process_config",
+            "apply_process_config",
+            "declared_mcp_server_ids",
+            "prepare_mcp_servers",
+            "commit_mcp_servers",
+        ],
     )
     def test_the_signatures_match(self, method):
         port = inspect.signature(getattr(IConfigLoader, method))

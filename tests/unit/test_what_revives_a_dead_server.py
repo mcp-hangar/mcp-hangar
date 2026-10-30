@@ -267,6 +267,7 @@ def test_reloading_a_dead_server_away_removes_its_series():
     repository.add(fleet.sid, fleet.server)
     loader = SimpleNamespace(
         load_from_file=lambda _path: {"mcp_servers": {}},
+        declared_mcp_server_ids=lambda: frozenset({fleet.sid}),
         check_process_config=lambda _config: None,
         apply_process_config=lambda _config: None,
         prepare_mcp_servers=lambda _config: SimpleNamespace(specs={}, keeps=lambda *_: False),

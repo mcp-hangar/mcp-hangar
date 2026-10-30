@@ -2250,6 +2250,10 @@ class ServerConfigLoader(IConfigLoader):
         """Apply every process-wide section, as startup does."""
         apply_process_config(full_config)
 
+    def declared_mcp_server_ids(self) -> frozenset[str]:
+        """The servers the configuration in force declares."""
+        return frozenset(_BUILT_FROM)
+
     def prepare_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> _StagedConfig:
         """Build and check a mcp_servers section and read the stored policies; put nothing in force.
 
