@@ -291,10 +291,7 @@ class TestWhichRoutesAreTenantAware:
         assert all(rule.permission is not None for rule in ROUTE_PERMISSIONS if rule.tenant_aware)
 
     def test_only_the_self_describing_routes_consult_no_grant(self):
-        assert {rule.template for rule in ROUTE_PERMISSIONS if rule.permission is None} == {
-            "GET /system/me",
-            "GET /system",
-        }
+        assert {rule.template for rule in ROUTE_PERMISSIONS if rule.permission is None} == {"GET /system/me"}
 
     @pytest.mark.parametrize(("rule", "asgi_type", "method", "path"), _GUARDED)
     def test_every_concrete_request_resolves_to_its_own_rule(self, rule, asgi_type, method, path):
