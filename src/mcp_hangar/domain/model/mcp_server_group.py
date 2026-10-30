@@ -1246,9 +1246,11 @@ class McpServerGroup(AggregateRoot):
     def to_status_dict(self) -> dict[str, Any]:
         """The group's status, read under its lock: one instant.
 
-        `GET /api/groups/{id}`, `hangar_group_list` and `hangar_list` return
-        this dict as it is, and so does `hangar_details` for a caller without
-        a tenant; `hangar_status` and `hangar_health` report its counts.
+        `GET /api/groups`, `GET /api/groups/{id}`, `hangar_group_list`,
+        `hangar_list` and `hangar_details` return this dict as it is to a
+        caller without a tenant, and :meth:`status_for_tenant` to a caller
+        with one (#2019, #2155); `hangar_status` and `hangar_health` report its
+        counts.
         `healthy_count` counts members that are ready and in rotation,
         `members_in_rotation_count` members in rotation whatever their state
         (#1356). :meth:`status_for_tenant` is the same dict cut down to one

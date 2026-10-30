@@ -4,6 +4,8 @@ Implements GET/POST endpoints for mcp_server group operations,
 reading directly from the application context groups dict.
 """
 
+from typing import Any
+
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
@@ -17,21 +19,31 @@ from ...application.commands.crud_commands import (
 )
 from ...application.group_events import publish_group_events
 from ...domain.exceptions import McpServerNotFoundError
+from ...domain.model.mcp_server_group import McpServerGroup
 from ..context import get_context
 from .middleware import dispatch_command
 from .request_body import json_body, missing_fields
 from .serializers import HangarJSONResponse
+from .tenant_scope import caller_tenant
+
+
+def _status(group: McpServerGroup, tenant_id: str | None) -> dict[str, Any]:
+    """The group as *tenant_id* is shown it, as ``hangar_details`` shows it (#2155); no tenant, the whole group."""
+    return group.to_status_dict() if tenant_id is None else group.status_for_tenant(tenant_id)
 
 
 async def list_groups(request: Request) -> HangarJSONResponse:
     """List all mcp_server groups with summary info.
 
     Returns:
-        JSON with {"groups": [...]} array of group summaries.
+        JSON with {"groups": [...]} array of group summaries. For a caller
+        whose principal has a tenant, each group lists only the members that
+        tenant's calls may be routed to, with every count, state and
+        is_available taken over them and no min_healthy or circuit_open.
     """
     ctx = get_context()
-    groups = ctx.groups
-    return HangarJSONResponse({"groups": [g.to_status_dict() for g in groups.values()]})
+    tenant_id = caller_tenant(request)
+    return HangarJSONResponse({"groups": [_status(g, tenant_id) for g in ctx.groups.values()]})
 
 
 async def get_group(request: Request) -> HangarJSONResponse:
@@ -42,6 +54,9 @@ async def get_group(request: Request) -> HangarJSONResponse:
 
     Returns:
         JSON with group detail including members and circuit breaker state.
+        For a caller whose principal has a tenant, the view ``list_groups``
+        gives: a group the tenant has no routable member of is an empty member
+        list, not a 404.
 
     Raises:
         McpServerNotFoundError: If group_id is not found.
@@ -51,7 +66,7 @@ async def get_group(request: Request) -> HangarJSONResponse:
     group = ctx.groups.get(group_id)
     if group is None:
         raise McpServerNotFoundError(mcp_server_id=group_id)
-    return HangarJSONResponse(group.to_status_dict())
+    return HangarJSONResponse(_status(group, caller_tenant(request)))
 
 
 async def rebalance_group(request: Request) -> HangarJSONResponse:

@@ -36,6 +36,7 @@ from ..validation import (
     tool_error_mapper,
     validate_mcp_server_id_input,
 )
+from .mcp_server import _caller_tenant_id
 from .replica_view import observe_replica
 
 #: The dashboard's version of `scope_note`, shorter because it sits above a
@@ -63,10 +64,13 @@ def hangar_list(state_filter: str | None = None) -> dict:
     query = ListMcpServersQuery(state_filter=state_filter)
     summaries = ctx.query_bus.execute(query)
 
-    # Read groups from context
+    # Read groups from context. A tenant is shown the members its calls may
+    # be routed to, as hangar_details shows them (#2155), and the filter reads
+    # the state of that view; no tenant, the whole group.
+    tenant_id = _caller_tenant_id()
     groups_list = []
-    for group_id, group in ctx.groups.items():
-        group_info = group.to_status_dict()
+    for group in ctx.groups.values():
+        group_info = group.to_status_dict() if tenant_id is None else group.status_for_tenant(tenant_id)
         if state_filter and group_info.get("state") != state_filter:
             continue
         groups_list.append(group_info)
@@ -136,6 +140,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     dead: {reason, since, retry_allowed_at, revived_by} | null
                 }],
                 groups: [{group_id, state, strategy, healthy_count, total_members, ...}],
+                    (for a caller with a tenant: only the members its calls may be
+                    routed to, counts and state taken over them, no min_healthy
+                    or circuit_open; the same view hangar_details gives)
                 runtime_mcp_servers: [{
                     mcp_server: str,
                     state: str,
