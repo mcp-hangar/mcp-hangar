@@ -319,7 +319,15 @@ PREDICATES: tuple[Predicate, ...] = (
         by="action",
         paths={
             **_each(
-                (REST_SERVERS, REST_SERVER, REST_SERVER_TOOLS, REST_TOOL_HISTORY, REST_PINS, REST_WITHDRAW, REST_RESTORE)
+                (
+                    REST_SERVERS,
+                    REST_SERVER,
+                    REST_SERVER_TOOLS,
+                    REST_TOOL_HISTORY,
+                    REST_PINS,
+                    REST_WITHDRAW,
+                    REST_RESTORE,
+                )
             ),
             **{probe.name: probe.handler_asks for probe in ROUTE_PROBES if probe.handler_asks},
         },

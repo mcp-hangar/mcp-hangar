@@ -58,10 +58,15 @@ from starlette.routing import Mount, Route, WebSocketRoute, compile_path
 # First: `server.bootstrap` is the import order production uses (#894).
 from mcp_hangar.server.bootstrap import build_serving_mcp_server
 from mcp_hangar.tasks_wire import EXTENSION_ID
-from mcp_hangar.server.api import create_api_router
-from mcp_hangar.server.api.route_permissions import ROUTE_PERMISSIONS, RouteRule
 from tests.unit._predicate_spy import Spy, from_json
-from tests.unit._rest_route_probes import EXEMPT_ROUTES, ROUTE_PROBE_NAMES, ROUTE_PROBES, rule_of
+from tests.unit._rest_route_probes import (
+    EXEMPT_ROUTES,
+    ROUTE_PERMISSIONS,
+    ROUTE_PROBE_NAMES,
+    ROUTE_PROBES,
+    RouteRule,
+    rule_of,
+)
 from tests.unit._security_predicates import (
     COMPLETION,
     FACADE_INVOKE,
@@ -990,6 +995,8 @@ class TestEveryRouteHasAProbe:
         assert unprobed_rules(ROUTE_PERMISSIONS, _probed_requests(), EXEMPT_ROUTES) == set()
 
     def test_every_served_route_is_probed_or_exempt(self) -> None:
+        from mcp_hangar.server.api import create_api_router
+
         served = list(_served_routes(create_api_router().routes))
         exempt = [
             f"{method} {path}"

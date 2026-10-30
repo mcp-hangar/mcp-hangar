@@ -22,10 +22,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from mcp_hangar.server.api.route_permissions import RouteRule, resolve_rule
+from mcp_hangar.server.api.route_permissions import ROUTE_PERMISSIONS, RouteRule, resolve_rule
+
+__all__ = [
+    "EXEMPT_ROUTES",
+    "ROUTE_PERMISSIONS",
+    "ROUTE_PROBES",
+    "ROUTE_PROBE_NAMES",
+    "RouteProbe",
+    "RouteRule",
+    "rule_of",
+]
 
 UPSTREAM = "upstream"
-#: The role `/auth/**` probes assign and revoke. Never a probing caller: their
+#: The principal `/auth/**` probes assign a role to and revoke it from. Never a probing caller: their
 #: grants are what every later probe is authorized by.
 TARGET_PRINCIPAL = "svc:probe-target"
 #: Registered and removed here. Docker, so a create is a local launch, and it is never started.
