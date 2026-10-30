@@ -45,6 +45,7 @@ def undo_applied_configuration() -> None:
         if repository.exists(mcp_server_id):
             repository.remove(mcp_server_id)
     server_config._BUILT_FROM.clear()
+    server_config._DECLARED_GROUPS.clear()
     GROUPS.clear()
     reset_tool_access_resolver()
     reset_tool_projection_registry()

@@ -67,9 +67,11 @@ class ReloadConfigurationHandler(CommandHandler):
       the file owns can be removed: a server created over the API or registered
       by discovery stays, with its policies, unless the file now declares its
       id, and then the file's definition replaces it, as at startup (#2169);
-    - the groups, and the tool-access policies, withdrawals, pins and
-      `header_exposure` blocks the servers declare, swapped in rather than
-      cleared and registered again, so no call is resolved without them. The
+    - the groups the file declares, keeping the members the group API added
+      to them and leaving alone the groups it created (#2169), and the
+      tool-access policies, withdrawals, pins and `header_exposure` blocks the
+      servers declare, swapped in rather than cleared and registered again, so
+      no call is resolved without them. The
       REST endpoint's stored policies are replayed over the file's, as at
       startup; any other policy set at runtime is kept unless the file now
       defines the same scope. A server the reload removes takes its policies

@@ -4,6 +4,7 @@ A McpServerGroup is an aggregate root that manages multiple McpServer instances
 as a single logical unit with automatic load balancing and failover.
 """
 
+import dataclasses
 import hashlib
 import time
 from collections.abc import Callable, Mapping
@@ -486,6 +487,17 @@ class McpServerGroup(AggregateRoot):
         # Phase 2: McpServer I/O outside lock (avoids level-11-holds-level-10)
         if need_start:
             self._try_start_member_unlocked(member, member_id)
+
+    def keep_member(self, member: GroupMember, mcp_server: McpServer) -> None:
+        """Take on a member of the copy of this group a reload replaces, as it stands (#2169).
+
+        Its weight, priority and rotation state stay, and nothing is started or
+        recorded: the membership did not change, and a reload swaps a group in
+        under a lock that I/O must not run under. A vacant member stays vacant.
+        """
+        with self._lock:
+            self._members[member.id] = member if member.vacant else dataclasses.replace(member, mcp_server=mcp_server)
+            self._update_state()
 
     def replace_member_server(self, member_id: str, mcp_server: McpServer) -> bool:
         """Point a member at a new copy of its server, keeping its place in the group.

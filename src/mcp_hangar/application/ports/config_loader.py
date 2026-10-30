@@ -107,7 +107,8 @@ class IConfigLoader(ABC):
         """Put a prepared section in force, replacing the previous one's.
 
         Its servers, its groups, and its governance overlays, which are swapped
-        in rather than cleared and registered again. Does not fail on the file:
+        in rather than cleared and registered again. A group or group member
+        made through the group API stays. Does not fail on the file:
         everything that could was checked by `prepare_mcp_servers`.
 
         Args:

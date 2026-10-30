@@ -189,15 +189,21 @@ class _StagedConfig:
             _BUILT_FROM.update(
                 {sid: (self.built_with[sid], server) for sid, server in self.servers.items() if sid in self.built_with}
             )
+            declared_groups = {sid: frozenset(str(m.id) for m in group.members) for sid, group in self.groups.items()}
+            if replace:
+                # Before the new groups are visible, so a call sees a group with
+                # the members added over REST or without the swap at all.
+                departed = _carry_runtime_groups(self.groups, repository)
             GROUPS.update(self.groups)
             if replace:
                 # Replaced, never cleared first: the front door finds a member's
                 # group only in GROUPS, so while it was empty a member was checked
                 # as a standalone server and its group's deny list, access policies
                 # and withdrawals did not apply (#1424).
-                departed = [known for known in GROUPS if known not in self.groups]
                 for group_id in departed:
                     del GROUPS[group_id]
+                _DECLARED_GROUPS.clear()
+            _DECLARED_GROUPS.update(declared_groups)
 
         for group_id in departed:
             # A reload removes a group without `GroupDeleted`, the event the
@@ -217,6 +223,58 @@ class _StagedConfig:
 #: built with. A reload keeps the running server only when the file would build
 #: it with the same ones (#1424, #1426).
 _BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
+
+
+#: Each group a configuration declared, with the members it names. A group in
+#: `GROUPS` and not here was created over REST. A member of a declared group not
+#: in its set was added over REST. `_BUILT_FROM` does this for servers (#2169).
+_DECLARED_GROUPS: dict[str, frozenset[str]] = {}
+
+
+def _server_of_member(member: Any, repository: Any) -> McpServer | None:
+    """The server *member* holds after a reload, or None when it cannot stay a member.
+
+    None when its server is gone from the fleet, so no member dangles, or came
+    back key-pinned, which cannot be in a group (ADR-030 §8).
+    """
+    server = repository.get(str(member.id))
+    return None if server is None or isinstance(getattr(server, "_peer_identity", None), PeerIdentity) else server
+
+
+def _carry_runtime_groups(staged: dict[str, McpServerGroup], repository: Any) -> list[str]:
+    """Keep what the REST group API made, and return the groups a reload removes (#2169).
+
+    A group is rebuilt from the file alone, and the file is not the only source
+    of what a group holds, as `_carry_runtime_state` says of a server. What
+    applied to a server through its group goes on applying.
+
+    - The file declares the group: it is replaced, and takes each member the
+      running copy has that the file neither names nor named before. One the
+      file used to name was removed by the file.
+    - The previous file declared it and this one does not: it is removed, with
+      any member added over REST. The servers stay.
+    - No file declared it: it stays, the same object. Each member follows its
+      server to the copy this reload built, or leaves if it has none.
+    """
+    departed: list[str] = []
+    for group_id, running in list(GROUPS.items()):
+        replacement = staged.get(group_id)
+        declared = _DECLARED_GROUPS.get(group_id)
+        if replacement is None and declared is not None:
+            departed.append(group_id)
+            continue
+        for member in running.members:
+            if replacement is not None and (member.id in (declared or ()) or replacement.get_member(member.id)):
+                continue
+            server = _server_of_member(member, repository)
+            if replacement is not None:
+                if server is not None:
+                    replacement.keep_member(member, server)
+            elif server is None:
+                running.remove_member(member.id)
+            elif not member.vacant:
+                running.replace_member_server(member.id, server)
+    return departed
 
 
 def declared_in_config(mcp_server_id: str) -> bool:

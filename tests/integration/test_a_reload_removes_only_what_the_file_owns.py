@@ -102,20 +102,20 @@ def test_a_rescan_after_the_reload_leaves_the_discovered_server_registered(run: 
     assert run["first"]["running_after_rescan"] == dict.fromkeys(NON_FILE, True)
 
 
-def test_membership_of_a_group_follows_the_file_and_the_server_stays(run: dict[str, Any]) -> None:
-    # Groups are not persisted, so a restart leaves exactly this too.
+def test_a_non_file_server_keeps_its_group_memberships_across_the_reload(run: dict[str, Any]) -> None:
     assert run["first"]["before"]["groups"] == {
         "pool": ["crud-one", "gone-member", "member"],
         "runtime-group": ["crud-one"],
     }
-    assert run["first"]["groups"] == {"pool": ["member"]}
+    assert run["first"]["groups"] == {"pool": ["crud-one", "member"], "runtime-group": ["crud-one"]}
     assert "crud-one" in run["first"]["ids"]
 
 
 def test_a_restart_on_a_durable_backend_gives_what_the_reload_left(sqlite: dict[str, Any]) -> None:
     first, booted = sqlite["first"], sqlite["restart"]["booted"]
     assert booted["ids"] == first["ids"]
-    assert booted["groups"] == first["groups"]
+    # Not the groups: those made over REST are not stored, so a restart has the file's.
+    assert booted["groups"] == {"pool": ["member"]}
     assert booted["policies"] == first["policies"]
     assert booted["upstream_description"] == first["upstream_description"]
 
