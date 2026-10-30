@@ -41,6 +41,7 @@ from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.policies import header_exposure
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
 from mcp_hangar.domain.policies.header_exposure import clear_header_exposure_policies, get_header_exposure_policy
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.governance_overlays import read_as_one_set, swapping
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.fastmcp_server import flat_tool_projection
@@ -122,8 +123,8 @@ def _overlays() -> tuple[Any, ...]:
     pin = registry.resolve_pin(SERVER, "p", None)
     exposure = get_header_exposure_policy(SERVER)
     return (
-        resolver.is_tool_allowed(SERVER, "t"),
-        resolver.is_tool_allowed(SERVER, "u"),
+        _policy_merge.is_allowed(resolver, SERVER, "t"),
+        _policy_merge.is_allowed(resolver, SERVER, "u"),
         registry.is_withdrawn(SERVER, "t"),
         registry.is_withdrawn(SERVER, "w"),
         pin.sha256 if pin is not None else None,
@@ -257,7 +258,7 @@ def test_a_decision_that_straddles_a_reload_is_made_again(files: _Files) -> None
         not_withdrawn = not registry.is_withdrawn(SERVER, "t")
         if not runs:
             files.new.commit(replace=True)
-        allowed = not_withdrawn and resolver.is_tool_allowed(SERVER, "t")
+        allowed = not_withdrawn and _policy_merge.is_allowed(resolver, SERVER, "t")
         runs.append(allowed)
         return allowed
 

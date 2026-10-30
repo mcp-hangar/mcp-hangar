@@ -27,9 +27,11 @@ from mcp_hangar.domain.events import ConfigurationReloadFailed
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver, reset_tool_access_resolver
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import ServerConfigLoader, load_configuration
 from mcp_hangar.server.state import GROUPS, get_runtime
+from tests._access_decisions import may
 
 pytestmark = pytest.mark.security
 
@@ -131,7 +133,7 @@ class TestTheLiveReproRefusesToBoot:
     def test_the_same_policy_without_the_bad_field_boots_and_denies(self, gateway: _Gateway) -> None:
         gateway.boot({SERVER: _server(tools={"deny_list": ["add"]})})
 
-        assert not get_tool_access_resolver().is_tool_allowed(SERVER, "add")
+        assert not may(get_tool_access_resolver(), Target.server(SERVER), "add")
 
 
 class TestEverySiteRefusesAnInvalidPolicy:
@@ -199,4 +201,4 @@ class TestARefusedReloadKeepsThePreviousPolicy:
         with pytest.raises(ConfigurationError):
             gateway.reload({SERVER: _server(tools={"deny_list": ["add"], **BAD})})
 
-        assert not get_tool_access_resolver().is_tool_allowed(SERVER, "add")
+        assert not may(get_tool_access_resolver(), Target.server(SERVER), "add")

@@ -4,10 +4,18 @@ import pytest
 
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services import (
+    _policy_merge,
     get_tool_access_resolver,
     reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Target
+from tests._access_decisions import may
+
+
+def _shown(resolver, server: str, tools: list[ToolSchema]) -> list[ToolSchema]:
+    """What a listing of *server* keeps: each tool, decided on its own."""
+    return [tool for tool in tools if may(resolver, Target.server(server), tool.name)]
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +44,7 @@ class TestToolFilteringDiscovery:
             ToolSchema(name="list_datasources", description="List datasources", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("grafana", all_tools)
+        filtered = _shown(resolver, "grafana", all_tools)
 
         assert len(filtered) == 2
         tool_names = [t.name for t in filtered]
@@ -60,7 +68,7 @@ class TestToolFilteringDiscovery:
             ToolSchema(name="create_alert_rule", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("grafana", all_tools)
+        filtered = _shown(resolver, "grafana", all_tools)
 
         assert len(filtered) == 2
         tool_names = [t.name for t in filtered]
@@ -81,12 +89,11 @@ class TestToolFilteringDiscovery:
             ToolSchema(name="delete_dashboard", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools(
-            "grafana",
-            all_tools,
-            group_id="monitoring",
-            member_id="grafana-prod",
-        )
+        filtered = [
+            tool
+            for tool in all_tools
+            if _policy_merge.is_allowed(resolver, "grafana", tool.name, group_id="monitoring", member_id="grafana-prod")
+        ]
 
         assert len(filtered) == 1
         assert filtered[0].name == "get_dashboard"
@@ -104,7 +111,7 @@ class TestToolFilteringDiscovery:
             ToolSchema(name="tool2", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("restricted", all_tools)
+        filtered = _shown(resolver, "restricted", all_tools)
         assert len(filtered) == 0
 
     def test_tool_count_reflects_filtered_count(self):
@@ -121,7 +128,7 @@ class TestToolFilteringDiscovery:
             ToolSchema(name="delete_alert", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("grafana", all_tools)
+        filtered = _shown(resolver, "grafana", all_tools)
         assert len(filtered) == 1  # Only get_dashboard
 
 
@@ -136,8 +143,8 @@ class TestToolFilteringInvocation:
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
 
-        assert resolver.is_tool_allowed("grafana", "get_dashboard")
-        assert resolver.is_tool_allowed("grafana", "create_dashboard")
+        assert may(resolver, Target.server("grafana"), "get_dashboard")
+        assert may(resolver, Target.server("grafana"), "create_dashboard")
 
     def test_denied_tool_fails_check(self):
         """Denied tool should fail is_tool_allowed check."""
@@ -147,8 +154,8 @@ class TestToolFilteringInvocation:
             ToolAccessPolicy(deny_list=("delete_*", "create_alert_*")),
         )
 
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
-        assert not resolver.is_tool_allowed("grafana", "create_alert_rule")
+        assert not may(resolver, Target.server("grafana"), "delete_dashboard")
+        assert not may(resolver, Target.server("grafana"), "create_alert_rule")
 
     def test_group_invocation_checks_policy(self):
         """Group invocation should check group+member policy."""
@@ -165,17 +172,19 @@ class TestToolFilteringInvocation:
         )
 
         # Should be denied by group policy
-        assert not resolver.is_tool_allowed(
-            "grafana", "delete_dashboard", group_id="monitoring", member_id="grafana-prod"
+        assert not _policy_merge.is_allowed(
+            resolver, "grafana", "delete_dashboard", group_id="monitoring", member_id="grafana-prod"
         )
 
         # Should be denied by member policy
-        assert not resolver.is_tool_allowed(
-            "grafana", "create_alert_rule", group_id="monitoring", member_id="grafana-prod"
+        assert not _policy_merge.is_allowed(
+            resolver, "grafana", "create_alert_rule", group_id="monitoring", member_id="grafana-prod"
         )
 
         # Should be allowed (not in any deny list)
-        assert resolver.is_tool_allowed("grafana", "get_dashboard", group_id="monitoring", member_id="grafana-prod")
+        assert _policy_merge.is_allowed(
+            resolver, "grafana", "get_dashboard", group_id="monitoring", member_id="grafana-prod"
+        )
 
 
 class TestToolFilteringReload:
@@ -190,30 +199,30 @@ class TestToolFilteringReload:
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
-        assert resolver.is_tool_allowed("grafana", "create_dashboard")
+        assert not may(resolver, Target.server("grafana"), "delete_dashboard")
+        assert may(resolver, Target.server("grafana"), "create_dashboard")
 
         # Change policy
         resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("create_*",)),
         )
-        assert resolver.is_tool_allowed("grafana", "delete_dashboard")
-        assert not resolver.is_tool_allowed("grafana", "create_dashboard")
+        assert may(resolver, Target.server("grafana"), "delete_dashboard")
+        assert not may(resolver, Target.server("grafana"), "create_dashboard")
 
     def test_add_policy_to_unrestricted_provider(self):
         """Adding policy to previously unrestricted provider should work."""
         resolver = get_tool_access_resolver()
 
         # No policy initially
-        assert resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert may(resolver, Target.server("grafana"), "delete_dashboard")
 
         # Add policy
         resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert not may(resolver, Target.server("grafana"), "delete_dashboard")
 
     def test_remove_policy_makes_all_visible(self):
         """Removing policy should make all tools visible again."""
@@ -223,11 +232,11 @@ class TestToolFilteringReload:
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
-        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert not may(resolver, Target.server("grafana"), "delete_dashboard")
 
         # Remove policy
         resolver.remove_provider_policy("grafana")
-        assert resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert may(resolver, Target.server("grafana"), "delete_dashboard")
 
 
 class TestToolFilteringHotLoad:
@@ -247,7 +256,7 @@ class TestToolFilteringHotLoad:
             ToolSchema(name="delete_dashboard", description="", input_schema={}),
         ]
 
-        filtered = resolver.filter_tools("mcp-server-grafana", all_tools)
+        filtered = _shown(resolver, "mcp-server-grafana", all_tools)
         assert len(filtered) == 1
         assert filtered[0].name == "get_dashboard"
 
@@ -259,8 +268,8 @@ class TestToolFilteringHotLoad:
         policy = ToolAccessPolicy(allow_list=("get_*",))
         resolver.set_mcp_server_policy("mcp-server-grafana", policy)
 
-        assert resolver.is_tool_allowed("mcp-server-grafana", "get_dashboard")
-        assert not resolver.is_tool_allowed("mcp-server-grafana", "create_dashboard")
+        assert may(resolver, Target.server("mcp-server-grafana"), "get_dashboard")
+        assert not may(resolver, Target.server("mcp-server-grafana"), "create_dashboard")
 
     def test_unload_removes_policy(self):
         """hangar_unload should remove tool access policy."""
@@ -271,11 +280,11 @@ class TestToolFilteringHotLoad:
             "mcp-server-time",
             ToolAccessPolicy(deny_list=("set_*",)),
         )
-        assert not resolver.is_tool_allowed("mcp-server-time", "set_timezone")
+        assert not may(resolver, Target.server("mcp-server-time"), "set_timezone")
 
         # Remove (simulating hangar_unload)
         resolver.remove_provider_policy("mcp-server-time")
-        assert resolver.is_tool_allowed("mcp-server-time", "set_timezone")
+        assert may(resolver, Target.server("mcp-server-time"), "set_timezone")
 
 
 class TestGlobPatterns:
@@ -289,10 +298,10 @@ class TestGlobPatterns:
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
 
-        assert not resolver.is_tool_allowed("test", "delete_dashboard")
-        assert not resolver.is_tool_allowed("test", "delete_alert_rule")
-        assert not resolver.is_tool_allowed("test", "delete_")
-        assert resolver.is_tool_allowed("test", "create_dashboard")
+        assert not may(resolver, Target.server("test"), "delete_dashboard")
+        assert not may(resolver, Target.server("test"), "delete_alert_rule")
+        assert not may(resolver, Target.server("test"), "delete_")
+        assert may(resolver, Target.server("test"), "create_dashboard")
 
     def test_middle_wildcard(self):
         """Wildcard in middle should match correctly."""
@@ -302,10 +311,10 @@ class TestGlobPatterns:
             ToolAccessPolicy(deny_list=("*_alert_*",)),
         )
 
-        assert not resolver.is_tool_allowed("test", "create_alert_rule")
-        assert not resolver.is_tool_allowed("test", "delete_alert_rule")
-        assert not resolver.is_tool_allowed("test", "get_alert_status")
-        assert resolver.is_tool_allowed("test", "get_dashboard")
+        assert not may(resolver, Target.server("test"), "create_alert_rule")
+        assert not may(resolver, Target.server("test"), "delete_alert_rule")
+        assert not may(resolver, Target.server("test"), "get_alert_status")
+        assert may(resolver, Target.server("test"), "get_dashboard")
 
     def test_question_mark_single_char(self):
         """Question mark should match single character."""
@@ -315,10 +324,10 @@ class TestGlobPatterns:
             ToolAccessPolicy(deny_list=("tool_?",)),
         )
 
-        assert not resolver.is_tool_allowed("test", "tool_a")
-        assert not resolver.is_tool_allowed("test", "tool_1")
-        assert resolver.is_tool_allowed("test", "tool_ab")  # Two chars
-        assert resolver.is_tool_allowed("test", "tool_")  # Zero chars
+        assert not may(resolver, Target.server("test"), "tool_a")
+        assert not may(resolver, Target.server("test"), "tool_1")
+        assert may(resolver, Target.server("test"), "tool_ab")  # Two chars
+        assert may(resolver, Target.server("test"), "tool_")  # Zero chars
 
     def test_exact_name_match(self):
         """Exact names should match exactly."""
@@ -328,6 +337,6 @@ class TestGlobPatterns:
             ToolAccessPolicy(deny_list=("dangerous_tool",)),
         )
 
-        assert not resolver.is_tool_allowed("test", "dangerous_tool")
-        assert resolver.is_tool_allowed("test", "dangerous_tool_v2")
-        assert resolver.is_tool_allowed("test", "safe_tool")
+        assert not may(resolver, Target.server("test"), "dangerous_tool")
+        assert may(resolver, Target.server("test"), "dangerous_tool_v2")
+        assert may(resolver, Target.server("test"), "safe_tool")

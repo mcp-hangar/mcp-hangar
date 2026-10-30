@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 
 from mcp_hangar.application.read_models.tool_projection import ToolProjectionRegistry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.access_decision import decide
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
@@ -198,7 +199,7 @@ def _the_executor_decided(
     routed_to = target.member_server or ""
     scopes = _legacy_scopes(target, routed_to)
     if not all(  # `_allowed_in_every_scope`
-        resolver.is_tool_allowed(mcp_server_id=s, tool_name=name, group_id=g, member_id=tenant_id, member_server_id=m)
+        _policy_merge.is_allowed(resolver, s, name, group_id=g, member_id=tenant_id, member_server_id=m)
         for s, g, m in scopes
     ):
         return Decision.refused_by(Gate.TOOL_ACCESS)
@@ -211,7 +212,7 @@ def _the_executor_decided(
     if withdrawn:
         return Decision.refused_by(Gate.WITHDRAWAL)
     for s, g, m in scopes:  # `_approval_policy`
-        scoped = resolver.resolve_effective_policy(s, g, tenant_id, member_server_id=m)
+        scoped = _policy_merge.resolve_effective_policy(resolver, s, g, tenant_id, member_server_id=m)
         if not scoped.is_unrestricted() and scoped.requires_approval(name):
             return Decision.allow(approval_policy=scoped)
     return Decision.allow()
@@ -223,7 +224,9 @@ def _the_front_door_decides(
     """The two halves of `is_governed_allowed`, under the call's scopes, for a prompt or a resource."""
     scopes = _legacy_scopes(target, target.member_server or "")
     if not all(
-        resolver.is_allowed(s, name, kind=target.kind, group_id=g, member_id=tenant_id, member_server_id=m)
+        _policy_merge.is_allowed(
+            resolver, s, name, kind=target.kind, group_id=g, member_id=tenant_id, member_server_id=m
+        )
         for s, g, m in scopes
     ):
         return Decision.refused_by(Gate.TOOL_ACCESS)
@@ -234,7 +237,7 @@ def _the_front_door_decides(
     ):
         return Decision.refused_by(Gate.WITHDRAWAL)
     for s, g, m in scopes:
-        scoped = resolver.resolve_effective_policy(s, g, tenant_id, member_server_id=m, kind=target.kind)
+        scoped = _policy_merge.resolve_effective_policy(resolver, s, g, tenant_id, member_server_id=m, kind=target.kind)
         if not scoped.is_unrestricted() and scoped.requires_approval(name):
             return Decision.allow(approval_policy=scoped)
     return Decision.allow()

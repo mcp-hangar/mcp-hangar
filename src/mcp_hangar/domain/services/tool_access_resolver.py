@@ -1,8 +1,9 @@
-"""Tool access resolver domain service.
+"""Tool access resolver domain service: the policies, and their registration.
 
-Resolves the effective access policy for any mcp_server/group/member combination.
-Handles the three-level merge: mcp_server -> group -> member.
-Caches effective policies per-member for performance.
+Holds every registered access policy, per mcp_server, group, member and tenant,
+and the cache of what they merge to. What a name is decided to be is not asked
+here: ``decide()`` in ``access_decision.py`` is the one entry point, and the
+merge it reads through is ``_policy_merge``, private to this package (#1784).
 
 Keyed by *kind* since #1028: a policy is registered for ``(scope target, kind)``
 where kind is ``tool``, ``prompt`` or ``resource``. Prompts and resources are
@@ -25,9 +26,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, Literal, cast
 
-from ...logging_config import should_log_now
 from ..exceptions import ConfigurationError
-from ..model.tool_catalog import ToolSchema
 from ..value_objects import ToolAccessPolicy
 from ..value_objects.access import DEFAULT_KIND, PolicyKind
 
@@ -83,10 +82,6 @@ def configured_topology_mode(config: Mapping[str, Any]) -> TopologyMode:
 # `Target` in `value_objects/access.py` (#1784) and imported above; the names
 # stay importable from here.
 
-# Sentinel policy that denies every tool.  deny_list=("*",) matches any
-# tool name via fnmatch, so is_tool_allowed() returns False for all names.
-_DENY_ALL_POLICY: ToolAccessPolicy = ToolAccessPolicy(deny_list=("*",))
-
 
 def _scope_label(scope: str, kind: str) -> str:
     """Describe a registered scope, naming the kind only when it is not tool."""
@@ -111,9 +106,10 @@ def _scope_covers(scope_key: str, prefix: str) -> bool:
 
 
 class ToolAccessResolver:
-    """Resolves effective tool access policy for any mcp_server/group/member combination.
+    """The registered access policies for every mcp_server, group and member.
 
-    Handles the three-level merge: mcp_server -> group -> member.
+    The registration API is public. Reading the merge of them is not: that is
+    ``decide()``, through ``_policy_merge`` (#1784).
     Caches effective policies per-member for performance.
     Invalidates cache on config reload.
 
@@ -422,282 +418,6 @@ class ToolAccessResolver:
                 self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=cast(PolicyKind, key[2]))
             self._member_mcp_server_mapping.pop((group_id, member_id), None)
             self._config_mapping_keys.discard((group_id, member_id))
-
-    def resolve_effective_policy(
-        self,
-        mcp_server_id: str,
-        group_id: str | None = None,
-        member_id: str | None = None,
-        *,
-        member_server_id: str | None = None,
-        kind: PolicyKind = DEFAULT_KIND,
-    ) -> ToolAccessPolicy:
-        """Get the effective access policy for a specific context.
-
-        For standalone mcp_servers: returns mcp_server-level policy.
-        For group members: merges mcp_server -> group -> member policies.
-
-        Args:
-            mcp_server_id: McpServer identifier.
-            group_id: Optional group identifier (for group member context).
-            member_id: The CALLER's tenant. On the standalone branch it selects
-                the per-tenant policy; in front_door mode its absence is the
-                fail-closed missing-identity branch.
-            member_server_id: The group member the call was routed to, when the
-                caller knows it. Group member policies are registered under the
-                member SERVER id (`groups.<g>.members.<m>.tools`, and the REST
-                `member/<group>:<member>` scope), so without this the group
-                branch looked them up under the tenant and never found them --
-                a documented deny list that failed open (#1164). Defaults to
-                *member_id* so a caller using the resolver's own vocabulary
-                (member id in `member_id`) resolves exactly as before.
-            kind: What is being governed -- tools, prompts or resources. Each
-                kind resolves against the policies registered for that kind
-                alone, so a tool deny never silently governs a prompt.
-
-        Returns:
-            The effective ToolAccessPolicy for this context.
-        """
-        # Build cache key. The group scope names both halves: two tenants
-        # routed to the same member can resolve differently (the member's own
-        # per-tenant policy), and so can one tenant routed to two members.
-        if group_id and (member_id or member_server_id):
-            member_scope = member_server_id or member_id
-            scope_key = f"group:{group_id}:member:{member_scope}"
-            if member_id:
-                scope_key = f"{scope_key}:tenant:{member_id}"
-        elif member_id and not group_id:
-            scope_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
-        else:
-            scope_key = f"mcp_server:{mcp_server_id}"
-        cache_key = (kind, scope_key)
-
-        # Check cache first
-        with self._lock:
-            if cache_key in self._policy_cache:
-                return self._policy_cache[cache_key]
-
-            # Compute effective policy
-            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id, kind, member_server_id)
-
-            # Cache it
-            self._policy_cache[cache_key] = effective
-            return effective
-
-    def _compute_effective_policy(
-        self,
-        mcp_server_id: str,
-        group_id: str | None,
-        member_id: str | None,
-        kind: PolicyKind = DEFAULT_KIND,
-        member_server_id: str | None = None,
-    ) -> ToolAccessPolicy:
-        """Compute effective policy by merging all applicable levels.
-
-        Must be called with lock held.
-
-        Resolution order (highest priority last, i.e. narrower wins):
-          _global -> mcp_server -> group -> member server -> tenant
-
-        The _global policy (keyed as "_global") is set by the agent when a
-        cloud policy uses mcp_server_id="*".  It acts as a floor: if no
-        mcp_server-specific policy exists the global policy is used instead; if
-        a mcp_server-specific policy exists the two are merged so the narrower
-        of the two wins (deny union, allow intersection).
-        """
-        explicit_mcp_server_policy = self._mcp_server_policies.get((mcp_server_id, kind))
-        global_policy = self._mcp_server_policies.get(("_global", kind), ToolAccessPolicy())
-
-        if explicit_mcp_server_policy is None:
-            mcp_server_policy = global_policy
-        else:
-            mcp_server_policy = ToolAccessPolicy.merge(global_policy, explicit_mcp_server_policy)
-
-        # Fail-closed default: in front_door mode a caller with NO tenant
-        # identity (member_id is None) is DENIED regardless of target. This
-        # fires before the standalone/group branches below so an unauthenticated
-        # external caller can never reach a tool via the group path either.
-        if member_id is None and self._topology_mode == "front_door":
-            # Say so. Fail-closed is right; fail-closed and SILENT is what hides
-            # a wiring bug behind a policy-shaped symptom -- it is what made #856
-            # cost hours instead of minutes, because every observable surface was
-            # healthy and the one thing that disagreed produced no signal (#862).
-            #
-            # Throttled to once a minute: this branch fires on every request
-            # while the condition lasts, and a front door denying everything is a
-            # standing state, so the first line is the signal and the next
-            # thousand would bury it. Keyed by server so a single misconfigured
-            # upstream does not silence the rest.
-            if should_log_now(f"front_door_denied_no_tenant:{mcp_server_id}"):
-                logger.warning(
-                    "front_door_denied_no_tenant mcp_server_id=%s -- the caller carried no tenant identity, "
-                    "so every tool is denied. This is the missing-identity branch, NOT a policy decision: "
-                    "check that authentication is configured and that the identity reaches the handler.",
-                    mcp_server_id,
-                )
-            return _DENY_ALL_POLICY
-
-        # If member_id present but no group_id: server→member merge (standalone tenant policy)
-        if member_id and not group_id:
-            standalone_member_policy = self._standalone_member_policies.get(
-                (mcp_server_id, member_id, kind), ToolAccessPolicy()
-            )
-            return ToolAccessPolicy.merge(mcp_server_policy, standalone_member_policy)
-
-        # If no group context at all (egress mode here — front_door already
-        # returned above; member_id is None), fall back to server-level policy.
-        if not group_id:
-            return mcp_server_policy
-
-        # Get group policy
-        group_policy = self._group_policies.get((group_id, kind), ToolAccessPolicy())
-
-        # Get member policy. Keyed by the member SERVER id, which is what
-        # `groups.<g>.members.<m>.tools` and the REST `member/<g>:<m>` scope
-        # register -- never the tenant (#1164). `member_server_id` is what the
-        # dispatching caller resolved; `member_id` is the fallback for a caller
-        # speaking the resolver's own vocabulary (the tests, and any caller for
-        # which tenant and member id coincide).
-        member_scope_id = member_server_id or member_id
-        member_policy = ToolAccessPolicy()
-        mapped_mcp_server_id: str | None = None
-        if member_scope_id is not None:
-            member_policy = self._member_policies.get((group_id, member_scope_id, kind), ToolAccessPolicy())
-            mapped_mcp_server_id = self._member_mcp_server_mapping.get((group_id, member_scope_id))
-        if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
-            mapped_mcp_server_policy = self._mcp_server_policies.get((mapped_mcp_server_id, kind), ToolAccessPolicy())
-            # Merge mapped mcp_server policy with base mcp_server policy
-            mcp_server_policy = ToolAccessPolicy.merge(mcp_server_policy, mapped_mcp_server_policy)
-
-        # The caller's own per-tenant policy, narrower than everything above it.
-        # Both spellings are consulted, the same way #1036 consults both for the
-        # group scope: `tool_access.member.<tenant>` can be declared on the group
-        # and on the member server, and a call routed through a group must honour
-        # whichever the operator wrote.
-        tenant_policy = ToolAccessPolicy()
-        if member_id is not None:
-            for scope in (mcp_server_id, mapped_mcp_server_id or member_scope_id):
-                if scope is None:
-                    continue
-                tenant_policy = ToolAccessPolicy.merge(
-                    tenant_policy,
-                    self._standalone_member_policies.get((scope, member_id, kind), ToolAccessPolicy()),
-                )
-
-        # Four-level merge: mcp_server -> group -> member server -> tenant
-        step1 = ToolAccessPolicy.merge(mcp_server_policy, group_policy)
-        step2 = ToolAccessPolicy.merge(step1, member_policy)
-
-        return ToolAccessPolicy.merge(step2, tenant_policy)
-
-    def is_allowed(
-        self,
-        mcp_server_id: str,
-        name: str,
-        *,
-        kind: PolicyKind = DEFAULT_KIND,
-        group_id: str | None = None,
-        member_id: str | None = None,
-        member_server_id: str | None = None,
-    ) -> bool:
-        """Quick check if a named tool / prompt / resource is allowed in context.
-
-        The one decision every projected surface asks (#1028). A prompt name and
-        a resource URI are matched by the same fnmatch patterns a tool name is:
-        the pattern language does not change with the kind, only which policies
-        are consulted does.
-
-        Args:
-            mcp_server_id: McpServer identifier.
-            name: Tool name, prompt name, or -- for resources -- the UPSTREAM
-                URI, not the ``hangar://`` projection of it.
-            kind: What *name* is.
-            group_id: Optional group identifier.
-            member_id: The caller's tenant (see :meth:`resolve_effective_policy`).
-            member_server_id: The group member this call routes to, when known.
-
-        Returns:
-            True if allowed (including approval-gated), False otherwise.
-        """
-        policy = self.resolve_effective_policy(
-            mcp_server_id, group_id, member_id, member_server_id=member_server_id, kind=kind
-        )
-        return policy.is_tool_allowed(name)
-
-    def is_tool_allowed(
-        self,
-        mcp_server_id: str,
-        tool_name: str,
-        group_id: str | None = None,
-        member_id: str | None = None,
-        *,
-        member_server_id: str | None = None,
-    ) -> bool:
-        """Quick check if a specific tool is allowed in context.
-
-        Args:
-            mcp_server_id: McpServer identifier.
-            tool_name: Name of the tool to check.
-            group_id: Optional group identifier.
-            member_id: The caller's tenant (see :meth:`resolve_effective_policy`).
-            member_server_id: The group member this call routes to, when known.
-
-        Returns:
-            True if the tool is allowed, False otherwise.
-        """
-        return self.is_allowed(
-            mcp_server_id, tool_name, group_id=group_id, member_id=member_id, member_server_id=member_server_id
-        )
-
-    def filter_tools(
-        self,
-        mcp_server_id: str,
-        tools: list[ToolSchema],
-        group_id: str | None = None,
-        member_id: str | None = None,
-    ) -> list[ToolSchema]:
-        """Filter tool schemas to only those allowed by policy.
-
-        Args:
-            mcp_server_id: McpServer identifier.
-            tools: List of ToolSchema objects to filter.
-            group_id: Optional group identifier.
-            member_id: Optional member identifier.
-
-        Returns:
-            List of ToolSchema objects that are allowed by the effective policy.
-        """
-        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
-
-        if policy.is_unrestricted():
-            return tools
-
-        return [t for t in tools if policy.is_tool_allowed(t.name)]
-
-    def filter_tool_dicts(
-        self,
-        mcp_server_id: str,
-        tools: list[dict[str, Any]],
-        group_id: str | None = None,
-        member_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Filter tool dictionaries to only those allowed by policy.
-
-        Args:
-            mcp_server_id: McpServer identifier.
-            tools: List of tool dictionaries with 'name' key.
-            group_id: Optional group identifier.
-            member_id: Optional member identifier.
-
-        Returns:
-            List of tool dictionaries that are allowed by the effective policy.
-        """
-        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
-
-        if policy.is_unrestricted():
-            return tools
-
-        return [t for t in tools if policy.is_tool_allowed(t.get("name", ""))]
 
     def invalidate_cache(self, mcp_server_id: str | None = None) -> None:
         """Invalidate cached effective policies.

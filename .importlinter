@@ -104,3 +104,36 @@ ignore_imports =
     mcp_hangar.domain.services -> mcp_hangar.application.read_models.tool_projection
     mcp_hangar.infrastructure.truncation.manager -> mcp_hangar.server.tools.batch.models
     mcp_hangar.observability.tracing -> mcp_hangar.metrics
+
+# ---------------------------------------------------------------------------
+# The policy merge behind decide()
+# ---------------------------------------------------------------------------
+# `_policy_merge` is the loose-string half of the access decision: its functions
+# take (mcp_server_id, group_id, member_id, member_server_id), and every
+# scope-key defect so far went through that signature with a server id in the
+# tenant slot (#1763). `decide()` in `access_decision` is the one way in (#1784),
+# so that is the one module allowed to import it.
+#
+# `protected`, not `forbidden`: a forbidden contract lists who may NOT import,
+# so a new top-level package would be outside it without anyone noticing. This
+# lists who may, and everything else is refused. The allowed importer is the
+# module rather than the `domain.services` package, because the package's
+# __init__ would otherwise be allowed too, and a re-export there would put the
+# merge back on the public surface with this contract still green.
+#
+# import-linter sees imports, not calls, which is why these are functions in a
+# module of their own rather than methods on the resolver: a method is reachable
+# from anything holding the resolver. What a contract cannot see -- the shape of
+# a call -- tests/unit/test_policy_scopes_are_typed_outside_the_decision.py checks.
+#
+# Tests are outside this contract on purpose: the graph is `root_package =
+# mcp_hangar`, so tests/ is not in it. The merge's own unit tests import
+# `_policy_merge` directly, because they ask questions `decide()` cannot spell;
+# the same test file pins which test files those are.
+[importlinter:contract:policy-merge-boundary]
+name = The policy merge is private to decide()
+type = protected
+protected_modules =
+    mcp_hangar.domain.services._policy_merge
+allowed_importers =
+    mcp_hangar.domain.services.access_decision

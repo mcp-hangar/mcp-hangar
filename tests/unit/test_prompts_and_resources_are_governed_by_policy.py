@@ -31,15 +31,18 @@ from mcp_hangar.application.read_models.tool_projection import (
     reset_tool_projection_registry,
 )
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
     reset_tool_access_resolver,
 )
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.fastmcp_server import prompt_proxy as pp
 from mcp_hangar.fastmcp_server import resource_link_read_through as rt
 from mcp_hangar.fastmcp_server.flat_tool_projection import is_governed_allowed
+from tests._access_decisions import may
 
 _SERVER = "server_a"
 _TENANT = "tenant:a"
@@ -217,9 +220,9 @@ class TestAnExistingConfigIsUnchanged:
         resolver.set_mcp_server_policy(_SERVER, policy)
         get_tool_projection_registry().set_config_withdrawal(_SERVER, "w")
 
-        assert resolver.resolve_effective_policy(_SERVER) is policy
+        assert _policy_merge.resolve_effective_policy(resolver, _SERVER) is policy
         assert resolver.get_configured_policy("mcp_server", _SERVER) is policy
-        assert not resolver.is_tool_allowed(_SERVER, "x", member_id=_TENANT)
+        assert not may(resolver, Target.server(_SERVER), "x", Caller(tenant_id=_TENANT))
         assert get_tool_projection_registry().is_withdrawn(_SERVER, "w")
 
     def test_the_new_access_block_registers_prompt_and_resource_policy(self) -> None:

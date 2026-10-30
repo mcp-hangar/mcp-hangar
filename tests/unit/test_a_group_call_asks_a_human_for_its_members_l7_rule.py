@@ -30,6 +30,7 @@ from mcp_hangar.application.read_models.tool_projection import (
 from mcp_hangar.approvals.models import ApprovalResult
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.policies.egress_l7 import L7Policy
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     get_tool_access_resolver,
     reset_tool_access_resolver,
@@ -111,6 +112,19 @@ def _call(named: str, tool: str) -> Any:
 
 def _executor() -> BatchExecutor:
     return object.__new__(BatchExecutor)
+
+
+@pytest.fixture(autouse=True)
+def _the_merge_asks_the_fake_resolver(monkeypatch):
+    """The merge is functions over a resolver (#1784); the fake here answers for them."""
+    merge = _policy_merge.resolve_effective_policy
+
+    def effective_policy(resolver, *scope, **rest):
+        if isinstance(resolver, SimpleNamespace):
+            return resolver.resolve_effective_policy(*scope, **rest)
+        return merge(resolver, *scope, **rest)
+
+    monkeypatch.setattr(_policy_merge, "resolve_effective_policy", effective_policy)
 
 
 def _unrestricted_resolver() -> Any:

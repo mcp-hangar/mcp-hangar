@@ -358,6 +358,10 @@ drift_allowance = 3.0
   "auth/infrastructure/rbac_authorizer.py" = 98.8
   "auth/roles.py" = 100.0
   "domain/policies/egress_l7.py" = 98.6
+  # The merge left tool_access_resolver.py for this private module (#1784), so
+  # it brings a floor of its own rather than dropping out of the gate. 97.67
+  # measured on 3.11; its one miss is a `None` scope no caller reaches.
+  "domain/services/_policy_merge.py" = 97.0
   "domain/services/digest_computation.py" = 100.0
   "domain/services/digest_validator.py" = 100.0
   "domain/services/task_consent.py" = 92.7

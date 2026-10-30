@@ -32,6 +32,7 @@ import pytest
 from mcp_hangar._sdk_compat import McpError
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
@@ -272,6 +273,17 @@ def test_the_store_records_the_call_that_created_a_task() -> None:
 # ---------------------------------------------------------------------------
 # The question: the access and withdrawal gates, for a call already known
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _the_merge_asks_the_fake_resolver(monkeypatch):
+    """The merge is functions over a resolver (#1784); the fake here answers for them."""
+    monkeypatch.setattr(_policy_merge, "is_allowed", lambda resolver, *a, **k: resolver.is_allowed(*a, **k))
+    monkeypatch.setattr(
+        _policy_merge,
+        "resolve_effective_policy",
+        lambda resolver, *a, **k: resolver.resolve_effective_policy(*a, **k),
+    )
 
 
 class _Resolver:

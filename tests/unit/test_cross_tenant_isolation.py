@@ -40,10 +40,12 @@ from mcp_hangar.domain.services.tool_access_resolver import (
     reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import Caller, Target
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server.flat_tool_projection import _build_flat_map
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 from mcp_hangar.server.tools.batch.models import BatchResult
+from tests._access_decisions import may
 
 # ---------------------------------------------------------------------------
 # Constants — one shared RS, two tenants, one private tool each.
@@ -220,12 +222,12 @@ class TestCrossTenantPolicyResolver:
         resolver.set_standalone_member_policy(SERVER, TENANT_B, ToolAccessPolicy(allow_list=(TOOL_B,)))
 
         # Own tool: allowed.
-        assert resolver.is_tool_allowed(SERVER, TOOL_A, member_id=TENANT_A) is True
-        assert resolver.is_tool_allowed(SERVER, TOOL_B, member_id=TENANT_B) is True
+        assert may(resolver, Target.server(SERVER), TOOL_A, Caller(tenant_id=TENANT_A)) is True
+        assert may(resolver, Target.server(SERVER), TOOL_B, Caller(tenant_id=TENANT_B)) is True
 
         # Cross-tenant: the exact boundary — A cannot reach B's tool, B cannot reach A's.
-        assert resolver.is_tool_allowed(SERVER, TOOL_B, member_id=TENANT_A) is False
-        assert resolver.is_tool_allowed(SERVER, TOOL_A, member_id=TENANT_B) is False
+        assert may(resolver, Target.server(SERVER), TOOL_B, Caller(tenant_id=TENANT_A)) is False
+        assert may(resolver, Target.server(SERVER), TOOL_A, Caller(tenant_id=TENANT_B)) is False
 
 
 # ---------------------------------------------------------------------------

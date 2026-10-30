@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from mcp_hangar.context import identity_context_var
+from mcp_hangar.domain.services import _policy_merge
 from mcp_hangar.domain.services.tool_access_resolver import (
     ToolAccessResolver,
     reset_tool_access_resolver,
@@ -83,11 +84,11 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
         # Without member context: server policy allows delete_data
-        assert resolver.is_tool_allowed("myserver", "delete_data")
+        assert _policy_merge.is_allowed(resolver, "myserver", "delete_data")
 
         # With tenant context: member deny overrides
-        assert not resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:a")
-        assert resolver.is_tool_allowed("myserver", "get_data", member_id="tenant:a")
+        assert not _policy_merge.is_allowed(resolver, "myserver", "delete_data", member_id="tenant:a")
+        assert _policy_merge.is_allowed(resolver, "myserver", "get_data", member_id="tenant:a")
 
     def test_different_tenant_still_allowed(self, resolver):
         """A different tenant with no member policy sees the server policy only."""
@@ -98,7 +99,7 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
         # tenant:b has no member policy → falls back to server policy
-        assert resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:b")
+        assert _policy_merge.is_allowed(resolver, "myserver", "delete_data", member_id="tenant:b")
 
     def test_member_id_none_returns_server_policy(self, resolver):
         """member_id=None → server-level resolution (backward compat)."""
@@ -109,7 +110,7 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
         # No member context — only server policy applies
-        policy = resolver.resolve_effective_policy("myserver")
+        policy = _policy_merge.resolve_effective_policy(resolver, "myserver")
         assert not policy.is_tool_allowed("dangerous_tool")  # server deny
         assert policy.is_tool_allowed("safe_tool")  # NOT in server deny
 
@@ -123,7 +124,7 @@ class TestStandaloneMemberPolicyResolver:
         # We test that even with an empty (unrestricted) member policy the server deny holds.
         resolver.set_standalone_member_policy("myserver", "tenant:attacker", ToolAccessPolicy())
 
-        assert not resolver.is_tool_allowed("myserver", "dangerous_tool", member_id="tenant:attacker")
+        assert not _policy_merge.is_allowed(resolver, "myserver", "dangerous_tool", member_id="tenant:attacker")
 
     def test_member_policy_cache_key_is_distinct_from_server_cache(self, resolver):
         """Cache key for server→member path is distinct from plain server key."""
@@ -134,8 +135,8 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_standalone_member_policy("srv", "tenant:t1", member_policy)
 
         # Populate both cache entries
-        resolver.resolve_effective_policy("srv")
-        resolver.resolve_effective_policy("srv", member_id="tenant:t1")
+        _policy_merge.resolve_effective_policy(resolver, "srv")
+        _policy_merge.resolve_effective_policy(resolver, "srv", member_id="tenant:t1")
 
         with resolver._lock:
             # Keyed (kind, scope) since #1028.

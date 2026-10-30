@@ -812,11 +812,11 @@ class TestEveryPredicateIsAskedAboutTheRequestsOwnScope:
 #: id instead of to the subscriber's tenant (and lets it through); the route
 #: guard records the server id as the tenant a confined grant reaches.
 _MUTATIONS: dict[str, tuple[str, str]] = {
-    HANGAR_CALL: ("is_allowed", "ToolAccessResolver.is_allowed"),
-    SUBSCRIPTIONS_LISTEN: ("is_allowed", "ToolAccessResolver.is_allowed"),
-    FACADE_INVOKE: ("is_allowed", "ToolAccessResolver.is_allowed"),
-    STDIO_HANGAR_CALL: ("is_allowed", "ToolAccessResolver.is_allowed"),
-    STDIO_FLAT_TOOL_CALL: ("is_allowed", "ToolAccessResolver.is_allowed"),
+    HANGAR_CALL: ("is_allowed", "is_allowed"),
+    SUBSCRIPTIONS_LISTEN: ("is_allowed", "is_allowed"),
+    FACADE_INVOKE: ("is_allowed", "is_allowed"),
+    STDIO_HANGAR_CALL: ("is_allowed", "is_allowed"),
+    STDIO_FLAT_TOOL_CALL: ("is_allowed", "is_allowed"),
     WS_EVENTS: ("visible_to_tenant", "visible_to_tenant"),
     REST_TOOL_HISTORY: ("grant_scope", "confined_tenant"),
 }
@@ -824,14 +824,14 @@ _MUTATIONS: dict[str, tuple[str, str]] = {
 
 def _mutate(env: pytest.MonkeyPatch, mutation: str) -> None:
     if mutation == "is_allowed":
-        from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
+        from mcp_hangar.domain.services import _policy_merge
 
-        is_allowed = ToolAccessResolver.is_allowed
+        is_allowed = _policy_merge.is_allowed
 
-        def server_in_the_tenant_slot(self, mcp_server_id, name, **kwargs):  # type: ignore[no-untyped-def]
-            return is_allowed(self, mcp_server_id, name, **{**kwargs, "member_id": mcp_server_id})
+        def server_in_the_tenant_slot(resolver, mcp_server_id, name, **kwargs):  # type: ignore[no-untyped-def]
+            return is_allowed(resolver, mcp_server_id, name, **{**kwargs, "member_id": mcp_server_id})
 
-        env.setattr(ToolAccessResolver, "is_allowed", server_in_the_tenant_slot)
+        env.setattr(_policy_merge, "is_allowed", server_in_the_tenant_slot)
     elif mutation == "visible_to_tenant":
         from mcp_hangar.server.api.ws import events
 
