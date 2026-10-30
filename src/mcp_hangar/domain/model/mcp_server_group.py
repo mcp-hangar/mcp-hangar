@@ -499,6 +499,17 @@ class McpServerGroup(AggregateRoot):
             self._members[member.id] = member if member.vacant else dataclasses.replace(member, mcp_server=mcp_server)
             self._update_state()
 
+    def restore_member(self, mcp_server: McpServer, weight: int, priority: int) -> None:
+        """Take back a member the group API added before a restart (#2172).
+
+        Starts and records nothing. Where members are started it is in rotation,
+        and the call that selects it starts it; elsewhere it waits, as after `add_member`.
+        """
+        with self._lock:
+            member = GroupMember(mcp_server, weight, priority, in_rotation=self._auto_start)
+            self._members[member.id] = member
+            self._update_state()
+
     def replace_member_server(self, member_id: str, mcp_server: McpServer) -> bool:
         """Point a member at a new copy of its server, keeping its place in the group.
 

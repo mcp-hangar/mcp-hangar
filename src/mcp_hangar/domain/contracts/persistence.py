@@ -395,6 +395,38 @@ class IMcpServerConfigRepository(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class GroupRecord:
+    """A group the group API created (#2172). One the file declares has no record.
+
+    A row is the record that the group API made it. Nothing else is remembered
+    about past files, and a restart needs nothing else to tell the two apart.
+    """
+
+    group_id: str
+    strategy: str
+    min_healthy: int = 1
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class GroupMemberRecord:
+    """A member the group API added, to a group of either origin. One the file names has no record."""
+
+    group_id: str
+    member_id: str
+    weight: int = 1
+    priority: int = 1
+
+
+@dataclass(frozen=True)
+class StoredGroups:
+    """Every stored group and member."""
+
+    groups: tuple[GroupRecord, ...] = ()
+    members: tuple[GroupMemberRecord, ...] = ()
+
+
 class IAuditRepository(Protocol):
     """Repository protocol for audit log persistence.
 

@@ -18,7 +18,7 @@ the storage backend's repository actually is.
 
 from abc import ABC, abstractmethod
 
-from .persistence import McpServerConfigSnapshot, PeerKeyClaim
+from .persistence import GroupMemberRecord, GroupRecord, McpServerConfigSnapshot, PeerKeyClaim
 
 
 class NotTheManagerError(RuntimeError):
@@ -34,6 +34,35 @@ class NotTheManagerError(RuntimeError):
             f"refusing to deregister {mcp_server_id}: this instance does not hold the management lease. "
             "It was decided under a tenure that has since ended, so the fleet it describes is not the current one."
         )
+
+
+class IGroupWriter(ABC):
+    """Records what the group API does, for a restart (#2172): sync and raising, as `IFleetWriter`.
+
+    An operator's requests, so not fenced: see `IFleetWriter.delete`.
+    """
+
+    @abstractmethod
+    def create_group(self, record: GroupRecord) -> bool:
+        """Store a new group. False when a row of that id exists."""
+
+    @abstractmethod
+    def update_group(
+        self, group_id: str, strategy: str | None, min_healthy: int | None, description: str | None
+    ) -> None:
+        """Change a stored group's given fields."""
+
+    @abstractmethod
+    def save_group_member(self, record: GroupMemberRecord) -> None:
+        """Store a member."""
+
+    @abstractmethod
+    def delete_group(self, group_id: str) -> None:
+        """Remove a group's row and its member rows."""
+
+    @abstractmethod
+    def delete_group_member(self, group_id: str, member_id: str) -> None:
+        """Remove a member's row."""
 
 
 class IFleetWriter(ABC):

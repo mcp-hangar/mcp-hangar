@@ -370,6 +370,26 @@ MIGRATIONS: list[tuple[str, str]] = [
         END;
         """,
     ),
+    (
+        "007_group_records",
+        """
+        -- What the group API made (#2172). No foreign key: a member added to a
+        -- group the file declares has no group row to name.
+        CREATE TABLE IF NOT EXISTS mcp_server_groups (
+            group_id TEXT PRIMARY KEY,
+            strategy TEXT NOT NULL,
+            min_healthy INTEGER NOT NULL DEFAULT 1,
+            description TEXT
+        );
+        CREATE TABLE IF NOT EXISTS mcp_server_group_members (
+            group_id TEXT NOT NULL,
+            member_id TEXT NOT NULL,
+            weight INTEGER NOT NULL DEFAULT 1,
+            priority INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (group_id, member_id)
+        );
+        """,
+    ),
 ]
 
 

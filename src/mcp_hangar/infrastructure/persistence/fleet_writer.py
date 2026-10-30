@@ -17,18 +17,24 @@ latency of one row write, on registration only.
 """
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
-from mcp_hangar.domain.contracts.fleet import IFleetWriter, NotTheManagerError
+from mcp_hangar.domain.contracts.fleet import IFleetWriter, IGroupWriter, NotTheManagerError
 from mcp_hangar.domain.contracts.management_lease import Lease
-from mcp_hangar.domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot, PeerKeyClaim
+from mcp_hangar.domain.contracts.persistence import (
+    GroupMemberRecord,
+    GroupRecord,
+    IMcpServerConfigRepository,
+    McpServerConfigSnapshot,
+    PeerKeyClaim,
+)
 from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class RepositoryFleetWriter(IFleetWriter):
+class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
     """Writes the fleet through the selected backend's config repository."""
 
     #: A row write. Generous enough that a slow disk or a busy pool does not
@@ -58,6 +64,7 @@ class RepositoryFleetWriter(IFleetWriter):
                 between losing the lease and noticing gets left open.
         """
         self._repository = config_repository
+        self._group_rows: Any = config_repository  # Both durable repositories keep the group rows too.
         self._timeout_s = timeout_s
         self._lease_provider = lease_provider
         self._loop = BackgroundLoop()
@@ -128,6 +135,23 @@ class RepositoryFleetWriter(IFleetWriter):
             generation=lease.generation,
             detail="the row was already absent, or this tenure had ended by the time the write reached the database",
         )
+
+    def create_group(self, record: GroupRecord) -> bool:
+        return cast(bool, self._loop.run(self._group_rows.create_group(record), self._timeout_s))
+
+    def update_group(
+        self, group_id: str, strategy: str | None, min_healthy: int | None, description: str | None
+    ) -> None:
+        self._loop.run(self._group_rows.update_group(group_id, strategy, min_healthy, description), self._timeout_s)
+
+    def save_group_member(self, record: GroupMemberRecord) -> None:
+        self._loop.run(self._group_rows.save_group_member(record), self._timeout_s)
+
+    def delete_group(self, group_id: str) -> None:
+        self._loop.run(self._group_rows.delete_group(group_id), self._timeout_s)
+
+    def delete_group_member(self, group_id: str, member_id: str) -> None:
+        self._loop.run(self._group_rows.delete_group_member(group_id, member_id), self._timeout_s)
 
     def close(self) -> None:
         """Stop the background loop. Called at shutdown; safe to call twice."""

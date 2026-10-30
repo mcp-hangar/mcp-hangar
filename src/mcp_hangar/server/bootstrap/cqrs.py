@@ -118,12 +118,14 @@ def init_cqrs(
         runtime_store=RUNTIME_PROVIDERS,
         event_store=runtime.event_bus.event_store,
     )
+    fleet_writer = _fleet_writer(runtime)
     register_crud_handlers(
         runtime.command_bus,
         repository,
         runtime.event_bus,
         GROUPS,
-        _fleet_writer(runtime),
+        fleet_writer,
+        group_writer=fleet_writer,
         coordinated=_coordinated,
         # So deleting a server releases the buffer its output was read from,
         # rather than leaving it registered under an id that is free (#1506).

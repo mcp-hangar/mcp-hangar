@@ -45,7 +45,7 @@ from ...gc import BackgroundWorker
 from ...infrastructure.saga_manager import SagaManager, get_saga_manager
 from ...logging_config import get_logger
 from ...protocol import HANGAR_SERVER_NAME
-from ..config import apply_configuration, load_config, load_configuration
+from ..config import apply_configuration, load_config, load_configuration, restore_stored_groups
 from ..context import get_context, init_context
 from ..state import GROUPS, get_runtime
 from .components import ServerComponents, get_auth_compat_exports, load_components
@@ -499,6 +499,7 @@ def bootstrap(
     # different backend than everything else.
     from .composition import set_persistence_backend
     from .persistence import (
+        read_stored_groups,
         refuse_a_cluster_that_cannot_coordinate,
         refuse_local_modes_in_a_declared_cluster,
         restore_persisted_fleet,
@@ -576,7 +577,13 @@ def bootstrap(
     # replays its own stream to get its lifecycle state back; before anything
     # serves, because a gateway that answers "no such server" for the first few
     # seconds after every restart is a gateway that lost its fleet.
+    stored_groups = read_stored_groups(runtime)
     restore_persisted_fleet(runtime)
+    # A restored server is outside its group until this has run, and the group's
+    # stored policy is replayed by `load_components` below. Nothing serves until
+    # `bootstrap` returns, so no call or listing sees either gap (#2172).
+    if stored_groups is not None:
+        restore_stored_groups(stored_groups, runtime.repository)
 
     # And the withdrawals decided before this replica existed. After the tailer
     # for the same head-then-snapshot reason, and after the fleet so the servers

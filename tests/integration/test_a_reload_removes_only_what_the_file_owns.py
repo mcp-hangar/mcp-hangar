@@ -114,8 +114,8 @@ def test_a_non_file_server_keeps_its_group_memberships_across_the_reload(run: di
 def test_a_restart_on_a_durable_backend_gives_what_the_reload_left(sqlite: dict[str, Any]) -> None:
     first, booted = sqlite["first"], sqlite["restart"]["booted"]
     assert booted["ids"] == first["ids"]
-    # Not the groups: those made over REST are not stored, so a restart has the file's.
-    assert booted["groups"] == {"pool": ["member"]}
+    # The groups too: those made over REST are stored, so a restart has them (#2172).
+    assert booted["groups"] == first["groups"]
     assert booted["policies"] == first["policies"]
     assert booted["upstream_description"] == first["upstream_description"]
 

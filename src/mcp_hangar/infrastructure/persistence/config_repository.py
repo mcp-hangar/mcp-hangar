@@ -3,17 +3,22 @@
 Provides both in-memory and SQLite implementations of IMcpServerConfigRepository.
 """
 
+import dataclasses
 import json
 import sqlite3
 import threading
 from datetime import UTC, datetime
+from typing import Any
 
 from ...domain.contracts.persistence import (
     ConcurrentModificationError,
+    GroupMemberRecord,
+    GroupRecord,
     McpServerConfigSnapshot,
     PeerKeyClaim,
     PeerKeyNameRefused,
     PersistenceError,
+    StoredGroups,
     check_peer_key_claim,
     peer_key_claim,
 )
@@ -630,3 +635,71 @@ class SQLiteMcpServerConfigRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: non-critical, best-effort update
             logger.error(f"Failed to update failure count: {e}")
             # Non-critical operation, don't raise
+
+    async def _write_group_rows(self, *statements: tuple[str, tuple[Any, ...]]) -> int:
+        """Run *statements* in one transaction; the rows the last changed."""
+        try:
+            async with self._db.transaction() as conn:
+                counts = [(await conn.execute(sql, parameters)).rowcount for sql, parameters in statements]
+                return counts[-1]
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to write the stored groups: {e}") from e
+
+    async def read_groups(self) -> StoredGroups:
+        """Every stored group and member."""
+        try:
+            async with self._db.connection() as conn:
+                groups = await conn.execute_fetchall(
+                    "SELECT group_id, strategy, min_healthy, description FROM mcp_server_groups ORDER BY group_id"
+                )
+                members = await conn.execute_fetchall(
+                    "SELECT group_id, member_id, weight, priority FROM mcp_server_group_members "
+                    "ORDER BY group_id, member_id"
+                )
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to read the stored groups: {e}") from e
+        return StoredGroups(
+            tuple(GroupRecord(*tuple(row)) for row in groups), tuple(GroupMemberRecord(*tuple(row)) for row in members)
+        )
+
+    async def create_group(self, record: GroupRecord) -> bool:
+        """Store a new group, without any member rows a dropped group of that id left. False when a row exists."""
+        stale = (
+            "DELETE FROM mcp_server_group_members WHERE group_id = ? "
+            "AND NOT EXISTS (SELECT 1 FROM mcp_server_groups WHERE group_id = ?)"
+        )
+        insert = (
+            "INSERT OR IGNORE INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (?, ?, ?, ?)"
+        )
+        statements = (stale, (record.group_id, record.group_id)), (insert, dataclasses.astuple(record))
+        return bool(await self._write_group_rows(*statements))
+
+    async def update_group(
+        self, group_id: str, strategy: str | None, min_healthy: int | None, description: str | None
+    ) -> None:
+        """Change the given fields, in one statement."""
+        sql = (
+            "UPDATE mcp_server_groups SET strategy = COALESCE(?, strategy), min_healthy = COALESCE(?, min_healthy), "
+            "description = COALESCE(?, description) WHERE group_id = ?"
+        )
+        await self._write_group_rows((sql, (strategy, min_healthy, description, group_id)))
+
+    async def save_group_member(self, record: GroupMemberRecord) -> None:
+        """Store a member, replacing an earlier row of that group and member."""
+        sql = (
+            "INSERT OR REPLACE INTO mcp_server_group_members (group_id, member_id, weight, priority) "
+            "VALUES (?, ?, ?, ?)"
+        )
+        await self._write_group_rows((sql, dataclasses.astuple(record)))
+
+    async def delete_group(self, group_id: str) -> None:
+        """Remove a group's row, if any, and every member row under its id."""
+        await self._write_group_rows(
+            ("DELETE FROM mcp_server_groups WHERE group_id = ?", (group_id,)),
+            ("DELETE FROM mcp_server_group_members WHERE group_id = ?", (group_id,)),
+        )
+
+    async def delete_group_member(self, group_id: str, member_id: str) -> None:
+        """Remove a member's row, if any."""
+        sql = "DELETE FROM mcp_server_group_members WHERE group_id = ? AND member_id = ?"
+        await self._write_group_rows((sql, (group_id, member_id)))

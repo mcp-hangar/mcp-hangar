@@ -29,12 +29,14 @@ must not change what an existing configuration does.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+from mcp_hangar.domain.contracts.persistence import StoredGroups
+from mcp_hangar.domain.exceptions import ConfigurationUnavailableError
 from mcp_hangar.infrastructure.launchers import LOCAL_MODES
 from mcp_hangar.infrastructure.persistence.registry import PersistenceBackend, create_backend
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.server.config import _defines_a_server
+from mcp_hangar.server.config import _defines_a_server, group_records
 
 logger = get_logger(__name__)
 
@@ -412,6 +414,33 @@ def restore_persisted_fleet(runtime: Any) -> int:
         logger.info("fleet_restored", count=len(restored), mcp_server_ids=list(restored))
         _seed_lifecycle_metrics(runtime, list(restored))
     return len(restored)
+
+
+def read_stored_groups(runtime: Any) -> StoredGroups | None:
+    """Read the group API's rows (#2172), before the fleet is restored, so a store that cannot be read restores nothing.
+
+    A failed read stops the boot, unlike the fleet's. A server the file declares
+    can be a stored member, so going on would serve it outside its group.
+
+    Returns:
+        The rows, or None when a restart does not read them back: `fleet_restore_gap`.
+        On the in-memory backend a group lasts as long as the process, as a server does.
+    """
+    from ...infrastructure.async_bridge import BackgroundLoop
+
+    records = group_records()
+    if records is None or fleet_restore_gap(runtime) is not None:
+        return None
+    loop = BackgroundLoop()
+    try:
+        return cast("StoredGroups", loop.run(records.read_groups(), RESTORE_TIMEOUT_S))
+    except Exception as e:  # noqa: BLE001 -- any store failure stops the boot, before anything is served
+        raise ConfigurationUnavailableError(
+            "The stored groups could not be read, so the gateway did not start: the servers they govern "
+            "would be served outside their groups. Start it again once the configuration store is reachable."
+        ) from e
+    finally:
+        loop.close()
 
 
 def _seed_lifecycle_metrics(runtime: Any, mcp_server_ids: list[str]) -> None:

@@ -21,12 +21,13 @@ import yaml
 
 from ..application.ports.config_loader import IConfigLoader, PreparedServers
 from ..application.read_models.tool_projection import UNREADABLE_PIN_SHA256
-from ..domain.contracts.persistence import peer_key_name_conflicts
+from ..domain.contracts.persistence import StoredGroups, peer_key_name_conflicts
 from ..domain.exceptions import ConfigurationError, ConfigurationUnavailableError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup, McpServerMode
 from ..domain.security.hot_load_trust import HotLoadTrust, parse_hot_load_trust, set_hot_load_trust
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_trusted_networks
+from ..domain.services.governance_overlays import swapping
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.config import MaxConsecutiveFailures
 from ..domain.value_objects.peer_identity import PeerIdentity, max_connection_age
@@ -121,7 +122,6 @@ class _StagedConfig:
         from ..application.read_models.tool_projection import get_tool_projection_registry
         from ..domain.policies.header_exposure import adopt_header_exposure_policies
         from ..domain.services import get_tool_access_resolver
-        from ..domain.services.governance_overlays import swapping
 
         # Function-local, as the rest are: `server.bootstrap` imports this module.
         from .bootstrap.logs import ensure_log_buffer
@@ -231,13 +231,13 @@ _BUILT_FROM: dict[str, tuple[dict[str, Any], McpServer]] = {}
 _DECLARED_GROUPS: dict[str, frozenset[str]] = {}
 
 
-def _server_of_member(member: Any, repository: Any) -> McpServer | None:
-    """The server *member* holds after a reload, or None when it cannot stay a member.
+def _server_of_member(member_id: str, repository: Any) -> McpServer | None:
+    """The server a member of that id holds, or None when it cannot be a member.
 
     None when its server is gone from the fleet, so no member dangles, or came
     back key-pinned, which cannot be in a group (ADR-030 §8).
     """
-    server = repository.get(str(member.id))
+    server = repository.get(member_id)
     return None if server is None or isinstance(getattr(server, "_peer_identity", None), PeerIdentity) else server
 
 
@@ -266,7 +266,7 @@ def _carry_runtime_groups(staged: dict[str, McpServerGroup], repository: Any) ->
         for member in running.members:
             if replacement is not None and (member.id in (declared or ()) or replacement.get_member(member.id)):
                 continue
-            server = _server_of_member(member, repository)
+            server = _server_of_member(str(member.id), repository)
             if replacement is not None:
                 if server is not None:
                     replacement.keep_member(member, server)
@@ -275,6 +275,39 @@ def _carry_runtime_groups(staged: dict[str, McpServerGroup], repository: Any) ->
             elif not member.vacant:
                 running.replace_member_server(member.id, server)
     return departed
+
+
+def restore_stored_groups(stored: StoredGroups, repository: Any) -> None:
+    """Put back what the group API made, by the rules `_carry_runtime_groups` keeps it (#2172).
+
+    Over the groups the file built, so the file wins: a stored group it declares
+    is the file's and takes the stored members it does not name, and a member row
+    under no group is of a group the file dropped. Neither joins
+    `_DECLARED_GROUPS`, so a reload after this keeps them as it keeps any other.
+    """
+    restored: list[McpServerGroup] = []
+    with swapping():
+        for record in stored.groups:
+            if record.group_id not in GROUPS:
+                strategy = _parse_strategy(record.strategy, record.group_id)
+                group = McpServerGroup(record.group_id, strategy, record.min_healthy, description=record.description)
+                group.collect_events()  # This is no creation: nothing goes on the log.
+                GROUPS[record.group_id] = group
+                restored.append(group)
+        for row in stored.members:
+            member_group, server = GROUPS.get(row.group_id), _server_of_member(row.member_id, repository)
+            if member_group is not None and server is not None and member_group.get_member(row.member_id) is None:
+                member_group.restore_member(server, row.weight, row.priority)
+    for group in restored:
+        observe_group_circuit(group)
+
+
+def group_records() -> Any:
+    """The durable store of the group API's rows, or None."""
+    from ..infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+
+    repository = getattr(get_runtime(), "config_repository", None)
+    return None if repository is None or isinstance(repository, InMemoryMcpServerConfigRepository) else repository
 
 
 def declared_in_config(mcp_server_id: str) -> bool:
