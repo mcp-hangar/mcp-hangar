@@ -215,7 +215,8 @@ ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # --- System ------------------------------------------------------------
     # /system/me describes the calling principal; the principal is the resource.
     _rule("/system/me", "GET", AUTHENTICATED_ONLY),
-    _rule("/system", "GET", AUTHENTICATED_ONLY),
+    # /system reports on the whole fleet, so it reads like the fleet's other routes.
+    _rule("/system", "GET", ("mcp_servers", "read")),
     # --- Approvals ---------------------------------------------------------
     # approval:resolve is additionally enforced at the command handler
     # (ADR-016 D1); this rule makes the REST edge agree with it.
