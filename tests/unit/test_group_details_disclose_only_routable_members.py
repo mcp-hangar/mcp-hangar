@@ -105,14 +105,32 @@ class TestAPinnedTenant:
         assert details["healthy_count"] == 1
         assert details["members_in_rotation_count"] == 1
 
-    def test_the_state_is_taken_over_the_disclosed_members(self) -> None:
-        """Two live members against min_healthy=2 is healthy; the one shown alone is partial."""
+    def test_the_state_is_judged_on_the_members_it_is_shown(self) -> None:
+        """min_healthy=2 is capped at the one member shown: the tenant's calls are served, so it is healthy."""
         group = _pool(ALPHA, BETA, ready=(ALPHA, BETA), pinned={PINNED: ALPHA}, min_healthy=2)
 
         assert _details(group, None)["state"] == "healthy"
         details = _details(group, PINNED)
-        assert details["state"] == "partial"
+        assert details["state"] == "healthy"
         assert details["is_available"] is True
+
+    def test_min_healthy_and_the_group_breaker_are_not_shown(self) -> None:
+        """Both describe the whole group: one counts hidden members, the other opens on their failures."""
+        details = _details(_pool(ALPHA, BETA, ready=(ALPHA, BETA), pinned={PINNED: ALPHA}, min_healthy=2), PINNED)
+
+        assert "min_healthy" not in details
+        assert "circuit_open" not in details
+
+    def test_a_dead_pinned_member_is_not_healthy_whatever_the_others_are(self) -> None:
+        group = _pool(ALPHA, BETA, ready=(BETA,), pinned={PINNED: ALPHA})
+        group.get_member(ALPHA).mcp_server._state = McpServerState.DEAD  # type: ignore[union-attr]
+
+        details = _details(group, PINNED)
+
+        assert _members(details) == [ALPHA]
+        assert details["state"] == "inactive"
+        assert details["is_available"] is False
+        assert details["healthy_count"] == 0
 
 
 class TestATenantInRotation:
@@ -139,5 +157,19 @@ class TestNoTenant:
     def test_the_whole_group_is_shown_as_before(self, in_rotation: tuple[str, ...]) -> None:
         group = _pool(*in_rotation, ready=(ALPHA,), pinned={PINNED: ALPHA})
 
-        assert _details(group, None) == group.to_status_dict()
+        details = _details(group, None)
+        assert details == group.to_status_dict()
+        assert list(details) == [
+            "group_id",
+            "description",
+            "state",
+            "strategy",
+            "min_healthy",
+            "healthy_count",
+            "members_in_rotation_count",
+            "total_members",
+            "is_available",
+            "circuit_open",
+            "members",
+        ]
         assert _members(_details(group, None)) == [ALPHA, BETA, GAMMA]

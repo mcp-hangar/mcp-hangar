@@ -441,7 +441,9 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline C
             caller with a tenant, members and every count, state and
             is_available cover only the members its calls may be routed to
             (the pinned or canary member, else every member in rotation;
-            none when no member is selectable). healthy_count
+            none when no member is selectable), state is judged against
+            min_healthy capped at that many members, and min_healthy and
+            circuit_open are left out. healthy_count
             counts members that are ready and in rotation;
             members_in_rotation_count counts members in rotation in any state.
             dead is null unless state is "dead". reason is "given_up",

@@ -5,6 +5,9 @@ lists only the members its calls may be routed to (the pinned or canary member
 alone, else every member in rotation), the set `hangar_tools` on a group
 already decides on, and `total_members`, `healthy_count`,
 `members_in_rotation_count`, `state` and `is_available` are taken over those
-members alone. A tenant in rotation is therefore no longer shown members out
-of rotation, and a group with no selectable member shows an empty member
-list. A caller without a tenant (auth off) is shown the whole group, as before
+members alone. `state` is judged against `min_healthy` capped at the number of
+members shown, so a tenant pinned to one live member reads `healthy`, and the
+tenant's view leaves out `min_healthy` and `circuit_open`, which describe the
+whole group. A tenant in rotation is no longer shown members out of rotation,
+and a group with no selectable member shows an empty member list. A caller
+without a tenant (auth off) is shown the whole group, as before
