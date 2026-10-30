@@ -11,8 +11,10 @@ This table is the one place those predicates are named, the way
 ``TOOL_PERMISSIONS`` is for tools. Two tests read it:
 
 * ``test_security_predicates_are_reachable.py`` drives the app
-  ``mcp-hangar serve --http`` serves. It fails when a declared path never runs
-  its predicate.
+  ``mcp-hangar serve --http`` serves -- its MCP endpoint, its REST API and its
+  WebSocket event stream -- and, each in a process of its own, the Python
+  facade's ``invoke`` and a stdio session. It fails when a declared path never
+  runs its predicate.
 * ``test_security_predicates_are_registered.py`` fails when a function in
   ``src/`` has a predicate's name and is neither registered here nor in
   ``EXEMPT``.
@@ -41,6 +43,11 @@ from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
 from mcp_hangar.domain.services.ui_resource_guard import UiResourceGuard
 from mcp_hangar.fastmcp_server.flat_tool_projection import _authorize_flat_call, is_governed_allowed
 from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
+from mcp_hangar.server.api.mcp_servers import _check_permission
+from mcp_hangar.server.api.middleware import AuthorizationEnforcementMiddleware
+from mcp_hangar.server.api.route_permissions import resolve_rule
+from mcp_hangar.server.api.tenant_scope import confined_tenant
+from mcp_hangar.server.api.ws.filters import visible_to_tenant
 from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_request_if_session_suspended
 from mcp_hangar.server.tools.batch import _authorize_calls, _refuse_if_param_headers_unchecked
 from mcp_hangar.server.tools.batch.executor import BatchExecutor
@@ -78,6 +85,33 @@ HANGAR_DETAILS = "hangar_details"
 FRONT_DOOR_HANGAR_TOOLS = "front door hangar_tools"
 FRONT_DOOR_HANGAR_DETAILS = "front door hangar_details"
 SERVER_DISCOVER = "front door server/discover"
+# The front door's `subscriptions/listen`, asked for one resource: the stream's
+# tenant projection and the resources it may subscribe to (#1027).
+SUBSCRIPTIONS_LISTEN = "front door subscriptions/listen"
+# The surfaces served without an MCP request over HTTP (#1786). Each needs a
+# process of its own: the facade's `invoke` and a stdio session, on egress
+# (`hangar_call`) and on the front door (the flat call).
+FACADE_INVOKE = "facade invoke"
+STDIO_HANGAR_CALL = "stdio hangar_call"
+STDIO_FLAT_TOOL_CALL = "stdio front door tools/call"
+# The REST API and the WebSocket event stream `serve --http` mounts at `/api`.
+# A route marked (tenant) is `tenant_aware` and is called with a grant confined
+# to the caller's tenant, so the confinement is what is exercised.
+REST_SERVERS = "GET /api/mcp_servers"
+REST_SERVER = "GET /api/mcp_servers/{id}"
+REST_SERVER_TOOLS = "GET /api/mcp_servers/{id}/tools"
+REST_TOOL_HISTORY = "GET /api/mcp_servers/{id}/tools/history (tenant)"
+REST_GROUPS = "GET /api/groups"
+REST_TOOLS = "GET /api/tools"
+REST_SYSTEM_ME = "GET /api/system/me"
+REST_CONFIG = "GET /api/config"
+REST_SESSION_SUSPEND = "POST /api/sessions/{id}/suspend"
+REST_SESSION_LIFT = "DELETE /api/sessions/{id}/suspend"
+REST_PINS = "GET /api/admin/tools/pins (tenant)"
+REST_WITHDRAW = "POST /api/admin/tools/{server}/{tool}/withdraw (tenant)"
+REST_RESTORE = "POST /api/admin/tools/{server}/{tool}/restore (tenant)"
+REST_APPROVALS = "GET /api/approvals (tenant)"
+WS_EVENTS = "WebSocket /api/ws/events (tenant)"
 
 _TASK_PATHS = (
     TASKS_GET,
@@ -90,6 +124,33 @@ _TASK_PATHS = (
 _PROMPT_PATHS = (PROMPTS_LIST, PROMPTS_GET, COMPLETION)
 _RESOURCE_PATHS = (RESOURCES_LIST, RESOURCE_TEMPLATES_LIST, RESOURCES_READ)
 _INVOKE_PATHS = (HANGAR_CALL, FLAT_TOOL_CALL)
+#: The invoke paths, and every other path that runs one tool call through the executor (#1786). The
+#: facade's `invoke` has no session and no request headers (`call_as`), so the
+#: session guard and the `Mcp-Param-*` check have nothing to read on it. A stdio
+#: session carries no session id (ADR-026), so its guard runs and has nothing to
+#: look up.
+_EXECUTOR_PATHS = _INVOKE_PATHS + (FACADE_INVOKE, STDIO_HANGAR_CALL, STDIO_FLAT_TOOL_CALL)
+_REST_PATHS = (
+    REST_SERVERS,
+    REST_SERVER,
+    REST_SERVER_TOOLS,
+    REST_TOOL_HISTORY,
+    REST_GROUPS,
+    REST_TOOLS,
+    REST_SYSTEM_ME,
+    REST_CONFIG,
+    REST_SESSION_SUSPEND,
+    REST_SESSION_LIFT,
+    REST_PINS,
+    REST_WITHDRAW,
+    REST_RESTORE,
+    REST_APPROVALS,
+)
+#: The routes the route guard asks the authorizer about: all but `/system/me`,
+#: which describes the caller itself (`AUTHENTICATED_ONLY`).
+_REST_AUTHORIZED_PATHS = tuple(p for p in _REST_PATHS if p != REST_SYSTEM_ME) + (WS_EVENTS,)
+#: The `tenant_aware` routes, which confine themselves by the guard's recorded decision.
+_REST_TENANT_AWARE_PATHS = (REST_TOOL_HISTORY, REST_PINS, REST_WITHDRAW, REST_RESTORE, REST_APPROVALS, WS_EVENTS)
 #: The read-only management tools that list or describe a server (#1786). They are
 #: management tools like any other: session guard, role check, authorizer.
 _LISTING_TOOL_PATHS = (HANGAR_TOOLS, HANGAR_DETAILS, FRONT_DOOR_HANGAR_TOOLS, FRONT_DOOR_HANGAR_DETAILS)
@@ -116,13 +177,18 @@ class Predicate:
             it must hold: ``tenant`` (the caller's tenant, or None) or ``server``
             (the target server, or None). A predicate reached with the wrong key
             in a slot -- a member server id in the tenant slot -- ran, and decided
-            about the wrong thing (#1786).
+            about the wrong thing (#1786). A parameter may name an attribute
+            under one (``principal.tenant_id``).
+        returns: What the return value must hold, in the same terms, for a
+            predicate whose answer is a scope: ``confined_tenant`` says which
+            tenant a REST request is confined to.
     """
 
     function: Callable[..., Any]
     paths: Mapping[str, str | None]
     by: str | None = None
     scope: Mapping[str, str] = field(default_factory=dict)
+    returns: str | None = None
 
     @property
     def name(self) -> str:
@@ -141,14 +207,18 @@ def _each(paths: tuple[str, ...], value: str | None = None) -> dict[str, str | N
 
 PREDICATES: tuple[Predicate, ...] = (
     # A suspended session is refused on every path that does work for it
-    # (GHSA-fhwh-fmq2-7m5c). `chokepoint` names the call site.
+    # (GHSA-fhwh-fmq2-7m5c). `chokepoint` names the call site. The facade's
+    # `invoke` has no session to refuse (`call_as`); a stdio session runs the
+    # guard, and carries no session id for it to find (ADR-026).
     Predicate(
         refuse_if_session_suspended,
         by="chokepoint",
         paths={
             HANGAR_CALL: "hangar_call",
+            STDIO_HANGAR_CALL: "hangar_call",
             MANAGEMENT_TOOL: "management_tool",
             FLAT_TOOL_CALL: "flat_tool",
+            STDIO_FLAT_TOOL_CALL: "flat_tool",
             FRONT_DOOR_MANAGEMENT_TOOL: "management_tool",
             **_each(_LISTING_TOOL_PATHS, "management_tool"),
             **_each(_TASK_PATHS, "task_relay"),
@@ -156,6 +226,7 @@ PREDICATES: tuple[Predicate, ...] = (
             PROMPTS_GET: "prompt",
             COMPLETION: "completion",
             **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "subscription",
         },
     ),
     Predicate(
@@ -167,6 +238,7 @@ PREDICATES: tuple[Predicate, ...] = (
             PROMPTS_GET: "prompt",
             COMPLETION: "completion",
             **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "subscription",
         },
     ),
     # The lookup the guard exists to make. A guard that runs and never finds
@@ -179,28 +251,55 @@ PREDICATES: tuple[Predicate, ...] = (
             + _TASK_PATHS
             + _PROMPT_PATHS
             + _RESOURCE_PATHS
+            + (SUBSCRIPTIONS_LISTEN,)
         ),
     ),
     # Role-based authorization: per tool on the management surface, per call on
     # both invoke paths -- `hangar_call` and the front door's flat call (#1622) --
     # and the authorizer all of them ask.
     Predicate(authorize_tool, paths=_each((MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL) + _LISTING_TOOL_PATHS)),
-    Predicate(_authorize_calls, paths=_each(_INVOKE_PATHS)),
-    Predicate(_authorize_flat_call, paths={FLAT_TOOL_CALL: None}),
+    # The REST routes and the event stream ask it from the route guard, and a
+    # handler on `mcp_servers` and `admin/tools` asks it again.
+    Predicate(_authorize_calls, paths=_each(_EXECUTOR_PATHS)),
+    Predicate(_authorize_flat_call, paths=_each((FLAT_TOOL_CALL, STDIO_FLAT_TOOL_CALL))),
     Predicate(
         AuthorizationMiddleware.authorize,
-        paths=_each(_INVOKE_PATHS + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL) + _LISTING_TOOL_PATHS),
+        paths=_each(
+            _EXECUTOR_PATHS
+            + (MANAGEMENT_TOOL, FRONT_DOOR_MANAGEMENT_TOOL)
+            + _LISTING_TOOL_PATHS
+            + _REST_AUTHORIZED_PATHS
+        ),
+        scope={"principal.tenant_id": "tenant"},
     ),
+    # The route guard of the REST API and the event stream: the route's rule,
+    # denied when it has none, and how far the grant that passed it reaches,
+    # which a `tenant_aware` handler confines itself to.
+    Predicate(AuthorizationEnforcementMiddleware.__call__, paths=_each(_REST_PATHS + (WS_EVENTS,))),
+    Predicate(resolve_rule, paths=_each(_REST_PATHS + (WS_EVENTS,))),
+    Predicate(confined_tenant, paths=_each(_REST_TENANT_AWARE_PATHS), returns="tenant"),
+    Predicate(
+        _check_permission,
+        paths=_each(
+            (REST_SERVERS, REST_SERVER, REST_SERVER_TOOLS, REST_TOOL_HISTORY, REST_PINS, REST_WITHDRAW, REST_RESTORE)
+        ),
+    ),
+    # A tenant grant restores only its own tenant's withdrawal, never one made for every tenant.
+    Predicate(ToolProjectionRegistry.is_withdrawn_for_all_tenants, paths={REST_RESTORE: None}),
+    # The event stream delivers an event to a confined subscriber only when it
+    # names the subscriber's tenant.
+    Predicate(visible_to_tenant, paths={WS_EVENTS: None}, scope={"tenant_id": "tenant"}),
     # Tool-access policy: the decision every surface shares, the executor's
     # call-time check included (#1784).
     Predicate(
         ToolAccessResolver.is_allowed,
         by="kind",
         paths={
-            **_each(_INVOKE_PATHS, "tool"),
+            **_each(_EXECUTOR_PATHS, "tool"),
             **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
             **_each(_PROMPT_PATHS, "prompt"),
             **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "resource",
         },
         scope=_SCOPE_IS_ALLOWED,
     ),
@@ -209,9 +308,11 @@ PREDICATES: tuple[Predicate, ...] = (
         by="kind",
         paths={
             FLAT_TOOL_CALL: "tool",
+            STDIO_FLAT_TOOL_CALL: "tool",
             **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
             **_each(_PROMPT_PATHS, "prompt"),
             **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "resource",
         },
         scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
@@ -221,12 +322,16 @@ PREDICATES: tuple[Predicate, ...] = (
     Predicate(
         ToolProjectionRegistry.is_withdrawn,
         by="kind",
-        paths={**_each(_PROMPT_PATHS, "prompt"), **_each(_RESOURCE_PATHS, "resource")},
+        paths={
+            **_each(_PROMPT_PATHS, "prompt"),
+            **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "resource",
+        },
         scope={"mcp_server": "server", "tenant_id": "tenant"},
     ),
     Predicate(
         ToolProjection.is_withdrawn_for,
-        paths=_each(_INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _LISTING_TOOL_PATHS),
+        paths=_each(_EXECUTOR_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _LISTING_TOOL_PATHS + (SUBSCRIPTIONS_LISTEN,)),
         scope={"tenant_id": "tenant"},
     ),
     # The one decision every surface makes (#1784): the executor's access and
@@ -237,60 +342,66 @@ PREDICATES: tuple[Predicate, ...] = (
     Predicate(
         decide,
         paths=_each(
-            _INVOKE_PATHS + _FRONT_DOOR_PROJECTION_PATHS + _LISTING_TOOL_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS
+            _EXECUTOR_PATHS
+            + _FRONT_DOOR_PROJECTION_PATHS
+            + _LISTING_TOOL_PATHS
+            + _PROMPT_PATHS
+            + _RESOURCE_PATHS
+            + (SUBSCRIPTIONS_LISTEN,)
         ),
     ),
     Predicate(
         ToolProjectionRegistry.withdrawal_status,
         by="kind",
         paths={
-            **_each(_INVOKE_PATHS, "tool"),
+            **_each(_EXECUTOR_PATHS, "tool"),
             **_each(_FRONT_DOOR_PROJECTION_PATHS, "tool"),
             **_each(_LISTING_TOOL_PATHS, "tool"),
             **_each(_PROMPT_PATHS, "prompt"),
             **_each(_RESOURCE_PATHS, "resource"),
+            SUBSCRIPTIONS_LISTEN: "resource",
         },
         scope={"tenant_id": "tenant"},
     ),
     # The executor's digest-pin and approval gates. `_enforce_digest_pins`
     # applies every pin a call must match, a member's group pins included,
     # and `_enforce_digest_pin` checks one of them.
-    Predicate(BatchExecutor._enforce_digest_pins, paths=_each(_INVOKE_PATHS)),
-    Predicate(BatchExecutor._enforce_digest_pin, paths=_each(_INVOKE_PATHS)),
-    Predicate(BatchExecutor._check_approval_gate, paths=_each(_INVOKE_PATHS)),
+    Predicate(BatchExecutor._enforce_digest_pins, paths=_each(_EXECUTOR_PATHS)),
+    Predicate(BatchExecutor._enforce_digest_pin, paths=_each(_EXECUTOR_PATHS)),
+    Predicate(BatchExecutor._check_approval_gate, paths=_each(_EXECUTOR_PATHS)),
     # The tenant's execution budget (#1445): the token and the check that the
     # caller has a budget, before the approval hold and the cold start, and the
     # slot, after every gate. The probes' tenant has a budget far above what
     # they spend, so both are taken on each invoke path and refuse nothing.
-    Predicate(BatchExecutor._gate_tenant_budget, paths=_each(_INVOKE_PATHS)),
-    Predicate(BatchExecutor._enforce_tenant_budget, paths=_each(_INVOKE_PATHS)),
+    Predicate(BatchExecutor._gate_tenant_budget, paths=_each(_EXECUTOR_PATHS)),
+    Predicate(BatchExecutor._enforce_tenant_budget, paths=_each(_EXECUTOR_PATHS)),
     # The configured interceptors (#1425). The probes configure one
     # `payload_size` validator, with a cap no probe reaches. The validator is
     # what is watched, not `BatchExecutor._check_validators` or the pipeline
     # that calls it: those run on an empty pipeline too, so a path that
     # dispatched through an executor built without the configured validators
     # would still pass. The front door's flat call did exactly that.
-    Predicate(PayloadSizeValidator.validate, paths=_each(_INVOKE_PATHS)),
+    Predicate(PayloadSizeValidator.validate, paths=_each(_EXECUTOR_PATHS)),
     # The L7 egress policy, enforced by the aggregate. Its Mcp-Param-* header
     # selectors are decided by `evaluate_headers`.
-    Predicate(McpServer._enforce_l7_policy, paths=_each(_INVOKE_PATHS)),
-    Predicate(evaluate_headers, paths=_each(_INVOKE_PATHS)),
+    Predicate(McpServer._enforce_l7_policy, paths=_each(_EXECUTOR_PATHS)),
+    Predicate(evaluate_headers, paths=_each(_EXECUTOR_PATHS)),
     # `headers.param_validation.required` on `hangar_call` (#1599). The front
     # door decides it inline in its flat call, before the executor.
-    Predicate(_refuse_if_param_headers_unchecked, paths={HANGAR_CALL: None}),
+    Predicate(_refuse_if_param_headers_unchecked, paths=_each((HANGAR_CALL, STDIO_HANGAR_CALL))),
     # The check made wherever the server's client is handed out -- the invoke
     # path and the relay every task, prompt and resource request makes: the
     # server is READY, and no refusing capability mode refuses its catalogue.
     Predicate(
         McpServer._check_serving,
-        paths=_each(_INVOKE_PATHS + _TASK_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS),
+        paths=_each(_EXECUTOR_PATHS + _TASK_PATHS + _PROMPT_PATHS + _RESOURCE_PATHS + (SUBSCRIPTIONS_LISTEN,)),
     ),
     # Task ownership, asked before a relayed task is read or touched, whichever
     # path created the task: `hangar_call` or the front door's flat call (#1394).
     Predicate(GovernedTaskStore.authorize, paths=_each(_TASK_PATHS)),
     # The ui:// guard (SEP-1865): the allowlist decision every resource
     # surface makes, and the consent enforcement a read makes.
-    Predicate(UiResourceGuard.evaluate, paths=_each(_RESOURCE_PATHS)),
+    Predicate(UiResourceGuard.evaluate, paths=_each(_RESOURCE_PATHS + (SUBSCRIPTIONS_LISTEN,))),
     Predicate(UiResourceGuard.enforce, paths=_each((RESOURCES_READ,))),
 )
 
@@ -360,13 +471,10 @@ EXEMPT: dict[str, str] = {
     "domain/contracts/session_suspension.py::ISessionSuspensionRegistry.is_suspended": (
         "An interface. Its implementation, InMemorySessionSuspensionRegistry.is_suspended, is registered."
     ),
-    # Not on an MCP request path.
-    "server/api/mcp_servers.py::_check_permission": "Guards REST routes, not an MCP request path.",
-    "application/read_models/tool_projection.py::ToolProjectionRegistry.is_withdrawn_for_all_tenants": (
-        "Scopes a REST restore in admin_tools.py, not an MCP request path."
-    ),
+    # Not on a probed path.
     "approvals/commands/resolve.py::ResolveApprovalHandler._authorize": (
-        "Authorizes resolving an approval over REST, not an MCP request path."
+        "Authorizes resolving an approval over REST. The REST probes list approvals; resolving one needs a "
+        "pending approval, which no probe creates."
     ),
     "auth/api/routes.py::check_permission": "A REST route that answers a permission question. It grants nothing.",
     "server/bootstrap/reachability.py::enforce_subsystem_reachability": (
