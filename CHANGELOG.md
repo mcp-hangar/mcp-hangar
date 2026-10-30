@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.8](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.7...v2.34.8) (2026-10-30)
+
+### Fixed
+
+- **core:** `hangar_list`, `hangar_group_list`, `GET /api/groups` and
+  `GET /api/groups/{id}` still disclosed every member of a group to every
+  tenant, after `hangar_details` stopped doing so. A tenant pinned to one member
+  was shown the others too, with their ids, states and counts. For a caller with
+  a tenant, each of them now gives the view `hangar_details` gives: only the
+  members its calls may be routed to, every count, `state` and `is_available`
+  taken over those members, and no `min_healthy` or `circuit_open`.
+  `hangar_list(state_filter=...)` filters on that view's `state`. On the REST
+  routes the tenant is the authenticated principal's own `tenant_id`, the one
+  the MCP tools read; a group the tenant has no routable member of is an empty
+  member list, not a 404. A caller without a tenant, and every caller with auth
+  off, is shown the whole group as before, so an operator who needs the whole
+  group over REST uses a principal without a tenant ([#2158](https://github.com/mcp-hangar/mcp-hangar/pull/2158))
+- **core:** `hangar_details` on a group disclosed every member to every tenant. A
+  tenant pinned to one member of a group was shown the others too, though its
+  calls only ever went to that one. For a caller with a tenant, `members` now
+  lists only the members its calls may be routed to (the pinned or canary member
+  alone, else every member in rotation), the set `hangar_tools` on a group
+  already decides on, and `total_members`, `healthy_count`,
+  `members_in_rotation_count`, `state` and `is_available` are taken over those
+  members alone. `state` is judged against `min_healthy` capped at the number of
+  members shown, so a tenant pinned to one live member reads `healthy`, and the
+  tenant's view leaves out `min_healthy` and `circuit_open`, which describe the
+  whole group. A tenant in rotation is no longer shown members out of rotation,
+  and a group with no selectable member shows an empty member list. A caller
+  without a tenant (auth off) is shown the whole group, as before ([#2154](https://github.com/mcp-hangar/mcp-hangar/pull/2154))
+
 ## [2.34.7](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.6...v2.34.7) (2026-10-29)
 
 ### Fixed
