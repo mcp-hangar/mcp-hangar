@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.9](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.8...v2.34.9) (2026-10-30)
+
+### Changed
+
+- **core:** `decide()` is now the only way to read an access decision. `ToolAccessResolver` keeps its registration API and loses `resolve_effective_policy`, `is_allowed`, `is_tool_allowed`, `filter_tools` and `filter_tool_dicts`, whose loose-string scope arguments let a server id land in the tenant slot. An import-linter contract and an AST test hold the boundary. Nothing a gateway serves, refuses or logs changes. ([#2164](https://github.com/mcp-hangar/mcp-hangar/pull/2164))
+
+### Fixed
+
+- **core:** `GET /api/system` now requires `mcp_servers:read` held globally, like
+  the other routes that report on the whole fleet. `GET /api/system/me` is
+  unchanged. A key that reads `/api/system` needs a role that grants this, such as
+  the built-in `viewer`, bound at global scope. ([#2167](https://github.com/mcp-hangar/mcp-hangar/pull/2167))
+
 ## [2.34.8](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.7...v2.34.8) (2026-10-30)
 
 ### Fixed
