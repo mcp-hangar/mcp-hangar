@@ -58,15 +58,20 @@ class ReloadConfigurationHandler(CommandHandler):
     - every process-wide section: `execution`, `headers.param_validation`,
       `resource_links`, `interceptors` and `ui_resources`. A section deleted
       from the file goes back to its default;
-    - `mcp_servers`: adds new servers, removes deleted ones, restarts the ones
-      whose server settings changed, and keeps every other one running: the
-      same object, with its process, sessions, health and circuit state. What
-      counts as changed is `PreparedServers.keeps`: a policy, pin, withdrawal,
-      `header_exposure` or group-membership change alone restarts nothing, and
-      takes effect all the same (#1426);
-    - the groups, and the tool-access policies, withdrawals, pins and
-      `header_exposure` blocks the servers declare, swapped in rather than
-      cleared and registered again, so no call is resolved without them. The
+    - `mcp_servers`: adds new servers, removes the ones deleted from the file,
+      restarts the ones whose server settings changed, and keeps every other
+      one running: the same object, with its process, sessions, health and
+      circuit state. What counts as changed is `PreparedServers.keeps`: a
+      policy, pin, withdrawal, `header_exposure` or group-membership change
+      alone restarts nothing, and takes effect all the same (#1426). Only what
+      the file owns can be removed: a server created over the API or registered
+      by discovery stays, with its policies, unless the file now declares its
+      id, and then the file's definition replaces it, as at startup (#2169);
+    - the groups the file declares, keeping the members the group API added
+      to them and leaving alone the groups it created (#2169), and the
+      tool-access policies, withdrawals, pins and `header_exposure` blocks the
+      servers declare, swapped in rather than cleared and registered again, so
+      no call is resolved without them. The
       REST endpoint's stored policies are replayed over the file's, as at
       startup; any other policy set at runtime is kept unless the file now
       defines the same scope. A server the reload removes takes its policies
@@ -219,7 +224,8 @@ class ReloadConfigurationHandler(CommandHandler):
         prepared = self._config_loader.prepare_mcp_servers(new_full_config.get("mcp_servers", {}))
 
         current_mcp_servers = dict(self._repository.get_all())
-        diff = self._diff(current_mcp_servers, prepared)
+        # Before the commit, which replaces the record with the new file's.
+        diff = self._diff(current_mcp_servers, prepared, self._config_loader.declared_mcp_server_ids())
 
         self._stop(current_mcp_servers, diff.removed + diff.updated, graceful=graceful)
         self._remove(diff.removed)
@@ -257,8 +263,15 @@ class ReloadConfigurationHandler(CommandHandler):
             details={"running_mode": running, "requested_mode": requested},
         )
 
-    def _diff(self, current: dict[str, Any], prepared: PreparedServers) -> _ServerDiff:
+    def _diff(self, current: dict[str, Any], prepared: PreparedServers, declared: frozenset[str]) -> _ServerDiff:
         """Compare the running servers with every server the file declares.
+
+        Only a server *declared*, the set the previous configuration declared,
+        can be removed. The repository holds the whole fleet, and counting it
+        all removed whatever the file did not name: a server created over the
+        API or registered by discovery. Its row outlived the reload, so a
+        restart brought it back; a discovery rescan did not, since the source
+        still counted it as registered (#2169).
 
         The declared servers include each group's inline members. Counting only
         the top-level keys made every inline member look removed: it was
@@ -276,6 +289,7 @@ class ReloadConfigurationHandler(CommandHandler):
         """
         new_ids = set(prepared.specs)
         current_ids = set(current)
+        owned_ids = current_ids & declared
 
         updated: list[str] = []
         unchanged: list[str] = []
@@ -287,7 +301,7 @@ class ReloadConfigurationHandler(CommandHandler):
 
         diff = _ServerDiff(
             added=sorted(new_ids - current_ids),
-            removed=sorted(current_ids - new_ids),
+            removed=sorted(owned_ids - new_ids),
             updated=updated,
             unchanged=unchanged,
         )

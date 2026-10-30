@@ -12,6 +12,7 @@ from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHa
 from mcp_hangar.domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.domain.model import McpServer
+from mcp_hangar.server import config as server_config
 from mcp_hangar.server.config import ServerConfigLoader
 
 
@@ -166,7 +167,11 @@ class TestReloadConfigurationHandler:
                 graceful=True,
             )
 
-            with patch("mcp_hangar.server.config.load_config"):
+            # The previous configuration declared it: only that is removed (#2169).
+            with (
+                patch("mcp_hangar.server.config.load_config"),
+                patch.dict(server_config._BUILT_FROM, {"old-provider": ({}, existing_provider)}),
+            ):
                 result = handler.handle(command)
 
             assert result["success"] is True
@@ -291,6 +296,24 @@ class TestReloadConfigurationHandler:
         finally:
             os.unlink(config_path)
 
+    def test_reload_leaves_a_server_the_file_never_declared(self, handler, mock_repository):
+        """One the API, discovery or a peer replica's registration added is not the file's to remove (#2169)."""
+        added_at_runtime = Mock(spec=McpServer)
+        mock_repository.get_all.return_value = {"added-at-runtime": added_at_runtime}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump({"mcp_servers": {}}, f)
+            config_path = f.name
+
+        try:
+            result = handler.handle(ReloadConfigurationCommand(config_path=config_path))
+
+            assert result["mcp_servers_removed"] == []
+            added_at_runtime.shutdown.assert_not_called()
+            mock_repository.remove.assert_not_called()
+        finally:
+            os.unlink(config_path)
+
     def test_reload_fails_when_existing_provider_cannot_shutdown(self, handler, mock_repository, mock_event_bus):
         """A failed shutdown must not be reported as a successful reload."""
         existing_provider = Mock(spec=McpServer)
@@ -303,9 +326,12 @@ class TestReloadConfigurationHandler:
             config_path = f.name
 
         try:
-            with patch("mcp_hangar.server.config.load_config") as load_config:
-                with pytest.raises(ConfigurationError, match="Failed to stop mcp_server 'old-provider'"):
-                    handler.handle(ReloadConfigurationCommand(config_path=config_path))
+            with (
+                patch("mcp_hangar.server.config.load_config") as load_config,
+                patch.dict(server_config._BUILT_FROM, {"old-provider": ({}, existing_provider)}),
+                pytest.raises(ConfigurationError, match="Failed to stop mcp_server 'old-provider'"),
+            ):
+                handler.handle(ReloadConfigurationCommand(config_path=config_path))
 
             existing_provider.shutdown.assert_called_once()
             mock_repository.remove.assert_not_called()
