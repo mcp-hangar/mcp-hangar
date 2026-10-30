@@ -56,6 +56,8 @@ not arguments: an argument-dependent L7 refusal cannot be predicted from a name.
 - ``hangar_details`` names a withheld tool (#1776: an operator diagnostic, not
   an invocable entry, so only ``tools`` is compared) only when the caller may
   list it;
+- ``hangar_details``, ``hangar_list`` and ``hangar_group_list`` show a caller
+  only the members of ``pool`` a call from it may be routed to (#2019, #2155);
 - every refusal is reported with its class: ``authorization`` (access policy,
   withdrawal, unknown name), ``digest`` (pin drift) or ``availability``.
   Approval is left out of the generator: a held call waits for an approver.
@@ -106,7 +108,15 @@ UNKNOWN_TOOL, UNKNOWN_PROMPT, UNKNOWN_RESOURCE = "no_such_tool", "no_such_prompt
 
 #: The surfaces each topology serves. The parent test parametrizes over these.
 SURFACES = {
-    EGRESS: ("hangar_tools", "hangar_details", "hangar_details_group", "hangar_call", "facade_invoke"),
+    EGRESS: (
+        "hangar_tools",
+        "hangar_details",
+        "hangar_details_group",
+        "hangar_list_group",
+        "hangar_group_list_group",
+        "hangar_call",
+        "facade_invoke",
+    ),
     FRONT_DOOR: (
         "tools_list",
         "server_discover",
@@ -115,6 +125,8 @@ SURFACES = {
         "hangar_tools",
         "hangar_details",
         "hangar_details_group",
+        "hangar_list_group",
+        "hangar_group_list_group",
         "flat_call",
         "prompts_get",
         "resources_read",
@@ -461,6 +473,8 @@ class Observed:
     details_tools: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
     details_withheld: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
     details_members: dict[str, frozenset[str]] = field(default_factory=dict)
+    #: (surface, tenant) -> the members of `pool` a group listing shows the tenant (#2155).
+    listed_members: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
     tools_list: dict[str, frozenset[str]] = field(default_factory=dict)
     discover: dict[str, frozenset[str]] = field(default_factory=dict)
     prompts_list: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -536,6 +550,16 @@ def _facade_outcome(gateway: Gateway, tenant: str, target: str, tool: str) -> Ou
     return OK
 
 
+def _pool_members(listing: Any) -> frozenset[str]:
+    """The member ids a group listing shows for `pool`; none when it does not list `pool`."""
+    groups = listing.get("groups") if isinstance(listing, dict) else None
+    if not isinstance(groups, list):
+        return frozenset({f"<no groups: {str(listing)[:120]}>"})
+    return frozenset(
+        str(member["id"]) for group in groups if group.get("group_id") == GROUP for member in group["members"]
+    )
+
+
 def observe(gateway: Gateway, apply: Callable[[Governance], dict[str, Any]], topology: str, g: Governance) -> Observed:
     observed = Observed(topology=topology, reload=apply(g))
     _decisions(observed)
@@ -559,6 +583,8 @@ def observe(gateway: Gateway, apply: Callable[[Governance], dict[str, Any]], top
                 observed.details_withheld[(tenant, target)] = frozenset(
                     str(w["name"]) for w in details.get("withheld_tools") or []
                 )
+        for surface, tool in (("hangar_list_group", "hangar_list"), ("hangar_group_list_group", "hangar_group_list")):
+            observed.listed_members[(surface, tenant)] = _pool_members(_structured(gateway.tool(tenant, tool, {})))
         if topology != FRONT_DOOR:
             continue
         listing = gateway.post(tenant, "tools/list", {})
@@ -757,6 +783,20 @@ def _hangar_details_group(o: Observed) -> list[str]:
     ]
 
 
+def _group_listing(surface: str) -> Callable[[Observed], list[str]]:
+    """A group listing discloses to a tenant only the members a call from it may be routed to (#2155)."""
+
+    def check_listing(o: Observed) -> list[str]:
+        return [
+            f"{surface}: {tenant} is shown members {sorted(o.listed_members[(surface, tenant)])} of {GROUP}; "
+            f"a call from it may be routed to {sorted(o.candidates[tenant])} only"
+            for tenant in TENANTS
+            if not o.listed_members[(surface, tenant)] <= set(o.candidates[tenant])
+        ]
+
+    return check_listing
+
+
 def _flat_listing(
     surface: str, kind: str, shown: Callable[[Observed, str], frozenset[str]]
 ) -> Callable[..., list[str]]:
@@ -815,6 +855,8 @@ CHECKS: dict[str, Callable[[Observed], list[str]]] = {
     "hangar_tools": _hangar_tools,
     "hangar_details": _hangar_details,
     "hangar_details_group": _hangar_details_group,
+    "hangar_list_group": _group_listing("hangar_list_group"),
+    "hangar_group_list_group": _group_listing("hangar_group_list_group"),
     "tools_list": _flat_listing("tools_list", "tool", lambda o, t: o.tools_list[t]),
     "server_discover": _flat_listing("server_discover", "tool", lambda o, t: o.discover[t]),
     "prompts_list": _flat_listing("prompts_list", "prompt", lambda o, t: o.prompts_list[t]),

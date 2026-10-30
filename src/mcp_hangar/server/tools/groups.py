@@ -9,6 +9,7 @@ from ...application.group_events import publish_group_events
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context
 from ..validation import RateLimited, not_rate_limited, tool_error_hook, tool_error_mapper, validate_group_id_input
+from .mcp_server import _caller_tenant_id
 
 
 def register_group_tools(mcp: FastMCP) -> None:
@@ -56,6 +57,11 @@ def register_group_tools(mcp: FastMCP) -> None:
             a cold one is started by the next call through the group.
             vacant is true for a member whose server was deleted: it is never
             routed to until a server of its id is registered again.
+            For a caller with a tenant, members lists only the members its
+            calls may be routed to (the pinned or canary member, else every
+            member in rotation), every count, state and is_available are taken
+            over them, and min_healthy and circuit_open are left out: the view
+            hangar_details gives.
 
         Example:
             hangar_group_list()
@@ -70,7 +76,15 @@ def register_group_tools(mcp: FastMCP) -> None:
             # {"groups": []}
         """
         ctx = get_context()
-        return {"groups": [group.to_status_dict() for group in ctx.groups.values()]}
+        # A tenant is shown the members its calls may be routed to, as
+        # hangar_details shows them (#2155); no tenant, the whole group.
+        tenant_id = _caller_tenant_id()
+        return {
+            "groups": [
+                group.to_status_dict() if tenant_id is None else group.status_for_tenant(tenant_id)
+                for group in ctx.groups.values()
+            ]
+        }
 
     @mcp.tool(name="hangar_group_rebalance")
     @mcp_tool_wrapper(
