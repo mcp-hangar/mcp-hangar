@@ -61,6 +61,26 @@ def out_of_scope(conn: HTTPConnection, *, action: str, resource: str, reason: st
     return AccessDeniedError(principal_id=_principal_id(conn), action=action, resource=resource, reason=reason)
 
 
+def caller_tenant(conn: HTTPConnection) -> str | None:
+    """The tenant of the authenticated caller of *conn*, or None (#2155).
+
+    The principal's own ``tenant_id``, the key the MCP tools read as the
+    caller's tenant (``_caller_tenant_id`` in ``server/tools/mcp_server.py``
+    reaches the same principal through the identity bridge), so a REST view and
+    an MCP view cut for a tenant are cut for the same one. None with auth off,
+    for the anonymous principal, and for a principal without a tenant.
+
+    This is not :func:`confined_tenant`. That is the scope of the grant the
+    guard admitted the request on, and on a route that is not ``tenant_aware``
+    it is always None, because the guard refuses a tenant-scoped grant there.
+    """
+    principal = getattr(_state_value(conn.scope, "auth"), "principal", None)
+    if principal is None or principal.is_anonymous():
+        return None
+    tenant_id: str | None = principal.tenant_id
+    return tenant_id
+
+
 def confined_tenant(conn: HTTPConnection) -> str | None:
     """The tenant this request may act on, or None when it reaches the whole fleet.
 
