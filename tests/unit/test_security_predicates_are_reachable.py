@@ -16,7 +16,9 @@ API key, from loopback. The REST API and the WebSocket event stream are mounted
 at ``/api`` beside it, as ``run_http`` mounts them (see
 ``tests/integration/test_rest_authz_on_served_app.py``), and are called by a
 fleet-wide caller or, on a ``tenant_aware`` route, by one whose grant is
-confined to its tenant. Loopback is a trusted proxy by default, so the
+confined to its tenant. Every other route of that API is driven in a process of
+its own (``_rest_route_probes.py``), and ``TestEveryRouteHasAProbe`` fails when a
+rule or a served route has neither. Loopback is a trusted proxy by default, so the
 ``x-session-id`` every request carries gives the suspension check a session to
 look up. The one upstream is an in-process HTTP MCP server. No handler, gate or
 predicate is patched: ``test_tool_permissions_cover_the_surface.py`` is the
@@ -25,9 +27,11 @@ can agree with a table while production disagrees.
 
 The facade's ``invoke`` and a stdio session are only served by a process that
 ran ``bootstrap()`` for itself, and a second boot in this interpreter would read
-the first's global state. ``_predicate_reachability_harness.py`` drives each in
-a process of its own, with the same spy (``_predicate_spy``), and its recordings
-join this file's, so every check below holds them to the same table.
+the first's global state. The same goes for the routes that change the fleet,
+and what those change must stay out of this process.
+``_predicate_reachability_harness.py`` drives each in a process of its own, with
+the same spy (``_predicate_spy``), and its recordings join this file's, so every
+check below holds them to the same table.
 
 The spy is installed before the client starts, so every thread the served app
 starts inherits it.
@@ -37,10 +41,11 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,11 +53,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from starlette.routing import Mount, Route, WebSocketRoute, compile_path
 
 # First: `server.bootstrap` is the import order production uses (#894).
 from mcp_hangar.server.bootstrap import build_serving_mcp_server
 from mcp_hangar.tasks_wire import EXTENSION_ID
+from mcp_hangar.server.api import create_api_router
+from mcp_hangar.server.api.route_permissions import ROUTE_PERMISSIONS, RouteRule
 from tests.unit._predicate_spy import Spy, from_json
+from tests.unit._rest_route_probes import EXEMPT_ROUTES, ROUTE_PROBE_NAMES, ROUTE_PROBES, rule_of
 from tests.unit._security_predicates import (
     COMPLETION,
     FACADE_INVOKE,
@@ -73,6 +82,7 @@ from tests.unit._security_predicates import (
     RESOURCE_TEMPLATES_LIST,
     RESOURCES_LIST,
     RESOURCES_READ,
+    REST_APPROVAL_RESOLVE,
     REST_APPROVALS,
     REST_CONFIG,
     REST_GROUPS,
@@ -332,7 +342,7 @@ HARNESS_PROBES: dict[str, str] = {
     STDIO_HANGAR_CALL: "stdio",
     STDIO_FLAT_TOOL_CALL: "stdio_front_door",
 }
-ALL_PATHS = [*PROBES, *HARNESS_PROBES]
+ALL_PATHS = [*PROBES, *HARNESS_PROBES, *ROUTE_PROBE_NAMES]
 
 
 # --- the served app ------------------------------------------------------------------
@@ -668,15 +678,28 @@ def _start_harness(surface: str, workdir: Path, *, mutate: bool = False) -> tupl
     return subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True), out
 
 
-def _harness_outcome(started: tuple[subprocess.Popen[str], Path]) -> _Outcome:
+def _harness_report(started: tuple[subprocess.Popen[str], Path]) -> dict[str, Any]:
     process, out = started
     _out, err = process.communicate(timeout=120)
     assert process.returncode == 0 and out.exists(), f"the harness exited {process.returncode}:\n{err[-4000:]}"
     report = json.loads(out.read_text())
     # It must have imported this checkout, not an installed copy.
     assert report["hangar"].startswith(str(Path(__file__).resolve().parents[2])), report["hangar"]
+    return report
+
+
+def _reported_outcome(report: dict[str, Any]) -> _Outcome:
     calls, scopes = from_json(report)
     return _Outcome(report["served"], report["detail"], calls, scopes)
+
+
+def _harness_outcome(started: tuple[subprocess.Popen[str], Path]) -> _Outcome:
+    return _reported_outcome(_harness_report(started))
+
+
+def _route_outcomes(started: tuple[subprocess.Popen[str], Path]) -> dict[str, _Outcome]:
+    """The `rest` surface's outcome for each route it probed."""
+    return {name: _reported_outcome(route) for name, route in _harness_report(started)["routes"].items()}
 
 
 def _probe_all(spy: Spy, upstream_url: str, tmp_path_factory: pytest.TempPathFactory) -> dict[str, _Outcome]:
@@ -711,12 +734,13 @@ def reached(tmp_path_factory: pytest.TempPathFactory) -> dict[str, _Outcome]:
     started = {
         path: _start_harness(surface, tmp_path_factory.mktemp(surface)) for path, surface in HARNESS_PROBES.items()
     }
+    routes = _start_harness("rest", tmp_path_factory.mktemp("rest"))
     spy = Spy(PREDICATES)
     with _upstream() as upstream_url, spy.installed():
         outcomes = _probe_all(spy, upstream_url, tmp_path_factory)
     for path, run in started.items():
         outcomes[path] = _harness_outcome(run)
-    return outcomes
+    return {**outcomes, **_route_outcomes(routes)}
 
 
 # --- the tests ---------------------------------------------------------------------------
@@ -810,7 +834,8 @@ class TestEveryPredicateIsAskedAboutTheRequestsOwnScope:
 #: `is_allowed` is asked with the server id as the member, where the caller's
 #: tenant goes; the event stream asks whether an event is visible to the server
 #: id instead of to the subscriber's tenant (and lets it through); the route
-#: guard records the server id as the tenant a confined grant reaches.
+#: guard records the server id as the tenant a confined grant reaches, and so
+#: does the resolve handler, in the `rest` harness.
 _MUTATIONS: dict[str, tuple[str, str]] = {
     HANGAR_CALL: ("is_allowed", "is_allowed"),
     SUBSCRIPTIONS_LISTEN: ("is_allowed", "is_allowed"),
@@ -819,6 +844,7 @@ _MUTATIONS: dict[str, tuple[str, str]] = {
     STDIO_FLAT_TOOL_CALL: ("is_allowed", "is_allowed"),
     WS_EVENTS: ("visible_to_tenant", "visible_to_tenant"),
     REST_TOOL_HISTORY: ("grant_scope", "confined_tenant"),
+    REST_APPROVAL_RESOLVE: ("rest", "ResolveApprovalHandler._within_grant"),
 }
 
 
@@ -854,6 +880,8 @@ def _mutate(env: pytest.MonkeyPatch, mutation: str) -> None:
 def _mutated(path: str, workdir: Path) -> _Outcome:
     """*path*'s one probe, sent with its mutation applied."""
     mutation, _predicate = _MUTATIONS[path]
+    if path in ROUTE_PROBE_NAMES:
+        return _route_outcomes(_start_harness("rest", workdir, mutate=True))[path]
     if path in HARNESS_PROBES:
         return _harness_outcome(_start_harness(HARNESS_PROBES[path], workdir, mutate=True))
     from mcp_hangar.fastmcp_server import asgi
@@ -890,6 +918,111 @@ class TestAMisScopedPredicateIsCaught:
         assert [v for v in violations if v.startswith(f"{predicate}(")], (
             f"a server id in {predicate}'s tenant slot on {path} was not noticed (violations: {violations})"
         )
+
+
+def rule_keys(rule: RouteRule) -> set[str]:
+    """A rule's name per method: `POST,PUT /x` is two things to probe, and `ANY /x` is one."""
+    methods, template = rule.template.split(" ", 1)
+    return {f"{method} {template}" for method in methods.split(",")}
+
+
+def _key_of(rule: RouteRule, method: str) -> str:
+    return f"{'ANY' if rule.methods is None else method} {rule.template.split(' ', 1)[1]}"
+
+
+def _probed_requests() -> set[tuple[str, str]]:
+    """Every REST or WebSocket request the gate sends, as (method, path below `/api`, query aside)."""
+    in_process = {
+        ("WEBSOCKET" if probe.surface == "ws" else probe.method, probe.path.removeprefix("/api").split("?", 1)[0])
+        for probe in PROBES.values()
+        if probe.surface in ("rest", "ws")
+    }
+    return in_process | {(probe.method, probe.path.split("?", 1)[0]) for probe in ROUTE_PROBES}
+
+
+def unprobed_rules(rules: Iterable[RouteRule], requests: set[tuple[str, str]], exempt: Mapping[str, str]) -> set[str]:
+    """Each rule, per method, that no request exercises and no exemption names."""
+    probed = set()
+    for method, path in requests:
+        rule = next((r for r in rules if r.matches(method, path)), None)
+        if rule is not None:
+            probed.add(_key_of(rule, method))
+    return {key for rule in rules for key in rule_keys(rule)} - probed - set(exempt)
+
+
+def _served_routes(routes: Iterable[Any], prefix: str = "") -> Iterator[tuple[str, str]]:
+    """Every (method, path template) the REST API serves, in the order the router tries them."""
+    for route in routes:
+        if isinstance(route, Mount):
+            yield from _served_routes(route.routes, prefix + route.path)
+        elif isinstance(route, Route):
+            for method in sorted(route.methods or ()):
+                if method != "HEAD":
+                    yield method, (prefix + route.path).rstrip("/")
+        elif isinstance(route, WebSocketRoute):
+            yield "WEBSOCKET", prefix + route.path
+
+
+def _concrete(path: str) -> str:
+    """*path* as a request: each `{placeholder}`, a route's or a probe's, stands for one segment."""
+    return re.sub(r"\{[^}]+\}", "x", path)
+
+
+def unprobed_served_routes(served: Iterable[tuple[str, str]], requests: set[tuple[str, str]]) -> set[str]:
+    """Each served route no request reaches, which sees past a rule that covers a subtree (`/auth/**`)."""
+    routes = [(method, path, compile_path(path)[0]) for method, path in served]
+    reached = set()
+    for sent, path in requests:
+        # The first match wins, as in the router.
+        matched = next((p for m, p, regex in routes if m == sent and regex.fullmatch(_concrete(path))), None)
+        reached.add((sent, matched))
+    return {f"{method} {path}" for method, path, _regex in routes if (method, path) not in reached}
+
+
+class TestEveryRouteHasAProbe:
+    """A new route goes unprobed only by saying why (#2162).
+
+    The rule table is checked per method, and the served routes too, because one
+    rule (`/auth/**`) covers a whole subtree.
+    """
+
+    def test_every_rule_is_probed_or_exempt(self) -> None:
+        assert unprobed_rules(ROUTE_PERMISSIONS, _probed_requests(), EXEMPT_ROUTES) == set()
+
+    def test_every_served_route_is_probed_or_exempt(self) -> None:
+        served = list(_served_routes(create_api_router().routes))
+        exempt = [
+            f"{method} {path}"
+            for method, path in served
+            if (rule := rule_of(method, _concrete(path))) and _key_of(rule, method) in EXEMPT_ROUTES
+        ]
+
+        assert unprobed_served_routes(served, _probed_requests()) - set(exempt) == set()
+
+    def test_a_new_rule_with_no_probe_fails(self) -> None:
+        rule = RouteRule(re.compile("/probe-me"), frozenset({"POST"}), ("x", "y"), "POST /probe-me")
+
+        unprobed = unprobed_rules((*ROUTE_PERMISSIONS, rule), _probed_requests(), EXEMPT_ROUTES)
+
+        assert "POST /probe-me" in unprobed
+
+    def test_a_new_route_under_a_covering_rule_with_no_probe_fails(self) -> None:
+        served = [("GET", "/auth/keys"), ("POST", "/auth/brand-new")]
+
+        assert unprobed_served_routes(served, _probed_requests()) == {"POST /auth/brand-new"}
+
+    def test_a_probe_is_governed_by_a_rule(self) -> None:
+        assert [p.name for p in ROUTE_PROBES if rule_of(p.method, p.path) is None] == []
+
+    def test_an_exemption_names_a_rule_and_gives_a_reason(self) -> None:
+        keys = {key for rule in ROUTE_PERMISSIONS for key in rule_keys(rule)}
+
+        assert [k for k, reason in EXEMPT_ROUTES.items() if k not in keys or not reason.strip()] == []
+
+    def test_an_exemption_is_not_also_probed(self) -> None:
+        unprobed = unprobed_rules(ROUTE_PERMISSIONS, _probed_requests(), {})
+
+        assert set(EXEMPT_ROUTES) <= unprobed
 
 
 class TestTheTableAndTheProbesAgree:
