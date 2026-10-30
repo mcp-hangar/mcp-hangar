@@ -77,8 +77,8 @@ def caller_tenant(conn: HTTPConnection) -> str | None:
     principal = getattr(_state_value(conn.scope, "auth"), "principal", None)
     if principal is None or principal.is_anonymous():
         return None
-    tenant_id = getattr(principal, "tenant_id", None)
-    return tenant_id if isinstance(tenant_id, str) and tenant_id else None
+    tenant_id: str | None = principal.tenant_id
+    return tenant_id
 
 
 def confined_tenant(conn: HTTPConnection) -> str | None:
