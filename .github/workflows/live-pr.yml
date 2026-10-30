@@ -6,18 +6,16 @@
 # a minute, so it runs on the pull requests that touch what it exercises. The
 # nightly keeps the rest (T1 needs compose, T2 an IdP).
 #
-# Not a required check: whether it should be is a branch-protection decision.
+# The job reports on every PR, so it can be a required check:
+# scripts/setup-branch-protection.sh --add "Live tier 0"
 name: live-pr
 
+# No `paths:` filter on the trigger, deliberately, for the reason ci-core.yml
+# gives: a path-filtered workflow produces no check run on a PR it skips, and a
+# required check that never reports stays pending forever. So the job always
+# runs and reports, and only its steps are gated on the paths below.
 on:
   pull_request:
-    paths:
-      - "src/mcp_hangar/fastmcp_server/**"
-      - "src/mcp_hangar/server/**"
-      - "src/mcp_hangar/domain/services/**"
-      - "src/mcp_hangar/application/**"
-      - "tests/live/**"
-      - ".github/workflows/live-pr.yml"
 
 concurrency:
   group: live-pr-${{ github.ref }}
@@ -25,6 +23,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read # paths-filter lists the PR's files through the API
 
 jobs:
   live-t0:
@@ -34,15 +33,34 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: filter
+        with:
+          filters: |
+            live:
+              - 'src/mcp_hangar/fastmcp_server/**'
+              - 'src/mcp_hangar/server/**'
+              - 'src/mcp_hangar/domain/services/**'
+              - 'src/mcp_hangar/application/**'
+              - 'tests/live/**'
+              - '.github/workflows/live-pr.yml'
+
+      - name: Say why tier 0 is skipped
+        if: steps.filter.outputs.live != 'true'
+        run: echo "No change under the live tier's paths; tier 0 does not run on this PR."
+
       - name: Install uv
+        if: steps.filter.outputs.live == 'true'
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: "3.11"
 
       - name: Sync dependencies
+        if: steps.filter.outputs.live == 'true'
         run: uv sync --all-extras
 
       - name: Run tier 0
+        if: steps.filter.outputs.live == 'true'
         env:
           MCP_HANGAR_LIVE_VERIFY: "1"
         run: uv run pytest tests/live -m t0 -n auto --timeout=180 -ra
