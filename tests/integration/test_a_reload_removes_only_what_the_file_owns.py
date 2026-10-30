@@ -64,7 +64,7 @@ def run(request: pytest.FixtureRequest) -> dict[str, Any]:
 
 def test_the_scenario_had_every_server_running_with_its_policies(run: dict[str, Any]) -> None:
     before = run["first"]["before"]
-    assert before["ids"] == ["crud-one", "found-one", "gone", "member", "upstream"]
+    assert before["ids"] == ["crud-one", "found-one", "gone", "gone-member", "member", "upstream"]
     for sid in NON_FILE:
         assert before["policies"][sid] == {"deny_list": ["add"], "l7_action": "Allow"}
 
@@ -83,7 +83,7 @@ def test_they_keep_their_policies(run: dict[str, Any]) -> None:
 
 
 def test_a_server_removed_from_the_file_is_still_stopped_and_removed(run: dict[str, Any]) -> None:
-    assert run["first"]["result"]["mcp_servers_removed"] == ["gone"]
+    assert run["first"]["result"]["mcp_servers_removed"] == ["gone", "gone-member"]
     assert run["first"]["gone_exited"] is True
 
 
@@ -104,7 +104,10 @@ def test_a_rescan_after_the_reload_leaves_the_discovered_server_registered(run: 
 
 def test_membership_of_a_group_follows_the_file_and_the_server_stays(run: dict[str, Any]) -> None:
     # Groups are not persisted, so a restart leaves exactly this too.
-    assert run["first"]["before"]["groups"] == {"pool": ["crud-one", "member"], "runtime-group": ["crud-one"]}
+    assert run["first"]["before"]["groups"] == {
+        "pool": ["crud-one", "gone-member", "member"],
+        "runtime-group": ["crud-one"],
+    }
     assert run["first"]["groups"] == {"pool": ["member"]}
     assert "crud-one" in run["first"]["ids"]
 
@@ -165,11 +168,12 @@ def test_a_taken_over_server_the_file_drops_again_goes(sqlite: dict[str, Any]) -
 
 
 def test_a_row_outlives_a_servers_removal_from_the_file(sqlite: dict[str, Any]) -> None:
-    """The one state a reload and a restart disagree on, pinned so that it is a decision.
+    """A known gap, pinned so that closing it is seen: the one state a reload and a restart disagree on.
 
     A row written for a server while the file owned it, or before it did, is
     left by the reload that removes it, so a restart restores it as a non-file
-    server. Deleting the row would also delete a stored L7 policy, which a server
-    declared again later would then come back without.
+    server. It is not deleted here because rows are shared and a reload is local:
+    a replica whose file still declares the server reads its stored L7 policy
+    from that row at its next restart.
     """
     assert "crud-one" in sqlite["after_dropped"]["ids"]

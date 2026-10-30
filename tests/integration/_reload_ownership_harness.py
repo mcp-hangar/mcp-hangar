@@ -13,8 +13,9 @@ configured filesystem source, by a scan and an approval; ``crud-one`` from
 
 The phases, in the order the test runs them on one directory:
 
-* ``first``: the file declares ``upstream``, ``gone`` and the group ``pool``.
-  Adds both non-file servers, with policies, and reloads a file without ``gone``.
+* ``first``: the file declares ``upstream``, ``gone`` and the group ``pool``,
+  with two inline members. Adds both non-file servers, with policies, and
+  reloads a file without ``gone`` or the member ``gone-member``.
 * ``restart``: boots that same file, reloads it, and scans.
 * ``takeover``: the file now declares ``crud-one`` and ``found-one``.
 * ``after_takeover``: boots that file.
@@ -47,8 +48,8 @@ def _server(**extra: Any) -> dict[str, Any]:
     return {"mode": "subprocess", "command": COMMAND, "idle_ttl_s": 600, **extra}
 
 
-def _config(backend: str, servers: dict[str, Any]) -> dict[str, Any]:
-    pool = {"mode": "group", "auto_start": False, "members": [{"id": "member", **_server()}]}
+def _config(backend: str, servers: dict[str, Any], *, members: tuple[str, ...] = ("member",)) -> dict[str, Any]:
+    pool = {"mode": "group", "auto_start": False, "members": [{"id": sid, **_server()} for sid in members]}
     config: dict[str, Any] = {
         "mcp_servers": {"upstream": _server(description=FROM_THE_FILE), "pool": pool, **servers},
         "discovery": {
@@ -285,7 +286,7 @@ def run(phase: str, backend: str, workdir: Path) -> dict[str, Any]:
     config = workdir / "config.yaml"
     if phase in BOOT_FILE:
         _write_definition(workdir)
-        _write(config, _config(backend, FILES[BOOT_FILE[phase]]))
+        _write(config, _config(backend, FILES[BOOT_FILE[phase]], members=("member", "gone-member")))
     context = bootstrap(config_path=str(config))
     repository = context.runtime.repository
     key = context.auth_components.api_key_store.create_key(principal_id=PRINCIPAL, name="operator")
