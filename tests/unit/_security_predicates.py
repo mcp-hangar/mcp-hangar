@@ -13,8 +13,9 @@ This table is the one place those predicates are named, the way
 * ``test_security_predicates_are_reachable.py`` drives the app
   ``mcp-hangar serve --http`` serves -- its MCP endpoint, its REST API and its
   WebSocket event stream -- and, each in a process of its own, the Python
-  facade's ``invoke`` and a stdio session. It fails when a declared path never
-  runs its predicate.
+  facade's ``invoke``, a stdio session and the REST routes that change the fleet
+  (``_rest_route_probes.py``). It fails when a declared path never runs its
+  predicate, and when a route of the REST API has no probe.
 * ``test_security_predicates_are_registered.py`` fails when a function in
   ``src/`` has a predicate's name and is neither registered here nor in
   ``EXEMPT``.
@@ -35,6 +36,7 @@ import mcp_hangar
 from mcp_hangar.application.read_models.tool_projection import ToolProjection, ToolProjectionRegistry
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.application.validators.payload_size import PayloadSizeValidator
+from mcp_hangar.approvals.commands.resolve import ResolveApprovalHandler
 from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.policies.egress_l7 import evaluate_headers
@@ -52,6 +54,7 @@ from mcp_hangar.server.session_guard import refuse_if_session_suspended, refuse_
 from mcp_hangar.server.tools.batch import _authorize_calls, _refuse_if_param_headers_unchecked
 from mcp_hangar.server.tools.batch.executor import BatchExecutor
 from mcp_hangar.server.tools.tool_permissions import authorize_tool
+from tests.unit._rest_route_probes import ROUTE_PROBE_NAMES, ROUTE_PROBES
 
 SRC = Path(mcp_hangar.__file__).resolve().parent
 
@@ -112,6 +115,10 @@ REST_WITHDRAW = "POST /api/admin/tools/{server}/{tool}/withdraw (tenant)"
 REST_RESTORE = "POST /api/admin/tools/{server}/{tool}/restore (tenant)"
 REST_APPROVALS = "GET /api/approvals (tenant)"
 WS_EVENTS = "WebSocket /api/ws/events (tenant)"
+# The rest of the REST API, driven in a process of its own: `_rest_route_probes.py`
+# names each one, and the rows below take them from there. Two are read by name.
+REST_APPROVAL = next(name for name in ROUTE_PROBE_NAMES if name.startswith("GET /api/approvals/"))
+REST_APPROVAL_RESOLVE = next(name for name in ROUTE_PROBE_NAMES if name.endswith("/resolve (tenant)"))
 
 _TASK_PATHS = (
     TASKS_GET,
@@ -130,7 +137,7 @@ _INVOKE_PATHS = (HANGAR_CALL, FLAT_TOOL_CALL)
 #: session carries no session id (ADR-026), so its guard runs and has nothing to
 #: look up.
 _EXECUTOR_PATHS = _INVOKE_PATHS + (FACADE_INVOKE, STDIO_HANGAR_CALL, STDIO_FLAT_TOOL_CALL)
-_REST_PATHS = (
+_IN_PROCESS_REST_PATHS = (
     REST_SERVERS,
     REST_SERVER,
     REST_SERVER_TOOLS,
@@ -146,11 +153,24 @@ _REST_PATHS = (
     REST_RESTORE,
     REST_APPROVALS,
 )
-#: The routes the route guard asks the authorizer about: all but `/system/me`,
-#: which describes the caller itself (`AUTHENTICATED_ONLY`).
-_REST_AUTHORIZED_PATHS = tuple(p for p in _REST_PATHS if p != REST_SYSTEM_ME) + (WS_EVENTS,)
+_REST_PATHS = _IN_PROCESS_REST_PATHS + ROUTE_PROBE_NAMES
+#: The routes the route guard asks the authorizer about: all but those whose rule
+#: names no permission, which describe the caller itself (`AUTHENTICATED_ONLY`).
+_REST_AUTHORIZED_PATHS = (
+    tuple(p for p in _IN_PROCESS_REST_PATHS if p != REST_SYSTEM_ME)
+    + tuple(probe.name for probe in ROUTE_PROBES if probe.rule is not None and probe.rule.permission is not None)
+    + (WS_EVENTS,)
+)
 #: The `tenant_aware` routes, which confine themselves by the guard's recorded decision.
-_REST_TENANT_AWARE_PATHS = (REST_TOOL_HISTORY, REST_PINS, REST_WITHDRAW, REST_RESTORE, REST_APPROVALS, WS_EVENTS)
+_REST_TENANT_AWARE_PATHS = (
+    REST_TOOL_HISTORY,
+    REST_PINS,
+    REST_WITHDRAW,
+    REST_RESTORE,
+    REST_APPROVALS,
+    REST_APPROVAL,
+    WS_EVENTS,
+)
 #: The read-only management tools that list or describe a server (#1786). They are
 #: management tools like any other: session guard, role check, authorizer.
 _LISTING_TOOL_PATHS = (HANGAR_TOOLS, HANGAR_DETAILS, FRONT_DOOR_HANGAR_TOOLS, FRONT_DOOR_HANGAR_DETAILS)
@@ -272,6 +292,22 @@ PREDICATES: tuple[Predicate, ...] = (
         ),
         scope={"principal.tenant_id": "tenant"},
     ),
+    # A pending approval's resolve authorizes in its handler, by the same rule
+    # on every transport, and the grant's reach and the caller's tenant are held
+    # against the approval's.
+    Predicate(
+        ResolveApprovalHandler._authorize, paths={REST_APPROVAL_RESOLVE: None}, scope={"principal.tenant_id": "tenant"}
+    ),
+    Predicate(
+        ResolveApprovalHandler._within_grant,
+        paths={REST_APPROVAL_RESOLVE: None},
+        scope={"grant.tenant_id": "tenant", "approval.tenant_id": "tenant"},
+    ),
+    Predicate(
+        ResolveApprovalHandler._tenant_matches,
+        paths={REST_APPROVAL_RESOLVE: None},
+        scope={"principal.tenant_id": "tenant", "approval.tenant_id": "tenant"},
+    ),
     # The route guard of the REST API and the event stream: the route's rule,
     # denied when it has none, and how far the grant that passed it reaches,
     # which a `tenant_aware` handler confines itself to.
@@ -280,9 +316,21 @@ PREDICATES: tuple[Predicate, ...] = (
     Predicate(confined_tenant, paths=_each(_REST_TENANT_AWARE_PATHS), returns="tenant"),
     Predicate(
         _check_permission,
-        paths=_each(
-            (REST_SERVERS, REST_SERVER, REST_SERVER_TOOLS, REST_TOOL_HISTORY, REST_PINS, REST_WITHDRAW, REST_RESTORE)
-        ),
+        by="action",
+        paths={
+            **_each(
+                (
+                    REST_SERVERS,
+                    REST_SERVER,
+                    REST_SERVER_TOOLS,
+                    REST_TOOL_HISTORY,
+                    REST_PINS,
+                    REST_WITHDRAW,
+                    REST_RESTORE,
+                )
+            ),
+            **{probe.name: probe.handler_asks for probe in ROUTE_PROBES if probe.handler_asks},
+        },
     ),
     # A tenant grant restores only its own tenant's withdrawal, never one made for every tenant.
     Predicate(ToolProjectionRegistry.is_withdrawn_for_all_tenants, paths={REST_RESTORE: None}),
@@ -468,10 +516,6 @@ EXEMPT: dict[str, str] = {
         "An interface. Its implementation, InMemorySessionSuspensionRegistry.is_suspended, is registered."
     ),
     # Not on a probed path.
-    "approvals/commands/resolve.py::ResolveApprovalHandler._authorize": (
-        "Authorizes resolving an approval over REST. The REST probes list approvals; resolving one needs a "
-        "pending approval, which no probe creates."
-    ),
     "auth/api/routes.py::check_permission": "A REST route that answers a permission question. It grants nothing.",
     "server/bootstrap/reachability.py::enforce_subsystem_reachability": (
         "A startup check on configuration, not a request gate."
