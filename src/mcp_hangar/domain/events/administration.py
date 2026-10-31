@@ -98,6 +98,11 @@ class ToolAccessPolicySet(DomainEvent):
     # Who set it (#1719). Empty on an event recorded before the field existed.
     set_by: str = ""
 
+    @property
+    def tool_access_policy_of(self) -> str:
+        """The stream this goes in, so every replica hears of it (#2172)."""
+        return f"{self.scope}:{self.target_id}"
+
 
 @dataclass
 class ToolAccessPolicyCleared(DomainEvent):
@@ -108,6 +113,11 @@ class ToolAccessPolicyCleared(DomainEvent):
     schema_version: int = 1
     # Who cleared it (#1719). Empty on an event recorded before the field existed.
     cleared_by: str = ""
+
+    @property
+    def tool_access_policy_of(self) -> str:
+        """The stream this goes in, so every replica hears of it (#2172)."""
+        return f"{self.scope}:{self.target_id}"
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,11 @@ TOOL_WITHDRAWAL: Final = "tool_withdrawal"
 #: stream also holds every invocation.
 PIN_LEDGER: Final = "pin_ledger"
 
+#: Stream for the runtime tool access policy of one scope and target (#2172). A
+#: policy names neither a server nor a group as an aggregate, and a peer learns
+#: of a change from the log, so it opts in the way a withdrawal does.
+TOOL_ACCESS_POLICY: Final = "tool_access_policy"
+
 SEPARATOR: Final = ":"
 
 
@@ -101,6 +106,10 @@ def stream_id_for_event(event: object) -> str | None:
     withdrawal_of = getattr(event, "withdrawal_of", None)
     if isinstance(withdrawal_of, str) and withdrawal_of:
         return stream_id_for(TOOL_WITHDRAWAL, withdrawal_of)
+
+    tool_access_policy_of = getattr(event, "tool_access_policy_of", None)
+    if isinstance(tool_access_policy_of, str) and tool_access_policy_of:
+        return stream_id_for(TOOL_ACCESS_POLICY, tool_access_policy_of)
 
     mcp_server_id = getattr(event, "mcp_server_id", None)
     if isinstance(mcp_server_id, str) and mcp_server_id:

@@ -510,6 +510,14 @@ class McpServerGroup(AggregateRoot):
             self._members[member.id] = member
             self._update_state()
 
+    def drop_member(self, member_id: str) -> None:
+        """Take out a member another replica removed (#2172). As `remove_member`, recording nothing."""
+        with self._lock:
+            member = self._members.pop(member_id, None)
+            if member is not None:
+                member.in_rotation = False
+                self._update_state()
+
     def replace_member_server(self, member_id: str, mcp_server: McpServer) -> bool:
         """Point a member at a new copy of its server, keeping its place in the group.
 
@@ -1235,13 +1243,24 @@ class McpServerGroup(AggregateRoot):
             min_healthy: New minimum healthy member count, min 1 (optional).
         """
         with self._lock:
-            if strategy is not None:
-                self._strategy = LoadBalancerStrategy(strategy)
-            if description is not None:
-                self._description = description
-            if min_healthy is not None:
-                self._min_healthy = max(1, min_healthy)
+            self._set_config(strategy, description, min_healthy)
         self._record_event(GroupUpdated(group_id=self.id))
+
+    def adopt_config(self, strategy: str, description: str | None, min_healthy: int) -> None:
+        """Take the configuration another replica stored (#2172). As `update`, recording nothing."""
+        with self._lock:
+            self._set_config(strategy, description, min_healthy)
+            self._update_state()
+
+    def _set_config(self, strategy: str | None, description: str | None, min_healthy: int | None) -> None:
+        """Apply the given fields. Call with the lock held."""
+        if strategy is not None and LoadBalancerStrategy(strategy) is not self._strategy:
+            self._strategy = LoadBalancerStrategy(strategy)
+            self._load_balancer = LoadBalancer(self._strategy)
+        if description is not None:
+            self._description = description
+        if min_healthy is not None:
+            self._min_healthy = max(1, min_healthy)
 
     # --- Serialization ---
 

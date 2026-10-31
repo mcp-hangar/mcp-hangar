@@ -29,21 +29,56 @@ applying a tailed one would be echoed by every replica in turn, forever.
 It is also idempotent, which the tail requires (at-least-once): a server already
 in the fleet is left exactly as it is, because the local copy may be *running*
 and the record describes configuration, not state.
+
+## Group changes reach running replicas
+
+A group change made over REST travels the same way (#2172). The handler stores
+the row, then publishes, and each peer applies what the event names from the
+rows, by the rules a restart uses (`GroupRules.restore`). A change on this replica
+is already applied when its event is published, so its own events are skipped,
+before the lock: a publisher may be anywhere.
+
+The file wins for what it declares: a group this replica's file declares keeps
+its configuration and the members it names, and leaves only with the file.
+
+A row can name a server this replica does not hold yet, because the log gives no
+order between two streams. That member joins when the server registers. Events
+whose rows could not be read wait for the next event, as a key-pinned server in
+`_unread` does.
+
+Nothing here records a shared event on a group: `restore_member`, `adopt_config`
+and `drop_member` exist for that. An event left on the aggregate would go out at
+its next drain, under this replica's name, and every peer would answer it.
 """
 
 from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
-from ...domain.contracts.persistence import IMcpServerConfigRepository, McpServerConfigSnapshot, peer_key_claim
+from ...domain.contracts.persistence import (
+    IMcpServerConfigRepository,
+    McpServerConfigSnapshot,
+    StoredGroups,
+    peer_key_claim,
+)
 from ...domain.events import DomainEvent, McpServerDeregistered, McpServerRegistered, McpServerUpdated
 from ...domain.events.enforcement import EgressPolicyCleared, EgressPolicySet
+from ...domain.events.producer import current_instance_id
 from ...domain.model import McpServer, McpServerGroup
+from ...domain.model.mcp_server_group import (
+    GroupCreated,
+    GroupDeleted,
+    GroupMemberAdded,
+    GroupMemberRemoved,
+    GroupUpdated,
+)
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.services.fleet_snapshot import server_from_snapshot
+from ...domain.services.governance_overlays import swapping
 from ...domain.value_objects.peer_identity import PeerIdentity, connection_declaration
 from ...logging_config import get_logger
 from ..group_membership import fill_vacant_member, vacate_member
@@ -54,6 +89,22 @@ logger = get_logger(__name__)
 #: A single row read. Long enough for a busy pool, short enough that a wedged
 #: database does not hold the tail behind one event.
 READ_TIMEOUT_S = 10.0
+
+#: What a group's configuration changing looks like on the log.
+GROUP_EVENTS = (GroupCreated, GroupUpdated, GroupDeleted, GroupMemberAdded, GroupMemberRemoved)
+
+
+@dataclass(frozen=True)
+class GroupRules:
+    """How rows become groups here, which the server layer owns with the file's declarations."""
+
+    #: Puts rows into the groups, as a restart does: the file's groups win, and
+    #: nothing is recorded or started.
+    restore: Callable[[StoredGroups], None]
+    #: Removes a group a peer deleted.
+    drop: Callable[[str], None]
+    #: The members the file names for a group, or None when it declares no such group.
+    declared_members: Callable[[str], frozenset[str] | None]
 
 
 class FleetProjection:
@@ -67,6 +118,8 @@ class FleetProjection:
         closer: IAsyncTaskSubmitter | None = None,
         declared_in_config: Callable[[str], bool] | None = None,
         groups: Mapping[str, McpServerGroup] | None = None,
+        group_rules: GroupRules | None = None,
+        instance_id: str | None = None,
     ) -> None:
         """Bind to the fleet this replica serves from and the shared record.
 
@@ -86,6 +139,10 @@ class FleetProjection:
                 the file, never from another replica's row (ADR-030 §8).
             groups: This replica's groups, whose members hold a server by
                 reference and follow a replaced copy.
+            group_rules: How this replica applies stored groups. None leaves
+                groups to the replica that changed them.
+            instance_id: This replica, whose own group events are not applied
+                again. None takes this process's.
         """
         self._repository = repository
         self._configs = config_repository
@@ -93,13 +150,22 @@ class FleetProjection:
         self._closer = closer
         self._declared_in_config = declared_in_config
         self._groups = groups
+        self._group_rules = group_rules
+        self._instance_id = instance_id or current_instance_id()
+        #: A peer's group events not applied yet: their rows could not be read.
+        self._group_events: list[Any] = []
+        #: Stored members whose server is not held here, by that server's id,
+        #: with the groups that name them. Applied when it registers.
+        self._awaiting_server: dict[str, set[str]] = {}
         #: Key-pinned servers whose row could not be read: retired and refusing
         #: calls, read again on each later event until a read succeeds (§8).
         self._unread: set[str] = set()
         self._serial = threading.Lock()
 
     def handle(self, event: DomainEvent) -> None:
-        """Apply a registration, a deregistration or an update to the local fleet."""
+        """Apply a registration, a deregistration, an update or a group change to the local fleet."""
+        if isinstance(event, GROUP_EVENTS) and event.produced_by == self._instance_id:
+            return
         # The tail and a request thread publishing live can both get here for
         # one server; two replacements would orphan the first, client and all.
         with self._serial:
@@ -117,6 +183,71 @@ class FleetProjection:
             self._deregister(event.mcp_server_id, event.produced_by)
         elif isinstance(event, (EgressPolicySet, EgressPolicyCleared)):
             self._apply_l7(event.mcp_server_id)
+        elif isinstance(event, GROUP_EVENTS):
+            self._group_events.append(event)
+        self._apply_group_events()
+
+    def _apply_group_events(self) -> None:
+        """Apply the peers' group events waiting here against the rows, or keep them until those can be read."""
+        if self._group_rules is None or not self._group_events:
+            return
+        rows: Any = self._configs  # Both durable repositories keep the group rows too.
+        try:
+            stored = cast("StoredGroups", self._runner.run(rows.read_groups(), READ_TIMEOUT_S))
+        except Exception as error:  # noqa: BLE001 -- fault-barrier: unreadable rows must not stall the tail
+            logger.warning("fleet_projection_group_rows_unreadable", waiting=len(self._group_events), error=str(error))
+            return
+        events, self._group_events = self._group_events, []
+        for event in events:
+            try:
+                self._apply_group_event(event, stored, self._group_rules)
+            except Exception as error:  # noqa: BLE001 -- fault-barrier: one malformed row must not stall the others
+                logger.warning("fleet_projection_group_row_malformed", group_id=event.group_id, error=str(error))
+
+    def _apply_group_event(self, event: Any, stored: StoredGroups, rules: GroupRules) -> None:
+        """Apply what *event* names and nothing else.
+
+        The rows are a snapshot, and a request here may have changed the group
+        since. So a member leaves only when an event names it, and a stored row
+        adds only the member its event names.
+        """
+        group_id = event.group_id
+        record = next((row for row in stored.groups if row.group_id == group_id), None)
+        rows = tuple(row for row in stored.members if row.group_id == group_id)
+        declared = rules.declared_members(group_id)
+        held = (self._groups or {}).get(group_id)
+        kept = {row.member_id for row in rows} | (declared or frozenset())
+        if isinstance(event, GroupDeleted):
+            if declared is None and record is None:
+                if held is not None:
+                    rules.drop(group_id)
+            elif held is not None:
+                self._drop_members(held, {str(member.id) for member in held.members} - kept)
+        elif isinstance(event, GroupMemberRemoved):
+            if held is not None and event.member_id not in kept:
+                self._drop_members(held, {event.member_id})
+        elif isinstance(event, GroupUpdated):
+            if held is not None and record is not None and declared is None:
+                held.adopt_config(record.strategy, record.description, record.min_healthy)
+        elif record is not None or declared is not None:
+            if isinstance(event, GroupMemberAdded):
+                rows = tuple(row for row in rows if row.member_id == event.member_id)
+            rules.restore(StoredGroups((record,) if record is not None else (), rows))
+            held = (self._groups or {}).get(group_id)
+            for row in rows:
+                if (
+                    held is not None
+                    and not held.get_member(row.member_id)
+                    and not self._repository.exists(row.member_id)
+                ):
+                    self._awaiting_server.setdefault(row.member_id, set()).add(group_id)
+        logger.info("fleet_projection_group_applied", group_id=group_id, event_type=type(event).__name__)
+
+    @staticmethod
+    def _drop_members(group: McpServerGroup, member_ids: set[str]) -> None:
+        with swapping():
+            for member_id in member_ids:
+                group.drop_member(member_id)
 
     def _apply_l7(self, mcp_server_id: str) -> None:
         """Apply a peer's L7 policy change to the local copy of the server.
@@ -193,6 +324,10 @@ class FleetProjection:
         # if discovery registered it (#2107). Its group's events wait for the next drain: the projection
         # publishes nothing.
         fill_vacant_member(self._groups, mcp_server_id, mcp_server)
+        for group_id in sorted(self._awaiting_server.pop(mcp_server_id, ())):
+            self._group_events.append(
+                GroupMemberAdded(group_id, mcp_server_id, weight=1, priority=1)
+            )  # Never published.
         logger.info("fleet_projection_registered", mcp_server_id=mcp_server_id, produced_by=produced_by)
 
     def _apply_update(self, mcp_server_id: str) -> bool:

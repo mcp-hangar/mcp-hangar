@@ -16,6 +16,9 @@ database directly, so a replica cannot vouch for itself.
   replica and a fresh one, and only one of two concurrent registrations of
   one `key_ref` succeeds.
 * The forget racing a re-create, from the review of #1975.
+* Group changes reach running replicas (#2172): a group, its member and its
+  policy made on A hold on B with no restart, leave B again, and come back from
+  the rows on a replica that starts later.
 * A mixed-version set: the published 2.31.0 next to this checkout.
 
 Opt-in twice: `MCP_HANGAR_LIVE_VERIFY=1`, and `HANGAR_TEST_POSTGRES_DSN` naming
@@ -52,8 +55,8 @@ DSN = os.environ.get(tr.DSN_ENV, "")
 if not DSN:
     pytest.skip(f"{tr.DSN_ENV} is not set", allow_module_level=True)
 
-OP, DEV = "operator", "developer"
-_ROLES = {OP: "kubernetes-operator", DEV: "developer"}
+OP, DEV, ADMIN = "operator", "developer", "administrator"
+_ROLES = {OP: "kubernetes-operator", DEV: "developer", ADMIN: "admin"}
 
 # The release before the peer identity (ADR-030), for the mixed-version run.
 _PUBLISHED = "2.31.0"
@@ -62,6 +65,7 @@ _PUBLISHED_REQUIREMENT = f"mcp-hangar[postgres]=={_PUBLISHED}"
 _POLICY = {"tools": {"allow": ["echo"]}, "defaultAction": "Deny", "mode": "Enforce"}
 
 _REFUSED = "UpstreamPeerKeyMismatchError"
+_DENIED = "ToolAccessDeniedError"
 
 
 @dataclass
@@ -108,6 +112,7 @@ def fleet(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Fleet]:
         endpoints = {
             "served": stack.enter_context(tr.upstream(served, address, workdir)),
             "other": stack.enter_context(tr.upstream(other, address, workdir)),
+            "plain": stack.enter_context(tr.upstream(None, address, workdir)),
         }
         fleet = Fleet(
             database=database,
@@ -347,6 +352,84 @@ def test_a_forget_racing_a_re_create_never_leaves_a_live_key_pinned_row_unrecord
 
         if tr.recorded_pins(fleet.database.row(server)) is not None:
             assert fleet.database.recorded_key_ref(server) == ref, f"a live key-pinned row lost its entry: {statuses}"
+
+
+# --- group changes reach running replicas (#2172) ---------------------------------
+
+
+def _group(replica: tr.Replica, group: str) -> dict[str, Any] | None:
+    got = replica.api("GET", f"/groups/{group}", ADMIN)
+    return dict(got.json()) if got.status_code == 200 else None
+
+
+def _member_ids(view: dict[str, Any] | None) -> set[str]:
+    return {str(member["id"]) for member in (view or {}).get("members", [])}
+
+
+def _denied_by_group_policy(replica: tr.Replica, server: str) -> Callable[[], bool | None]:
+    def probe() -> bool | None:
+        result = replica.call(DEV, server)
+        return True if result.get("success") is False and result.get("error_type") == _DENIED else None
+
+    return probe
+
+
+def _served_again(replica: tr.Replica, server: str) -> Callable[[], bool | None]:
+    return lambda: True if replica.call(DEV, server).get("success") is True else None
+
+
+def test_group_changes_reach_a_running_replica_and_a_restart_reads_the_same_rows(fleet: Fleet) -> None:
+    """A group, member and policy made on A hold on B unrestarted, and on a replica that starts later."""
+    a, b, database = fleet.a, fleet.b, fleet.database
+    server, group = tr.name("group-member"), tr.name("group")
+    body = {"mcp_server_id": server, "mode": "remote", "endpoint": fleet.endpoints["plain"]}
+    created = a.create(OP, body)
+    assert created.status_code == 201, created.text
+    tr.eventually(_held_by(b, server), "B holds the server")
+    _assert_served(b.call(DEV, server), "B, before the server has a group")
+
+    made = a.api("POST", "/groups/", ADMIN, {"group_id": group, "strategy": "priority", "description": "from REST"})
+    assert made.status_code == 201, made.text
+    policy = a.api("POST", f"/auth/policies/group/{group}", ADMIN, {"deny_list": ["echo"]})
+    assert policy.status_code == 200, policy.text
+    joined = a.api("POST", f"/groups/{group}/members", ADMIN, {"member_id": server, "weight": 3, "priority": 2})
+    assert joined.status_code in (200, 201), joined.text
+    assert database.query("SELECT strategy FROM mcp_server_groups WHERE group_id = %s", (group,)) == [("priority",)]
+    assert database.query(
+        "SELECT member_id, weight, priority FROM mcp_server_group_members WHERE group_id = %s", (group,)
+    ) == [(server, 3, 2)]
+
+    # B has not restarted: the group, the member and the group's policy reach it.
+    view = tr.eventually(lambda: v if server in _member_ids(v := _group(b, group)) else None, "B holds the member")
+    assert view["strategy"] == "priority" and view["description"] == "from REST"
+    tr.eventually(_denied_by_group_policy(b, server), "B applies the group's policy to the member")
+
+    # A replica that starts now reads all of it back from the rows.
+    restarted = fleet.start("group-restart")
+    view = _group(restarted, group)
+    assert view is not None and view["strategy"] == "priority" and server in _member_ids(view)
+    assert _denied_by_group_policy(restarted, server)(), "the restored group's policy does not apply"
+
+    updated = a.api("PUT", f"/groups/{group}", ADMIN, {"strategy": "round_robin", "description": "moved"})
+    assert updated.status_code == 200, updated.text
+    for replica in (b, restarted):
+        tr.eventually(
+            lambda r=replica: True if (_group(r, group) or {}).get("strategy") == "round_robin" else None,
+            f"{replica.label} takes the new strategy",
+        )
+
+    left = a.api("DELETE", f"/groups/{group}/members/{server}", ADMIN)
+    assert left.status_code in (200, 204), left.text
+    tr.eventually(lambda: True if not _member_ids(_group(b, group)) else None, "the member leaves B's group")
+    tr.eventually(_served_again(b, server), "B serves the server again once it left the group")
+    assert database.query("SELECT 1 FROM mcp_server_group_members WHERE group_id = %s", (group,)) == []
+
+    deleted = a.api("DELETE", f"/groups/{group}", ADMIN)
+    assert deleted.status_code in (200, 204), deleted.text
+    for replica in (b, restarted):
+        tr.eventually(lambda r=replica: True if _group(r, group) is None else None, f"{replica.label} drops the group")
+    assert database.query("SELECT 1 FROM mcp_server_groups WHERE group_id = %s", (group,)) == []
+    assert _group(fleet.start("group-gone"), group) is None, "a deleted group came back from the rows"
 
 
 # --- mixed versions ------------------------------------------------------------------

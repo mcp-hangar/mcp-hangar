@@ -194,8 +194,8 @@ class MetricsEventHandler:
     def _handle_group_deleted(self, event: GroupDeleted) -> None:
         """A deleted group takes its circuit gauge with it (#1357).
 
-        An effect is enough. A group is deleted on one replica, and nothing
-        removes it from the others: they keep serving it, and keep its series.
+        An effect is enough. A peer removes the group and its series when the
+        fleet projection applies the deletion (#2172).
         """
         prometheus_metrics.remove_group_series(event.group_id)
 

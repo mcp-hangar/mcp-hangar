@@ -137,12 +137,19 @@ def make_key(directory: Path, label: str, address: str) -> TlsKey:
 
 
 @contextmanager
-def upstream(key: TlsKey, address: str, log_dir: Path) -> Iterator[str]:
-    """Serve ``_peer_key_server.py`` under ``key`` on ``address``; yield its endpoint."""
+def upstream(key: TlsKey | None, address: str, log_dir: Path) -> Iterator[str]:
+    """Serve ``_peer_key_server.py`` under ``key``, or plain with None, on ``address``; yield its endpoint."""
     port = _free_port()
     with (log_dir / f"upstream-{port}.log").open("wb") as log:
         proc = subprocess.Popen(
-            [sys.executable, str(_SERVER), str(key.cert), str(key.key), address, str(port)],
+            [
+                sys.executable,
+                str(_SERVER),
+                str(key.cert) if key else "-",
+                str(key.key) if key else "-",
+                address,
+                str(port),
+            ],
             stdout=log,
             stderr=subprocess.STDOUT,
         )
@@ -156,7 +163,7 @@ def upstream(key: TlsKey, address: str, log_dir: Path) -> Iterator[str]:
                 return None
 
         eventually(listening, f"the upstream on {address}:{port} listens", timeout=20)
-        yield f"https://{address}:{port}/mcp"
+        yield f"{'https' if key else 'http'}://{address}:{port}/mcp"
     finally:
         proc.terminate()
         try:
@@ -316,9 +323,12 @@ class Replica:
     keys: dict[str, str]
 
     def request(self, method: str, path: str, principal: str, body: dict[str, Any] | None = None) -> httpx.Response:
+        return self.api(method, f"/mcp_servers{path}", principal, body)
+
+    def api(self, method: str, path: str, principal: str, body: dict[str, Any] | None = None) -> httpx.Response:
         return httpx.request(
             method,
-            f"{self.base_url}/api/mcp_servers{path}",
+            f"{self.base_url}/api{path}",
             json=body,
             headers={"X-API-Key": self.keys[principal]},
             timeout=30.0,

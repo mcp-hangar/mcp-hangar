@@ -1,5 +1,6 @@
 """Event handlers registration."""
 
+import functools
 import importlib
 import os
 from typing import TYPE_CHECKING
@@ -38,7 +39,13 @@ from ...domain.events import (
     ToolWithdrawn,
 )
 from ...domain.exceptions import ConfigurationError
-from ...domain.model.mcp_server_group import GroupCreated
+from ...domain.model.mcp_server_group import (
+    GroupCreated,
+    GroupDeleted,
+    GroupMemberAdded,
+    GroupMemberRemoved,
+    GroupUpdated,
+)
 from ...domain.repository import IMcpServerRepository
 from ...domain.services import tool_catalogue_changes
 from ...infrastructure.event_bus import EventBus
@@ -231,14 +238,14 @@ def init_event_handlers(runtime: "Runtime") -> None:
     # peers to learn from.
     config_repository = getattr(runtime, "config_repository", None)
     if config_repository is not None and type(config_repository).__name__ != "InMemoryMcpServerConfigRepository":
-        from ...application.event_handlers.fleet_projection import FleetProjection
+        from ...application.event_handlers.fleet_projection import FleetProjection, GroupRules
         from ...infrastructure.async_bridge import BackgroundLoop
         from .composition import close_at_shutdown
 
         runner = BackgroundLoop()
         close_at_shutdown(runner.close)
         from ...infrastructure.async_executor import AsyncExecutor
-        from ..config import declared_in_config
+        from ..config import declared_group_members, declared_in_config, drop_stored_group, restore_stored_groups
         from ..state import GROUPS
 
         fleet_projection = FleetProjection(
@@ -248,6 +255,11 @@ def init_event_handlers(runtime: "Runtime") -> None:
             closer=AsyncExecutor.get_instance(),
             declared_in_config=declared_in_config,
             groups=GROUPS,
+            group_rules=GroupRules(
+                restore=functools.partial(restore_stored_groups, repository=runtime.repository),
+                drop=drop_stored_group,
+                declared_members=declared_group_members,
+            ),
         )
         runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # A key-pinned server's key list or endpoint changed elsewhere: its copy
@@ -261,6 +273,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
         runtime.event_bus.subscribe(EgressPolicySet, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         runtime.event_bus.subscribe(EgressPolicyCleared, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        # A group change reaches running replicas the same way (#2172): the
+        # handler stored the row first, and each peer reads it back.
+        for group_event in (GroupCreated, GroupUpdated, GroupDeleted, GroupMemberAdded, GroupMemberRemoved):
+            runtime.event_bus.subscribe(group_event, fleet_projection.handle, kind=HandlerKind.PROJECTION)
         # Not `fleet_projection_registered`: that name belongs to the
         # projection applying a server, and two different events under one name
         # is a log an operator cannot read. `_configured` matches
