@@ -13,8 +13,14 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
-from ...domain.contracts.fleet import IFleetWriter
-from ...domain.contracts.persistence import ConcurrentModificationError, PeerKeyClaim, PeerKeyNameRefused
+from ...domain.contracts.fleet import IFleetWriter, IGroupWriter
+from ...domain.contracts.persistence import (
+    ConcurrentModificationError,
+    GroupMemberRecord,
+    GroupRecord,
+    PeerKeyClaim,
+    PeerKeyNameRefused,
+)
 from ...domain.events import (
     EgressPolicyCleared,
     EgressPolicySet,
@@ -35,6 +41,7 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
 from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
+from ...domain.value_objects.mcp_server import MemberPriority, MemberWeight
 from ...domain.value_objects.peer_identity import PeerIdentity, max_connection_age
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
@@ -984,15 +991,17 @@ class CreateGroupHandler(CommandHandler):
     Thread-safe via a per-handler threading.Lock.
     """
 
-    def __init__(self, groups: dict, event_bus: Any) -> None:
+    def __init__(self, groups: dict, event_bus: Any, group_writer: IGroupWriter | None = None) -> None:
         """Initialize the handler.
 
         Args:
             groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
+            group_writer: Records the change before it is applied. None: memory only.
         """
         self._groups = groups
         self._event_bus = event_bus
+        self._group_writer = group_writer
         self._lock = threading.Lock()
 
     def handle(self, command: CreateGroupCommand) -> dict[str, Any]:
@@ -1007,15 +1016,21 @@ class CreateGroupHandler(CommandHandler):
         Raises:
             ValidationError: If a group with the same ID already exists.
         """
+        record = GroupRecord(command.group_id, command.strategy, max(1, command.min_healthy), command.description)
+        group = McpServerGroup(
+            group_id=command.group_id,
+            strategy=LoadBalancerStrategy(command.strategy),
+            min_healthy=command.min_healthy,
+            description=command.description,
+        )
         with self._lock:
             if command.group_id in self._groups:
                 raise ValidationError(f"Group already exists: {command.group_id}")
-            group = McpServerGroup(
-                group_id=command.group_id,
-                strategy=LoadBalancerStrategy(command.strategy),
-                min_healthy=command.min_healthy,
-                description=command.description,
-            )
+        # Before the group exists, and with no lock held: a create whose durable
+        # half failed must not answer "created".
+        if self._group_writer is not None and not self._group_writer.create_group(record):
+            raise ValidationError(f"Group already exists: {command.group_id}")
+        with self._lock:
             self._groups[command.group_id] = group
 
         # Publish events OUTSIDE lock (no I/O under lock)
@@ -1033,15 +1048,17 @@ class UpdateGroupHandler(CommandHandler):
     Thread-safe via a per-handler threading.Lock.
     """
 
-    def __init__(self, groups: dict, event_bus: Any) -> None:
+    def __init__(self, groups: dict, event_bus: Any, group_writer: IGroupWriter | None = None) -> None:
         """Initialize the handler.
 
         Args:
             groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
+            group_writer: Records the change before it is applied. None: memory only.
         """
         self._groups = groups
         self._event_bus = event_bus
+        self._group_writer = group_writer
         self._lock = threading.Lock()
 
     def handle(self, command: UpdateGroupCommand) -> dict[str, Any]:
@@ -1063,6 +1080,12 @@ class UpdateGroupHandler(CommandHandler):
             group = self._groups.get(command.group_id)
             if group is None:
                 raise McpServerNotFoundError(command.group_id)
+
+        if self._group_writer is not None:
+            if command.strategy is not None:
+                LoadBalancerStrategy(command.strategy)  # Refused before it is recorded.
+            min_healthy = None if command.min_healthy is None else max(1, command.min_healthy)
+            self._group_writer.update_group(command.group_id, command.strategy, min_healthy, command.description)
 
         # group.update() acquires its own lock internally
         group.update(
@@ -1087,15 +1110,17 @@ class DeleteGroupHandler(CommandHandler):
     Thread-safe via a per-handler threading.Lock.
     """
 
-    def __init__(self, groups: dict, event_bus: Any) -> None:
+    def __init__(self, groups: dict, event_bus: Any, group_writer: IGroupWriter | None = None) -> None:
         """Initialize the handler.
 
         Args:
             groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
+            group_writer: Records the change before it is applied. None: memory only.
         """
         self._groups = groups
         self._event_bus = event_bus
+        self._group_writer = group_writer
         self._lock = threading.Lock()
 
     def handle(self, command: DeleteGroupCommand) -> dict[str, Any]:
@@ -1111,10 +1136,17 @@ class DeleteGroupHandler(CommandHandler):
             McpServerNotFoundError: If group does not exist.
         """
         with self._lock:
-            group = self._groups.get(command.group_id)
+            if command.group_id not in self._groups:
+                raise McpServerNotFoundError(command.group_id)
+
+        # First: a row left behind brings the group back at the next restart.
+        if self._group_writer is not None:
+            self._group_writer.delete_group(command.group_id)
+
+        with self._lock:
+            group = self._groups.pop(command.group_id, None)
             if group is None:
                 raise McpServerNotFoundError(command.group_id)
-            del self._groups[command.group_id]
 
         # I/O (stop) outside lock — stop_all() acquires McpServer locks individually
         group.stop_all()
@@ -1135,17 +1167,21 @@ class AddGroupMemberHandler(CommandHandler):
     Thread-safe via a per-handler threading.Lock for the groups dict lookup.
     """
 
-    def __init__(self, repository: IMcpServerRepository, groups: dict, event_bus: Any) -> None:
+    def __init__(
+        self, repository: IMcpServerRepository, groups: dict, event_bus: Any, group_writer: IGroupWriter | None = None
+    ) -> None:
         """Initialize the handler.
 
         Args:
             repository: McpServer repository for member lookup.
             groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
+            group_writer: Records the change before it is applied. None: memory only.
         """
         self._repository = repository
         self._groups = groups
         self._event_bus = event_bus
+        self._group_writer = group_writer
         self._lock = threading.Lock()
 
     def handle(self, command: AddGroupMemberCommand) -> dict[str, Any]:
@@ -1177,6 +1213,16 @@ class AddGroupMemberHandler(CommandHandler):
             group = self._groups.get(command.group_id)
             if group is None:
                 raise McpServerNotFoundError(command.group_id)
+
+        # Before it joins. Not for a member already there, which the add refuses:
+        # the file may name it, and what the file names has no row.
+        if self._group_writer is not None and group.get_member(command.mcp_server_id) is None:
+            weight, priority = MemberWeight(command.weight).value, MemberPriority(command.priority).value
+            self._group_writer.save_group_member(
+                GroupMemberRecord(command.group_id, command.mcp_server_id, weight, priority)
+            )
+
+        with self._lock:
             # group.add_member() acquires group's own lock internally
             group.add_member(mcp_server, weight=command.weight, priority=command.priority)
 
@@ -1195,15 +1241,17 @@ class RemoveGroupMemberHandler(CommandHandler):
     Thread-safe via a per-handler threading.Lock.
     """
 
-    def __init__(self, groups: dict, event_bus: Any) -> None:
+    def __init__(self, groups: dict, event_bus: Any, group_writer: IGroupWriter | None = None) -> None:
         """Initialize the handler.
 
         Args:
             groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
+            group_writer: Records the change before it is applied. None: memory only.
         """
         self._groups = groups
         self._event_bus = event_bus
+        self._group_writer = group_writer
         self._lock = threading.Lock()
 
     def handle(self, command: RemoveGroupMemberCommand) -> dict[str, Any]:
@@ -1222,6 +1270,12 @@ class RemoveGroupMemberHandler(CommandHandler):
             group = self._groups.get(command.group_id)
             if group is None:
                 raise McpServerNotFoundError(command.group_id)
+
+        # First: a row left behind brings the member back at the next restart.
+        if self._group_writer is not None:
+            self._group_writer.delete_group_member(command.group_id, command.mcp_server_id)
+
+        with self._lock:
             # group.remove_member() acquires group's own lock internally
             group.remove_member(command.mcp_server_id)
 
@@ -1249,6 +1303,7 @@ def register_crud_handlers(
     declared_in_config: Callable[[str], bool] | None = None,
     peer_identity_authority: IPeerIdentityAuthority | None = None,
     drain: Callable[[str, float], bool] | None = None,
+    group_writer: IGroupWriter | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -1260,6 +1315,7 @@ def register_crud_handlers(
             are not registered.
         fleet_writer: Where fleet changes are recorded so a restart can rebuild
             them. None leaves the fleet in memory only, as before.
+        group_writer: Where the group API's changes are recorded, likewise.
         coordinated: Whether this gateway shares its state with peers.
         log_buffers: Where a created server's log buffer is attached (#1747) and
             a deleted server's is released (#1506).
@@ -1328,16 +1384,16 @@ def register_crud_handlers(
 
     # Group handlers (require groups dict)
     if groups is not None:
-        command_bus.register(CreateGroupCommand, CreateGroupHandler(groups=groups, event_bus=event_bus))
-        command_bus.register(UpdateGroupCommand, UpdateGroupHandler(groups=groups, event_bus=event_bus))
-        command_bus.register(DeleteGroupCommand, DeleteGroupHandler(groups=groups, event_bus=event_bus))
+        command_bus.register(CreateGroupCommand, CreateGroupHandler(groups, event_bus, group_writer))
+        command_bus.register(UpdateGroupCommand, UpdateGroupHandler(groups, event_bus, group_writer))
+        command_bus.register(DeleteGroupCommand, DeleteGroupHandler(groups, event_bus, group_writer))
         command_bus.register(
             AddGroupMemberCommand,
-            AddGroupMemberHandler(repository=repository, groups=groups, event_bus=event_bus),
+            AddGroupMemberHandler(repository, groups, event_bus, group_writer),
         )
         command_bus.register(
             RemoveGroupMemberCommand,
-            RemoveGroupMemberHandler(groups=groups, event_bus=event_bus),
+            RemoveGroupMemberHandler(groups, event_bus, group_writer),
         )
         logger.info("crud_group_handlers_registered")
 

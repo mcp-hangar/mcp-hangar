@@ -9,16 +9,20 @@ the same mcp_server must get the same `ConcurrentModificationError`, on the
 same conditions, on either backend.
 """
 
+import dataclasses
 import json
 from datetime import UTC, datetime
 from typing import Any
 
 from mcp_hangar.domain.contracts.persistence import (
     ConcurrentModificationError,
+    GroupMemberRecord,
+    GroupRecord,
     McpServerConfigSnapshot,
     PeerKeyClaim,
     PeerKeyNameRefused,
     PersistenceError,
+    StoredGroups,
     check_peer_key_claim,
     peer_key_claim,
 )
@@ -49,6 +53,23 @@ CREATE INDEX IF NOT EXISTS idx_mcp_server_configs_enabled
 CREATE TABLE IF NOT EXISTS peer_key_names (
     name TEXT PRIMARY KEY,
     key_ref TEXT NOT NULL UNIQUE
+);
+
+-- What the group API made (#2172). No foreign key: a member added to a group
+-- the file declares has no group row to name.
+CREATE TABLE IF NOT EXISTS mcp_server_groups (
+    group_id TEXT PRIMARY KEY,
+    strategy TEXT NOT NULL,
+    min_healthy INTEGER NOT NULL DEFAULT 1,
+    description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS mcp_server_group_members (
+    group_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    weight INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (group_id, member_id)
 );
 
 -- A live row under a recorded name carries the recorded key_ref (#1987). This
@@ -683,3 +704,80 @@ class PostgresMcpServerConfigRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: non-critical, best-effort update
             logger.error(f"Failed to update failure count: {e}")
             # Non-critical operation, don't raise
+
+    def _group_rows(self, *statements: tuple[str, tuple[Any, ...]]) -> tuple[int, list[list[Any]]]:
+        """Run *statements* in one transaction: the rows the last changed, and what each one fetched."""
+        try:
+            with self._connections.get_connection() as conn:
+                try:
+                    counts, fetched = [], []
+                    with conn.cursor() as cur:
+                        for sql, parameters in statements:
+                            cur.execute(sql, parameters)
+                            counts.append(cur.rowcount)
+                            fetched.append(cur.fetchall() if sql.startswith("SELECT") else [])
+                    conn.commit()
+                    return counts[-1], fetched
+                except Exception:
+                    # See class docstring.
+                    conn.rollback()
+                    raise
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed on the stored groups: {e}") from e
+
+    async def read_groups(self) -> StoredGroups:
+        """Every stored group and member, in one transaction."""
+        _, (groups, members) = self._group_rows(
+            ("SELECT group_id, strategy, min_healthy, description FROM mcp_server_groups ORDER BY group_id", ()),
+            (
+                "SELECT group_id, member_id, weight, priority FROM mcp_server_group_members "
+                "ORDER BY group_id, member_id",
+                (),
+            ),
+        )
+        return StoredGroups(
+            tuple(GroupRecord(*row) for row in groups), tuple(GroupMemberRecord(*row) for row in members)
+        )
+
+    async def create_group(self, record: GroupRecord) -> bool:
+        """Store a new group, without any member rows a dropped group of that id left. False when a row exists."""
+        stale = (
+            "DELETE FROM mcp_server_group_members WHERE group_id = %s "
+            "AND NOT EXISTS (SELECT 1 FROM mcp_server_groups WHERE group_id = %s)"
+        )
+        insert = (
+            "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (group_id) DO NOTHING"
+        )
+        statements = (stale, (record.group_id, record.group_id)), (insert, dataclasses.astuple(record))
+        return bool(self._group_rows(*statements)[0])
+
+    async def update_group(
+        self, group_id: str, strategy: str | None, min_healthy: int | None, description: str | None
+    ) -> None:
+        """Change the given fields, in one statement."""
+        sql = (
+            "UPDATE mcp_server_groups SET strategy = COALESCE(%s, strategy), min_healthy = COALESCE(%s, min_healthy), "
+            "description = COALESCE(%s, description) WHERE group_id = %s"
+        )
+        self._group_rows((sql, (strategy, min_healthy, description, group_id)))
+
+    async def save_group_member(self, record: GroupMemberRecord) -> None:
+        """Store a member, replacing an earlier row of that group and member."""
+        sql = (
+            "INSERT INTO mcp_server_group_members (group_id, member_id, weight, priority) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (group_id, member_id) DO UPDATE SET weight = excluded.weight, priority = excluded.priority"
+        )
+        self._group_rows((sql, dataclasses.astuple(record)))
+
+    async def delete_group(self, group_id: str) -> None:
+        """Remove a group's row, if any, and every member row under its id."""
+        self._group_rows(
+            ("DELETE FROM mcp_server_groups WHERE group_id = %s", (group_id,)),
+            ("DELETE FROM mcp_server_group_members WHERE group_id = %s", (group_id,)),
+        )
+
+    async def delete_group_member(self, group_id: str, member_id: str) -> None:
+        """Remove a member's row, if any."""
+        sql = "DELETE FROM mcp_server_group_members WHERE group_id = %s AND member_id = %s"
+        self._group_rows((sql, (group_id, member_id)))
