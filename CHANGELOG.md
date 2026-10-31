@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.35.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.10...v2.35.0) (2026-10-31)
+
+### Added
+
+- **core:** groups and members made through `/api/groups` survive a restart on a
+  durable backend. They are stored beside the server rows, in new tables on SQLite
+  and PostgreSQL, and restored at bootstrap before anything is served, so a server
+  added to a group over REST is under its group's policy from the first call and
+  listing. The file wins for what it declares, by the rules a reload uses. A
+  create, update, delete or member change is written to the store first, and fails
+  if that write fails; deleting a group or member removes its row. If the stored
+  groups cannot be read, the gateway does not start. On the in-memory backend a
+  group still lasts as long as the process. ([#2175](https://github.com/mcp-hangar/mcp-hangar/pull/2175))
+- **core:** group changes reach running replicas. A group or member created,
+  updated, deleted or removed over REST on one replica is applied by its peers
+  from the stored rows within the event tail's interval, with no restart, by the
+  rules a restart uses: the file wins for what it declares, and a member whose
+  server arrives later joins when it does. A tool access policy set through
+  `/api/auth/policies` reaches peers the same way, so a replica applies a group's
+  policy to the members it learns of. `ToolAccessPolicySet` and
+  `ToolAccessPolicyCleared` now go on the shared log, in a `tool_access_policy`
+  stream. `PUT /api/groups/{id}` with a new strategy now also changes how the group
+  selects members, on every replica. ([#2177](https://github.com/mcp-hangar/mcp-hangar/pull/2177))
+
 ## [2.34.10](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.9...v2.34.10) (2026-10-30)
 
 ### Fixed
