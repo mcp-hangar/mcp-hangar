@@ -277,7 +277,7 @@ def _carry_runtime_groups(staged: dict[str, McpServerGroup], repository: Any) ->
     return departed
 
 
-def restore_stored_groups(stored: StoredGroups, repository: Any) -> None:
+def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[str, McpServerGroup] = GROUPS) -> None:
     """Put back what the group API made, by the rules `_carry_runtime_groups` keeps it (#2172).
 
     Over the groups the file built, so the file wins: a stored group it declares
@@ -288,18 +288,30 @@ def restore_stored_groups(stored: StoredGroups, repository: Any) -> None:
     restored: list[McpServerGroup] = []
     with swapping():
         for record in stored.groups:
-            if record.group_id not in GROUPS:
+            if record.group_id not in groups:
                 strategy = _parse_strategy(record.strategy, record.group_id)
                 group = McpServerGroup(record.group_id, strategy, record.min_healthy, description=record.description)
                 group.collect_events()  # This is no creation: nothing goes on the log.
-                GROUPS[record.group_id] = group
+                groups[record.group_id] = group
                 restored.append(group)
         for row in stored.members:
-            member_group, server = GROUPS.get(row.group_id), _server_of_member(row.member_id, repository)
+            member_group, server = groups.get(row.group_id), _server_of_member(row.member_id, repository)
             if member_group is not None and server is not None and member_group.get_member(row.member_id) is None:
                 member_group.restore_member(server, row.weight, row.priority)
     for group in restored:
         observe_group_circuit(group)
+
+
+def drop_stored_group(group_id: str) -> None:
+    """Remove a group another replica deleted (#2172). Its servers stay, as when a reload removes a group."""
+    with swapping():
+        GROUPS.pop(group_id, None)
+    remove_group_series(group_id)
+
+
+def declared_group_members(group_id: str) -> frozenset[str] | None:
+    """The members the file names for *group_id*, or None when the file does not declare that group."""
+    return _DECLARED_GROUPS.get(group_id)
 
 
 def group_records() -> Any:

@@ -355,8 +355,8 @@ def _replay_tap_policies(tap_store: Any) -> None:
     Args:
         tap_store: The policy store to replay from.
     """
+    from mcp_hangar.auth.policy_projection import apply_stored_policy
     from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
-    from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
     try:
         from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
@@ -373,32 +373,8 @@ def _replay_tap_policies(tap_store: Any) -> None:
 
     policies = tap_store.list_all_policies()
     for scope, target_id, stored in policies:
-        policy = stored
-        if not stored.approval_list:
-            in_force = resolver.get_configured_policy(scope, target_id)
-            if in_force is not None and in_force.approval_list:
-                policy = ToolAccessPolicy.with_access_lists(
-                    stored.allow_list,
-                    stored.deny_list,
-                    carrying_from=in_force,
-                )
-                logger.info(
-                    "tap_replay_carried_approval_gate",
-                    scope=scope,
-                    target_id=target_id,
-                    reason="stored_row_predates_approval_columns",
-                )
         try:
-            if scope == "provider":
-                resolver.set_mcp_server_policy(target_id, policy)
-            elif scope == "group":
-                resolver.set_group_policy(target_id, policy)
-            elif scope == "member":
-                parts = target_id.split(":", 1)
-                if len(parts) == 2:
-                    resolver.set_member_policy(parts[0], parts[1], policy)
-                else:
-                    resolver.set_member_policy(target_id, target_id, policy)
+            apply_stored_policy(resolver, scope, target_id, stored)
         except Exception as e:  # noqa: BLE001 -- fault-barrier: replay failure must not prevent startup
             logger.warning(
                 "tap_policy_replay_failed",
@@ -612,6 +588,13 @@ def bootstrap_auth(
     # Replay TAP policies from SQLite into the in-memory resolver on startup
     if tap_store is not None:
         _replay_tap_policies(tap_store)
+        if event_bus is not None:
+            from mcp_hangar.auth.policy_projection import ToolAccessPolicyProjection
+            from mcp_hangar.domain.contracts.event_bus import HandlerKind
+            from mcp_hangar.domain.events import ToolAccessPolicySet
+
+            projection = ToolAccessPolicyProjection(tap_store)
+            event_bus.subscribe(ToolAccessPolicySet, projection.handle, kind=HandlerKind.PROJECTION)
 
     return AuthComponents(
         authn_middleware=authn_middleware,
