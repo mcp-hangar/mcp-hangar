@@ -23,7 +23,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs  # skip bulk reformats in
 uv run pytest tests/ -x -q
 uv run pytest tests/ -x -q -n auto --dist loadfile -m "not benchmark"  # parallel, as CI runs it
 uv run pytest tests/unit/              # unit only
-uv run pytest tests/integration/       # integration (needs Docker)
+uv run pytest tests/integration/       # integration (in-process, no container runtime)
 uv run pytest -m benchmark             # benchmarks
 
 # Lint & type check
@@ -237,7 +237,7 @@ Read `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` for 
 - **No emoji** anywhere in code, comments, commit messages, or docs.
 - **Never `!` or `BREAKING CHANGE:` in a commit.** `3.x` is reserved for a business milestone, so release-please must never compute a major. A change that breaks callers ships as a **minor** with an upgrade note in `upgrade.d/` naming the old and new form -- which is what 2.2.0 and 2.3.0 did. If a major is genuinely wanted, that is a human decision, not a commit footer.
 - **Squash-merge default.** Do not request merge commits.
-- **Required status checks** (must pass before merge; the repository ruleset is the source): `required-check` (PR Validation), `check` (changelog), `pr-title / validate`, `branch-name / validate`, `pr-body / validate`, `lint`, `test (3.11)`, `test (3.12)`, `test (3.13)`, `test (3.14)`, `decision-coverage`, `integration`, `integration-newest`, `build`.
+- **Required status checks** (must pass before merge; the repository ruleset is the source): `required-check` (PR Validation), `check` (changelog), `pr-title / validate`, `branch-name / validate`, `pr-body / validate`, `lint`, `test (3.11)`, `test (3.12)`, `test (3.13)`, `test (3.14)`, `decision-coverage`, `integration`, `integration-newest`, `build`, `Live tier 0`.
 
 For ADR work specifically, see `docs/internal/ADR_AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
 
@@ -253,7 +253,7 @@ Auth, compliance, and approvals live under `src/mcp_hangar/` as first-class pack
 - **Markers**: `benchmark`, `security`, `live`, `t0`/`t1`/`t2` -- all registered in `pyproject.toml`
 - **No opt-in flags**: a test that only runs behind a flag nobody passes does not run. The
   `--run-containers` / `--run-slow` tiers and their testcontainers fixtures were deleted for
-  exactly that reason; anything needing a real runtime belongs in `tests/live` (nightly) or the lab.
+  exactly that reason; anything needing a real runtime belongs in `tests/live`.
 - **A control is tested through the path production takes.** A test that asserts a security or governance control fires (a gate, a policy, a scope check, a suspension, an approval) must reach it through `bootstrap()` or the served ASGI/stdio app, not by constructing the component. Direct construction is fine for a pure unit test of the component's own logic, and such a test does not count as coverage of the control. The recurring defect family "mechanism present, path absent" is a test that built the object through a path production never takes. The pattern is `tests/unit/test_security_predicates_are_reachable.py`: a real request down each served path, with a spy that fails when a registered predicate does not run.
 - **Mock provider**: `tests/mock_provider.py` implements JSON-RPC MCP protocol
 - **Acceptance**: `tests/acceptance/ha_two_gateways.sh` is run by hand against a cluster you own
