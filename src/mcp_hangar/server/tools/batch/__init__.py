@@ -59,6 +59,7 @@ from .models import (
     RetryMetadata,
     ValidationError,
 )
+from .refusal_shape import shape_refusal
 from .relay_seam import govern_relayed_tasks
 from .validator import validate_batch
 
@@ -226,14 +227,14 @@ def _authorize_calls(
             call_count=len(calls),
         )
         for i, call in enumerate(calls):
-            _publish_authorization_refusal(app_context, call, call_ids[i], identity, "unauthenticated")
-            denied[i] = CallResult(
-                index=i,
-                call_id=call_ids[i],
-                success=False,
-                error="Authentication required to invoke tools",
-                error_type="AuthorizationDenied",
-                elapsed_ms=0.0,
+            denied[i] = _authorization_refusal(
+                app_context,
+                call,
+                i,
+                call_ids[i],
+                identity,
+                "unauthenticated",
+                "Authentication required to invoke tools",
             )
         return denied
 
@@ -255,16 +256,20 @@ def _authorize_calls(
                 tool=tool,
                 reason=type(exc).__name__,
             )
+            message = f"Not authorized to invoke tool '{tool}': tool:invoke permission required"
             if isinstance(exc, AccessDeniedError):
-                _publish_authorization_refusal(app_context, call, call_ids[i], identity, "tool_invoke_denied")
-            denied[i] = CallResult(
-                index=i,
-                call_id=call_ids[i],
-                success=False,
-                error=f"Not authorized to invoke tool '{tool}': tool:invoke permission required",
-                error_type="AuthorizationDenied",
-                elapsed_ms=0.0,
-            )
+                denied[i] = _authorization_refusal(
+                    app_context, call, i, call_ids[i], identity, "tool_invoke_denied", message
+                )
+            else:
+                denied[i] = CallResult(
+                    index=i,
+                    call_id=call_ids[i],
+                    success=False,
+                    error=message,
+                    error_type="AuthorizationDenied",
+                    elapsed_ms=0.0,
+                )
             continue
         roles = _role_that_authorized(decision)
         if roles and authorizing_roles is not None:
@@ -272,15 +277,34 @@ def _authorize_calls(
     return denied
 
 
-def _publish_authorization_refusal(
-    app_context: Any, call: dict[str, Any], call_id: str, identity: IdentityContext | None, reason: str
-) -> None:
-    """The ``ToolCallRefused`` of a call ``tool:invoke`` denied (#1582); its reason is a fixed code."""
+def _authorization_refusal(
+    app_context: Any,
+    call: dict[str, Any],
+    index: int,
+    call_id: str,
+    identity: IdentityContext | None,
+    reason: str,
+    message: str,
+) -> CallResult:
+    """The refusal of a call ``tool:invoke`` denied, with its ``ToolCallRefused`` (#1582, ADR-029 s12).
+
+    *reason* is a fixed code; *message* is the line below the bounded one.
+    """
     spec = CallSpec(
         index=0, call_id=call_id, mcp_server=call.get("mcp_server", ""), tool=call.get("tool", ""), arguments={}
     )
     event_bus = getattr(app_context, "event_bus", None)
-    publish_call_refused(event_bus, spec, 0.0, identity, gate="authorization", reason=reason)
+    event_id = publish_call_refused(event_bus, spec, 0.0, identity, gate="authorization", reason=reason)
+    shape = shape_refusal("authorization", reason, server=spec.mcp_server, event_id=event_id)
+    return CallResult(
+        index=index,
+        call_id=call_id,
+        success=False,
+        error=f"{shape.text}\n{message}",
+        error_type="AuthorizationDenied",
+        elapsed_ms=0.0,
+        refusal_meta=shape.meta,
+    )
 
 
 def _refuse_if_param_headers_unchecked(ctx: Context | None) -> None:

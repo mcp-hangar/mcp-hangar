@@ -2209,7 +2209,9 @@ class McpServer(AggregateRoot):
 
                 if isinstance(invocation_error, UpstreamPeerKeyMismatchError):
                     # Recorded above like any failed call; raised as itself so the
-                    # executor records `deny` with its reason (ADR-030 §5).
+                    # executor records `deny` with its reason (ADR-030 §5), under
+                    # this correlation id: the two events are one refusal.
+                    invocation_error.details["correlation_id"] = correlation_id
                     raise invocation_error
                 raise ToolInvocationError(
                     self.mcp_server_id,

@@ -99,7 +99,7 @@ from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .member_health import MemberOutcome, member_outcome
 from .models import BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
-from .refusal_shape import Disposition, disposition, shape_refusal
+from .refusal_shape import DISPATCH_REFUSALS, Disposition, disposition, shape_refusal
 from .relay_seam import upstream_task
 from .shutdown import batch_abandoned_error, track_batch, untrack_batch, wait_unless_abandoned
 from .tenant_admission import CONCURRENCY, NO_BUDGET, RATE, Grant, Refusal, Reservation, get_tenant_admission
@@ -124,14 +124,7 @@ _GATE_ERRORS = frozenset({"McpServerStartError", "ApprovalGateError", "ApprovalR
 #: what `ExpectedRefusal` marks. `tests/unit/test_refusal_span_status.py` holds
 #: this set to the exceptions carrying that marker, so a new one cannot be
 #: recorded as a failure here while the tracer treats it as a refusal.
-_REFUSED_AT_DISPATCH = frozenset(
-    {
-        "EgressPolicyDeniedError",
-        "EgressPolicyApprovalRequiredError",
-        "RateLimitExceeded",
-        "UpstreamPeerKeyMismatchError",
-    }
-)
+_REFUSED_AT_DISPATCH = frozenset(DISPATCH_REFUSALS)
 
 #: The dispatch refusals the aggregate's L7 policy raises (#1295). Their log line
 #: carries the verdict's bounded fields, not the policy's joined reasons.
@@ -879,20 +872,47 @@ def _log_call_failure(call: Any, error: Any, error_type: str, elapsed_ms: float,
     )
 
 
-def _publish_l7_refusal(
-    ctx: Any, call: CallSpec, error_type: str, elapsed_ms: float, l7: L7Decision | None, route_backend: str
-) -> None:
-    """Publish `ToolCallRefused` for an L7 refusal, the calls `_log_call_failure` logs as `batch_call_refused`.
+def _refuse_at_dispatch(
+    ctx: Any,
+    call: CallSpec,
+    error: BaseException | None,
+    message: str,
+    elapsed_ms: float,
+    l7: L7Decision | None,
+    route_backend: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """The text and `_meta` of a call that ended at dispatch, publishing `ToolCallRefused` if it was refused.
 
+    The calls refused are the ones `_log_call_failure` logs as `batch_call_refused`.
     One refused because its arguments could not be inspected is not: its
-    evaluator broke (ADR-029 s5), as a gate that errs is no refusal either.
-    The verdict is the dispatched server's, so the record names it as the
-    route's backend (#1594).
+    evaluator broke (ADR-029 s5), as a gate that errs is no refusal either. The
+    record names the dispatched server as the route's backend (#1594). A key
+    mismatch shares its `ToolInvocationFailed`'s correlation id, which is how
+    `why` shows the two as one refusal.
     """
-    if error_type in _L7_REFUSALS and not (l7 is not None and l7.evaluator_failed):
-        publish_call_refused(
-            ctx.event_bus, call, elapsed_ms, get_identity_context(), l7=l7, route_backend=route_backend
-        )
+    error_type = type(error).__name__
+    named = DISPATCH_REFUSALS.get(error_type)
+    if named is None or (l7 is not None and l7.evaluator_failed):
+        return message, None
+    gate, reason = named
+    by_l7 = error_type in _L7_REFUSALS
+    details = getattr(error, "details", None)
+    event_id = publish_call_refused(
+        ctx.event_bus,
+        call,
+        elapsed_ms,
+        get_identity_context(),
+        gate=None if by_l7 else gate,
+        reason=None if by_l7 else reason,
+        l7=l7 if by_l7 else None,
+        route_backend=route_backend,
+        observed_peer_spki=getattr(error, "observed_peer_spki", None),
+        correlation_id=details.get("correlation_id") if isinstance(details, dict) else None,
+    )
+    shape = shape_refusal(
+        gate, reason, server=call.mcp_server, event_id=event_id, retry_after_s=getattr(error, "retry_after", None)
+    )
+    return f"{shape.text}\n{message}", shape.meta
 
 
 class BatchExecutor:
@@ -2778,7 +2798,9 @@ class BatchExecutor:
                 error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
                 _log_call_failure(call, retry_result.final_error, error_type, elapsed_ms, l7)
-                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7, dispatch_server_id)
+                error_msg, refusal_meta = _refuse_at_dispatch(
+                    ctx, call, retry_result.final_error, error_msg, elapsed_ms, l7, dispatch_server_id
+                )
 
                 return CallResult(
                     index=call.index,
@@ -2790,6 +2812,7 @@ class BatchExecutor:
                     member_outcome=member_outcome(retry_result.final_error),
                     upstream_result=_upstream_result_of(retry_result.final_error),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
+                    refusal_meta=refusal_meta,
                     retry_metadata=RetryMetadata(
                         attempts=retry_result.attempt_count,
                         retries=[a.error_type for a in retry_result.attempts],
@@ -2806,18 +2829,19 @@ class BatchExecutor:
                 l7 = _l7_decision(l7_holder[0])
 
                 _log_call_failure(call, e, error_type, elapsed_ms, l7)
-                _publish_l7_refusal(ctx, call, error_type, elapsed_ms, l7, dispatch_server_id)
+                error_msg, refusal_meta = _refuse_at_dispatch(ctx, call, e, str(e), elapsed_ms, l7, dispatch_server_id)
 
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
                     success=False,
-                    error=str(e),
+                    error=error_msg,
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(e),
                     upstream_result=_upstream_result_of(e),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
+                    refusal_meta=refusal_meta,
                 )
             else:
                 _l7_decision(l7_holder[0])
@@ -2963,6 +2987,7 @@ def publish_call_refused(
     l7: L7Decision | None = None,
     route_backend: str | None = None,
     observed_peer_spki: str | None = None,
+    correlation_id: str | None = None,
 ) -> str:
     """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
 
@@ -2980,7 +3005,7 @@ def publish_call_refused(
         event = ToolCallRefused(
             mcp_server_id=call.mcp_server,
             tool_name=call.tool,
-            correlation_id=call.call_id,
+            correlation_id=correlation_id or call.call_id,
             identity_context=identity.to_dict() if identity is not None else None,
             gate=gate,
             gate_reason=reason,

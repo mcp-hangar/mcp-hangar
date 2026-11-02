@@ -154,6 +154,7 @@ def test_with_auth_on_a_caller_without_tool_invoke_is_refused(
     runs: dict[str, dict[str, Any]], case: str, message: str
 ) -> None:
     refused = runs["auth"][case]
+    refused["message"] = refused["message"].splitlines()[-1]
 
     assert refused == {
         "ok": False,

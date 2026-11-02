@@ -52,10 +52,25 @@ GATE_DISPOSITIONS: dict[str, Disposition] = {
 _COLD_START_SHAPED = frozenset({"not_revived_by_calls", "circuit_open", "upstream_peer_key_mismatch"})
 
 #: What waiting clears (ADR-029 s12.2): `class: reliability`, which a client may retry.
-_CLEARS_BY_WAITING = frozenset({"circuit_open", "concurrency", "rate"})
+_CLEARS_BY_WAITING = frozenset({"circuit_open", "concurrency", "rate", "exceeded"})
 
 #: The SEP-2643 `remediation` of a denial; only these reasons carry the envelope.
-_AUTHORIZATION_REMEDIATION = {"approval_denied": "unavailable"}
+_AUTHORIZATION_REMEDIATION = {
+    "approval_denied": "unavailable",
+    "tool_invoke_denied": "undisclosed",
+    "unauthenticated": "undisclosed",
+}
+
+#: The refusals raised past the gates, by exception, with the name and reason
+#: each gives its caller: the layer that refused, as none of them is a gate
+#: (ADR-029 s12.2). Adding one here is what makes the executor read it as a
+#: refusal, so a new one cannot miss its shape.
+DISPATCH_REFUSALS: dict[str, tuple[str, str]] = {
+    "EgressPolicyDeniedError": ("l7", "deny"),
+    "EgressPolicyApprovalRequiredError": ("l7", "require_approval"),
+    "RateLimitExceeded": ("rate_limit", "exceeded"),
+    "UpstreamPeerKeyMismatchError": ("upstream_key", "upstream_peer_key_mismatch"),
+}
 
 
 @dataclass(frozen=True)

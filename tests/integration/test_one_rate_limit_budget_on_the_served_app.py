@@ -115,4 +115,6 @@ def test_an_idle_bucket_grants_only_what_it_refilled():
 
     assert [call["success"] for call in spent] == [True, True]
     assert (after["success"], after["error_type"]) == (False, "RateLimitExceeded"), after
-    assert after["error"].startswith(f"RateLimitExceeded: {SHARED} for InvokeToolCommand is used up"), after
+    assert (
+        after["error"].splitlines()[-1].startswith(f"RateLimitExceeded: {SHARED} for InvokeToolCommand is used up")
+    ), after

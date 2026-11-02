@@ -173,10 +173,13 @@ def read_refusals(
 ) -> list[Refusal]:
     """The newest *last* refusals in the store at *db_path*, newest first; or the one with *event_id*."""
     # A warm call refused for its upstream's key is recorded as a failed
-    # invocation, not as a ToolCallRefused; it is read here as what it is, and
-    # never re-labelled as a refusal event.
+    # invocation; it is read here as what it is, and never re-labelled as a
+    # refusal event. It now has a ToolCallRefused too, published after it and so
+    # read before it here, under one correlation id: the two are one refusal, and
+    # only an older record shows the failed invocation.
     rows = _read_rows(db_path, (*REFUSAL_EVENT_TYPES, "ToolInvocationFailed"), order="DESC")
 
+    refused_calls: set[str] = set()
     refusals: list[Refusal] = []
     for event_type, raw in rows:
         refusal = _refusal(event_type, raw)
@@ -185,6 +188,11 @@ def read_refusals(
         if event_id is not None:
             if refusal.event_id == event_id or refusal.event_id.startswith(event_id):
                 refusals.append(refusal)
+            continue
+        correlation_id = str(refusal.fields.get("correlation_id", ""))
+        if event_type == "ToolCallRefused" and correlation_id:
+            refused_calls.add(correlation_id)
+        elif event_type == "ToolInvocationFailed" and correlation_id in refused_calls:
             continue
         if server is not None and refusal.server != server:
             continue

@@ -377,7 +377,7 @@ def test_with_tracing_off_the_label_costs_no_policy_read(tracer_kind: str) -> No
         result = _execute(_executor_ctx(approval_gate=None, servers=servers, command_bus=bus), tracer)
 
     assert reads == [TOOL], "tracing off must not add an L7 read for the label"
-    assert (result.success, result.error_type, result.error) == (
+    assert (result.success, result.error_type, result.error.splitlines()[-1]) == (
         False,
         "EgressPolicyApprovalRequiredError",
         "Tool call requires approval",
@@ -431,7 +431,7 @@ def test_an_l7_requirement_without_a_gate_is_unavailable_and_still_refused(sdk) 
 
     result = _execute(_executor_ctx(approval_gate=None, servers=servers, command_bus=bus), tracer)
 
-    assert (result.success, result.error_type, result.error) == (
+    assert (result.success, result.error_type, result.error.splitlines()[-1]) == (
         False,
         "EgressPolicyApprovalRequiredError",
         "Tool call requires approval",
