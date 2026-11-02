@@ -96,7 +96,7 @@ dev = [
     # `Item._nodeid`, which the benchmark fixture of pytest-benchmark 5.3.0 still
     # reads, so every benchmark test errors at setup (#2146). Lift it when a
     # pytest-benchmark release supports 9.2.
-    "pytest>=9.0.3,<9.2",
+    "pytest>=9.0.3,<9.3",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=1.3.0",  # first release that admits pytest 9 (the pytest floor above)
     "pytest-timeout>=2.2.0",
@@ -107,7 +107,7 @@ dev = [
     # every machine resolve a different ruff, which is how a rule that fires
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     "import-linter==2.15",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
@@ -181,7 +181,7 @@ Repository = "https://github.com/mcp-hangar/mcp-hangar"
 # `hatch` at plugin-load time, then prove it with `docker build .` and the
 # `build` job -- not with a local `pip install`, which has `hatch` on hand and
 # therefore cannot reproduce the failure.
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = ["/.github/brand"]
