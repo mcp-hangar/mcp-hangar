@@ -13,6 +13,7 @@ import asyncio
 import contextvars
 import threading
 import time
+import uuid
 from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
@@ -98,6 +99,7 @@ from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .member_health import MemberOutcome, member_outcome
 from .models import BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
+from .refusal_shape import Disposition, disposition, shape_refusal
 from .relay_seam import upstream_task
 from .shutdown import batch_abandoned_error, track_batch, untrack_batch, wait_unless_abandoned
 from .tenant_admission import CONCURRENCY, NO_BUDGET, RATE, Grant, Refusal, Reservation, get_tenant_admission
@@ -782,7 +784,7 @@ class _CallPipeline:
     def elapsed_ms(self) -> float:
         return (time.perf_counter() - self.call_start) * 1000
 
-    def refuse(self, error: str, error_type: str) -> CallResult:
+    def refuse(self, error: str, error_type: str, *, retry_after_s: float | None = None) -> CallResult:
         """A refusal for this call, timed from its start.
 
         Every gate built this by hand, eight lines apiece, and the elapsed_ms
@@ -795,6 +797,7 @@ class _CallPipeline:
             error=error,
             error_type=error_type,
             elapsed_ms=self.elapsed_ms(),
+            retry_after_s=retry_after_s,
         )
 
 
@@ -2282,6 +2285,7 @@ class BatchExecutor:
         return p.refuse(
             f"Circuit breaker open (too many consecutive failures); retry in {health.time_until_retry():.1f}s",
             "CircuitBreakerOpen",
+            retry_after_s=health.time_until_retry(),
         )
 
     @classmethod
@@ -2329,6 +2333,7 @@ class BatchExecutor:
             return p.refuse(
                 f"Circuit breaker open (too many consecutive failures); retry in {e.time_until_retry:.1f}s",
                 "CircuitBreakerOpen",
+                retry_after_s=e.time_until_retry,
             )
         return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
 
@@ -2958,7 +2963,7 @@ def publish_call_refused(
     l7: L7Decision | None = None,
     route_backend: str | None = None,
     observed_peer_spki: str | None = None,
-) -> None:
+) -> str:
     """Publish the one `ToolCallRefused` audit exports for a refused call (#1582). Never raises.
 
     Called where the refusal is logged, from the same bounded decision: a gate's
@@ -2966,34 +2971,43 @@ def publish_call_refused(
     Nothing here reads the refusal's message, which carries text the gate was
     handed (an approver's reason, a validator's), so no free text reaches the
     record. A publish that fails is logged, and the call is still refused.
+
+    Returns the event's id, which the caller is told (ADR-029 s12.2). An event
+    that could not be built still has an id to return, naming no record.
     """
+    event_id = str(uuid.uuid4())
     try:
-        event_bus.publish(
-            ToolCallRefused(
-                mcp_server_id=call.mcp_server,
-                tool_name=call.tool,
-                correlation_id=call.call_id,
-                identity_context=identity.to_dict() if identity is not None else None,
-                gate=gate,
-                gate_reason=reason,
-                l7_verdict=l7.verdict if l7 is not None else None,
-                l7_mode=l7.mode if l7 is not None else None,
-                l7_rule_kind=l7.rule_kind if l7 is not None else None,
-                l7_policy_id=l7.policy_id if l7 is not None else None,
-                elapsed_ms=round(elapsed_ms, 2),
-                route_backend=route_backend,
-                observed_peer_spki=observed_peer_spki,
-            )
+        event = ToolCallRefused(
+            mcp_server_id=call.mcp_server,
+            tool_name=call.tool,
+            correlation_id=call.call_id,
+            identity_context=identity.to_dict() if identity is not None else None,
+            gate=gate,
+            gate_reason=reason,
+            l7_verdict=l7.verdict if l7 is not None else None,
+            l7_mode=l7.mode if l7 is not None else None,
+            l7_rule_kind=l7.rule_kind if l7 is not None else None,
+            l7_policy_id=l7.policy_id if l7 is not None else None,
+            elapsed_ms=round(elapsed_ms, 2),
+            route_backend=route_backend,
+            observed_peer_spki=observed_peer_spki,
         )
+        event_id = event.event_id
+        event_bus.publish(event)
     except Exception as e:  # noqa: BLE001 -- fault barrier: the refusal stands whether or not its record is written
         logger.warning("tool_call_refused_not_published", call_id=call.call_id, error_type=type(e).__name__)
+    return event_id
 
 
 def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
-    """Publish `ToolCallRefused` for a gate that said `deny`; a gate that broke (`error`) is no refusal."""
+    """Publish `ToolCallRefused` for a gate that said `deny`; a gate that broke (`error`) is no refusal.
+
+    A refusal of a tool its caller may see is then shaped for that caller, with
+    the event's id (ADR-029 s12).
+    """
     outcome, reason, _revision = _gate_decision(p, refusal)
     if outcome == Gate.DENY:
-        publish_call_refused(
+        event_id = publish_call_refused(
             p.ctx.event_bus,
             p.call,
             refusal.elapsed_ms,
@@ -3003,6 +3017,13 @@ def _publish_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> N
             route_backend=p.route_backend,
             observed_peer_spki=p.observed_peer_spki,
         )
+        if disposition(gate, reason) == Disposition.SHAPED:
+            shape = shape_refusal(
+                gate, reason, server=p.call.mcp_server, event_id=event_id, retry_after_s=refusal.retry_after_s
+            )
+            # The first line is bounded; the gate's own message stays below it (ADR-029 s12.2).
+            refusal.error = f"{shape.text}\n{refusal.error}"
+            refusal.refusal_meta = shape.meta
 
 
 def _report_gate_refusal(p: _CallPipeline, gate: str, refusal: CallResult) -> None:
@@ -3075,6 +3096,9 @@ def format_result_dict(result: CallResult) -> dict[str, Any]:
 
     if result.upstream_result is not None:
         d["upstream_result"] = result.upstream_result
+
+    if result.refusal_meta is not None:
+        d["_meta"] = result.refusal_meta
 
     return d
 

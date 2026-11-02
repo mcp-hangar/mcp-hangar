@@ -226,7 +226,7 @@ class TestConcurrency:
             after = _refusals(door, TENANT_A, "concurrency")
             reached = list(door.upstream.called)
 
-        assert refused == IN_FLIGHT
+        assert refused.splitlines()[-1] == IN_FLIGHT
         assert served_b == served_a == f"did {READ}"
         assert not first["result"].get("isError") and first["result"]["content"][0]["text"] == f"did {SLOW}"
         assert reached == [SLOW, READ, READ], "the refused call reached the upstream"
@@ -248,7 +248,7 @@ class TestRate:
             time.sleep(0.6)
             refilled = _served(door, TENANT_A, READ)
 
-        assert refused == TOO_FAST
+        assert refused.splitlines()[-1] == TOO_FAST
         assert first == served_b == refilled == f"did {READ}"
 
 
@@ -291,7 +291,7 @@ class TestWhatSpendsNothing:
 
         assert (denied["success"], denied["error_type"]) == (False, "ToolAccessDeniedError"), denied
         assert served["success"] is True, served
-        assert (refused["error_type"], refused["error"]) == ("TenantQuotaExceeded", TOO_FAST), refused
+        assert (refused["error_type"], refused["error"].splitlines()[-1]) == ("TenantQuotaExceeded", TOO_FAST), refused
         assert reached == [READ]
 
 
@@ -310,7 +310,7 @@ class TestWhatIsRefusedEarly:
             pending = approvals.pending()
 
         assert served == f"did {READ}"
-        assert refused == TOO_FAST
+        assert refused.splitlines()[-1] == TOO_FAST
         assert pending == [], "a call that could not run was put to a human"
 
     def test_a_tenant_with_no_budget_does_not_start_a_stopped_server(
@@ -328,7 +328,7 @@ class TestWhatIsRefusedEarly:
             after_a_call = server.state.value
 
         assert (stopped, after_the_refusal) == ("cold", "cold")
-        assert refused == NO_BUDGET
+        assert refused.splitlines()[-1] == NO_BUDGET
         assert (served, after_a_call) == (f"did {READ}", "ready")
 
 
@@ -344,7 +344,7 @@ class TestWhoIsHeldToWhichBudget:
             after = _refusals(door, "none", "no_budget")
             reached = list(door.upstream.called)
 
-        assert refused == NO_BUDGET
+        assert refused.splitlines()[-1] == NO_BUDGET
         assert served == f"did {READ}"
         assert reached == [READ]
         assert after - before == 1
@@ -359,7 +359,7 @@ class TestWhoIsHeldToWhichBudget:
                 served = _served(door, TENANT_A, READ)
             first = jsonrpc(held.result(timeout=30))
 
-        assert refused == IN_FLIGHT
+        assert refused.splitlines()[-1] == IN_FLIGHT
         assert served == f"did {READ}"
         assert not first["result"].get("isError")
 

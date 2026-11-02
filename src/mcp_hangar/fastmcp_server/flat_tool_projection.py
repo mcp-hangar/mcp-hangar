@@ -1135,7 +1135,9 @@ def _refusing_suspended_sessions(call_tool: Callable[..., Awaitable[Any]]) -> Ca
     return guarded
 
 
-def _failed_flat_result(error: str | None, upstream_result: dict[str, Any] | None) -> Any:
+def _failed_flat_result(
+    error: str | None, upstream_result: dict[str, Any] | None, refusal_meta: dict[str, Any] | None = None
+) -> Any:
     """The tool result for a flat call that did not succeed.
 
     An upstream that reported its own failure is owed its answer back as sent: its
@@ -1151,8 +1153,9 @@ def _failed_flat_result(error: str | None, upstream_result: dict[str, Any] | Non
             return CallToolResult.model_validate({**upstream_result, "isError": True})
         except ValueError:
             logger.warning("upstream_failure_result_not_relayable", exc_info=True)
+    meta = {"_meta": refusal_meta} if refusal_meta is not None else {}
     return CallToolResult.model_validate(
-        {"content": [{"type": "text", "text": error or "tool call failed"}], "isError": True}
+        {"content": [{"type": "text", "text": error or "tool call failed"}], "isError": True, **meta}
     )
 
 
@@ -1379,7 +1382,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         result, created_task = govern_flat_call(batch.results)
         if not result.success:
             note_failure(result.error_type)  # the text below does not carry the code; the log line does
-            return _failed_flat_result(result.error, result.upstream_result)
+            return _failed_flat_result(result.error, result.upstream_result, result.refusal_meta)
 
         # Namespace every resource URI we are about to hand this tenant with its
         # owning upstream, and remember the resource_links, so following one on

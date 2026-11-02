@@ -90,16 +90,17 @@ def test_a_refused_call_is_refused_as_hangar_call_refuses_it(run: dict[str, Any]
     served = run["cases"][case]["hangar_call"]
 
     assert served["success"] is False and served["error_type"] == code, served
-    assert facade == {"ok": False, "exception": "ToolCallFailedError", "code": code, "message": served["error"]}
+    assert facade.pop("message").splitlines()[-1] == served["error"].splitlines()[-1]
+    assert facade == {"ok": False, "exception": "ToolCallFailedError", "code": code}
 
 
 def test_the_tenant_over_its_budget_had_spent_it(run: dict[str, Any]) -> None:
     assert run["tenant_b_first"]["ok"] is True, run["tenant_b_first"]
-    assert run["cases"]["over_budget"]["hangar_call"]["error"] == TOO_FAST
+    assert run["cases"]["over_budget"]["hangar_call"]["error"].splitlines()[-1] == TOO_FAST
 
 
 def test_an_anonymous_caller_is_refused_the_budget_of_a_caller_with_no_tenant(run: dict[str, Any]) -> None:
-    assert run["cases"]["anonymous"]["hangar_call"]["error"] == NO_BUDGET
+    assert run["cases"]["anonymous"]["hangar_call"]["error"].splitlines()[-1] == NO_BUDGET
 
 
 def test_an_allowed_call_returns_the_result_hangar_call_returns(run: dict[str, Any]) -> None:

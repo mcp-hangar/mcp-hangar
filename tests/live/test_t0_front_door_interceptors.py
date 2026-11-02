@@ -136,7 +136,7 @@ def test_a_payload_over_the_cap_is_refused_on_the_flat_path_with_the_hangar_call
     assert refused["success"] is False and refused["error_type"] == "ValidatorDenied", refused
     assert f"exceeds cap {_CAP}" in refused["error"], refused
     assert flat_is_error, f"the flat call was served: {flat_text!r}"
-    assert flat_text == refused["error"]
+    assert flat_text.splitlines()[-1] == refused["error"].splitlines()[-1]
 
 
 def test_a_payload_under_the_cap_is_served_on_the_flat_path(gateways: dict[str, _Gateway]) -> None:

@@ -141,7 +141,11 @@ def test_each_tenant_is_charged_to_its_own_budget(caller_hangar) -> None:
     assert first["success"] is True, first
 
     second = _hangar_call(base_url, keys[TENANT_A], "add", {"a": 2, "b": 3})
-    assert (second["success"], second["error_type"], second["error"]) == (False, "TenantQuotaExceeded", TOO_FAST)
+    assert (second["success"], second["error_type"], second["error"].splitlines()[-1]) == (
+        False,
+        "TenantQuotaExceeded",
+        TOO_FAST,
+    )
 
     other = _hangar_call(base_url, keys[TENANT_B], "add", {"a": 2, "b": 3})
     assert other["success"] is True, other
@@ -153,7 +157,7 @@ def test_an_anonymous_caller_is_refused_by_the_tool_invoke_check(caller_hangar) 
 
     result = _hangar_call(base_url, None, "add", {"a": 2, "b": 3})
 
-    assert (result["success"], result["error_type"], result["error"]) == (
+    assert (result["success"], result["error_type"], result["error"].splitlines()[-1]) == (
         False,
         "AuthorizationDenied",
         "Authentication required to invoke tools",
