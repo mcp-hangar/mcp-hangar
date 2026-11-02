@@ -2325,7 +2325,7 @@ class McpServer(AggregateRoot):
 
             logger.debug(f"tool_invoked: {correlation_id}, mcp_server={self.mcp_server_id}, tool={tool_name}")
 
-            return cast(dict[str, Any], result)
+            return result
 
     def relay_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         """Relay a raw JSON-RPC request to the live upstream client.
