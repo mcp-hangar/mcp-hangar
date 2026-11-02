@@ -60,6 +60,7 @@ from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServ
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..value_objects.peer_identity import PeerIdentity, connection_declaration
 from ..value_objects.provenance import DiscoveryOrigin, Provenance, source_of_discovered_description
+from ..value_objects.refusal import without_refusal_keys
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .mcp_server_config import McpServerConfig
@@ -2251,7 +2252,8 @@ class McpServer(AggregateRoot):
                     },
                 )
 
-            result = response.get("result", {})
+            # Before anything reads it: no upstream may pass for Hangar (ADR-029 s12.3).
+            result = without_refusal_keys(response.get("result", {}))
 
             # A backend tool result with isError:true is a tool-level failure,
             # even though the JSON-RPC envelope carries no protocol error. Map it

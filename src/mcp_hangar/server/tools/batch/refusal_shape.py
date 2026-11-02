@@ -15,10 +15,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
-#: The `_meta` key of the classification every shaped refusal carries.
-TOOL_FAILURE_KEY = "io.mcp-hangar/toolFailure"
-#: The `_meta` key of the SEP-2643 envelope an authorization denial also carries.
-AUTHORIZATION_DENIAL_KEY = "io.mcp-hangar/authorizationDenial"
+from ....domain.value_objects.refusal import AUTHORIZATION_DENIAL_KEY, TOOL_FAILURE_KEY
 
 
 class Disposition(StrEnum):

@@ -111,6 +111,7 @@ from mcp_hangar._sdk_compat import (
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import caller_polls_tasks_var, get_identity_context, identity_context_var
 from mcp_hangar.domain.services.task_consent import TaskConsentGate
+from mcp_hangar.domain.value_objects.refusal import without_refusal_keys
 from mcp_hangar.fastmcp_server.asgi import identity_for_request
 from mcp_hangar.fastmcp_server.resource_link_read_through import project_result_uris
 from mcp_hangar.infrastructure.observability.task_relay_spans import (
@@ -548,7 +549,9 @@ def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before 
 
         projected = task_wire_fields(snapshot)
         if upstream:
-            projected["result"] = upstream.get("result")
+            outcome = upstream.get("result")
+            # Relayed output is an upstream's result too (ADR-029 s12.3).
+            projected["result"] = without_refusal_keys(outcome) if isinstance(outcome, dict) else outcome
             projected["error"] = upstream.get("error")
             projected["input_requests"] = upstream.get("inputRequests") or upstream.get("input_requests")
             # An inlined task outcome is a tool result: it can carry a
