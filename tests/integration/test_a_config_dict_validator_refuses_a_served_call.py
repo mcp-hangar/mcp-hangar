@@ -69,7 +69,9 @@ def test_the_same_boot_serves_a_call_under_the_cap(runs) -> None:
 def test_a_file_and_a_dict_answer_both_calls_alike(runs) -> None:
     def outcome(batch: dict[str, Any]) -> tuple[Any, ...]:
         result = _only_result(batch)
-        return result["success"], result.get("error_type"), result.get("error")
+        error = result.get("error")
+        # The first line names its event, which differs from run to run.
+        return result["success"], result.get("error_type"), error and error.splitlines()[-1]
 
     assert {name: outcome(batch) for name, batch in runs["dict"].items()} == {
         name: outcome(batch) for name, batch in runs["file"].items()

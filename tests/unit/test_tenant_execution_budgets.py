@@ -570,7 +570,11 @@ class TestTheExecutor:
         refused = _run(A)
 
         assert served.success is True, served.error
-        assert (refused.success, refused.error_type, refused.error) == (False, "TenantQuotaExceeded", _TOO_FAST)
+        assert (refused.success, refused.error_type, refused.error.splitlines()[-1]) == (
+            False,
+            "TenantQuotaExceeded",
+            _TOO_FAST,
+        )
         assert ctx.command_bus.send.call_count == 1
 
     def test_the_tenant_charged_is_the_callers_in_the_worker_thread(self, ctx, budgets) -> None:
@@ -665,7 +669,7 @@ class TestTheExecutor:
 
         refused = _run(B)
 
-        assert (refused.error_type, refused.error) == ("TenantQuotaExceeded", _NO_BUDGET)
+        assert (refused.error_type, refused.error.splitlines()[-1]) == ("TenantQuotaExceeded", _NO_BUDGET)
         assert _sent(ctx) == []
         assert _run(A).success is True
         assert _sent(ctx) == ["StartMcpServerCommand", "InvokeToolCommand"]
@@ -696,7 +700,7 @@ class TestTheExecutor:
         ):
             refused = _run(A)
 
-        assert (refused.error_type, refused.error) == ("TenantQuotaExceeded", _IN_FLIGHT)
+        assert (refused.error_type, refused.error.splitlines()[-1]) == ("TenantQuotaExceeded", _IN_FLIGHT)
         (line,) = [call for call in log.warning.call_args_list if call.args[0] == "tenant_quota_exceeded"]
         assert (line.kwargs["approval_id"], line.kwargs["reason"]) == ("approval-1", CONCURRENCY)
         held.release()

@@ -334,7 +334,7 @@ def _flat_call(client: Any, key: str, tool: str, capabilities: dict[str, Any] | 
     if result.get("resultType") == "task":
         return {"outcome": "task", "task_id": result.get("taskId")}
     if result.get("isError"):
-        return {"outcome": "refused", "detail": result["content"][0]["text"]}
+        return {"outcome": "refused", "detail": result["content"][0]["text"].splitlines()[-1]}
     return {"outcome": "ok", "detail": json.dumps(result)[:300]}
 
 

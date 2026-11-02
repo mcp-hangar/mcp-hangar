@@ -45,12 +45,17 @@ def validator() -> Iterator[None]:
         configure_interceptors(None)
 
 
-def _flat_error(door: FrontDoor, arguments: dict[str, Any]) -> str:
-    """The error text of a flat call the gateway refused as a tool error."""
+def _flat_payload(door: FrontDoor, arguments: dict[str, Any]) -> dict[str, Any]:
+    """The result of a flat call the gateway refused as a tool error."""
     payload = jsonrpc(door.call(TENANT_A, _TOOL, arguments))
     result = payload.get("result")
     assert isinstance(result, dict) and result.get("isError") is True, f"the flat call was not refused: {payload}"
-    return str(result["content"][0]["text"])
+    return result
+
+
+def _flat_error(door: FrontDoor, arguments: dict[str, Any]) -> str:
+    """The error text of a flat call the gateway refused as a tool error."""
+    return str(_flat_payload(door, arguments)["content"][0]["text"])
 
 
 def _hangar_call(door: FrontDoor, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -74,8 +79,19 @@ class TestTheConfiguredValidatorRunsOnTheFlatPath:
 
         assert refused["success"] is False and refused["error_type"] == "ValidatorDenied", refused
         assert f"exceeds cap {_CAP}" in refused["error"], refused
-        assert flat_error == refused["error"]
+        assert flat_error.splitlines()[-1] == refused["error"].splitlines()[-1]
         assert egress_reached == [] and flat_reached == [], "a refused call reached the upstream"
+
+    def test_the_refusal_reaches_the_wire_with_its_fields(self) -> None:
+        with front_door((_TOOL,)) as door:
+            payload = _flat_payload(door, _OVER)
+        (first_line, _message) = payload["content"][0]["text"].split("\n", 1)
+
+        failure = payload["_meta"]["io.mcp-hangar/toolFailure"]
+        assert payload["isError"] is True
+        assert first_line.startswith("Refused by MCP Hangar (validators): validator_denied. ")
+        assert failure["class"] == "governance" and failure["code"] == "validators.validator_denied"
+        assert failure["correlationId"] in first_line
 
     def test_a_payload_under_the_cap_is_served(self) -> None:
         with front_door((_TOOL,)) as door:
