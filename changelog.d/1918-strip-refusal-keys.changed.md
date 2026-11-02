@@ -1,0 +1,1 @@
+**core:** `io.mcp-hangar/toolFailure` and `io.mcp-hangar/authorizationDenial` are now removed from every result an upstream sends, on a tool call and in relayed task output, so those keys mark a refusal as Hangar's own (ADR-029 section 12.3). Everything else in an upstream's result is still relayed as sent.

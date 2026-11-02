@@ -4,7 +4,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ...errors import OTHER_ERROR_TYPE, bounded_error_type
 from ...logging_config import get_logger
@@ -60,6 +60,7 @@ from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServ
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..value_objects.peer_identity import PeerIdentity, connection_declaration
 from ..value_objects.provenance import DiscoveryOrigin, Provenance, source_of_discovered_description
+from ..value_objects.refusal import without_refusal_keys
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .mcp_server_config import McpServerConfig
@@ -2251,7 +2252,8 @@ class McpServer(AggregateRoot):
                     },
                 )
 
-            result = response.get("result", {})
+            # Before anything reads it: no upstream may pass for Hangar (ADR-029 s12.3).
+            result = without_refusal_keys(response.get("result", {}))
 
             # A backend tool result with isError:true is a tool-level failure,
             # even though the JSON-RPC envelope carries no protocol error. Map it
@@ -2323,7 +2325,7 @@ class McpServer(AggregateRoot):
 
             logger.debug(f"tool_invoked: {correlation_id}, mcp_server={self.mcp_server_id}, tool={tool_name}")
 
-            return cast(dict[str, Any], result)
+            return result
 
     def relay_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         """Relay a raw JSON-RPC request to the live upstream client.
