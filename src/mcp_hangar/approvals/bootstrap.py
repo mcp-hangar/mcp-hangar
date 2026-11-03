@@ -19,12 +19,32 @@ from .service import ApprovalGateService
 
 logger = get_logger(__name__)
 
+#: How long a call stays held over stdio unless `approvals.stdio_wait_seconds`
+#: says otherwise. Below the 60 s the MCP TypeScript SDK gives a request by
+#: default, the shortest limit measured; the Python SDK sets none. A client that
+#: times out first takes the refusal with it (ADR-029 s12.4).
+DEFAULT_STDIO_WAIT_SECONDS = 50
+
+
+def stdio_wait_seconds(config: dict | None) -> int:
+    """`approvals.stdio_wait_seconds`, or the default for one that is not a positive whole number.
+
+    The default on a bad value, and not none: a hold with no limit is what this exists to end.
+    """
+    configured = ((config or {}).get("approvals") or {}).get("stdio_wait_seconds", DEFAULT_STDIO_WAIT_SECONDS)
+    if isinstance(configured, bool) or not isinstance(configured, int) or configured <= 0:
+        logger.warning("approval_stdio_wait_invalid", default=DEFAULT_STDIO_WAIT_SECONDS)
+        return DEFAULT_STDIO_WAIT_SECONDS
+    return configured
+
 
 def bootstrap_approvals(
     database: Any,
     event_bus: Any,
     config: dict | None = None,
     repository: Any = None,
+    *,
+    stdio: bool = False,
 ) -> ApprovalGateService:
     """Wire and return an ApprovalGateService instance.
 
@@ -36,6 +56,8 @@ def bootstrap_approvals(
         repository: The approval repository from the selected storage backend.
             None means build the SQLite one from `database`, which is the
             compatibility path for a deployment that selected no backend.
+        stdio: This process serves over stdio, where a held call must not
+            outlast its client.
 
     Returns:
         Configured ApprovalGateService.
@@ -50,6 +72,7 @@ def bootstrap_approvals(
         hold_registry=hold_registry,
         event_bus=event_bus,
         delivery=delivery,
+        wait_limit_seconds=stdio_wait_seconds(config) if stdio else None,
     )
 
     logger.info(

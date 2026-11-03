@@ -135,11 +135,24 @@ class ApprovalGateService:
         hold_registry: ApprovalHoldRegistry,
         event_bus: Any,
         delivery: ApprovalDelivery,
+        *,
+        wait_limit_seconds: int | None = None,
     ) -> None:
+        """*wait_limit_seconds* caps every approval's window, whatever its policy allows; None caps nothing."""
         self._repository = repository
         self._hold_registry = hold_registry
         self._event_bus = event_bus
         self._delivery = delivery
+        self._wait_limit_seconds = wait_limit_seconds
+
+    def _window_seconds(self, policy: ToolAccessPolicy) -> int:
+        """How long an approval under *policy* stays open: the wait limit ends the window, not only the wait.
+
+        A stdio decision comes from a second process that cannot see the hold, so
+        only the record can refuse a late approve (ADR-029 s12.4).
+        """
+        allowed = policy.approval_timeout_seconds
+        return allowed if self._wait_limit_seconds is None else min(allowed, self._wait_limit_seconds)
 
     async def check(
         self,
@@ -185,14 +198,15 @@ class ApprovalGateService:
             gate_span.set_attribute("mcp.server.id", resolved_provider_id)
             gate_span.set_attribute("gen_ai.tool.name", tool_name)
             gate_span.set_attribute("approval.channel", channel)
-            gate_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
+            window_seconds = self._window_seconds(policy)
+            gate_span.set_attribute("approval.timeout_seconds", window_seconds)
 
             approval_id = str(uuid.uuid4())
             gate_span.set_attribute("approval.id", approval_id)
             now = datetime.now(UTC)
             sanitized_args = redact_arguments(arguments)
             args_hash = hash_arguments(arguments)
-            expires_at = now + timedelta(seconds=policy.approval_timeout_seconds)
+            expires_at = now + timedelta(seconds=window_seconds)
 
             request = ApprovalRequest(
                 approval_id=approval_id,
@@ -237,8 +251,8 @@ class ApprovalGateService:
 
             with tracer.start_as_current_span("approval_gate.wait_for_decision") as wait_span:
                 wait_span.set_attribute("approval.id", approval_id)
-                wait_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
-                decision = await self._wait_for_decision(approval_id, policy.approval_timeout_seconds)
+                wait_span.set_attribute("approval.timeout_seconds", window_seconds)
+                decision = await self._wait_for_decision(approval_id, window_seconds)
                 if decision is True:
                     wait_span.set_attribute("approval.decision", "approved")
                 elif decision is False:

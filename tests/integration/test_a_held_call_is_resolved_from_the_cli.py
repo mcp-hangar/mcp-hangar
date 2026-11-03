@@ -220,3 +220,26 @@ def test_a_viewer_cannot_resolve_and_the_call_stays_held(tmp_path: Path) -> None
     assert "provider-admin" in message and "auth.stdio.principal.roles" in message, message
     [row] = json.loads(still.stdout.strip().splitlines()[-1])
     assert row["approval_id"] == approval_id and row["state"] == "pending" and row["decided_by"] is None
+
+
+def test_the_wait_ends_before_the_client_and_a_late_approve_is_refused(tmp_path: Path) -> None:
+    # ADR-029 s12.4. The policy allows 40 s; the stdio limit ends the window at 6.
+    config = _config(tmp_path, "provider-admin")
+    config.write_text(config.read_text() + "approvals:\n  stdio_wait_seconds: 6\n")
+    gateway = _gateway(tmp_path, config)
+    try:
+        approval_id = _held(config)
+        answer = _answer(gateway)
+        late = _cli(config, "approvals", "approve", approval_id)
+    finally:
+        gateway.kill()
+
+    assert answer["is_error"] is True, answer
+    assert answer["text"].startswith("Refused by MCP Hangar (approval): approval_timeout. "), answer
+    assert answer["held_s"] < 20, answer
+    assert late.returncode != 0, late.stdout + late.stderr
+    assert "is already expired" in late.stdout + late.stderr
+    assert _decisions(config) == []
+    with sqlite3.connect(config.parent / "state" / "events.db") as conn:
+        [(expired,)] = conn.execute("SELECT count(*) FROM events WHERE event_type = 'ToolApprovalExpired'").fetchall()
+    assert expired == 1
