@@ -144,7 +144,7 @@ def test_a_viewer_is_refused_the_flat_call(front_door: _FrontDoor) -> None:
 
     is_error, text = _call_add(front_door, _VIEWER)
 
-    assert (is_error, text) == (True, _REFUSAL)
+    assert (is_error, text.splitlines()[-1]) == (True, _REFUSAL)
     [line] = front_door.call_lines()[before:]
     assert (line["principal_id"], line["outcome"], line["reason"]) == (_VIEWER, "tool_error", "AuthorizationDenied")
 

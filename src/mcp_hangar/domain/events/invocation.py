@@ -120,7 +120,8 @@ class ToolCallRefused(DomainEvent):
     audit -- which exported only those two -- never saw the decisions an
     auditor most needs. This is the one record of a refused call: a gate of the
     batch executor that said ``deny``, the ``tool:invoke`` check before the
-    gates (``gate="authorization"``), or an L7 verdict raised at dispatch.
+    gates (``gate="authorization"``), a command-bus rate limit
+    (``gate="rate_limit"``), or an L7 verdict raised at dispatch.
 
     Every field is an identifier, a number or a bounded code, never text a gate
     was handed: an approver's or a validator's reason stays out (#1276). A gate
@@ -130,7 +131,9 @@ class ToolCallRefused(DomainEvent):
     Attributes:
         mcp_server_id: The logical target the caller named (ADR-029 s5).
         tool_name: The tool the caller named.
-        correlation_id: The refused call's id.
+        correlation_id: The refused call's id. A key mismatch at dispatch
+            (``gate="upstream_key"``) reached the aggregate, so it has a
+            ``ToolInvocationFailed`` too, and this is that event's id.
         identity_context: The caller's ``IdentityContext.to_dict()``, if any.
         gate: The refusing gate, without its ``_gate_`` prefix, or ``authorization``.
         gate_reason: The gate's bounded reason code, when it has one.

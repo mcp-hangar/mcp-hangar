@@ -68,7 +68,9 @@ def _ran(calls: list[dict[str, Any]]) -> list[bool]:
 
 def _refused_by(call: dict[str, Any], budget: str) -> None:
     assert (call["success"], call["error_type"]) == (False, "RateLimitExceeded"), call
-    assert call["error"].startswith(f"RateLimitExceeded: {budget} for InvokeToolCommand is used up"), call
+    assert call["error"].splitlines()[-1].startswith(f"RateLimitExceeded: {budget} for InvokeToolCommand is used up"), (
+        call
+    )
     assert "Retry after" in call["error"], call
 
 

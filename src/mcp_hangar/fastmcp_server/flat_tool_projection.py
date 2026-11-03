@@ -1249,7 +1249,6 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
-        from mcp_hangar._sdk_compat import CallToolResult
 
         # Imported lazily: the batch package reaches `server.bootstrap`, which
         # imports this module back. At module scope that makes this module
@@ -1323,8 +1322,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         refused, caller_roles = _authorize_flat_call(mcp_server_id, tool_name, call_id, mcp_ctx, identity)
         if refused is not None:
             note_failure(refused.error_type)
-            refusal = {"content": [{"type": "text", "text": refused.error}], "isError": True}
-            return CallToolResult.model_validate(refusal)
+            return _failed_flat_result(refused.error, None, refused.refusal_meta)
 
         # Relay the caller's progressToken (#883): the upstream is asked with a
         # freshly minted token, and progress arriving on the standing GET
