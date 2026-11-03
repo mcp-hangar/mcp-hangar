@@ -258,7 +258,10 @@ def test_a_front_door_viewer_is_refused_and_a_developer_served(runs):
     # the `success` record below is written only by a call that did.
     assert "tool:invoke" not in json.dumps(served), served
     assert refused.get("isError") is True, refused
-    assert refused["content"][0]["text"] == "Not authorized to invoke tool 'add': tool:invoke permission required"
+    assert (
+        refused["content"][0]["text"].splitlines()[-1]
+        == "Not authorized to invoke tool 'add': tool:invoke permission required"
+    )
 
     allowed = _record_for(run, "flat_served")["attributes"]
     assert (allowed["mcp.tool.status"], allowed["gen_ai.tool.name"]) == ("success", "add")

@@ -102,4 +102,4 @@ def test_a_declared_viewer_is_refused(tmp_path: Path, topology: str) -> None:
     refused, text = _call(tmp_path, topology, "viewer")
 
     assert refused, text
-    assert text == "Not authorized to invoke tool 'add': tool:invoke permission required", text
+    assert text.splitlines()[-1] == "Not authorized to invoke tool 'add': tool:invoke permission required", text

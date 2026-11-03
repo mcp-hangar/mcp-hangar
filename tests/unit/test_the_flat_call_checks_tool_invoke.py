@@ -29,6 +29,7 @@ from mcp_hangar.auth.stdio_principal import clear_stdio_principal
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.contracts.authentication import AuthRequest
 from mcp_hangar.domain.events import ToolCallRefused
+from mcp_hangar.domain.value_objects.refusal import AUTHORIZATION_DENIAL_KEY, TOOL_FAILURE_KEY
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.server.api.sessions import get_session_suspension_registry
@@ -125,13 +126,19 @@ class _Gateway:
         )
 
     def call(self, path: str, principal: Principal | None, *, request: bool = True) -> str | None:
-        """Make one call of add down *path*; return None when served, else the refusal text."""
+        """Make one call of add down *path*; return None when served, else the gate's message.
+
+        The refusal's bounded first line and `_meta` stay on `self.last_refusal`.
+        """
         req = _request(principal) if request else None
         if path == "hangar_call":
             ctx = SimpleNamespace(request_context=SimpleNamespace(request=req))
             out = hangar_call([{"mcp_server": _SERVER, "tool": _TOOL, "arguments": {}}], ctx=ctx)
             [result] = out["results"]
-            return None if result["success"] else result["error"]
+            if result["success"]:
+                return None
+            self.last_refusal = (result["error"], result["_meta"])
+            return str(result["error"]).splitlines()[-1]
 
         async def _run() -> Any:
             ctx = SimpleNamespace(request=req, meta=None, session=None)
@@ -140,7 +147,9 @@ class _Gateway:
         result = anyio.run(_run)
         if not (getattr(result, "is_error", None) or getattr(result, "isError", None)):
             return None
-        return " ".join(block.text for block in result.content)
+        text = " ".join(block.text for block in result.content)
+        self.last_refusal = (text, result.meta)
+        return text.splitlines()[-1]
 
     def refusals(self) -> list[ToolCallRefused]:
         return [e for e in self.events if isinstance(e, ToolCallRefused)]
@@ -238,6 +247,14 @@ class TestEveryModeDecidesAsHangarCall:
         assert gateway.executed == []
         [event] = gateway.refusals()
         assert (event.gate, event.gate_reason) == ("authorization", "tool_invoke_denied")
+        text, meta = gateway.last_refusal
+        assert text.startswith("Refused by MCP Hangar (authorization): tool_invoke_denied. ")
+        assert meta[TOOL_FAILURE_KEY] == {
+            "class": "governance",
+            "code": "authorization.tool_invoke_denied",
+            "correlationId": event.event_id,
+        }
+        assert meta[AUTHORIZATION_DENIAL_KEY]["remediation"] == "undisclosed"
         assert (event.mcp_server_id, event.tool_name) == (_SERVER, _TOOL)
         assert event.identity_context is not None
         assert (event.identity_context["user_id"], event.identity_context["roles"]) == (caller, [])

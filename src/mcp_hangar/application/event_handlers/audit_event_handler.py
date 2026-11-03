@@ -55,6 +55,11 @@ def _route_fields(event: ToolInvocationCompleted | ToolInvocationFailed) -> tupl
     return event.logical_target or event.mcp_server_id, event.mcp_server_id
 
 
+#: A key mismatch at dispatch is already exported from its `ToolInvocationFailed`,
+#: with the failure code and the key: one refusal, one export (#1582).
+_EXPORTED_AS_FAILED_INVOCATION = "upstream_key"
+
+
 def _refusal_fields(event: ToolCallRefused) -> dict[str, str]:
     """The bounded refusal attributes of *event*, keyed by the ADR-029 vocabulary; unset ones left out."""
     candidates = {
@@ -128,7 +133,7 @@ class OTLPAuditEventHandler:
                 },
                 **_caller_fields(event.identity_context),
             )
-        elif isinstance(event, ToolCallRefused):
+        elif isinstance(event, ToolCallRefused) and event.gate != _EXPORTED_AS_FAILED_INVOCATION:
             # One record per refusal (#1582). The refusal events that already
             # exist -- ToolApprovalDenied, AuthorizationDenied,
             # EgressPolicyEnforced -- are not subscribed, so none counts twice.

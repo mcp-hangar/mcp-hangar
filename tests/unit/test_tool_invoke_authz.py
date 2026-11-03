@@ -236,7 +236,10 @@ def test_call_as_an_anonymous_caller_is_denied_where_auth_is_configured() -> Non
         result = call_as(Principal.anonymous(), "svc", "do_thing", {})
 
     (call,) = result["results"]
-    assert (call["error_type"], call["error"]) == ("AuthorizationDenied", "Authentication required to invoke tools")
+    assert (call["error_type"], call["error"].splitlines()[-1]) == (
+        "AuthorizationDenied",
+        "Authentication required to invoke tools",
+    )
     executor.execute.assert_not_called()
     authz.authorize.assert_not_called()
     # Every call was denied, so the executor never ran: the identity bound for
