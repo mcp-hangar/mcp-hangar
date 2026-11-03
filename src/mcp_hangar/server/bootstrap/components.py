@@ -123,7 +123,7 @@ def _approval_repository_from_backend() -> Any:
     return backend.approval_repository() if (backend := get_persistence_backend()) is not None else None
 
 
-def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any:
+def build_approval_service(config: dict[str, Any], event_bus: Any = None, *, stdio: bool = False) -> Any:
     """Construct the approval gate service, or return None when disabled.
 
     ``bootstrap_approvals()`` existed with **no call site anywhere in src/** --
@@ -156,6 +156,7 @@ def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any
             event_bus=event_bus,
             config=config,
             repository=_approval_repository_from_backend(),
+            stdio=stdio,
         )
     except Exception:  # noqa: BLE001 -- surfaced by the startup reachability check
         logger.error("approval_gate_bootstrap_failed", exc_info=True)
@@ -167,6 +168,8 @@ def load_components(
     event_bus: Any = None,
     event_publisher: Any = None,
     event_store: Any = None,
+    *,
+    stdio: bool = False,
 ) -> ServerComponents:
     """Load the optional auth and approval components.
 
@@ -179,12 +182,13 @@ def load_components(
         config: Full application configuration dictionary.
         event_bus: Optional event bus for auth / approval module wiring.
         event_publisher: Optional callable for publishing domain events.
+        stdio: This process serves over stdio; the approval wait is limited.
 
     Returns:
         ServerComponents with the approval service and, when auth is enabled,
         the auth components.
     """
-    approval_service = build_approval_service(config, event_bus=event_bus)
+    approval_service = build_approval_service(config, event_bus=event_bus, stdio=stdio)
 
     exports = get_auth_compat_exports()
     if not exports.auth_available:

@@ -109,7 +109,7 @@ SERVER_SPEC_KEYS = frozenset(
 SECTIONS: dict[str, frozenset[str] | None] = {
     # An id -> spec map; specs are checked against SERVER_SPEC_KEYS instead.
     "mcp_servers": None,
-    "approvals": frozenset({"channel", "delivery", "enabled", "slack", "webhook"}),
+    "approvals": frozenset({"channel", "delivery", "enabled", "slack", "stdio_wait_seconds", "webhook"}),
     "auth": frozenset(
         {
             "allow_anonymous",

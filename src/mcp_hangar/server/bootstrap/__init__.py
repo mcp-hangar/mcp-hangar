@@ -632,6 +632,7 @@ def bootstrap(
 
     # Load optional auth / approval components unconditionally
     components = load_components(
+        stdio=stdio,
         config=full_config,
         event_bus=runtime.event_bus,
         event_publisher=lambda event: runtime.event_bus.publish(event),
