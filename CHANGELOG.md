@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.35.0...v2.36.0) (2026-11-03)
+
+### Changed
+
+- **core:** a gate that refuses a tool the caller may see now says so in a bounded first line, `Refused by MCP Hangar (<gate>): <reason>. <next step>`, above the gate's own message, and carries `io.mcp-hangar/toolFailure` in `_meta`, with `io.mcp-hangar/authorizationDenial` on a denied approval (ADR-029 section 12). On `hangar_call` each refused entry of `results` carries them. Refusals outside the gates follow separately. ([#1918](https://github.com/mcp-hangar/mcp-hangar/pull/1918))
+- **core:** `io.mcp-hangar/toolFailure` and `io.mcp-hangar/authorizationDenial` are now removed from every result an upstream sends, on a tool call and in relayed task output, so those keys mark a refusal as Hangar's own (ADR-029 section 12.3). Everything else in an upstream's result is still relayed as sent. ([#1918](https://github.com/mcp-hangar/mcp-hangar/pull/1918))
+- **core:** Over stdio Hangar now ends an approval's wait itself, after `approvals.stdio_wait_seconds` (default 50), before the 60 s the MCP TypeScript SDK gives a request (ADR-029 s12.4, #1918). The caller gets the `approval` refusal with reason `approval_timeout` instead of a transport timeout. Where the limit is shorter than `approval_timeout_seconds` it ends the approval's window: the record moves to `expired`, `ToolApprovalExpired` is published, and a later `mcp-hangar approvals approve` is refused. ([#2190](https://github.com/mcp-hangar/mcp-hangar/pull/2190))
+- **core:** A refusal raised outside the gates now reads like a gate's (ADR-029 s12, #1918). A `tool:invoke` denial, an L7 `deny` or `require_approval`, an upstream key mismatch at dispatch and a command-bus rate limit start with `Refused by MCP Hangar (<layer>): <reason>. <next step>`, with the message they had on the next line and `_meta["io.mcp-hangar/toolFailure"]`; a `tool:invoke` denial also carries `io.mcp-hangar/authorizationDenial`. A rate limit is `class: reliability` with `retryNotBefore`. A rate limit and a key mismatch at dispatch now publish `ToolCallRefused`, so a rate-limited call writes a durable event and an audit record; `mcp-hangar why` and the audit show a key mismatch once. ([#2189](https://github.com/mcp-hangar/mcp-hangar/pull/2189))
+
 ## [2.35.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.34.10...v2.35.0) (2026-10-31)
 
 ### Added
