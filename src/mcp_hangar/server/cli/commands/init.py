@@ -21,6 +21,7 @@ from typing import Annotated, cast
 
 import questionary
 import typer
+import yaml
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -41,7 +42,7 @@ from ..services import (
     get_mcp_servers_by_category_filtered,
     run_smoke_test,
 )
-from ..services.client_import import ImportReport, import_client_servers
+from ..services.client_import import ImportReport, colliding_tools, import_client_servers
 from ..services.client_servers import ClientServers, read_client_servers
 from ..services.init_manifest import restore
 from ..services.mcp_clients import McpClient, client_by_key, detect_clients, write_hangar_entry
@@ -348,7 +349,27 @@ def _import_existing_servers(
         console.print(f"  [green]Moved:[/green] {imported.name} -- {imported.tools} tool(s) pinned")
     for left in report.not_imported:
         console.print(f"  [yellow]Left in {left.client_key}:[/yellow] {left.name} -- {left.reason}")
+    if report.imported:
+        _say_colliding_tools(config_path)
     return report
+
+
+def _say_colliding_tools(config_path: Path) -> None:
+    """Name the tools no server will serve because two serve them (#2193); silent when there are none."""
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return
+    collisions = colliding_tools(config if isinstance(config, dict) else {})
+    if not collisions:
+        return
+    console.print("\n  [yellow]Not listed: these tool names are served by more than one server[/yellow]")
+    for tool, servers in sorted(collisions.items()):
+        console.print(f"  [yellow]Not listed:[/yellow] {tool} -- served by {', '.join(servers)}")
+    console.print(
+        "  [dim]Your client sees a tool by its own name, so a name two servers serve is listed for neither.\n"
+        f"  Remove one of those servers from {config_path} to have the other's tool listed.[/dim]"
+    )
 
 
 def _undo_init(*, force: bool) -> None:
