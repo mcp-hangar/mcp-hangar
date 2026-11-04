@@ -1,5 +1,21 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.36.0
+
+### Authorization, L7 and rate-limit refusals have a new first line
+
+A `tool:invoke` denial, an L7 refusal, an upstream key mismatch at dispatch and a command-bus rate limit now start with `Refused by MCP Hangar (<layer>): <reason>. <next step>`. The text they had moved to the second line of `error` and of the tool result's text, so a client matching `Not authorized to invoke tool`, `Tool call denied by egress policy` or `RateLimitExceeded:` from the start of the text has to read `_meta["io.mcp-hangar/toolFailure"]` instead. `error_type` is unchanged.
+
+A rate-limited call now writes a `ToolCallRefused` to the event store and one `denied` audit record, so traffic refused at the limit costs a write. The record's `hangar.gate.name` is `rate_limit`.
+
+### Approvals over stdio now end after 50 seconds by default
+
+On a gateway serving stdio, an approval stays open for the shorter of `approval_timeout_seconds` and the new `approvals.stdio_wait_seconds`, which defaults to 50. A human slower than that cannot get the call through: the approve is refused and a retried call opens a new approval. If your client waits longer than the MCP TypeScript SDK's default of 60 seconds, raise `approvals.stdio_wait_seconds` to fit it. A gateway serving HTTP is unchanged.
+
+### A gate refusal's text has a new first line
+
+The message a gate wrote now starts on the second line of `error` and of the tool result's text. Anything matching a refusal's text from its start has to read `_meta["io.mcp-hangar/toolFailure"]` instead, or the second line. `error_type` is unchanged. Do not treat the text as proof Hangar refused: only the `_meta` key will be, once upstream results are stripped of it.
+
 ## Upgrade to 2.35.0
 
 ### groups and members made over REST come back after a restart
