@@ -1,8 +1,9 @@
-"""The README quickstart runner picks exactly the marked blocks (#1774)."""
+"""The README quickstart runner picks exactly the marked blocks and checks, in order (#1774, #2182)."""
 
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,8 +38,43 @@ def test_only_marked_bash_blocks_are_run() -> None:
     assert readme_quickstart.quickstart_blocks(text) == ["echo one\n", "echo two\n"]
 
 
-def test_the_readme_has_a_quickstart_to_run() -> None:
-    blocks = readme_quickstart.quickstart_blocks((ROOT / "README.md").read_text(encoding="utf-8"))
+def test_a_check_line_takes_its_place_between_the_blocks() -> None:
+    text = "\n".join(
+        [
+            "<!-- ci:quickstart -->",
+            "```bash",
+            "echo one",
+            "```",
+            "<!-- ci:check served -->",
+            "<!-- ci:quickstart -->",
+            "```bash",
+            "echo two",
+            "```",
+            "<!-- ci:check withheld -->",
+        ]
+    )
 
-    assert len(blocks) == 2
-    assert "export PATH" in blocks[0]
+    assert readme_quickstart.quickstart_steps(text) == [
+        ("run", "echo one\n"),
+        ("check", "served"),
+        ("run", "echo two\n"),
+        ("check", "withheld"),
+    ]
+
+
+def test_the_readme_installs_inits_and_drifts_between_the_two_checks() -> None:
+    steps = readme_quickstart.quickstart_steps((ROOT / "README.md").read_text(encoding="utf-8"))
+    kinds = [kind if kind == "run" else body for kind, body in steps]
+
+    assert kinds == ["run", "run", "run", "served", "run", "withheld"]
+    assert "export PATH" in steps[0][1]
+    assert "mcp-hangar init -y" in steps[2][1]
+    assert "RUG_DESC" in steps[4][1]
+
+
+def test_the_fixture_is_two_servers_of_the_readers_own(tmp_path: Path) -> None:
+    readme_quickstart.seed_fixture(tmp_path, tmp_path / "home")
+
+    servers = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert set(servers) == set(readme_quickstart.FIXTURE_TOOLS)
+    assert readme_quickstart.DRIFTED not in readme_quickstart.FIXTURE_TOOLS.values()
