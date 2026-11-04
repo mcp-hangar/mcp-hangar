@@ -119,6 +119,10 @@ model, and a call of it is answered like a call of a tool that does not exist.
 "withheld_tools": [{"name": "echo", "reason": "digest_drift", ...}]
 ```
 
+CI runs this quickstart every day on a clean GitHub-hosted Linux runner, with
+two servers of its own in `.mcp.json`. From `curl` to the withheld `echo` it
+takes about 40 seconds; the client restarts are yours to add.
+
 A pin covers the tool's `name`, `description`, `inputSchema` and
 `outputSchema`. A tool under a pin in `block` mode is served with those fields
 only: its `title`, `annotations`, `execution`, `icons` and `_meta` are not part
