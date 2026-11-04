@@ -132,6 +132,26 @@ def import_client_servers(
     return report
 
 
+def colliding_tools(config: dict[str, Any]) -> dict[str, list[str]]:
+    """Tool names more than one server pins, each with those servers (#2193).
+
+    On the front door a tool is listed under its own name, and a name two
+    servers serve routes nowhere: both are left out of `tools/list`
+    (`flat_tool_name_collision`). An import can bring that about without any
+    one server being wrong, so `init` says it. Read from the pins, which hold
+    every tool a server served when it was started; empty unless the config
+    is in `front_door` mode, the only one with a flat listing.
+    """
+    if ((config.get("tool_access") or {}).get("mode")) != "front_door":
+        return {}
+    servers_of: dict[str, list[str]] = {}
+    for server, spec in (config.get("mcp_servers") or {}).items():
+        pins = ((spec or {}).get("tool_projection") or {}).get("pins") or {}
+        for tool in pins:
+            servers_of.setdefault(tool, []).append(server)
+    return {tool: servers for tool, servers in servers_of.items() if len(servers) > 1}
+
+
 def _refusal(
     name: str,
     client_key: str,
