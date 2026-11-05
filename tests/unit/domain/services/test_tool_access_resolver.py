@@ -12,6 +12,8 @@ from mcp_hangar.domain.services.tool_access_resolver import (
     reset_tool_access_resolver,
 )
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
+from mcp_hangar.domain.value_objects.access import POLICY_KINDS, Caller, Target
+from tests._access_decisions import may
 
 
 @pytest.fixture
@@ -72,6 +74,23 @@ class TestToolAccessResolverBasic:
 class TestToolAccessResolverGroupMerge:
     """Tests for group-level policy merging."""
 
+    @pytest.mark.parametrize("kind", POLICY_KINDS)
+    @pytest.mark.parametrize("warm_member_cache", [False, True])
+    def test_group_without_member_does_not_use_tenant_as_member(self, resolver, kind, warm_member_cache):
+        resolver.set_group_policy("group", ToolAccessPolicy(deny_list=("group_denied",)), kind=kind)
+        resolver.set_standalone_member_policy(
+            "group", "tenant", ToolAccessPolicy(deny_list=("tenant_denied",)), kind=kind
+        )
+        resolver.set_member_policy("group", "tenant", ToolAccessPolicy(deny_list=("member_denied",)), kind=kind)
+        caller = Caller(tenant_id="tenant")
+        if warm_member_cache:
+            assert not may(resolver, Target.group("group", member_server="tenant", kind=kind), "member_denied", caller)
+
+        target = Target.group("group", kind=kind)
+        assert may(resolver, target, "member_denied", caller)
+        assert not may(resolver, target, "group_denied", caller)
+        assert not may(resolver, target, "tenant_denied", caller)
+
     def test_group_policy_applied_to_member(self, resolver):
         """Group policy should be applied to members."""
         group_policy = ToolAccessPolicy(deny_list=("delete_*",))
@@ -79,7 +98,7 @@ class TestToolAccessResolverGroupMerge:
         resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), mcp_server_id="grafana")
 
         effective = _policy_merge.resolve_effective_policy(
-            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", group_id="monitoring", member_server_id="grafana-prod"
         )
         assert not effective.is_tool_allowed("delete_dashboard")
         assert effective.is_tool_allowed("get_dashboard")
@@ -93,7 +112,7 @@ class TestToolAccessResolverGroupMerge:
         resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
         effective = _policy_merge.resolve_effective_policy(
-            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", group_id="monitoring", member_server_id="grafana-prod"
         )
         # Both group and member denials should apply
         assert not effective.is_tool_allowed("delete_dashboard")
@@ -108,7 +127,7 @@ class TestToolAccessResolverGroupMerge:
         resolver.set_member_policy("monitoring", "grafana-staging", ToolAccessPolicy(), mcp_server_id="grafana")
 
         effective = _policy_merge.resolve_effective_policy(
-            resolver, "grafana", group_id="monitoring", member_id="grafana-staging"
+            resolver, "grafana", group_id="monitoring", member_server_id="grafana-staging"
         )
         assert not effective.is_tool_allowed("delete_dashboard")
         assert effective.is_tool_allowed("get_dashboard")
@@ -128,7 +147,7 @@ class TestToolAccessResolverThreeLevelMerge:
         resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
         effective = _policy_merge.resolve_effective_policy(
-            resolver, "grafana", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", group_id="monitoring", member_server_id="grafana-prod"
         )
 
         # Provider allows get_*, list_*, create_*, update_*
@@ -158,6 +177,21 @@ class TestToolAccessResolverThreeLevelMerge:
 
 class TestToolAccessResolverCache:
     """Tests for caching behavior."""
+
+    @pytest.mark.parametrize("kind", POLICY_KINDS)
+    @pytest.mark.parametrize("initial_mode", ["egress", "front_door"])
+    def test_topology_change_invalidates_member_cache(self, resolver, kind, initial_mode):
+        resolver.set_topology_mode(initial_mode)
+        target = Target.group("group", member_server="server", kind=kind)
+        assert may(resolver, target, "read") is (initial_mode == "egress")
+        assert may(resolver, target, "read", Caller(tenant_id="tenant"))
+        assert resolver._policy_cache
+
+        resolver.set_topology_mode("front_door" if initial_mode == "egress" else "egress")
+
+        assert not resolver._policy_cache
+        assert may(resolver, target, "read") is (initial_mode != "egress")
+        assert may(resolver, target, "read", Caller(tenant_id="tenant"))
 
     def test_cache_hit(self, resolver):
         """Second call should use cached policy."""
@@ -476,12 +510,16 @@ class TestRemovingAGroupOrMemberRetiresEveryKind:
         for kind in ("tool", "prompt", "resource"):
             resolver.set_member_policy("grp", "m1", ToolAccessPolicy(deny_list=("secret_*",)), "srv", kind=kind)
         # Warm the prompt cache entry so a stale hit would be visible.
-        assert not _policy_merge.is_allowed(resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_id="m1")
+        assert not _policy_merge.is_allowed(
+            resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_server_id="m1"
+        )
 
         resolver.remove_member_policy("grp", "m1")
 
         assert not [s for s, _ in resolver.iter_registered_policies(kind=None) if s.startswith("group:grp")]
-        assert _policy_merge.is_allowed(resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_id="m1")
+        assert _policy_merge.is_allowed(
+            resolver, "srv", "secret_x", kind="prompt", group_id="grp", member_server_id="m1"
+        )
 
     def test_another_group_and_member_are_untouched(self, resolver):
         resolver.set_group_policy("other", ToolAccessPolicy(deny_list=("secret_*",)), kind="prompt")

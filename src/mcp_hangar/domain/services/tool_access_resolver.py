@@ -348,11 +348,9 @@ class ToolAccessResolver:
         """
         with self._lock:
             self._topology_mode = mode
-            # Invalidate the cache keyed without a member_id so the new
-            # mode is reflected immediately on the next resolve call.
-            keys_to_remove = [k for k in self._policy_cache if ":member:" not in k[1]]
-            for key in keys_to_remove:
-                self._policy_cache.pop(key, None)
+            # Group-member cache keys may also belong to unauthenticated
+            # callers, whose effective policy changes with the topology.
+            self._policy_cache.clear()
 
     def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
         """Remove EVERY access policy for a mcp_server -- tool, prompt and resource,

@@ -50,9 +50,8 @@ def resolve_effective_policy(
             member SERVER id (`groups.<g>.members.<m>.tools`, and the REST
             `member/<group>:<member>` scope), so without this the group
             branch looked them up under the tenant and never found them --
-            a documented deny list that failed open (#1164). Defaults to
-            *member_id* so a caller using the resolver's own vocabulary
-            (member id in `member_id`) resolves exactly as before.
+            a documented deny list that failed open (#1164). Without a
+            selected member, no member-server policy is consulted.
         kind: What is being governed -- tools, prompts or resources. Each
             kind resolves against the policies registered for that kind
             alone, so a tool deny never silently governs a prompt.
@@ -64,7 +63,7 @@ def resolve_effective_policy(
     # routed to the same member can resolve differently (the member's own
     # per-tenant policy), and so can one tenant routed to two members.
     if group_id and (member_id or member_server_id):
-        member_scope = member_server_id or member_id
+        member_scope = member_server_id or ""
         scope_key = f"group:{group_id}:member:{member_scope}"
         if member_id:
             scope_key = f"{scope_key}:tenant:{member_id}"
@@ -157,16 +156,13 @@ def _compute_effective_policy(
 
     # Get member policy. Keyed by the member SERVER id, which is what
     # `groups.<g>.members.<m>.tools` and the REST `member/<g>:<m>` scope
-    # register -- never the tenant (#1164). `member_server_id` is what the
-    # dispatching caller resolved; `member_id` is the fallback for a caller
-    # speaking the resolver's own vocabulary (the tests, and any caller for
-    # which tenant and member id coincide).
-    member_scope_id = member_server_id or member_id
+    # register -- never the tenant (#1164). Without a selected member,
+    # neither its policy nor its server mapping applies.
     member_policy = ToolAccessPolicy()
     mapped_mcp_server_id: str | None = None
-    if member_scope_id is not None:
-        member_policy = resolver._member_policies.get((group_id, member_scope_id, kind), ToolAccessPolicy())
-        mapped_mcp_server_id = resolver._member_mcp_server_mapping.get((group_id, member_scope_id))
+    if member_server_id is not None:
+        member_policy = resolver._member_policies.get((group_id, member_server_id, kind), ToolAccessPolicy())
+        mapped_mcp_server_id = resolver._member_mcp_server_mapping.get((group_id, member_server_id))
     if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
         mapped_mcp_server_policy = resolver._mcp_server_policies.get((mapped_mcp_server_id, kind), ToolAccessPolicy())
         # Merge mapped mcp_server policy with base mcp_server policy
@@ -179,7 +175,7 @@ def _compute_effective_policy(
     # whichever the operator wrote.
     tenant_policy = ToolAccessPolicy()
     if member_id is not None:
-        for scope in (mcp_server_id, mapped_mcp_server_id or member_scope_id):
+        for scope in (mcp_server_id, mapped_mcp_server_id or member_server_id):
             if scope is None:
                 continue
             tenant_policy = ToolAccessPolicy.merge(

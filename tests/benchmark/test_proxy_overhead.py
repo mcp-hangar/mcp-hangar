@@ -245,7 +245,7 @@ class TestToolAccessResolver:
 
         def check():
             return _policy_merge.is_allowed(
-                resolver, "provider-a", "read_file", group_id="group-1", member_id="member-1"
+                resolver, "provider-a", "read_file", group_id="group-1", member_server_id="member-1"
             )
 
         result = benchmark(check)

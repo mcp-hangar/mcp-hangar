@@ -148,8 +148,8 @@ def test_the_front_door_decides_a_groups_tool_on_the_members_a_call_may_select()
         )
 
 
-def test_the_resolvers_own_vocabulary_still_resolves():
-    """A caller passing the member id as `member_id` (the pre-#1164 tests)."""
+def test_the_merge_uses_the_explicit_member_server_id():
+    """The merge's member-server scope stays separate from the caller's tenant."""
     resolver = _configured_pool()
 
-    assert not _policy_merge.is_allowed(resolver, _MEMBER, "admin_reset", group_id=_GROUP, member_id=_MEMBER)
+    assert not _policy_merge.is_allowed(resolver, _MEMBER, "admin_reset", group_id=_GROUP, member_server_id=_MEMBER)
