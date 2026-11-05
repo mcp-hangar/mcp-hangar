@@ -92,7 +92,9 @@ class TestToolFilteringDiscovery:
         filtered = [
             tool
             for tool in all_tools
-            if _policy_merge.is_allowed(resolver, "grafana", tool.name, group_id="monitoring", member_id="grafana-prod")
+            if _policy_merge.is_allowed(
+                resolver, "grafana", tool.name, group_id="monitoring", member_server_id="grafana-prod"
+            )
         ]
 
         assert len(filtered) == 1
@@ -173,17 +175,17 @@ class TestToolFilteringInvocation:
 
         # Should be denied by group policy
         assert not _policy_merge.is_allowed(
-            resolver, "grafana", "delete_dashboard", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", "delete_dashboard", group_id="monitoring", member_server_id="grafana-prod"
         )
 
         # Should be denied by member policy
         assert not _policy_merge.is_allowed(
-            resolver, "grafana", "create_alert_rule", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", "create_alert_rule", group_id="monitoring", member_server_id="grafana-prod"
         )
 
         # Should be allowed (not in any deny list)
         assert _policy_merge.is_allowed(
-            resolver, "grafana", "get_dashboard", group_id="monitoring", member_id="grafana-prod"
+            resolver, "grafana", "get_dashboard", group_id="monitoring", member_server_id="grafana-prod"
         )
 
 
