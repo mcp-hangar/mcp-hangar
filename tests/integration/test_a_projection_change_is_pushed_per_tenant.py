@@ -18,7 +18,7 @@ Naming: neutral placeholders only (store, read_item, write_item, tenant:a, tenan
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 
@@ -113,9 +113,25 @@ async def test_a_hot_loaded_upstream_notifies_the_channels_it_reaches(gateway: F
     assert (a.notified, b.notified) == (1, 1)
 
 
-async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification(gateway: FrontDoor) -> None:
+async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification(
+    gateway: FrontDoor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop = asyncio.get_running_loop()
+    call_later = loop.call_later
+    windows: list[Callable[[], None]] = []
+
+    def hold_window(delay: float, callback: Callable[..., Any], *args: Any, context: Any = None) -> asyncio.TimerHandle:
+        if callback is not tool_list_changed._fire:
+            return call_later(delay, callback, *args, context=context)
+        assert delay == tool_list_changed.COALESCE_WINDOW_S
+        assert not args
+        windows.append(callback)
+        # Give the publisher its real cancellable handle, but leave this timer
+        # unscheduled until every upstream has landed, however slow the runner.
+        return asyncio.TimerHandle(loop.time() + delay, callback, args, loop, context=context)
+
+    monkeypatch.setattr(loop, "call_later", hold_window)
     channels = [_listen(TENANT_A) for _ in range(3)] + [_listen(TENANT_B)]
-    await _settle()
     registry = get_tool_projection_registry()
 
     def storm() -> None:
@@ -123,7 +139,11 @@ async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification
             registry.build_from_tools(f"shelf-{n}", [_tool(f"shelf_item_{n}")])
 
     await asyncio.to_thread(storm)
-    await _settle()
+
+    assert len(windows) == 1, "all registry changes must share the pending coalescing window"
+    assert [channel.notified for channel in channels] == [0, 0, 0, 0]
+    windows[0]()
+    await asyncio.gather(*tool_list_changed._tasks)
 
     # Every channel changed, and each was told once for the lot.
     assert [channel.notified for channel in channels] == [1, 1, 1, 1]
