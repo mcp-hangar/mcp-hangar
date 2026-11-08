@@ -37,7 +37,7 @@ from ..validation import (
     validate_mcp_server_id_input,
 )
 from .mcp_server import _caller_tenant_id
-from .replica_view import observe_replica
+from .replica_view import members_hidden_from, observe_replica
 
 #: The dashboard's version of `scope_note`, shorter because it sits above a
 #: frame rather than in a field an operator reads on its own.
@@ -95,8 +95,10 @@ def hangar_list(state_filter: str | None = None) -> dict:
             }
         )
 
+    # A tenant is not shown a group member its calls may not be routed to (#2161).
+    hidden = members_hidden_from(tenant_id)
     return {
-        "mcp_servers": [s.to_dict() for s in summaries],
+        "mcp_servers": [s.to_dict() for s in summaries if str(s.mcp_server_id) not in hidden],
         "groups": groups_list,
         "runtime_mcp_servers": runtime_mcp_servers_list,
     }
@@ -139,6 +141,8 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     description?: str,
                     dead: {reason, since, retry_allowed_at, revived_by} | null
                 }],
+                    (for a caller with a tenant: no group member its calls may
+                    not be routed to)
                 groups: [{group_id, state, strategy, healthy_count, total_members, ...}],
                     (for a caller with a tenant: only the members its calls may be
                     routed to, counts and state taken over them, no min_healthy
@@ -205,6 +209,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                 members_in_rotation_count: int,
                 total_members: int
             }
+            For a caller with a tenant, a group's state and counts are over the
+            members its calls may be routed to, and members_started is the
+            number of them ready in rotation; every member is still started.
             Error: ValueError with "unknown_mcp_server: <id>" (an id that is neither a server nor a group)
 
         Example:
@@ -228,6 +235,19 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             group = ctx.get_group(mcp_server)
             assert group is not None
             started = group.start_all()
+            tenant_id = _caller_tenant_id()
+            if tenant_id is not None:
+                # A tenant is told of the members its calls may be routed to
+                # (#2161): what started is counted as those ready in rotation.
+                view = group.status_for_tenant(tenant_id)
+                return {
+                    "group": mcp_server,
+                    "state": view["state"],
+                    "members_started": view["healthy_count"],
+                    "healthy_count": view["healthy_count"],
+                    "members_in_rotation_count": view["members_in_rotation_count"],
+                    "total_members": view["total_members"],
+                }
             return {
                 "group": mcp_server,
                 "state": group.state.value,
@@ -349,6 +369,10 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
                     total_members: int,
                     circuit_open: bool
                 }],
+                    (for a caller with a tenant: mcp_servers leaves out the group
+                    members its calls may not be routed to, each group is counted
+                    over the members they may be, circuit_open is left out, and
+                    the summary counts what is shown)
                 runtime_mcp_servers: [{
                     id: str, indicator: str, state: str, source: str, verified: bool, dead: object | null
                 }],
@@ -389,7 +413,8 @@ def hangar_status() -> dict:
     `replica.instance_id` values, so their answers cannot be read as two moments
     of one fleet (#1380).
     """
-    view = observe_replica()
+    # A tenant is shown the servers and group members its calls may reach (#2161).
+    view = observe_replica(_caller_tenant_id())
 
     mcp_servers_status = []
     for summary in view.configured:
@@ -415,7 +440,8 @@ def hangar_status() -> dict:
             "healthy_members": group.healthy_count,
             "members_in_rotation_count": group.members_in_rotation_count,
             "total_members": group.total_count,
-            "circuit_open": group.circuit_open,
+            # Left out of a tenant's view, as status_for_tenant leaves it out.
+            **({} if group.circuit_open is None else {"circuit_open": group.circuit_open}),
         }
         for group in view.groups
     ]
@@ -561,7 +587,8 @@ def _group_table(groups: list) -> list[str]:
             g["id"],
             g["state"],
             f"{g['healthy_members']}/{g['total_members']}",
-            "open" if g["circuit_open"] else "closed",
+            # A tenant's view has no circuit (#2161).
+            "-" if "circuit_open" not in g else "open" if g["circuit_open"] else "closed",
         ]
         for g in groups
     ]

@@ -1291,8 +1291,8 @@ class McpServerGroup(AggregateRoot):
         `GET /api/groups`, `GET /api/groups/{id}`, `hangar_group_list`,
         `hangar_list` and `hangar_details` return this dict as it is to a
         caller without a tenant, and :meth:`status_for_tenant` to a caller
-        with one (#2019, #2155); `hangar_status` and `hangar_health` report its
-        counts.
+        with one (#2019, #2155); `hangar_status` and `hangar_health` report the
+        counts of the same pair (#2161).
         `healthy_count` counts members that are ready and in rotation,
         `members_in_rotation_count` members in rotation whatever their state
         (#1356). :meth:`status_for_tenant` is the same dict cut down to one

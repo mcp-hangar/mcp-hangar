@@ -463,7 +463,7 @@ class TestWhereTheNamesGo:
             groups=[], total_servers=2, servers_by_state=lambda: {"dead": 2}, scope_fields=lambda: {}
         )
         context = SimpleNamespace(rate_limiter=SimpleNamespace(get_stats=lambda: {}), repository=repository)
-        monkeypatch.setattr(health, "observe_replica", lambda: view)
+        monkeypatch.setattr(health, "observe_replica", lambda *_: view)
         monkeypatch.setattr(health, "get_context", lambda: context)
 
         assert health.hangar_health()["catalogue"] == {
