@@ -111,7 +111,8 @@ class GroupView:
     healthy_count: int
     members_in_rotation_count: int
     total_count: int
-    circuit_open: bool
+    #: None in a tenant's view, which leaves `circuit_open` out (#2161).
+    circuit_open: bool | None
 
 
 @dataclass(frozen=True)
@@ -164,19 +165,44 @@ class ReplicaView:
 
 
 def _group_view(group_id: str, status: dict[str, Any]) -> GroupView:
-    """A group's `to_status_dict()`, cut down to what the status tools report."""
+    """A group's `to_status_dict()` or `status_for_tenant()`, cut down to what the status tools report."""
     return GroupView(
         group_id=group_id,
         state=status["state"],
         healthy_count=status["healthy_count"],
         members_in_rotation_count=status["members_in_rotation_count"],
         total_count=status["total_members"],
-        circuit_open=status["circuit_open"],
+        circuit_open=status.get("circuit_open"),
     )
 
 
-def observe_replica() -> ReplicaView:
+def members_hidden_from(tenant_id: str | None) -> frozenset[str]:
+    """The group members a call from *tenant_id* may not be routed to by any group that owns them (#2161).
+
+    A server listing leaves these out for that tenant, as a group view leaves
+    them out (#2155): a member is shown when one of its groups would route the
+    tenant to it (`route_candidates`), and a server no group owns is always
+    shown. None when there is no tenant: nothing is hidden. This hides ids
+    from a listing and refuses nothing; a call naming a member directly is
+    decided by tool access, as before.
+    """
+    if tenant_id is None:
+        return frozenset()
+    owned: set[str] = set()
+    routed: set[str] = set()
+    for group in get_context().groups.values():
+        owned.update(str(member.id) for member in group.members)
+        routed.update(str(server.mcp_server_id) for server in group.route_candidates(tenant_id))
+    return frozenset(owned - routed)
+
+
+def observe_replica(tenant_id: str | None = None) -> ReplicaView:
     """Read this replica's servers, hot-loaded servers and groups, once.
+
+    For a caller with a tenant, the configured servers leave out the group
+    members its calls may not be routed to, and each group is its
+    `status_for_tenant` view, so every count is taken over what the tenant is
+    shown (#2161). With no tenant, everything, as before.
 
     The only place either status tool reads fleet state from, so a change to
     what counts as "a server" reaches both tools or neither.
@@ -191,9 +217,17 @@ def observe_replica() -> ReplicaView:
     from ..state import get_runtime_mcp_servers
 
     ctx = get_context()
-    configured = tuple(_configured(mcp_server_id, server) for mcp_server_id, server in ctx.repository.get_all().items())
+    hidden = members_hidden_from(tenant_id)
+    configured = tuple(
+        _configured(mcp_server_id, server)
+        for mcp_server_id, server in ctx.repository.get_all().items()
+        if str(mcp_server_id) not in hidden
+    )
     hot_loaded = tuple(_hot_loaded(server, metadata) for server, metadata in get_runtime_mcp_servers().list_all())
-    groups = tuple(_group_view(group_id, group.to_status_dict()) for group_id, group in ctx.groups.items())
+    groups = tuple(
+        _group_view(group_id, group.to_status_dict() if tenant_id is None else group.status_for_tenant(tenant_id))
+        for group_id, group in ctx.groups.items()
+    )
     return ReplicaView(
         instance_id=current_instance_id(),
         uptime_seconds=time.time() - _PROCESS_STARTED_AT,

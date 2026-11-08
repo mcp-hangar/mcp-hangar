@@ -7,6 +7,7 @@ from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.group_events import publish_group_events
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
+from ...domain.exceptions import AccessDeniedError
 from ..context import get_context
 from ..validation import RateLimited, not_rate_limited, tool_error_hook, tool_error_mapper, validate_group_id_input
 from .mcp_server import _caller_tenant_id
@@ -118,6 +119,8 @@ def register_group_tools(mcp: FastMCP) -> None:
             }
             members_in_rotation_count is the length of members_in_rotation.
             Error: ValueError with "unknown_group: <id>"
+            Error: AccessDeniedError for a caller with a tenant: a rebalance
+            acts on the whole group, so it is an operator's (#2161).
 
         Example:
             hangar_group_rebalance("llm-group")
@@ -128,6 +131,17 @@ def register_group_tools(mcp: FastMCP) -> None:
             hangar_group_rebalance("unknown")
             # Error: unknown_group: unknown
         """
+        # A whole-group operator action: a tenant caller is refused, before
+        # the group is looked up, so it learns nothing of it (#2161).
+        tenant_id = _caller_tenant_id()
+        if tenant_id is not None:
+            raise AccessDeniedError(
+                principal_id=f"tenant:{tenant_id}",
+                action="rebalance",
+                resource=f"group:{group}",
+                reason="a group is rebalanced as a whole, by a caller without a tenant",
+            )
+
         ctx = get_context()
 
         if not ctx.group_exists(group):
