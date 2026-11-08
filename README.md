@@ -2,7 +2,7 @@
   <img src=".github/brand/github-header-1280x640.png" alt="MCP Hangar" width="640">
 </p>
 
-**The policy enforcement plane for MCP -- deterministic admission and egress policy, attributable audit, and SIEM export for your MCP server fleet. MIT, self-hosted, no SaaS.**
+**The MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy.** MIT, self-hosted, no SaaS.
 
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
 [![CI](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml)
