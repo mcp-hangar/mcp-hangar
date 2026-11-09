@@ -119,9 +119,9 @@ class GroupState(Enum):
         return self in (GroupState.HEALTHY, GroupState.PARTIAL)
 
 
-#: The id the tool access resolver keeps the gateway-wide policy floor under:
-#: the policy set for ``mcp_server_id="*"``, which `_policy_merge` merges into
-#: every server's effective policy. It is a key in the same table as every
+#: The id the tool access resolver keeps the gateway-wide policy floor under,
+#: which `_policy_merge` merges into every server's effective policy. It is
+#: written through the tool access policy endpoint with scope ``provider``. It is a key in the same table as every
 #: server's own policy, so a server registered under it would read and write
 #: the floor itself (#2204).
 GLOBAL_POLICY_SCOPE_ID = "_global"

@@ -830,7 +830,7 @@ def _refuse_a_reserved_id(mcp_server_id: Any) -> None:
     reserved id is refused instead, so the file is not put in force while
     saying less than it does.
     """
-    if mcp_server_id in RESERVED_MCP_SERVER_IDS:
+    if isinstance(mcp_server_id, str) and mcp_server_id in RESERVED_MCP_SERVER_IDS:
         raise ConfigurationError(reserved_mcp_server_id_message(mcp_server_id))
 
 

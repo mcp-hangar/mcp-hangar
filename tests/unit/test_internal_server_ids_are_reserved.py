@@ -88,6 +88,11 @@ class TestTheConfigurationFile:
         with pytest.raises(ConfigurationError, match="'_global' is reserved"):
             server_config.load_config({"pool": group})
 
+    def test_a_member_id_that_is_not_a_string_is_still_only_skipped(self, no_store) -> None:
+        group = {"mode": "group", "members": [{"id": ["a", "b"], **_SUBPROCESS}]}
+
+        server_config.build_config({"pool": group})
+
 
 class _Bus:
     def publish(self, event: Any) -> None:
