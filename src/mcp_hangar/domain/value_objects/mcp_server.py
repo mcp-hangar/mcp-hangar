@@ -119,6 +119,25 @@ class GroupState(Enum):
         return self in (GroupState.HEALTHY, GroupState.PARTIAL)
 
 
+#: The id the tool access resolver keeps the gateway-wide policy floor under:
+#: the policy set for ``mcp_server_id="*"``, which `_policy_merge` merges into
+#: every server's effective policy. It is a key in the same table as every
+#: server's own policy, so a server registered under it would read and write
+#: the floor itself (#2204).
+GLOBAL_POLICY_SCOPE_ID = "_global"
+
+#: Ids Hangar uses internally, which no configured or hot-loaded server may take.
+RESERVED_MCP_SERVER_IDS: frozenset[str] = frozenset({GLOBAL_POLICY_SCOPE_ID})
+
+
+def reserved_mcp_server_id_message(mcp_server_id: str) -> str:
+    """The refusal for a server that names a reserved id, the same at every door."""
+    return (
+        f"McpServer id {mcp_server_id!r} is reserved for Hangar's internal use "
+        f"(reserved ids: {', '.join(sorted(RESERVED_MCP_SERVER_IDS))}); give the server another id"
+    )
+
+
 class McpServerId:
     """Unique identifier for a mcp_server.
 
@@ -126,6 +145,7 @@ class McpServerId:
     - Non-empty string
     - Alphanumeric, hyphens, underscores only
     - Max 64 characters
+    - Not one of `RESERVED_MCP_SERVER_IDS`
 
     Attributes:
         value: The validated mcp_server identifier string.
@@ -149,7 +169,7 @@ class McpServerId:
             value: The mcp_server identifier string to validate.
 
         Raises:
-            ValueError: If value is empty, too long, or contains invalid characters.
+            ValueError: If value is empty, too long, contains invalid characters, or is reserved.
         """
         if not value:
             raise ValueError("McpServerId cannot be empty")
@@ -157,6 +177,8 @@ class McpServerId:
             raise ValueError(f"McpServerId cannot exceed {self._MAX_LENGTH} characters")
         if not self._VALID_PATTERN.match(value):
             raise ValueError("McpServerId must contain only alphanumeric characters, hyphens, and underscores")
+        if value in RESERVED_MCP_SERVER_IDS:
+            raise ValueError(reserved_mcp_server_id_message(value))
         self._value = value
 
     @property

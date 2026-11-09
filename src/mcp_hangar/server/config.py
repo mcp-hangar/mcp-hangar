@@ -30,6 +30,7 @@ from ..domain.security.ssrf import TrustedNetwork, parse_trusted_networks, set_t
 from ..domain.services.governance_overlays import swapping
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.config import MaxConsecutiveFailures
+from ..domain.value_objects.mcp_server import RESERVED_MCP_SERVER_IDS, reserved_mcp_server_id_message
 from ..domain.value_objects.peer_identity import PeerIdentity, max_connection_age
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
@@ -799,6 +800,7 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
     with _building(_StagedConfig()) as staged:
         groups: list[tuple[str, dict[str, Any]]] = []
         for mcp_server_id, spec_dict in config.items():
+            _refuse_a_reserved_id(mcp_server_id)
             result = validate_mcp_server_id(mcp_server_id)
             if not result.valid:
                 logger.warning("skipping_invalid_mcp_server_id", mcp_server_id=mcp_server_id)
@@ -819,6 +821,17 @@ def build_config(config: dict[str, Any]) -> _StagedConfig:
             with _naming(group_id):
                 _load_group_config(group_id, spec_dict)
     return staged
+
+
+def _refuse_a_reserved_id(mcp_server_id: Any) -> None:
+    """Refuse a server, group or member under an id Hangar uses internally (#2204).
+
+    Before the id validator, which skips an id it rejects with a warning: a
+    reserved id is refused instead, so the file is not put in force while
+    saying less than it does.
+    """
+    if mcp_server_id in RESERVED_MCP_SERVER_IDS:
+        raise ConfigurationError(reserved_mcp_server_id_message(mcp_server_id))
 
 
 @contextmanager
@@ -904,6 +917,7 @@ def _load_group_members(
             logger.warning("skipping_group_member_without_id", group_id=group_id)
             continue
 
+        _refuse_a_reserved_id(member_id)
         result = validate_mcp_server_id(member_id)
         if not result.valid:
             logger.warning("skipping_invalid_member_id", member_id=member_id)
