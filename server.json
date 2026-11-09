@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.mcp-hangar/hangar",
   "title": "MCP Hangar",
-  "description": "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT.",
+  "description": "The MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy.",
   "websiteUrl": "https://mcp-hangar.io",
   "repository": {
     "url": "https://github.com/mcp-hangar/mcp-hangar",
