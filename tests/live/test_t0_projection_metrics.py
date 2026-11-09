@@ -27,7 +27,7 @@ import pytest
 
 from tests._promql import PROJECTION_QUERIES, Scrape, evaluate, parse_scrape
 from tests.live import _group_support as gs
-from tests.live.conftest import _MATH_SERVER, _POLL_INTERVAL_S, _STARTUP_TIMEOUT_S, running_hangar
+from tests.live.conftest import _MATH_SERVER, running_hangar
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -39,6 +39,8 @@ logging:
   level: WARNING
 tool_access:
   mode: front_door
+  required_catalogue:
+    servers: [math]
 auth:
   enabled: true
   allow_anonymous: true
@@ -111,21 +113,14 @@ def front_door(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_FrontDoor]
         pytest.skip(f"could not seed tenant API keys: {exc}")
 
     config = _CONFIG.format(auth_db=str(auth_db), tenant=_TENANT, python=sys.executable, server=str(_MATH_SERVER))
-    with running_hangar(workdir, config) as hangar:
-        gateway = _FrontDoor(base_url=hangar.base_url, api_key=keys[_TENANT])
-        # HTTP liveness does not wait for the asynchronous catalogue warm-up.
-        # Establish readiness before the test's baseline scrape, so setup
-        # listings and the initial projection change do not enter its deltas.
-        deadline = time.monotonic() + _STARTUP_TIMEOUT_S
-        listed: list[str] = []
-        while time.monotonic() < deadline:
-            [listed] = gateway.list_times(1)
-            if _WITHDRAWN in listed:
-                break
-            time.sleep(_POLL_INTERVAL_S)
-        else:
-            pytest.fail(f"math catalogue did not warm: last listing={listed!r}\n{hangar.output()}")
-        yield gateway
+    # /health/live returns before the front-door warm-up has projected math.
+    # tools/list waits at most WARMUP_LIST_WAIT_S (5s) for that warm-up; a
+    # slower math backend answers with management tools only, so `power` is
+    # missing from the first listing (#2173). required_catalogue keeps
+    # /health/ready at 503 until math is on the projection; the harness waits
+    # on readiness instead of polling tools/list.
+    with running_hangar(workdir, config, wait_for_ready=True) as hangar:
+        yield _FrontDoor(base_url=hangar.base_url, api_key=keys[_TENANT])
 
 
 def _value(scrape: Scrape, sample: str, **labels: str) -> float:

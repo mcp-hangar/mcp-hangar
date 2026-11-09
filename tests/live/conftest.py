@@ -94,17 +94,26 @@ class RunningHangar:
 
 @contextmanager
 def running_hangar(
-    workdir: Path, config_text: str, env: dict[str, str] | None = None, binary: str | None = None
+    workdir: Path,
+    config_text: str,
+    env: dict[str, str] | None = None,
+    binary: str | None = None,
+    *,
+    wait_for_ready: bool = False,
 ) -> Iterator[RunningHangar]:
     """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
-    config into ``workdir``, binds a free loopback port, polls ``/health/live``
-    until healthy, then yields and tears the process down on exit. ``env``, when
-    given, is the process's whole environment. Output goes to a file, not a pipe
-    nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
-    (never fails) if the server does not become healthy within the startup
-    budget; fails if the executable is missing or is not this checkout's.
+    config into ``workdir``, binds a free loopback port, polls until the process
+    is up, then yields and tears the process down on exit. By default it polls
+    ``/health/live``; when ``wait_for_ready`` is true it polls ``/health/ready``
+    until HTTP 200 instead (for example with ``tool_access.required_catalogue``,
+  which keeps readiness at 503 until the front door has projected the named
+    servers). Transient ``httpx.HTTPError`` responses are ignored while polling.
+    ``env``, when given, is the process's whole environment. Output goes to a
+    file, not a pipe nobody reads, so a chatty server cannot block on a full pipe.
+    Skips cleanly (never fails) if the server does not become healthy within the
+    startup budget; fails if the executable is missing or is not this checkout's.
     ``binary``, when given, is another `mcp-hangar` to run instead: a published
     release, for a replica set that mixes versions.
     """
@@ -125,6 +134,7 @@ def running_hangar(
         )
     hangar = RunningHangar(base_url=f"http://127.0.0.1:{port}", proc=proc, log_path=log_path)
 
+    probe_path = "/health/ready" if wait_for_ready else "/health/live"
     deadline = time.monotonic() + _STARTUP_TIMEOUT_S
     healthy = False
     try:
@@ -132,8 +142,7 @@ def running_hangar(
             if proc.poll() is not None:  # process exited before becoming healthy
                 break
             try:
-                # `serve --http` exposes liveness at /health/live (the operational probe).
-                if httpx.get(f"{hangar.base_url}/health/live", timeout=1.0).status_code == 200:
+                if httpx.get(f"{hangar.base_url}{probe_path}", timeout=1.0).status_code == 200:
                     healthy = True
                     break
             except httpx.HTTPError:
