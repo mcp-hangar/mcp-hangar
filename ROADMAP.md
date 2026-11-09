@@ -3,84 +3,112 @@
 > **Maintainer:** [@mapyr](https://github.com/mapyr)
 >
 > This document is the **product strategy and positioning** for MCP Hangar: what it is,
-> the principles that govern how it is built, and what it will deliberately never become.
-> It is intentionally stable and rarely changes.
+> who it is for, the principles that govern how it is built, and what it will deliberately
+> never become. It is intentionally stable and rarely changes.
 >
 > **Delivery status and near-term plans live elsewhere** — what has shipped is in
 > [CHANGELOG.md](CHANGELOG.md), and forward-looking work is tracked as
-> [GitHub issues and milestones](https://github.com/mcp-hangar/mcp-hangar/issues)
-> (epics carry the full scope, e.g. per-tenant tool projection and the OAuth Resource
-> Server handshake). This file is not a delivery tracker and should not accumulate
-> per-release status tables.
+> [GitHub issues and milestones](https://github.com/mcp-hangar/mcp-hangar/issues).
+> This file is not a delivery tracker and should not accumulate per-release status tables.
 
 ## Vision
 
 MCP Hangar is **the MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy**.
 
-Every organization deploying MCP servers in production faces the same question: *"What are my agents actually doing with
-these tools?"* MCP Hangar answers it — lifecycle management, behavioral governance, identity-aware audit trails, and
-runtime security enforcement in a single deployable control plane.
+In MCP, the tool list is a hint the client caches; the call path is the only surface a gateway mediates in real
+time. Hangar sits on that path and gives every call three things:
 
-The primary battlefield is Kubernetes. Docker remains a first-class local and transitional deployment target, but new
-governance and enforcement work should be designed for the Kubernetes ecosystem first and then adapted to Docker where
-practical.
+- **A deterministic verdict.** Allow, deny or hold for approval, decided from declared policy: tool access lists,
+  per-tenant tool projection, digest pins and L7 egress rules. No anomaly scores and no learned baselines, so every
+  verdict is reproducible from the policy that produced it.
+- **Tool-contract integrity.** A tool whose `name`, `description`, `inputSchema` or `outputSchema` no longer matches
+  its pin is withheld instead of quietly serving a different tool (pins block by default), and
+  `mcp-hangar pin --check` reports the drift in CI.
+- **An attributable audit record.** A call is attributed to the principal it arrived with, and a refusal leaves an audit record that
+  `mcp-hangar why` can look up by correlation id and that the SIEM and OTLP exports carry.
 
-OpenTelemetry-compatible observability backends such as `OpenLIT`, `Langfuse`, Grafana, or other OTLP destinations can
-extend the visibility layer around Hangar. They are partners and integrations, not the product category Hangar is trying
-to become.
+Two parts of that promise need a step from whoever runs the gateway, and the product says so rather than implying
+otherwise:
 
-Composio connects agents to tools. Smithery helps you find servers. Glama hosts them. **Hangar makes sure they behave.**
+- **Pinning is opt-in.** `mcp-hangar init` records a pin for every tool of the servers it moves behind Hangar; a
+  hand-written config gets pins from `mcp-hangar pin --write`. A tool with no pin is served unpinned.
+- **Egress policy has two halves.** The tool and argument rules are pushed to core over its admin API, normally by
+  the Kubernetes operator from an `MCPEgressPolicy`, and core enforces them on every call. The network half, a
+  `NetworkPolicy` that limits what the server's pod can reach, is written by the operator and exists only on
+  Kubernetes.
 
-## Design Principles
+## Who it is for
 
-1. **Observe everything, trust nothing.** MCP servers are black boxes. Hangar treats them as untrusted workloads —
-   monitor behavior, enforce boundaries, audit everything.
-2. **Kubernetes-first, Docker-compatible.** Runtime security requires isolation and policy enforcement close to the
-   orchestrator. Kubernetes is the primary growth path. Docker remains important for local development, smaller
-   deployments, and compatibility. Stdio providers are supported but do not receive new security/governance investments.
-3. **Declare, then verify.** Servers declare what they need. Hangar verifies at runtime that they don't exceed those
-   declarations. Deviation = alert + block.
-4. **Open core, open telemetry.** The entire project is open source under MIT. All telemetry flows through OpenTelemetry into partner
-   backends such as OpenLIT, Langfuse, Grafana, or a standard OTEL Collector. No vendor lock-in on the observation path.
-   OTEL is a strategic integration interface, not a product pivot.
-5. **Governance over metrics.** Metrics, traces, and telemetry exist to support policy, verification, audit, and response.
-   Hangar is not trying to become a generic AI observability platform.
-6. **Work with the platform, not around it.** Operator-driven reconciliation, admission hooks, NetworkPolicy generation,
-   policy engines, and violation signals are the preferred implementation path for enforcement.
-7. **Enterprise-grade from day one.** RBAC, audit trails, API key rotation, OIDC — these aren't premium features bolted
-   on later. They're foundational.
+### Entry user: a developer with a client config
 
-## Licensing
+A developer with five to fifteen MCP servers in Claude Code, Cursor or Claude Desktop. The first value is a deny on
+drift, on their own servers, in about five minutes on one laptop: install, `mcp-hangar init -y`, restart the client,
+and a tool whose description changes underneath them is withheld. CI runs the README quickstart every day on a clean
+runner, and from `curl` to the withheld tool it takes about 40 seconds plus the client restarts.
 
-MCP Hangar is licensed under the [MIT License](LICENSE). The full source is always
-readable, auditable, and free to use, modify, and distribute without restriction.
+For this user stdio is the transport that matters. Over stdio the process that spawned Hangar is the trust boundary,
+so `auth.stdio.principal` declares the caller
+([ADR-026](https://mcp-hangar.io/docs/adr/ADR-026-stdio-is-an-authenticated-transport)), and pins, tool access
+lists, approvals and audit apply over stdio too.
 
----
+### Expansion user: a platform team with a fleet
 
-## What We Won't Build
+A platform team that needs identity, approvals and egress policy across many MCP servers and many callers, on
+Kubernetes. Core adds API-key and OIDC/JWT identity with role-based access, per-tenant tool projection that fails
+closed on unknown identity, and approvals attributed to a real principal. The operator runs container-mode servers,
+registers them in core, compiles `MCPEgressPolicy` into core's tool rules and writes the `NetworkPolicy` backstop.
 
-- **MCP server hosting.** Smithery, Glama, and Composio do this. We govern, we don't host.
-- **MCP server marketplace.** The official MCP Registry exists. We integrate with it, not replace it.
-- **LLM runtime.** Hangar sits between the agent and MCP servers. We don't run the model.
-- **Generic API gateway.** Hangar is purpose-built for MCP. Use Kong, Envoy, or Traefik for HTTP APIs.
-- **Generic AI observability platform.** Prompt hubs, playgrounds, broad model-eval suites, and vendor-specific
-  telemetry UX are useful adjacent tools, but not Hangar's product lane. We integrate with platforms such as OpenLIT
-  instead of trying to replace them.
-- **New stdio-focused security features.** Stdio remains supported, but future governance and enforcement investment is
-  centered on Kubernetes first and Docker second.
+That path works from the published charts. The
+[Kubernetes Quick Start](https://mcp-hangar.io/docs/getting-started/kubernetes-quickstart) goes from an empty kind
+cluster to a tool call refused by an `MCPEgressPolicy`, and a nightly job runs it as written against the published
+charts.
 
----
+The entry user and the expansion user run the same core package and the same policy model. Where other MCP gateways
+are stronger is listed, with sources, at [mcp-hangar.io/compare](https://mcp-hangar.io/compare).
+
+## Design principles
+
+1. **Deterministic over clever.** A verdict comes from policy a person wrote, never from a model, a score or a
+   learned baseline. If a decision cannot be explained by pointing at the rule that made it, it does not ship.
+2. **Fail closed at trust boundaries.** In front-door mode an unknown identity gets no tools, a drifted pin withholds
+   the tool, and HTTP on a non-loopback interface refuses to start without authentication. A claim in the docs must
+   match what the mechanism delivers.
+3. **Pin, then verify.** A tool's contract is the digest a person approved. Each listing and call is checked against
+   it, and a change is adopted only by writing a new pin.
+4. **Every call is attributable.** Identity is not a premium feature bolted on later. API keys, OIDC, roles and an
+   audit record with a principal are part of the base product: verified by key or token over HTTP when auth is on,
+   declared by the spawning process over stdio.
+5. **Laptop first, fleet ready.** The first contact is a developer's own client config. Kubernetes is where a fleet
+   grows, and the operator is how Hangar works with the platform there: reconciled custom resources and generated
+   network policy, not a parallel control loop.
+6. **Governance over metrics.** OpenTelemetry traces, Prometheus metrics and structured logs exist to support policy,
+   verification, audit and response. Telemetry leaves Hangar over open interfaces (OTLP and standard SIEM formats), so
+   any compatible backend can read it.
+
+## What we won't build
+
+- **MCP server hosting.** Hangar governs servers you run; it does not host them for you.
+- **MCP server marketplace.** The official MCP Registry exists. Hangar is listed in it and does not replace it.
+- **LLM runtime.** Hangar sits between the agent and its MCP servers. It does not run the model.
+- **Generic API gateway.** Hangar is purpose-built for MCP. HTTP APIs belong behind a general-purpose gateway.
+- **Generic AI observability platform.** Prompt hubs, playgrounds, model-eval suites and telemetry dashboards are
+  adjacent tools. Hangar exports to them instead of competing with them.
+- **ML guardrails or detection.** No prompt-injection classifiers, anomaly scoring or behavioral baselines in the
+  verdict path. A verdict that depends on a model is not reproducible, and reproducibility is the product.
+
+## License
+
+MCP Hangar is MIT-licensed: no open-core edition, no paid tier, no SaaS. Hangar is self-hosted only. The name and
+logo are licensed separately; see the [README](README.md#name-and-logo).
 
 ## Contributing
 
-We welcome contributions to the **MIT-licensed core**, especially in:
+Contributions are welcome, especially in:
 
-- Network policy templates for common MCP servers
+- `MCPEgressPolicy` and network policy templates for common MCP servers
 - Kubernetes operator enhancements
-- Admission / policy integration for Kubernetes
-- Violation and enforcement signal modeling
-- Detection rule packs for semantic analysis
-- Behavioral profiling improvements (core interfaces and contracts)
+- Client support for `mcp-hangar init`
+- Approval delivery channels, as installable entry points rather than vendor code in core
 - Documentation and guides
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
