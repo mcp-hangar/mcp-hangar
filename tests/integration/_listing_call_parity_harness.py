@@ -58,6 +58,9 @@ not arguments: an argument-dependent L7 refusal cannot be predicted from a name.
   list it;
 - ``hangar_details``, ``hangar_list`` and ``hangar_group_list`` show a caller
   only the members of ``pool`` a call from it may be routed to (#2019, #2155);
+- the server listings of ``hangar_list``, ``hangar_status`` and
+  ``hangar_health``, and ``hangar_start`` on ``pool``, show and count of
+  ``pool`` only those members, and ``gamma``, which no group owns (#2161);
 - every refusal is reported with its class: ``authorization`` (access policy,
   withdrawal, unknown name), ``digest`` (pin drift) or ``availability``.
   Approval is left out of the generator: a held call waits for an approver.
@@ -106,6 +109,9 @@ CATALOGUES[GROUP] = CATALOGUES[ALPHA]
 #: upstream is relayed, and the upstream's own not-found answer is its own text.
 UNKNOWN_TOOL, UNKNOWN_PROMPT, UNKNOWN_RESOURCE = "no_such_tool", "no_such_prompt", "doc://nowhere/none"
 
+#: The server listings a tenant is shown only what its calls may reach on (#2161).
+SERVER_LISTINGS = ("hangar_list_servers", "hangar_status_servers", "hangar_health_servers", "hangar_start_group")
+
 #: The surfaces each topology serves. The parent test parametrizes over these.
 SURFACES = {
     EGRESS: (
@@ -114,6 +120,7 @@ SURFACES = {
         "hangar_details_group",
         "hangar_list_group",
         "hangar_group_list_group",
+        *SERVER_LISTINGS,
         "hangar_call",
         "facade_invoke",
     ),
@@ -127,6 +134,7 @@ SURFACES = {
         "hangar_details_group",
         "hangar_list_group",
         "hangar_group_list_group",
+        *SERVER_LISTINGS,
         "flat_call",
         "prompts_get",
         "resources_read",
@@ -475,6 +483,9 @@ class Observed:
     details_members: dict[str, frozenset[str]] = field(default_factory=dict)
     #: (surface, tenant) -> the members of `pool` a group listing shows the tenant (#2155).
     listed_members: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
+    #: (surface, tenant) -> the servers a server listing shows, and the member count it reports for `pool` (#2161).
+    listed_servers: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
+    pool_counts: dict[tuple[str, str], Any] = field(default_factory=dict)
     tools_list: dict[str, frozenset[str]] = field(default_factory=dict)
     discover: dict[str, frozenset[str]] = field(default_factory=dict)
     prompts_list: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -560,6 +571,28 @@ def _pool_members(listing: Any) -> frozenset[str]:
     )
 
 
+def _observe_server_listings(gateway: Gateway, observed: Observed, tenant: str) -> None:
+    """What each server listing shows *tenant*: the server ids, and what it counts of `pool` (#2161)."""
+    listing = _structured(gateway.tool(tenant, "hangar_list", {}))
+    observed.listed_servers[("hangar_list_servers", tenant)] = frozenset(
+        str(s["mcp_server_id"]) for s in listing.get("mcp_servers") or []
+    )
+    status = _structured(gateway.tool(tenant, "hangar_status", {}))
+    observed.listed_servers[("hangar_status_servers", tenant)] = frozenset(
+        str(s["id"]) for s in status.get("mcp_servers") or []
+    )
+    observed.pool_counts[("hangar_status_servers", tenant)] = [
+        (g.get("total_members"), "circuit_open" in g) for g in status.get("groups") or [] if g.get("id") == GROUP
+    ]
+    health = _structured(gateway.tool(tenant, "hangar_health", {}))
+    observed.pool_counts[("hangar_health_servers", tenant)] = (
+        (health.get("mcp_servers") or {}).get("total"),
+        (health.get("groups") or {}).get("total_members"),
+    )
+    started = _structured(gateway.tool(tenant, "hangar_start", {"mcp_server": GROUP}))
+    observed.pool_counts[("hangar_start_group", tenant)] = started.get("total_members", started)
+
+
 def observe(gateway: Gateway, apply: Callable[[Governance], dict[str, Any]], topology: str, g: Governance) -> Observed:
     observed = Observed(topology=topology, reload=apply(g))
     _decisions(observed)
@@ -585,6 +618,7 @@ def observe(gateway: Gateway, apply: Callable[[Governance], dict[str, Any]], top
                 )
         for surface, tool in (("hangar_list_group", "hangar_list"), ("hangar_group_list_group", "hangar_group_list")):
             observed.listed_members[(surface, tenant)] = _pool_members(_structured(gateway.tool(tenant, tool, {})))
+        _observe_server_listings(gateway, observed, tenant)
         if topology != FRONT_DOOR:
             continue
         listing = gateway.post(tenant, "tools/list", {})
@@ -797,6 +831,38 @@ def _group_listing(surface: str) -> Callable[[Observed], list[str]]:
     return check_listing
 
 
+def _server_listing(surface: str) -> Callable[[Observed], list[str]]:
+    """A server listing shows a tenant `gamma`, which no group owns, and of `pool` only the members it may be routed to.
+
+    Every count it reports of `pool` is over those members (#2161). Hidden is
+    not refused: a call naming a member directly is decided by tool access.
+    """
+
+    def check_listing(o: Observed) -> list[str]:
+        problems = []
+        for tenant in TENANTS:
+            routed = set(o.candidates[tenant])
+            expected: Any = {
+                "hangar_status_servers": [(len(routed), False)],
+                "hangar_health_servers": (1 + len(routed), len(routed)),
+                "hangar_start_group": len(routed),
+            }.get(surface)
+            listed = o.listed_servers.get((surface, tenant))
+            if listed is not None and (listed & set(MEMBERS) != routed or GAMMA not in listed):
+                problems.append(
+                    f"{surface}: {tenant} is shown servers {sorted(listed)}; "
+                    f"a call from it may be routed to {sorted(routed)} of {GROUP}, and {GAMMA} stands alone"
+                )
+            if expected is not None and o.pool_counts[(surface, tenant)] != expected:
+                problems.append(
+                    f"{surface}: {tenant} is told {o.pool_counts[(surface, tenant)]} of {GROUP}; "
+                    f"expected {expected} over the {len(routed)} members it may be routed to"
+                )
+        return problems
+
+    return check_listing
+
+
 def _flat_listing(
     surface: str, kind: str, shown: Callable[[Observed, str], frozenset[str]]
 ) -> Callable[..., list[str]]:
@@ -857,6 +923,7 @@ CHECKS: dict[str, Callable[[Observed], list[str]]] = {
     "hangar_details_group": _hangar_details_group,
     "hangar_list_group": _group_listing("hangar_list_group"),
     "hangar_group_list_group": _group_listing("hangar_group_list_group"),
+    **{surface: _server_listing(surface) for surface in SERVER_LISTINGS},
     "tools_list": _flat_listing("tools_list", "tool", lambda o, t: o.tools_list[t]),
     "server_discover": _flat_listing("server_discover", "tool", lambda o, t: o.discover[t]),
     "prompts_list": _flat_listing("prompts_list", "prompt", lambda o, t: o.prompts_list[t]),

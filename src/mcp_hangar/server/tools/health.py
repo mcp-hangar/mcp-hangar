@@ -15,7 +15,8 @@ from ...observability.health import get_compliance_export_status
 from ..catalogue_readiness import catalogue_detail
 from ..context import get_context
 from ..validation import not_rate_limited, tool_error_hook, tool_error_mapper
-from .replica_view import observe_replica
+from .mcp_server import _caller_tenant_id
+from .replica_view import members_hidden_from, observe_replica
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,18 @@ def _aggregate_errors(result: dict[str, Any]) -> None:
         result["errors"][error_type] = result["errors"].get(error_type, 0) + int(sample.value)
 
 
+def _catalogue_for(catalogue: dict[str, Any], hidden: frozenset[str]) -> dict[str, Any]:
+    """The catalogue block without the ids of *hidden*, the group members a tenant is not shown (#2161)."""
+    if not hidden:
+        return catalogue
+    return {
+        **catalogue,
+        "required": [name for name in catalogue["required"] if name not in hidden],
+        "missing": [name for name in catalogue["missing"] if name not in hidden],
+        "not_retried": {sid: reason for sid, reason in catalogue["not_retried"].items() if sid not in hidden},
+    }
+
+
 def hangar_health() -> dict:
     """This replica's server and group health, from the snapshot `hangar_status` reads.
 
@@ -97,7 +110,9 @@ def hangar_health() -> dict:
     (#1380).
     """
     ctx = get_context()
-    view = observe_replica()
+    # A tenant's counts are over the servers and group members its calls may reach (#2161).
+    tenant_id = _caller_tenant_id()
+    view = observe_replica(tenant_id)
 
     group_state_counts: dict[str, int] = {}
     for group in view.groups:
@@ -125,7 +140,7 @@ def hangar_health() -> dict:
     # `/health/ready` leaves out because it answers without authentication (#1446).
     catalogue = catalogue_detail(ctx.repository)
     if catalogue is not None:
-        health["catalogue"] = catalogue
+        health["catalogue"] = _catalogue_for(catalogue, members_hidden_from(tenant_id))
     # The compliance (SIEM) file feed: a failing write makes this replica
     # degraded, and the calls it serves go unexported (#1701).
     compliance = get_compliance_export_status()
@@ -184,7 +199,9 @@ def register_health_tools(mcp: FastMCP) -> None:
             mcp_servers counts configured and hot-loaded servers on this replica.
             groups sums every group's healthy_count (members ready and in
             rotation) and members_in_rotation_count (members in rotation in any
-            state), as hangar_group_list reports them.
+            state), as hangar_group_list reports them. For a caller with a
+            tenant, both are over what it is shown: no group member its calls
+            may not be routed to.
 
         Example:
             hangar_health()

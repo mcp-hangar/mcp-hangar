@@ -75,8 +75,11 @@ def test_the_root_help_says_what_hangar_is():
     # category nobody searches for, in the vocabulary of the code.
     text = rendered([])
 
-    assert "policy enforcement plane" in text
+    # The one tagline (#1783), in its short form: the noun people search for
+    # ("MCP gateway") plus what only Hangar does.
+    assert "MCP gateway with tool pinning and approvals" in text
     assert "Production-grade" not in text
+    assert "policy enforcement plane" not in text
 
 
 def test_the_old_flag_spelling_still_works():

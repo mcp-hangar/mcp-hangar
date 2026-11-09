@@ -22,7 +22,7 @@ error_console = Console(stderr=True)
 # Create the main app
 app = typer.Typer(
     name="mcp-hangar",
-    help="MCP Hangar - the policy enforcement plane for your MCP servers",
+    help="MCP Hangar - MCP gateway with tool pinning and approvals",
     no_args_is_help=False,  # Allow running without args (defaults to serve)
     add_completion=True,
     rich_markup_mode="rich",
@@ -93,7 +93,7 @@ def main_callback(
         ),
     ] = False,
 ):
-    """MCP Hangar - the policy enforcement plane for your MCP servers.
+    """MCP Hangar - MCP gateway with tool pinning and approvals.
 
     Every tool call your client makes goes through one mediated path, where
     policy, digest pins and audit apply.
