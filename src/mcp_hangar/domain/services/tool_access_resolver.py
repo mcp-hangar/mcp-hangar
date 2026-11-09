@@ -105,6 +105,45 @@ def _scope_covers(scope_key: str, prefix: str) -> bool:
     return scope_key == prefix or scope_key.startswith(f"{prefix}:")
 
 
+#: The server id whose policy every merge reads as a floor (`_policy_merge`).
+GLOBAL_SERVER_ID = "_global"
+
+
+def _scope_reads_server(scope_key: str, server_id: str, mapping: Mapping[tuple[str, str], str]) -> bool:
+    """Could the cache entry at *scope_key* have read a server-scope policy of *server_id*?
+
+    The invalidation rule, as one predicate (#2203). A server-scope policy is
+    the server's own (``_mcp_server_policies``) or one of its per-tenant ones
+    (``_standalone_member_policies``). The merge reads one under:
+
+    - ``_global``: every scope, so every entry;
+    - ``mcp_server:{id}`` and its per-tenant forms: the standalone branch;
+    - ``group:{id}:...``: the group branch is asked with the group id as its
+      server id (``Target.policy_scopes``), so it reads the server-scope
+      policies registered under the group id;
+    - ``group:{g}:member:{id}...``: the member server, which the tenant policy
+      falls back to when the member has no mapping;
+    - ``group:{g}:member:{m}...`` where ``(g, m)`` maps to *id*.
+
+    Server and group ids hold no colon, so the segments are unambiguous where
+    they name a server. A key of a shape this does not know answers yes: an
+    entry dropped too often costs a recompute, one kept too long is a policy
+    not enforced.
+    """
+    if server_id == GLOBAL_SERVER_ID:
+        return True
+    head, _, rest = scope_key.partition(":")
+    if head == "mcp_server":
+        return rest.split(":", 1)[0] == server_id
+    if head == "group":
+        group_id, found, member_part = rest.partition(":member:")
+        if not found:
+            return True
+        member_id = member_part.split(":tenant:", 1)[0]
+        return server_id in (group_id, member_id, mapping.get((group_id, member_id)))
+    return True
+
+
 class ToolAccessResolver:
     """The registered access policies for every mcp_server, group and member.
 
@@ -180,8 +219,7 @@ class ToolAccessResolver:
             else:
                 self._mcp_server_policies[(mcp_server_id, kind)] = policy
             self._config_keys["mcp_server"].discard((mcp_server_id, kind))
-            # Invalidate cache for this mcp_server
-            self._invalidate_mcp_server_cache(mcp_server_id)
+            self._invalidate_server_scope(mcp_server_id)
 
     def set_provider_policy(self, provider_id: str, policy: ToolAccessPolicy) -> None:
         """Legacy alias for set_mcp_server_policy."""
@@ -260,6 +298,9 @@ class ToolAccessResolver:
             if resolved_mcp_server_id:
                 self._member_mcp_server_mapping[(group_id, member_id)] = resolved_mcp_server_id
                 self._config_mapping_keys.discard((group_id, member_id))
+                # The mapping decides which server's policies the member reads,
+                # for every kind, so a changed one is stale for every kind.
+                self._pop_cache_scope(f"group:{group_id}:member:{member_id}")
 
             # Invalidate cache for this member, every tenant it was resolved for.
             self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=kind)
@@ -287,12 +328,9 @@ class ToolAccessResolver:
             else:
                 self._standalone_member_policies[key] = policy
             self._config_keys["standalone_member"].discard(key)
-            # Invalidate cache for this (server, member) pair. Also every group
-            # scope: the group branch merges this tenant policy too (#1164), so
-            # a group-scoped entry resolved for this tenant is now stale.
-            self._pop_cache_scope(f"mcp_server:{mcp_server_id}:member:{member_id}", kind=kind)
-            for stale in [k for k in self._policy_cache if k[1].endswith(f":tenant:{member_id}")]:
-                self._policy_cache.pop(stale, None)
+            # A per-tenant policy is a server-scope policy: the group branch
+            # merges it too (#1164), under the group id and the member server.
+            self._invalidate_server_scope(mcp_server_id)
 
     def iter_registered_policies(self, *, kind: PolicyKind | None = None) -> list[tuple[str, ToolAccessPolicy]]:
         """Return every registered policy as ``(scope_description, policy)``.
@@ -377,8 +415,7 @@ class ToolAccessResolver:
             for member_key in [k for k in self._standalone_member_policies if k[0] == mcp_server_id]:
                 self._standalone_member_policies.pop(member_key, None)
                 self._config_keys["standalone_member"].discard(member_key)
-            # Already drops every `mcp_server:<id>:member:` entry too.
-            self._invalidate_mcp_server_cache(mcp_server_id)
+            self._invalidate_server_scope(mcp_server_id)
 
     def remove_provider_policy(self, provider_id: str) -> None:
         """Legacy alias for remove_mcp_server_policy."""
@@ -415,7 +452,9 @@ class ToolAccessResolver:
             for key in [k for k in self._member_policies if k[:2] == (group_id, member_id)]:
                 self._member_policies.pop(key, None)
                 self._config_keys["member"].discard(key)
-                self._pop_cache_scope(f"group:{group_id}:member:{member_id}", kind=cast(PolicyKind, key[2]))
+            # Every kind, after the loop: a member with a mapping and no policy
+            # of its own still read the mapped server's policies (#2203).
+            self._pop_cache_scope(f"group:{group_id}:member:{member_id}")
             self._member_mcp_server_mapping.pop((group_id, member_id), None)
             self._config_mapping_keys.discard((group_id, member_id))
 
@@ -433,7 +472,7 @@ class ToolAccessResolver:
                 self._policy_cache.clear()
                 logger.debug("tool_access_cache_invalidated_all")
             else:
-                self._invalidate_mcp_server_cache(mcp_server_id)
+                self._invalidate_server_scope(mcp_server_id)
                 logger.debug("tool_access_cache_invalidated", extra={"mcp_server_id": mcp_server_id})
 
     def _pop_cache_scope(self, prefix: str, *, kind: PolicyKind | None = None) -> None:
@@ -441,25 +480,17 @@ class ToolAccessResolver:
         for key in [k for k in self._policy_cache if (kind is None or k[0] == kind) and _scope_covers(k[1], prefix)]:
             self._policy_cache.pop(key, None)
 
-    def _invalidate_mcp_server_cache(self, mcp_server_id: str) -> None:
-        """Invalidate cache entries related to a mcp_server.
+    def _invalidate_server_scope(self, mcp_server_id: str) -> None:
+        """Drop every cache entry that read a server-scope policy of *mcp_server_id*.
 
+        The one invalidation for every writer and remover of a server's own or
+        per-tenant policies (#2203); the rule is :func:`_scope_reads_server`.
         Must be called with lock held. Every kind is dropped: cheaper than
         tracking which one changed, and a stale entry for another kind is the
         kind of bug that only shows up under a reload.
         """
-        # The direct mcp_server cache, plus standalone server→member entries.
-        stale = {f"mcp_server:{mcp_server_id}"}
-        stale |= {k[1] for k in self._policy_cache if k[1].startswith(f"mcp_server:{mcp_server_id}:member:")}
-
-        # Any group member caches that reference this mcp_server.
-        stale |= {
-            f"group:{group_id}:member:{member_id}"
-            for (group_id, member_id), mapped in self._member_mcp_server_mapping.items()
-            if mapped == mcp_server_id
-        }
-
-        for key in [k for k in self._policy_cache if any(_scope_covers(k[1], s) for s in stale)]:
+        mapping = self._member_mcp_server_mapping
+        for key in [k for k in self._policy_cache if _scope_reads_server(k[1], mcp_server_id, mapping)]:
             self._policy_cache.pop(key, None)
 
     def _invalidate_group_cache(self, group_id: str) -> None:
