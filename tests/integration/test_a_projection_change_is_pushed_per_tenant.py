@@ -134,6 +134,12 @@ async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification
     channels = [_listen(TENANT_A) for _ in range(3)] + [_listen(TENANT_B)]
     registry = get_tool_projection_registry()
 
+    # track_listing opened a comparison window; drain it so the storm's window
+    # comes only from _on_projection_changed, not leftover _pending state.
+    windows.pop()()
+    await asyncio.gather(*tool_list_changed._tasks)
+    assert [channel.notified for channel in channels] == [0, 0, 0, 0]
+
     def storm() -> None:
         for n in range(40):
             registry.build_from_tools(f"shelf-{n}", [_tool(f"shelf_item_{n}")])
