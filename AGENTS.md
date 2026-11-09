@@ -1,6 +1,6 @@
 # mcp-hangar -- Python Core Platform
 
-> DDD/CQRS runtime security and governance layer for MCP servers. Published to PyPI as `mcp-hangar`.
+> The MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy. A DDD/CQRS core, published to PyPI as `mcp-hangar`.
 
 ## Quick Reference
 
