@@ -193,6 +193,19 @@ class TestToolAccessResolverCache:
         assert may(resolver, target, "read") is (initial_mode != "egress")
         assert may(resolver, target, "read", Caller(tenant_id="tenant"))
 
+    def test_group_without_member_uses_distinct_cache_key(self, resolver):
+        """A group with no member must not share a cache entry with a same-named server."""
+        resolver.set_topology_mode("egress")
+        resolver.set_mcp_server_policy("pool", ToolAccessPolicy(allow_list=("ok",)))
+        resolver.set_group_policy("pool", ToolAccessPolicy(deny_list=("ok",)))
+
+        server_effective = _policy_merge.resolve_effective_policy(resolver, "pool")
+        group_effective = _policy_merge.resolve_effective_policy(resolver, "pool", group_id="pool")
+        assert server_effective.is_tool_allowed("ok")
+        assert not group_effective.is_tool_allowed("ok")
+        assert ("tool", "mcp_server:pool") in resolver._policy_cache
+        assert ("tool", "group:pool") in resolver._policy_cache
+
     def test_cache_hit(self, resolver):
         """Second call should use cached policy."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))

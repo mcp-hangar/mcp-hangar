@@ -67,6 +67,8 @@ def resolve_effective_policy(
         scope_key = f"group:{group_id}:member:{member_scope}"
         if member_id:
             scope_key = f"{scope_key}:tenant:{member_id}"
+    elif group_id:
+        scope_key = f"group:{group_id}"
     elif member_id and not group_id:
         scope_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
     else:
