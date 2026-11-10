@@ -39,6 +39,7 @@ from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, Discover
 from mcp_hangar.domain.events import McpServerDiscoveryConfigChanged
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.services.fleet_snapshot import snapshot_of
 from mcp_hangar.domain.value_objects.provenance import DiscoveryOrigin, Provenance
 from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.infrastructure.persistence.fleet_writer import RepositoryFleetWriter
@@ -105,12 +106,26 @@ class _Source(DiscoverySource):
         super().__init__(mode=mode)
         self.names: set[str] = set()
         self.variant = ""
+        #: Set, each name is reported as a remote server at this address, as a pod is.
+        self.address = ""
 
     @property
     def source_type(self) -> str:
         return "filesystem"
 
     async def discover(self) -> list[DiscoveredMcpServer]:
+        if self.address:
+            return [
+                DiscoveredMcpServer.create(
+                    name=name,
+                    source_type="filesystem",
+                    mode="http",
+                    connection_info={"endpoint": f"http://{self.address}:8080/mcp"},
+                    metadata={"runtime_addresses": [self.address]},
+                    ttl_seconds=TTL,
+                )
+                for name in sorted(self.names)
+            ]
         return [
             DiscoveredMcpServer.create(
                 name=name,
@@ -502,6 +517,71 @@ class TestTheRowFollowsTheServer:
             after.discovered_as.fingerprint == first.orchestrator._lifecycle_manager.get_mcp_server("moved").fingerprint
         )
         assert after.command == ["python", "-m", "moved-v2"]
+
+    async def test_one_back_at_a_new_address_after_its_deregistration_did_not_apply_runs_there(
+        self, durable, monkeypatch
+    ) -> None:
+        gateway = durable.boot()
+        gateway.source.address = "10.0.0.5"
+        gateway.source.names = {"moved"}
+        await gateway.tick(0)
+        assert snapshot_of(gateway.repo.get("moved")).endpoint == "http://10.0.0.5:8080/mcp"
+
+        # The source stops reporting it, and the deletion is refused: the
+        # instance holds no lease on storage peers share, say. The server stays
+        # registered, with its origin recorded, and is no longer tracked.
+        monkeypatch.setattr(gateway.writer, "_lease_provider", lambda: None)
+        gateway.source.names = set()
+        await gateway.run_past_the_ttl()
+        assert gateway.repo.get("moved") is not None
+        assert not gateway.orchestrator.is_tracking("moved")
+
+        # It comes back under the same name, at another address.
+        gateway.source.address = "10.0.0.9"
+        gateway.source.names = {"moved"}
+        await gateway.tick()
+
+        running = snapshot_of(gateway.repo.get("moved"))
+        row = durable.row("moved")
+        assert row is not None and row.discovered_as is not None
+        for definition in (running, row):
+            assert definition.endpoint == "http://10.0.0.9:8080/mcp"
+            assert definition.runtime_addresses == frozenset({"10.0.0.9"})
+        tracked = gateway.orchestrator._lifecycle_manager.get_mcp_server("moved")
+        assert row.discovered_as.fingerprint == tracked.fingerprint
+
+    async def test_one_back_with_a_definition_that_is_refused_is_not_recorded_as_running_it(
+        self, durable, monkeypatch
+    ) -> None:
+        gateway = durable.boot()
+        gateway.source.address = "10.0.0.5"
+        gateway.source.names = {"moved"}
+        await gateway.tick(0)
+        before = durable.row("moved")
+        assert before is not None and before.discovered_as is not None
+
+        monkeypatch.setattr(gateway.writer, "_lease_provider", lambda: None)
+        gateway.source.names = set()
+        await gateway.run_past_the_ttl()
+
+        # Back at an address the runtime does not vouch for: the SSRF check refuses it.
+        monkeypatch.setattr(bootstrap_discovery, "_runtime_addresses_of", lambda _s: None)
+        gateway.source.address = "10.0.0.9"
+        gateway.source.names = {"moved"}
+        await gateway.tick()
+
+        row = durable.row("moved")
+        assert row is not None and row.discovered_as is not None
+        assert row.endpoint == "http://10.0.0.5:8080/mcp"
+        assert row.discovered_as.fingerprint == before.discovered_as.fingerprint
+        assert gateway.commands.of(AdoptDiscoveredMcpServerCommand) == []
+
+        # Still governed by its source: once it is no longer reported, it goes.
+        monkeypatch.setattr(gateway.writer, "_lease_provider", None)
+        gateway.source.names = set()
+        await gateway.run_past_the_ttl()
+        assert gateway.repo.get("moved") is None
+        assert durable.row("moved") is None
 
     async def test_a_server_re_pointed_over_the_api_is_recorded_without_its_origin(self, durable) -> None:
         first = durable.boot()

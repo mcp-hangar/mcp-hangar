@@ -75,12 +75,25 @@ def short_bound() -> Iterator[None]:
         yield
 
 
+_WARM_UP_THREADS = ("mcp-hangar-front-door-warmup", "mcp-hangar-catalogue-retry")
+
+
 @pytest.fixture
 def hung() -> Iterator[threading.Event]:
-    """Released by the test, or at teardown, so no thread outlives it."""
+    """Released by the test, or at teardown, and joined there, so no thread outlives it.
+
+    Released alone was not enough (#2215): a warm-up left running by design
+    finished during the next test, flushed that test's patched `flush_now` and
+    called `warmup_finished` on that test's warm-up, which ended its wait early.
+    """
+    before = set(threading.enumerate())
     release = threading.Event()
     yield release
     release.set()
+    started = [t for t in threading.enumerate() if t not in before and t.name in _WARM_UP_THREADS]
+    for thread in started:
+        thread.join(timeout=5)
+    assert not [t for t in started if t.is_alive()], "a warm-up thread outlived its test"
 
 
 def _runtime(registry: ToolProjectionRegistry, server_ids: list[str], hold: threading.Event | None = None) -> Any:

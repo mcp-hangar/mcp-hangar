@@ -381,16 +381,23 @@ class DiscoveryOrchestrator:
         if self.restored_servers is None or self._took_back_restored or not self._manages():
             return
         self._took_back_restored = True
-        taken = []
-        for mcp_server in self.restored_servers():
-            if self.is_tracking(mcp_server.name):
-                continue
-            self._conflict_resolver.register(mcp_server)
-            self._lifecycle_manager.add_mcp_server(mcp_server)
-            self._validator.record_registration(mcp_server)
-            taken.append(mcp_server.name)
+        taken = [mcp_server.name for mcp_server in self.restored_servers() if self.track_restored(mcp_server)]
         if taken:
             logger.info("discovery_restored_servers_tracked", mcp_server_ids=sorted(taken))
+
+    def track_restored(self, mcp_server: DiscoveredMcpServer) -> bool:
+        """Track a discovered server already in the fleet as the definition it runs; False if already tracked.
+
+        Its source's mode then governs it as if the source had just reported
+        it: removal once no longer reported, and a different report read as a
+        change to it.
+        """
+        if self.is_tracking(mcp_server.name):
+            return False
+        self._conflict_resolver.register(mcp_server)
+        self._lifecycle_manager.add_mcp_server(mcp_server)
+        self._validator.record_registration(mcp_server)
+        return True
 
     def _manages(self) -> bool:
         """Whether this instance holds the management lease, and the one place that asks (#2111).

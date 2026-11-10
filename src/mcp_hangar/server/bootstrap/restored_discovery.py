@@ -19,7 +19,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ...application.commands.crud_commands import AdoptDiscoveredMcpServerCommand
-from ...application.discovery import DiscoveryOrchestrator
+from ...application.discovery import DiscoveryChangeRefused, DiscoveryOrchestrator, DiscoveryServerGone
 from ...domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from ...domain.exceptions import McpServerNotFoundError, ValidationError
 from ...domain.value_objects.provenance import DiscoveryOrigin
@@ -72,6 +72,14 @@ def govern_restored_discovered_servers(
     is static. A changed definition of a server discovery tracks goes on as
     before.
 
+    A row that records its origin and is not tracked -- its deregistration did
+    not apply, say -- is taken back by its source the same way. When the
+    reported fingerprint is not the recorded one, the reported definition
+    replaces the running one, as a change to a tracked server does. It is never
+    adopted under the new fingerprint, which would leave the old definition
+    running while discovery took the new one as applied. A refused change
+    leaves it tracked as the definition it runs, so its source still governs it.
+
     Args:
         orchestrator: The orchestrator, its callbacks already set.
         repository: The fleet.
@@ -79,50 +87,108 @@ def govern_restored_discovered_servers(
     """
 
     def restored() -> list[DiscoveredMcpServer]:
-        servers = []
-        for name in repository.get_all_ids():
-            server = repository.get(name)
-            origin = getattr(server, "discovered_as", None) if _discovering_source(server) else None
-            if origin is None:
-                continue
-            servers.append(
-                DiscoveredMcpServer.restored(
-                    name=name,
-                    source_type=origin.source_type,
-                    mode=server.mode_str,
-                    fingerprint=origin.fingerprint,
-                    metadata={"namespace": origin.namespace} if origin.namespace else None,
-                    ttl_seconds=orchestrator.config.default_ttl_s,
-                )
-            )
-        return servers
+        ttl = orchestrator.config.default_ttl_s
+        servers = (_restored_one(name, repository.get(name), ttl) for name in repository.get_all_ids())
+        return [server for server in servers if server is not None]
 
     orchestrator.restored_servers = restored
 
     register = orchestrator.on_register
     if register is None:
         return
-    refused: set[tuple[str, str]] = set()
+    orchestrator.on_register = _TakeBack(orchestrator, repository, send, register).adopt_or_register
 
-    async def adopt_or_register(mcp_server: DiscoveredMcpServer) -> bool:
-        if _discovering_source(repository.get(mcp_server.name)) is None or orchestrator.is_tracking(mcp_server.name):
-            return await register(mcp_server)
+
+def _restored_one(name: str, server: Any, ttl_s: int) -> DiscoveredMcpServer | None:
+    """The definition a discovered server in the fleet runs, as its recorded origin says; None without one."""
+    origin = getattr(server, "discovered_as", None) if _discovering_source(server) else None
+    if origin is None:
+        return None
+    return DiscoveredMcpServer.restored(
+        name=name,
+        source_type=origin.source_type,
+        mode=server.mode_str,
+        fingerprint=origin.fingerprint,
+        metadata={"namespace": origin.namespace} if origin.namespace else None,
+        ttl_seconds=ttl_s,
+    )
+
+
+class _TakeBack:
+    """Answers a source's report of a discovered server that is in the fleet and not tracked."""
+
+    def __init__(
+        self,
+        orchestrator: DiscoveryOrchestrator,
+        repository: Any,
+        send: Callable[[Any], Any],
+        register: Callable[[DiscoveredMcpServer], Any],
+    ) -> None:
+        self._orchestrator = orchestrator
+        self._repository = repository
+        self._send = send
+        self._register = register
+        self._refused: set[tuple[str, str]] = set()
+
+    async def adopt_or_register(self, mcp_server: DiscoveredMcpServer) -> bool:
+        server = self._repository.get(mcp_server.name)
+        if _discovering_source(server) is None or self._orchestrator.is_tracking(mcp_server.name):
+            return bool(await self._register(mcp_server))
         origin = discovery_origin_of(mcp_server)
         if origin is None:
             return False
+        recorded = getattr(server, "discovered_as", None)
+        if (
+            recorded is not None
+            and recorded.source_type == origin.source_type
+            and recorded.fingerprint != origin.fingerprint
+        ):
+            return await self._apply_reported(mcp_server, origin)
         try:
-            send(AdoptDiscoveredMcpServerCommand(mcp_server_id=mcp_server.name, discovered_as=origin))
+            self._send(AdoptDiscoveredMcpServerCommand(mcp_server_id=mcp_server.name, discovered_as=origin))
         except (McpServerNotFoundError, ValidationError) as e:
-            # Repeated every cycle the source reports the name; said once.
-            if (mcp_server.name, origin.source_type) not in refused:
-                refused.add((mcp_server.name, origin.source_type))
-                logger.warning(
-                    "discovery_takeover_refused",
-                    mcp_server_name=mcp_server.name,
-                    source_type=origin.source_type,
-                    detail=str(e),
-                )
-            return False
+            return self._refuse_once(mcp_server, origin, str(e))
         return True
 
-    orchestrator.on_register = adopt_or_register
+    async def _apply_reported(self, mcp_server: DiscoveredMcpServer, origin: DiscoveryOrigin) -> bool:
+        """Replace the running server with the reported definition, which differs from the one it runs.
+
+        Adopting would record the reported fingerprint over the running
+        definition, and discovery would then take the definition as applied
+        and never apply it.
+        """
+        update = self._orchestrator.on_update
+        if update is None:
+            return self._keep_running(mcp_server, origin, "the reported definition cannot be applied")
+        try:
+            await update(mcp_server)
+        except DiscoveryChangeRefused as e:
+            return self._keep_running(mcp_server, origin, str(e))
+        except DiscoveryServerGone as e:
+            return self._refuse_once(mcp_server, origin, str(e))
+        logger.info("discovered_mcp_server_taken_back_changed", mcp_server_id=mcp_server.name)
+        return True
+
+    def _keep_running(self, mcp_server: DiscoveredMcpServer, origin: DiscoveryOrigin, detail: str) -> bool:
+        """Refuse the report, and track the server as the definition it runs.
+
+        Its source then still governs it: it goes once no longer reported, and
+        the next report is a change to it.
+        """
+        ttl = self._orchestrator.config.default_ttl_s
+        running = _restored_one(mcp_server.name, self._repository.get(mcp_server.name), ttl)
+        if running is not None:
+            self._orchestrator.track_restored(running)
+        return self._refuse_once(mcp_server, origin, detail)
+
+    def _refuse_once(self, mcp_server: DiscoveredMcpServer, origin: DiscoveryOrigin, detail: str) -> bool:
+        # Repeated every cycle the source reports the name; said once.
+        if (mcp_server.name, origin.source_type) not in self._refused:
+            self._refused.add((mcp_server.name, origin.source_type))
+            logger.warning(
+                "discovery_takeover_refused",
+                mcp_server_name=mcp_server.name,
+                source_type=origin.source_type,
+                detail=detail,
+            )
+        return False
