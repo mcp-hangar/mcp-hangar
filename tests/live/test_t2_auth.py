@@ -213,9 +213,24 @@ mcp_servers:
     idle_ttl_s: 60
 """
 
-# Privileged, permission-guarded operation: creating an mcp_server is INTENDED to
-# need `mcp_servers:write`, which `viewer` lacks and `developer` holds.
+# Privileged, permission-guarded operation: creating an mcp_server needs
+# `mcp_servers:write`, which `viewer` lacks and `developer` holds.
 _PRIVILEGED_CREATE_PATH = "/api/mcp_servers/"
+
+# The probe registers a REMOTE server, so `mcp_servers:write` is the only
+# permission it needs. A `subprocess` or `docker` server also needs
+# `mcp_servers:local_launch`, which `developer` deliberately lacks (#2025), so a
+# local-mode probe would deny the developer for a reason unrelated to the claim.
+# The `.invalid` TLD never resolves (RFC 6761): the registration-time SSRF check
+# has no address to judge and lets it through, and nothing dials it unless a
+# tool is called, so the probe has no network side effect and answers 201
+# deterministically.
+_PROBE_ENDPOINT = "https://rbac-probe.invalid/mcp"
+
+
+def _remote_create_body(probe_id: str) -> dict:
+    """A create body that needs `mcp_servers:write` and nothing else."""
+    return {"mcp_server_id": probe_id, "mode": "remote", "endpoint": _PROBE_ENDPOINT}
 
 
 @pytest.fixture(scope="module")
@@ -271,6 +286,10 @@ def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keyclo
       authentication -- the token itself is valid).
     * ``developer`` -> ``group:developers`` -> role ``developer``
       (``mcp_servers:write``): must be ALLOWED 201.
+    * the same ``developer`` registering a ``subprocess`` server: must be DENIED
+      403 with ``action == "local_launch"``. Running a command on the gateway
+      host needs ``mcp_servers:local_launch`` on top of write, which
+      ``developer`` does not hold (#2025).
 
     Both tokens authenticate successfully (valid signature, trusted issuer, tenant
     present), so only the assigned role decides the outcome -- proving enforcement
@@ -284,11 +303,7 @@ def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keyclo
     finding rather than fake a pass; when it IS denied the full invariant is
     asserted, so this test becomes a real PASS the moment the wiring is fixed.
     """
-    create_body = {
-        "mcp_server_id": "rbac-probe",
-        "mode": "subprocess",
-        "command": [sys.executable, "-c", "pass"],
-    }
+    create_body = _remote_create_body("rbac-probe")
 
     # Negative control: an unprivileged (viewer) principal attempts the write.
     viewer = keycloak_token(realm="mcp-hangar", username="viewer", password="view123")
@@ -333,6 +348,23 @@ def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keyclo
         timeout=10.0,
     )
     assert allowed.status_code == 201, allowed.text
+
+    # The same developer may not register a server the gateway would launch on
+    # its own host: write is not enough, local_launch is required (#2025).
+    local = httpx.post(
+        f"{hangar_rbac}{_PRIVILEGED_CREATE_PATH}",
+        headers={"Authorization": f"Bearer {developer}"},
+        json={
+            "mcp_server_id": "rbac-probe-local",
+            "mode": "subprocess",
+            "command": [sys.executable, "-c", "pass"],
+        },
+        timeout=10.0,
+    )
+    assert local.status_code == 403, local.text
+    local_err = local.json().get("error")
+    assert isinstance(local_err, dict) and local_err.get("code") == "AccessDeniedError", local.text
+    assert local_err.get("details", {}).get("action") == "local_launch", local.text
 
 
 # --- tool:invoke on the MCP hangar_call path (#385) ---------------------------
@@ -438,7 +470,7 @@ def _attempt_privileged_write(base_url: str, token: str, probe_id: str) -> int:
     """POST the guarded create as *token*; return the HTTP status."""
     return httpx.post(
         f"{base_url}{_PRIVILEGED_CREATE_PATH}",
-        json={"mcp_server_id": probe_id, "mode": "subprocess", "command": [sys.executable, "-c", "pass"]},
+        json=_remote_create_body(probe_id),
         headers={"Authorization": f"Bearer {token}"},
         timeout=15.0,
     ).status_code
