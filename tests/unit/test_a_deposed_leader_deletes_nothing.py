@@ -141,6 +141,28 @@ class TestWhoIsFenced:
             writer.delete("math", fenced=True)
         assert await _recovered(configs) == ["math"]
 
+    async def test_storage_no_peer_shares_is_not_fenced_while_holding_nothing(self, storage) -> None:
+        # A standalone gateway on its own SQLite file runs no keeper, so it holds
+        # no lease. It is still its own manager, and discovery's removal applies.
+        configs, _lease_store = storage
+        await configs.save(_snapshot("math"))
+
+        RepositoryFleetWriter(configs, lease_provider=lambda: None, shared_storage=lambda: False).delete(
+            "math", fenced=True
+        )
+
+        assert await _recovered(configs) == []
+
+    async def test_shared_storage_holding_nothing_still_refuses(self, storage) -> None:
+        configs, _lease_store = storage
+        await configs.save(_snapshot("math"))
+
+        writer = RepositoryFleetWriter(configs, lease_provider=lambda: None, shared_storage=lambda: True)
+
+        with pytest.raises(NotTheManagerError):
+            writer.delete("math", fenced=True)
+        assert await _recovered(configs) == ["math"]
+
     async def test_a_repository_that_cannot_fence_refuses_to_delete_unfenced(self) -> None:
         # Silently dropping the fence is worse than refusing: the deletion looks
         # like it worked, and the whole guarantee is gone with no sign of it.
@@ -234,3 +256,56 @@ class TestTheCallPath:
             assert lease._db_path == database.config.path
         finally:
             backend.close()
+
+
+@pytest.mark.asyncio
+class TestTheWriterBootstrapBuilds:
+    """The writer as `init_cqrs` builds it, before any lease keeper exists.
+
+    `init_cqrs` runs before `init_lease_keeper` on every backend, so the fence
+    cannot be decided by whether a keeper exists when the writer is built.
+    """
+
+    @pytest.fixture
+    def built(self, storage, monkeypatch):
+        from types import SimpleNamespace
+
+        from mcp_hangar.server.bootstrap import composition, coordination, cqrs
+
+        configs, _lease_store = storage
+        monkeypatch.setattr(coordination, "_keeper", None)
+        writers: list[RepositoryFleetWriter] = []
+
+        def build(backend: Any) -> RepositoryFleetWriter:
+            monkeypatch.setattr(composition, "_persistence_backend", backend)
+            writer = cqrs._fleet_writer(SimpleNamespace(config_repository=configs))
+            writers.append(writer)
+            return writer
+
+        yield configs, build
+        for writer in writers:
+            writer.close()
+
+    async def test_storage_peers_share_refuses_with_no_lease_held(self, built) -> None:
+        from types import SimpleNamespace
+
+        configs, build = built
+        await configs.save(_snapshot("math"))
+        writer = build(SimpleNamespace(shared_across_instances=True))
+
+        with pytest.raises(NotTheManagerError):
+            writer.delete("math", fenced=True)
+        assert await _recovered(configs) == ["math"]
+
+    @pytest.mark.parametrize("local", ["sqlite", "none"])
+    async def test_storage_one_process_owns_deletes(self, built, local) -> None:
+        from types import SimpleNamespace
+
+        configs, build = built
+        await configs.save(_snapshot("math"))
+        # "none" is the legacy `MCP_PERSISTENCE_ENABLED` file, with no backend selected.
+        writer = build(SimpleNamespace(shared_across_instances=False) if local == "sqlite" else None)
+
+        writer.delete("math", fenced=True)
+
+        assert await _recovered(configs) == []

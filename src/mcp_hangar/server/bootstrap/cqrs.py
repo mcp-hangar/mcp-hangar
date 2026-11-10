@@ -34,15 +34,31 @@ def _drain_in_flight_calls(mcp_server_id: str, timeout_s: float) -> bool:
 def _current_lease() -> Any:
     """The tenure this instance believes it holds, or None if it holds nothing.
 
-    None is meaningful: it means this instance is coordinating and is not the
-    manager right now, so a convergence loop's write must be refused. A gateway
-    with no keeper at all never reaches here -- `_fleet_writer` passes no
-    provider in that case, which is the standalone answer.
+    None is meaningful: on storage peers share, it means this instance is not
+    the manager right now, so a convergence loop's write must be refused. That
+    holds with no keeper too, since one is created after the writer is. On
+    storage no peer shares, the writer never asks: `_storage_is_shared` answers
+    first, and a standalone gateway is its own manager.
     """
     from .coordination import get_lease_keeper
 
     keeper = get_lease_keeper()
     return None if keeper is None else keeper.lease
+
+
+def _storage_is_shared() -> bool:
+    """Whether a convergence loop's deletion has to be fenced: only on storage peers share.
+
+    Asked per write, and of the selected backend rather than of the lease
+    keeper. The writer is built before the keeper exists on every backend, so
+    "is there a keeper" would read False on PostgreSQL too and leave a cluster
+    unfenced. The backend is chosen before the writer is built and never
+    changes. With none selected, the legacy SQLite file is one process's.
+    """
+    from ...infrastructure.persistence.registry import is_shared
+    from .composition import get_persistence_backend
+
+    return is_shared(get_persistence_backend())
 
 
 def _coordinated() -> bool:
@@ -78,7 +94,7 @@ def _fleet_writer(runtime: "Runtime") -> Any:
         return None
     # The lease is asked per write rather than captured here: a tenure that has
     # ended between bootstrap and the write is exactly the case being fenced.
-    writer = RepositoryFleetWriter(repository, lease_provider=_current_lease)
+    writer = RepositoryFleetWriter(repository, lease_provider=_current_lease, shared_storage=_storage_is_shared)
     close_at_shutdown(writer.close)
     logger.info("fleet_writer_configured", repository=type(repository).__name__)
     return writer
