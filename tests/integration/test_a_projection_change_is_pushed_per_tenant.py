@@ -140,11 +140,18 @@ async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification
     await asyncio.gather(*tool_list_changed._tasks)
     assert [channel.notified for channel in channels] == [0, 0, 0, 0]
 
+    landed = asyncio.Event()
+
     def storm() -> None:
         for n in range(40):
             registry.build_from_tools(f"shelf-{n}", [_tool(f"shelf_item_{n}")])
+        # Each change handed _schedule to the loop with call_soon_threadsafe.
+        # Those callbacks run in order, so one queued after them runs last.
+        # Returning from to_thread guarantees nothing about them.
+        loop.call_soon_threadsafe(landed.set)
 
     await asyncio.to_thread(storm)
+    await landed.wait()
 
     assert len(windows) == 1, "all registry changes must share the pending coalescing window"
     assert [channel.notified for channel in channels] == [0, 0, 0, 0]
