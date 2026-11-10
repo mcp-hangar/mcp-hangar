@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.1...v2.36.2) (2026-11-10)
+
+### Fixed
+
+- **core:** a server could be registered under `_global`, the id the tool access
+  resolver keeps the gateway-wide policy floor under, and would then share that
+  entry: a `hangar_load` with a tool list replaced the floor, and unloading the
+  server removed it. `_global` is now a reserved server id. `McpServerId` refuses
+  it, and the configuration file at startup, a reload and `hangar_load` refuse a
+  server, group or group member under it with an error that names the id. ([#2213](https://github.com/mcp-hangar/mcp-hangar/pull/2213))
+- **core:** a server-scope tool access policy set or removed at runtime did not
+  reach a caller whose effective policy was already cached. A provider policy on
+  `_global`, which every scope reads, and one on a group id, which every call
+  through that group reads, dropped only the cache entries that named that id,
+  so `POST /api/auth/policies/provider/<id>` left such a caller resolving against
+  the previous policy until a reload or restart. Removing a server's policies on
+  unload or reload missed the group entries of a member with no member policy of
+  its own, and removing a member policy missed a member that had a mapping but no
+  policy. Every writer and remover of a server's own or per-tenant policies now
+  invalidates through one rule that covers every scope reading the changed
+  policy. Merge order and semantics are unchanged ([#2214](https://github.com/mcp-hangar/mcp-hangar/pull/2214))
+- **core:** Fail-closed policy merge fixes that are not reachable from the served decision paths: cached effective policies are cleared when topology mode is set (once at startup; reload does not change it), group-member policies are looked up only when a member server is explicitly selected, never via the caller's tenant as an implicit member id, and a group with no member and no tenant no longer shares a cache key with a standalone server of the same id. No operator action on upgrade. ([#2196](https://github.com/mcp-hangar/mcp-hangar/pull/2196))
+- **core:** the `mcp_servers` section of `hangar_list`, and `hangar_status` and
+  `hangar_health`, listed every configured server to every tenant, the group
+  members declared at the top level of the configuration included, and the group
+  counts they and `hangar_start` on a group reported were whole-group. A tenant
+  pinned to one member of a group was shown the other members' ids and states.
+  For a caller with a tenant, a server listing now shows the servers no group
+  owns plus the group members its calls may be routed to; each group's
+  `total_members`, `healthy_count` and `members_in_rotation_count` are taken over
+  those members, `circuit_open` is left out, and the summaries count what is
+  shown; the required catalogue `hangar_health` reports names none of the hidden
+  members either. `hangar_start` on a group reports the same counts to a tenant, with
+  `members_started` the number of its members ready in rotation; every member is
+  still started. `hangar_group_rebalance` acts on the whole group, so a caller
+  with a tenant is refused with `AccessDeniedError`. A caller without a tenant,
+  and every caller with auth off, gets the output it got before. Hiding a member
+  from a listing refuses nothing: a call that names a member directly is still
+  decided by tool access alone ([#2200](https://github.com/mcp-hangar/mcp-hangar/pull/2200))
+
 ## [2.36.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.0...v2.36.1) (2026-11-04)
 
 ### Fixed
