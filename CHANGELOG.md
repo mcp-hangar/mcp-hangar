@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.2...v2.36.3) (2026-11-10)
+
+### Fixed
+
+- **release:** 2.36.2 was tagged but never published: a test of the
+  `tools/list_changed` coalescing window asserted before the callbacks it had
+  handed to the event loop had run, and failed in the release job under a newer
+  `pytest-asyncio`. The test now waits for them. 2.36.3 publishes everything
+  2.36.2 carried. No runtime change. ([#2217](https://github.com/mcp-hangar/mcp-hangar/pull/2217))
+
 ## [2.36.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.1...v2.36.2) (2026-11-10)
 
 ### Fixed
