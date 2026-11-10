@@ -83,6 +83,7 @@ FILES_THAT_TEST_THE_MERGE = frozenset(
         "integration/test_tool_filtering.py",
         "unit/_predicate_reachability_harness.py",
         "unit/_security_predicates.py",
+        "unit/domain/services/test_policy_cache_invalidation.py",
         "unit/domain/services/test_tool_access_resolver.py",
         "unit/test_a_group_call_asks_a_human_for_its_members_l7_rule.py",
         "unit/test_a_group_members_own_policy_reaches_the_verdict.py",

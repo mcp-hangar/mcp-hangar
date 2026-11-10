@@ -16,7 +16,8 @@
 
 ### One-liner
 
-**MCP Hangar is the runtime security and governance layer for MCP servers in production.**
+**MCP Hangar is the MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy.**
+(Decided 2026-11-08 in #1783; the candidates below are kept for history.)
 
 ### Positioning matrix
 

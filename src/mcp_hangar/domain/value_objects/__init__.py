@@ -56,6 +56,8 @@ from .log import LogLine
 
 # McpServer lifecycle and identity
 from .mcp_server import (
+    GLOBAL_POLICY_SCOPE_ID,
+    RESERVED_MCP_SERVER_IDS,
     GroupId,
     GroupState,
     LoadBalancerStrategy,
@@ -65,6 +67,7 @@ from .mcp_server import (
     McpServerState,
     MemberPriority,
     MemberWeight,
+    reserved_mcp_server_id_message,
 )
 
 # Security - Authentication & Authorization
@@ -100,6 +103,9 @@ __all__ = [
     "McpServerMode",
     "McpServerId",
     "McpServerConfig",
+    "GLOBAL_POLICY_SCOPE_ID",
+    "RESERVED_MCP_SERVER_IDS",
+    "reserved_mcp_server_id_message",
     "LoadBalancerStrategy",
     "GroupState",
     "GroupId",

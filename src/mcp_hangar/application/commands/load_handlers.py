@@ -22,7 +22,7 @@ from ...domain.model.mcp_server_config import parse_tools_access_config
 from ...domain.security.hot_load_trust import HotLoadTrust
 from ...domain.services import get_tool_access_resolver
 from ...domain.services.tool_access_resolver import is_front_door
-from ...domain.value_objects import ToolAccessPolicy
+from ...domain.value_objects import RESERVED_MCP_SERVER_IDS, ToolAccessPolicy, reserved_mcp_server_id_message
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
 from ...redactor import OutputRedactor
@@ -221,6 +221,18 @@ class LoadMcpServerHandler(CommandHandler):
             has_approval_list=bool(policy.approval_list),
         )
 
+    @staticmethod
+    def _refuse_a_reserved_id(*candidates: str) -> "LoadResult | None":
+        """Refuse a load that names, or would register a server under, an id Hangar uses internally."""
+        mcp_server_id = next((c for c in candidates if c in RESERVED_MCP_SERVER_IDS), None)
+        if mcp_server_id is None:
+            return None
+        return LoadResult(
+            status="failed",
+            mcp_server_id=mcp_server_id,
+            message=reserved_mcp_server_id_message(mcp_server_id),
+        )
+
     def _refuse_gating_without_a_gate(self, command: LoadMcpServerCommand) -> "LoadResult | None":
         """Refuse a load that would register an approval policy nothing enforces.
 
@@ -343,6 +355,14 @@ class LoadMcpServerHandler(CommandHandler):
                 )
 
             server = await self._find_server(command.name)
+
+            # The id registered is the registry entry's, sanitized, not the name
+            # asked for; both are checked. Before secrets, install and start, and
+            # before `_register_tool_policy`, which would otherwise write the
+            # gateway-wide floor (#2204).
+            reserved = self._refuse_a_reserved_id(sanitized_name, sanitize_mcp_server_id(server.id))
+            if reserved is not None:
+                return reserved
 
             warnings.extend(self._refuse_unless_verified(server, command, trust))
             warnings.extend(_front_door_warnings())
