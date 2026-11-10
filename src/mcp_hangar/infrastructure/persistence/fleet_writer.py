@@ -48,6 +48,7 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
         *,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         lease_provider: Callable[[], Lease | None] | None = None,
+        shared_storage: Callable[[], bool] | None = None,
     ) -> None:
         """Wrap an async config repository as a sync fleet writer.
 
@@ -62,11 +63,18 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
                 nothing, so a convergence loop's write must be refused rather
                 than let through unfenced. Conflating the two is how the window
                 between losing the lease and noticing gets left open.
+            shared_storage: Whether peers share the storage, asked per write.
+                False means no peer can hold a lease over this storage, so the
+                instance is its own manager and a convergence loop's write
+                needs no fence. Absent, `lease_provider` alone decides. It is
+                asked rather than inferred from the provider's answer: on
+                shared storage, holding no lease must still refuse the write.
         """
         self._repository = config_repository
         self._group_rows: Any = config_repository  # Both durable repositories keep the group rows too.
         self._timeout_s = timeout_s
         self._lease_provider = lease_provider
+        self._shared_storage = shared_storage
         self._loop = BackgroundLoop()
 
     def save(self, snapshot: McpServerConfigSnapshot) -> None:
@@ -101,7 +109,7 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
         database decides whether that belief is still true -- reading it here is
         not the check, it only supplies the claim.
         """
-        if not fenced or self._lease_provider is None:
+        if not fenced or self._lease_provider is None or not self._is_shared():
             self._loop.run(self._repository.delete(mcp_server_id), self._timeout_s)
             logger.debug("fleet_snapshot_deleted", mcp_server_id=mcp_server_id)
             return
@@ -135,6 +143,10 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
             generation=lease.generation,
             detail="the row was already absent, or this tenure had ended by the time the write reached the database",
         )
+
+    def _is_shared(self) -> bool:
+        """Whether a fenced write must prove a tenure: True unless the storage is known to be one process's."""
+        return True if self._shared_storage is None else bool(self._shared_storage())
 
     def create_group(self, record: GroupRecord) -> bool:
         return cast(bool, self._loop.run(self._group_rows.create_group(record), self._timeout_s))
