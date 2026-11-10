@@ -208,7 +208,7 @@ class TestApprovalListReachesThePolicy:
         )
 
         policy = _policy_merge.resolve_effective_policy(
-            get_tool_access_resolver(), "member-a", group_id="pool", member_id="member-a"
+            get_tool_access_resolver(), "member-a", group_id="pool", member_server_id="member-a"
         )
         assert policy.requires_approval("delete_everything") is True
 
@@ -232,7 +232,7 @@ class TestApprovalListReachesThePolicy:
         )
 
         policy = _policy_merge.resolve_effective_policy(
-            get_tool_access_resolver(), "member-a", group_id="pool", member_id="member-a"
+            get_tool_access_resolver(), "member-a", group_id="pool", member_server_id="member-a"
         )
         assert policy.requires_approval("risky_thing") is True
 

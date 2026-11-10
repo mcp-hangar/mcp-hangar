@@ -159,9 +159,12 @@ class ToolAccessResolver:
         """Initialize the resolver with empty caches."""
         self._lock = threading.RLock()
         # Cache key format: (kind, scope key), where scope key is
-        # - "mcp_server:{mcp_server_id}" for standalone mcp_servers
-        # - "group:{group_id}:member:{member_id}" for group members
-        # - "mcp_server:{mcp_server_id}:member:{member_id}" for standalone server→member
+        # - "mcp_server:{mcp_server_id}" for a standalone server
+        # - "mcp_server:{mcp_server_id}:member:{tenant_id}" for standalone per-tenant merge
+        # - "group:{group_id}" for a group with no member and no tenant selected
+        # - "group:{group_id}:member:{member_server_id}" when the routed member is known
+        # - "group:{group_id}:member::tenant:{tenant_id}" when only the tenant is known
+        # - "group:{group_id}:member:{member_server_id}:tenant:{tenant_id}" when both are known
         self._policy_cache: dict[tuple[str, str], ToolAccessPolicy] = {}
 
         # Policy sources - set by external config loader. Every key carries the
@@ -386,11 +389,9 @@ class ToolAccessResolver:
         """
         with self._lock:
             self._topology_mode = mode
-            # Invalidate the cache keyed without a member_id so the new
-            # mode is reflected immediately on the next resolve call.
-            keys_to_remove = [k for k in self._policy_cache if ":member:" not in k[1]]
-            for key in keys_to_remove:
-                self._policy_cache.pop(key, None)
+            # Group-member cache keys may also belong to unauthenticated
+            # callers, whose effective policy changes with the topology.
+            self._policy_cache.clear()
 
     def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
         """Remove EVERY access policy for a mcp_server -- tool, prompt and resource,
@@ -498,8 +499,7 @@ class ToolAccessResolver:
 
         Must be called with lock held.
         """
-        for key in [k for k in self._policy_cache if k[1].startswith(f"group:{group_id}:")]:
-            self._policy_cache.pop(key, None)
+        self._pop_cache_scope(f"group:{group_id}")
 
     def get_policy_summary(self, mcp_server_id: str) -> dict[str, Any]:
         """Get a summary of the tool policy for a mcp_server (for observability).
