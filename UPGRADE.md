@@ -1,5 +1,29 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.36.2
+
+### a tenant's server listings show fewer servers, and a tenant may not rebalance a group
+
+A caller whose principal has a tenant is no longer shown, in `hangar_list`,
+`hangar_status` or `hangar_health`, a group member its calls may not be routed
+to, and the group counts it reads there and from `hangar_start` on a group are
+over its reachable members only, with no `circuit_open`. `hangar_group_rebalance`
+now refuses such a caller with `AccessDeniedError`, whatever its role. An
+operator who reads the whole fleet, or rebalances a group, through a
+tenant-bound key uses a key without a tenant instead.
+
+### a configuration that declares a server named `_global` is refused
+
+`_global` is now a reserved server id. A configuration file whose
+`mcp_servers` section has a server, group or group member with the id
+`_global` used to start with that entry skipped and a warning
+(`skipping_invalid_mcp_server_id`, or `skipping_invalid_member_id` for a group
+member); startup and a reload now refuse the file with a `ConfigurationError`
+that names the id. Remove the entry or give it another id. `hangar_load`
+likewise refuses a registry entry whose sanitized id is `_global`. A
+gateway-wide policy set for `_global` through the tool access policy endpoint
+(scope `provider`) is not affected.
+
 ## Upgrade to 2.36.0
 
 ### Authorization, L7 and rate-limit refusals have a new first line
