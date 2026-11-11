@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.3...v2.36.4) (2026-11-11)
+
+### Fixed
+
+- **core:** a gateway that keeps its fleet in storage no peer shares
+  (`persistence.backend: sqlite`, or the older `MCP_PERSISTENCE_ENABLED`) never
+  removed a server discovery had registered. When the source stopped reporting it,
+  or its TTL ran out, the deletion was refused as if this gateway had lost a
+  management lease, which a gateway on such storage never holds. The server stayed
+  in the fleet and in its row, and came back on every restart. Such a deletion is
+  now fenced only on storage peers share, decided at each write. On PostgreSQL a
+  gateway that holds no lease still refuses it. A server an authoritative source
+  left behind this way is taken back at the next start and removed one TTL later,
+  with no action needed.
+- **core:** a discovered server that was still registered but no longer tracked
+  by discovery, for example because its deregistration did not apply, could come
+  back under the same name with a different definition. Discovery then recorded
+  the new definition's fingerprint but kept running the old one: a remote server
+  stayed at its old endpoint and address, a command or image stayed the old one,
+  and no later cycle corrected it. The reported definition now replaces the
+  running one, as a change to a tracked server does. A change that is refused
+  leaves the running server and its recorded fingerprint as they were, and the
+  server stays tracked, so it is still removed once its source stops reporting it.
+
 ## [2.36.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.2...v2.36.3) (2026-11-10)
 
 ### Fixed
