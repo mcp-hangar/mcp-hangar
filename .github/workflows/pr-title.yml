@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   pr-title:
-    uses: mcp-hangar/.github/.github/workflows/pr-title.yml@2ca382cad799aba046b435917ae322cb770db373 # main
+    uses: mcp-hangar/.github/.github/workflows/pr-title.yml@10a1c6b7ee1018f5e58abd85436fe44a035ac08e # main
     with:
       scopes: |
         core
