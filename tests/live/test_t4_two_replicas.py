@@ -498,6 +498,78 @@ def test_a_replica_whose_file_dropped_a_taken_over_server_does_not_restore_it_an
         assert system["dormant_file_claimed_rows"] == 1, system
 
 
+def test_a_replica_whose_file_dropped_a_taken_over_group_does_not_restore_it_and_a_peer_keeps_its_deny_list(
+    tmp_path: Path,
+) -> None:
+    """Two replicas on two files over one database: the holder claims the group's row, nothing deletes a row.
+
+    A group created over the API, with a server added to it over the API, is
+    taken over by the file of both replicas, which declares it with a deny list
+    and does not name the member. The lease holder claims the group's row and
+    leaves the member's, which the file does not name. B restarts on a file
+    that still declares the group and refuses the denied tool to the stored
+    member from its first call; A restarts on a file that dropped the group
+    and does not restore it.
+    """
+    address = tr.host_address()
+    if address is None:
+        pytest.skip("no non-loopback address to serve the upstreams on; the API refuses loopback endpoints")
+    server, group = tr.name("rest-member"), tr.name("taken-group")
+    with ExitStack() as stack:
+        database = stack.enter_context(tr.fresh_database(DSN))
+        keys = tr.seed_keys(database, list(_ROLES))
+        endpoint = stack.enter_context(tr.upstream(None, address, tmp_path))
+        empty = tr.replica_config(database, address, _ROLES)
+        declares = empty.replace(
+            "mcp_servers: {}",
+            f"mcp_servers:\n  {group}:\n    mode: group\n    auto_start: false\n    members: []\n"
+            "    tools:\n      deny_list: [echo]",
+        )
+
+        def replica(label: str, config: str, stack: ExitStack) -> tr.Replica:
+            (tmp_path / label).mkdir()
+            hangar = stack.enter_context(running_hangar(tmp_path / label, config))
+            return tr.Replica(label=label, base_url=hangar.base_url, keys=keys)
+
+        def claims() -> dict[str | None, int | None]:
+            rows = database.query("SELECT NULL, claimed_by_file FROM mcp_server_groups WHERE group_id = %s", (group,))
+            rows += database.query(
+                "SELECT member_id, claimed_by_file FROM mcp_server_group_members WHERE group_id = %s", (group,)
+            )
+            return {member: claimed for member, claimed in rows}
+
+        with ExitStack() as seeding:
+            seed = replica("seed", empty, seeding)
+            created = seed.create(OP, {"mcp_server_id": server, "mode": "remote", "endpoint": endpoint})
+            assert created.status_code == 201, created.text
+            made = seed.api("POST", "/groups/", ADMIN, {"group_id": group, "strategy": "round_robin"})
+            assert made.status_code == 201, made.text
+            joined = seed.api("POST", f"/groups/{group}/members", ADMIN, {"member_id": server})
+            assert joined.status_code in (200, 201), joined.text
+        assert claims() == {None: None, server: None}, "the API's rows started claimed"
+
+        with ExitStack() as a_running:
+            replica("a", declares, a_running)
+            with ExitStack() as b_running:
+                replica("b", declares, b_running)
+                tr.eventually(
+                    lambda: True if claims().get(None) == 1 else None,
+                    "the lease holder claims the group row its file took over",
+                    timeout=60,
+                )
+            b_again = replica("b-again", declares, stack)
+            result = b_again.call(DEV, server)
+            assert result.get("success") is False and result.get("error_type") == _DENIED, (
+                f"B, restarted on a file that declares the group, served the denied tool to its member: {result}"
+            )
+        a_again = replica("a-again", empty, stack)
+        assert _group(a_again, group) is None, "A, restarted on a file without the group, restored it"
+        _assert_served(a_again.call(DEV, server), "A, where the server is outside any group")
+        assert claims() == {None: 1, server: None}, "a row a peer restores from was deleted or claimed"
+        system = a_again.api("GET", "/system/", OP).json()["system"]["instance"]
+        assert system["dormant_file_claimed_rows"] == 1, system
+
+
 # --- mixed versions ------------------------------------------------------------------
 
 

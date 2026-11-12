@@ -3,7 +3,6 @@
 Provides both in-memory and SQLite implementations of IMcpServerConfigRepository.
 """
 
-import dataclasses
 import json
 import sqlite3
 import threading
@@ -689,28 +688,39 @@ class SQLiteMcpServerConfigRepository:
         try:
             async with self._db.connection() as conn:
                 groups = await conn.execute_fetchall(
-                    "SELECT group_id, strategy, min_healthy, description FROM mcp_server_groups ORDER BY group_id"
+                    "SELECT group_id, strategy, min_healthy, description, claimed_by_file FROM mcp_server_groups "
+                    "ORDER BY group_id"
                 )
                 members = await conn.execute_fetchall(
-                    "SELECT group_id, member_id, weight, priority FROM mcp_server_group_members "
+                    "SELECT group_id, member_id, weight, priority, claimed_by_file FROM mcp_server_group_members "
                     "ORDER BY group_id, member_id"
                 )
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             raise PersistenceError(f"Failed to read the stored groups: {e}") from e
         return StoredGroups(
-            tuple(GroupRecord(*tuple(row)) for row in groups), tuple(GroupMemberRecord(*tuple(row)) for row in members)
+            tuple(GroupRecord(g, s, n, d, bool(claimed)) for g, s, n, d, claimed in groups),
+            tuple(GroupMemberRecord(g, m, w, p, bool(claimed)) for g, m, w, p, claimed in members),
         )
 
     async def create_group(self, record: GroupRecord) -> bool:
-        """Store a new group, without any member rows a dropped group of that id left. False when a row exists."""
+        """Store a new group, without any member rows a dropped group of that id left. False when a row exists.
+
+        A row a file claimed is replaced, unclaimed (#2171): the handler creates
+        only a group this replica's file does not declare, so that row is dormant
+        here. Its member rows stay, since a peer whose file still declares the
+        group restores them.
+        """
         stale = (
             "DELETE FROM mcp_server_group_members WHERE group_id = ? "
             "AND NOT EXISTS (SELECT 1 FROM mcp_server_groups WHERE group_id = ?)"
         )
         insert = (
-            "INSERT OR IGNORE INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (?, ?, ?, ?)"
+            "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (group_id) DO UPDATE SET strategy = excluded.strategy, min_healthy = excluded.min_healthy, "
+            "description = excluded.description, claimed_by_file = NULL WHERE mcp_server_groups.claimed_by_file = 1"
         )
-        statements = (stale, (record.group_id, record.group_id)), (insert, dataclasses.astuple(record))
+        values = (record.group_id, record.strategy, record.min_healthy, record.description)
+        statements = (stale, (record.group_id, record.group_id)), (insert, values)
         return bool(await self._write_group_rows(*statements))
 
     async def update_group(
@@ -724,12 +734,39 @@ class SQLiteMcpServerConfigRepository:
         await self._write_group_rows((sql, (strategy, min_healthy, description, group_id)))
 
     async def save_group_member(self, record: GroupMemberRecord) -> None:
-        """Store a member, replacing an earlier row of that group and member."""
+        """Store a member, replacing an earlier row of that group and member, and any claim on it (#2171).
+
+        The group API adds only a member the group does not hold, so a claimed
+        row it replaces is one the file in force no longer names here.
+        """
         sql = (
             "INSERT OR REPLACE INTO mcp_server_group_members (group_id, member_id, weight, priority) "
             "VALUES (?, ?, ?, ?)"
         )
-        await self._write_group_rows((sql, dataclasses.astuple(record)))
+        await self._write_group_rows((sql, (record.group_id, record.member_id, record.weight, record.priority)))
+
+    async def claim_group_row_for_file(
+        self, group_id: str, member_id: str | None = None, lease: tuple[str, int] | None = None
+    ) -> bool:
+        """Mark a group's row, or with *member_id* a member's, as claimed by the file (#2171).
+
+        One conditional statement, fenced as `claim_for_file` is. Only the claim
+        column is written, so no other change can be lost: a row deleted
+        meanwhile matches nothing and stays deleted.
+
+        Returns:
+            True if the row was claimed, False when nothing matched.
+        """
+        table, keys = "mcp_server_groups", "group_id = ?"
+        params: tuple[Any, ...] = (group_id,)
+        if member_id is not None:
+            table, keys, params = "mcp_server_group_members", "group_id = ? AND member_id = ?", (group_id, member_id)
+        fence = ""
+        if lease is not None:
+            fence = "AND EXISTS (SELECT 1 FROM management_lease WHERE name = ? AND holder = ? AND generation = ?)"
+            params = (*params, FLEET_MANAGEMENT, *lease)
+        sql = f"UPDATE {table} SET claimed_by_file = 1 WHERE {keys} AND claimed_by_file IS NULL {fence}"
+        return bool(await self._write_group_rows((sql, params)))  # Constants only; every value is a parameter.
 
     async def delete_group(self, group_id: str) -> None:
         """Remove a group's row, if any, and every member row under its id."""

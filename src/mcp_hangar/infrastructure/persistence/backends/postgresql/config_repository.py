@@ -9,7 +9,6 @@ the same mcp_server must get the same `ConcurrentModificationError`, on the
 same conditions, on either backend.
 """
 
-import dataclasses
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -71,6 +70,11 @@ CREATE TABLE IF NOT EXISTS mcp_server_group_members (
     priority INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (group_id, member_id)
 );
+
+-- Whether a configuration file declared the group, or named the member in it
+-- (#2171). An older release ignores the column; its inserts leave it NULL.
+ALTER TABLE mcp_server_groups ADD COLUMN IF NOT EXISTS claimed_by_file INTEGER;
+ALTER TABLE mcp_server_group_members ADD COLUMN IF NOT EXISTS claimed_by_file INTEGER;
 
 -- A live row under a recorded name carries the recorded key_ref (#1987). This
 -- release's writes already do; the trigger binds a release that predates the
@@ -770,28 +774,38 @@ class PostgresMcpServerConfigRepository:
     async def read_groups(self) -> StoredGroups:
         """Every stored group and member, in one transaction."""
         _, (groups, members) = self._group_rows(
-            ("SELECT group_id, strategy, min_healthy, description FROM mcp_server_groups ORDER BY group_id", ()),
             (
-                "SELECT group_id, member_id, weight, priority FROM mcp_server_group_members "
+                "SELECT group_id, strategy, min_healthy, description, claimed_by_file FROM mcp_server_groups "
+                "ORDER BY group_id",
+                (),
+            ),
+            (
+                "SELECT group_id, member_id, weight, priority, claimed_by_file FROM mcp_server_group_members "
                 "ORDER BY group_id, member_id",
                 (),
             ),
         )
         return StoredGroups(
-            tuple(GroupRecord(*row) for row in groups), tuple(GroupMemberRecord(*row) for row in members)
+            tuple(GroupRecord(g, s, n, d, bool(claimed)) for g, s, n, d, claimed in groups),
+            tuple(GroupMemberRecord(g, m, w, p, bool(claimed)) for g, m, w, p, claimed in members),
         )
 
     async def create_group(self, record: GroupRecord) -> bool:
-        """Store a new group, without any member rows a dropped group of that id left. False when a row exists."""
+        """Store a new group, without any member rows a dropped group of that id left. False when a row exists.
+
+        A row a file claimed is replaced, unclaimed, as on SQLite (#2171).
+        """
         stale = (
             "DELETE FROM mcp_server_group_members WHERE group_id = %s "
             "AND NOT EXISTS (SELECT 1 FROM mcp_server_groups WHERE group_id = %s)"
         )
         insert = (
-            "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (group_id) DO NOTHING"
+            "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (group_id) DO UPDATE SET strategy = excluded.strategy, min_healthy = excluded.min_healthy, "
+            "description = excluded.description, claimed_by_file = NULL WHERE mcp_server_groups.claimed_by_file = 1"
         )
-        statements = (stale, (record.group_id, record.group_id)), (insert, dataclasses.astuple(record))
+        values = (record.group_id, record.strategy, record.min_healthy, record.description)
+        statements = (stale, (record.group_id, record.group_id)), (insert, values)
         return bool(self._group_rows(*statements)[0])
 
     async def update_group(
@@ -805,12 +819,39 @@ class PostgresMcpServerConfigRepository:
         self._group_rows((sql, (strategy, min_healthy, description, group_id)))
 
     async def save_group_member(self, record: GroupMemberRecord) -> None:
-        """Store a member, replacing an earlier row of that group and member."""
+        """Store a member, replacing an earlier row of that group and member, and any claim on it (#2171).
+
+        The claim goes as SQLite's `INSERT OR REPLACE` drops it: the group API
+        adds only a member the group does not hold, one the file no longer names.
+        """
         sql = (
             "INSERT INTO mcp_server_group_members (group_id, member_id, weight, priority) VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (group_id, member_id) DO UPDATE SET weight = excluded.weight, priority = excluded.priority"
+            "ON CONFLICT (group_id, member_id) DO UPDATE SET weight = excluded.weight, priority = excluded.priority, "
+            "claimed_by_file = NULL"
         )
-        self._group_rows((sql, dataclasses.astuple(record)))
+        self._group_rows((sql, (record.group_id, record.member_id, record.weight, record.priority)))
+
+    async def claim_group_row_for_file(
+        self, group_id: str, member_id: str | None = None, lease: tuple[str, int] | None = None
+    ) -> bool:
+        """Mark a group's row, or with *member_id* a member's, as claimed by the file (#2171).
+
+        See the SQLite repository. The fence also requires the tenure to be
+        unexpired, as `delete_while_leased` does.
+        """
+        table, keys = "mcp_server_groups", "group_id = %s"
+        params: tuple[Any, ...] = (group_id,)
+        if member_id is not None:
+            table, keys, params = "mcp_server_group_members", "group_id = %s AND member_id = %s", (group_id, member_id)
+        fence = ""
+        if lease is not None:
+            fence = (
+                "AND EXISTS (SELECT 1 FROM management_lease WHERE name = %s AND holder = %s"
+                " AND generation = %s AND expires_at > now())"
+            )
+            params = (*params, FLEET_MANAGEMENT, *lease)
+        sql = f"UPDATE {table} SET claimed_by_file = 1 WHERE {keys} AND claimed_by_file IS NULL {fence}"
+        return bool(self._group_rows((sql, params))[0])  # Constants only; every value is a parameter.
 
     async def delete_group(self, group_id: str) -> None:
         """Remove a group's row, if any, and every member row under its id."""

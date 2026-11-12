@@ -125,20 +125,19 @@ def test_a_further_restart_changes_nothing(run: dict[str, Any]) -> None:
     assert run["again"]["reloaded"]["groups"] == run["again"]["at_boot"]
 
 
-def test_a_row_outlives_the_file_taking_over_what_it_records(run: dict[str, Any]) -> None:
-    """A known gap, pinned so that closing it is seen: the state a reload and a restart disagree on.
+def test_what_the_file_took_over_and_dropped_does_not_come_back_at_a_restart(run: dict[str, Any]) -> None:
+    """The rows the group API wrote stay, claimed by the file at the ``file_takes`` boot (#2171).
 
-    A group row written before the file declared the group is still there when
-    the file drops it again, so a restart restores it where a reload would
-    remove it. Rows are shared and a reload is local, as for a server's row.
-
-    The server ``kept-member`` the file declared is not: its row was claimed by
-    the file at the ``file_takes`` boot, so the restart on a file without it
-    skips the server, and with it its stored membership (#2171).
+    SQLite is standalone, so the replica is its own manager and claims at boot:
+    the group ``runtime`` the file declared, and the member ``kept-member`` it
+    named in ``pool``. The restart on a file that names neither skips both, as a
+    reload removes them. ``runtime``'s member row added over REST is then under
+    no group, and the server it names stays, standalone.
     """
-    dropped = run["file_drops"]["at_boot"]
-    assert "kept-member" not in dropped["pool"]["members"]
-    assert dropped["runtime"] == RUNTIME
+    dropped = run["file_drops"]
+    assert "kept-member" not in dropped["at_boot"]["pool"]["members"]
+    assert "runtime" not in dropped["at_boot"]
+    assert "runtime-member" in dropped["ids"]
 
 
 def test_the_front_door_withholds_a_refused_tool_from_the_first_listing(front_door: dict[str, Any]) -> None:
