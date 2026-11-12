@@ -75,7 +75,10 @@ class ReloadConfigurationHandler(CommandHandler):
       REST endpoint's stored policies are replayed over the file's, as at
       startup; any other policy set at runtime is kept unless the file now
       defines the same scope. A server the reload removes takes its policies
-      with it.
+      with it, the rows the REST endpoint stored for it included, so a restart
+      does not hand them to a later server under its id (#2224). On a gateway
+      whose policy store peers may share, those rows are kept: a peer whose
+      file still declares the server replays them.
 
     A file that changes `tool_access.mode` is refused, and nothing is changed:
     the front-door tool surface is built at startup, so the mode needs a
@@ -229,6 +232,9 @@ class ReloadConfigurationHandler(CommandHandler):
 
         self._stop(current_mcp_servers, diff.removed + diff.updated, graceful=graceful)
         self._remove(diff.removed)
+        # And their stored rows, before the commit replays the store, so
+        # neither this reload nor the next restart puts them back (#2224).
+        self._config_loader.forget_stored_policies(prepared, diff.removed)
 
         # The same function startup applies these sections with. The topology
         # mode among them is the running one, which the check above ensured.
@@ -354,7 +360,8 @@ class ReloadConfigurationHandler(CommandHandler):
             # Its policies go with it, as on `hangar_unload`: the id is now free
             # for a later server, which must not inherit them (#1028). The
             # file's own entries would go in the swap anyway; this also takes
-            # the ones a runtime caller set.
+            # the ones a runtime caller set. Their stored rows go in
+            # `forget_stored_policies`, which `_reload` calls next (#2224).
             resolver.remove_mcp_server_policy(mcp_server_id)
             logger.info("mcp_server_removed", mcp_server_id=mcp_server_id)
 
