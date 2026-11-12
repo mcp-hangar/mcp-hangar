@@ -528,6 +528,49 @@ class _StoredRows:
         return self._rows
 
 
+def _forget_stored_server_policies(prepared: _StagedConfig, mcp_server_ids: list[str]) -> None:
+    """Delete the REST endpoint's stored policies of the servers a reload removed (#2224).
+
+    The resolver forgets them when the server is removed, and the store used
+    not to: the next restart replayed every row, and a server created later
+    under the id was governed by its predecessor's policy (#1028). Only the
+    server's own rows go; a group's and a member's are keyed by the group.
+
+    Only on a store no peer reads. A peer whose file still declares the server
+    replays the same rows on its own restart, and deleting them there would
+    drop a deny list or an approval gate it still enforces. So a policy store a
+    replica may share -- PostgreSQL, or any gateway coordinating through a
+    lease -- keeps them, as #2171 keeps the server's claimed row. A failed
+    delete is logged and the reload goes on: a row left behind only narrows.
+    """
+    store = _tap_store()
+    if store is None or not mcp_server_ids:
+        return
+    from ..auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
+    from .bootstrap.coordination import get_lease_keeper
+
+    if not isinstance(store, SQLiteToolAccessPolicyStore) or get_lease_keeper() is not None:
+        logger.info(
+            "stored_tool_access_policies_kept_for_peers",
+            mcp_server_ids=mcp_server_ids,
+            detail="the policy store may be shared, and a peer whose file declares the server still replays them",
+        )
+        return
+    forgotten: set[str] = set()
+    for mcp_server_id in mcp_server_ids:
+        try:
+            store.clear_policy("provider", mcp_server_id)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the server is already removed; a stale row only narrows
+            logger.warning("stored_tool_access_policy_not_deleted", mcp_server_id=mcp_server_id, error=str(e))
+            continue
+        forgotten.add(mcp_server_id)
+    # The rows the commit falls back on if its own read fails, read before this.
+    if prepared.stored_policies is not None:
+        prepared.stored_policies = [
+            row for row in prepared.stored_policies if not (row[0] == "provider" and row[1] in forgotten)
+        ]
+
+
 def _replay_stored_rows(rows: list[Any]) -> None:
     from ..auth.bootstrap import _replay_tap_policies
 
@@ -2410,6 +2453,10 @@ class ServerConfigLoader(IConfigLoader):
         _refuse_what_the_record_contradicts(prepared)
         prepared.stored_policies = _read_stored_policies()
         return prepared
+
+    def forget_stored_policies(self, prepared: PreparedServers, mcp_server_ids: list[str]) -> None:
+        """Delete the stored tool-access policies of the servers a reload removed."""
+        _forget_stored_server_policies(cast(_StagedConfig, prepared), mcp_server_ids)
 
     def commit_mcp_servers(self, prepared: PreparedServers) -> None:
         """Put a prepared section in force, replacing the previous one's servers, groups and overlays."""
