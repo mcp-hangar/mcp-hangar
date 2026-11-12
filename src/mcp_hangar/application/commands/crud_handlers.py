@@ -182,6 +182,12 @@ def _record_fields(
     file cannot declare, and a restart on a file that no longer declares the
     id does not read it as a registration. A row that already exists keeps
     the claim it has, through `dataclasses.replace`.
+
+    The one change that does not refuse the write is the claim pass marking
+    the row between the read and the write: it moves only `claimed_by_file`
+    and bumps the version, so the fields are applied once more on the row as
+    it now is (#2229). Anything else that changed -- another edit, a delete --
+    still refuses it.
     """
     recorded = fleet_writer.read(mcp_server.mcp_server_id)
     if recorded is None:
@@ -191,7 +197,24 @@ def _record_fields(
         fleet_writer.save_versioned(snapshot, 0, PeerKeyClaim.SKIP)
         return
     base, version = recorded
-    fleet_writer.save_versioned(dataclasses.replace(base, **fields), version, peer_key)
+    try:
+        fleet_writer.save_versioned(dataclasses.replace(base, **fields), version, peer_key)
+    except ConcurrentModificationError:
+        fresh = fleet_writer.read(mcp_server.mcp_server_id)
+        if fresh is None or not _only_claimed_since(base, fresh[0]):
+            raise
+        fleet_writer.save_versioned(dataclasses.replace(fresh[0], **fields), fresh[1], peer_key)
+
+
+def _only_claimed_since(read: McpServerConfigSnapshot, now: McpServerConfigSnapshot) -> bool:
+    """Whether the row went from unclaimed to claimed and nothing else about it changed.
+
+    The timestamps are not compared: the claim rewrites `updated_at`.
+    """
+    if read.claimed_by_file or not now.claimed_by_file:
+        return False
+    unclaimed = dataclasses.replace(now, claimed_by_file=False, created_at=read.created_at, updated_at=read.updated_at)
+    return unclaimed == read
 
 
 def _get_mcp_server_or_raise(repository: IMcpServerRepository, mcp_server_id: str) -> McpServer:
