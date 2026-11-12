@@ -191,7 +191,9 @@ class TestPostgresRows:
         stale, insert = cursor.execute.call_args_list
         assert "NOT EXISTS" in stale.args[0]
         sql, parameters = insert.args
-        assert "ON CONFLICT (group_id) DO NOTHING" in sql
+        # Only a row a file claimed is replaced (#2171); any other conflict changes nothing.
+        assert "ON CONFLICT (group_id) DO UPDATE" in sql
+        assert "WHERE mcp_server_groups.claimed_by_file = 1" in sql
         assert parameters == ("runtime", "priority", 1, None)
         connection.commit.assert_called_once()
 
@@ -211,9 +213,9 @@ class TestPostgresRows:
 
     def test_groups_are_read_in_one_transaction(self, fixture) -> None:
         repository, _, cursor = fixture
-        cursor.fetchall.side_effect = [[("runtime", "priority", 2, "d")], [("pool", "kept", 3, 2)]]
+        cursor.fetchall.side_effect = [[("runtime", "priority", 2, "d", None)], [("pool", "kept", 3, 2, 1)]]
         assert asyncio.run(repository.read_groups()) == StoredGroups(
-            (GroupRecord("runtime", "priority", 2, "d"),), (GroupMemberRecord("pool", "kept", 3, 2),)
+            (GroupRecord("runtime", "priority", 2, "d"),), (GroupMemberRecord("pool", "kept", 3, 2, True),)
         )
 
     def test_a_failed_write_rolls_back_and_raises(self, fixture) -> None:

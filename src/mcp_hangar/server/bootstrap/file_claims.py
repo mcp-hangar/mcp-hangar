@@ -5,7 +5,8 @@ restores, or the file's overlay for a server the file declares, which holds its
 L7 policy and is not restored once the file drops the server. A row written for
 a declared server is born claimed (`_record_fields`). This pass claims the rest:
 a server the file took over from the API or discovery, and rows written before
-the claim existed.
+the claim existed. The group and member rows the file declares are claimed the
+same way, so a restart on a file that dropped them skips them too.
 
 Who runs it, and when:
 
@@ -32,14 +33,16 @@ from .coordination import get_lease_keeper, may_manage
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
+    from ...domain.contracts.persistence import StoredGroups
 
 logger = get_logger(__name__)
 
 #: The holder's safety net between tenures and reloads, so a rollout converges.
 CLAIM_INTERVAL_S = 60.0
 
-#: Live claimed rows whose server this replica's file does not declare, as of
-#: its last pass; None before one has read the rows (decision 3: kept, counted).
+#: Live claimed rows -- servers, groups and members -- this replica's file does
+#: not declare, as of its last pass; None before one has read the rows
+#: (decision 3: kept, counted).
 _dormant: int | None = None
 #: Set to ask the timer for a pass now: a tenure began, or the worker stops.
 _wake = threading.Event()
@@ -67,7 +70,9 @@ def claim_declared_rows() -> int | None:
         return None
     try:
         rows = writer.read_all()
+        group_rows = _group_rows(writer.read_groups())
         _dormant = sum(1 for row in rows if row.claimed_by_file and not declared_in_config(row.mcp_server_id))
+        _dormant += sum(1 for *_, claimed, declared in group_rows if claimed and not declared)
     except Exception as e:  # noqa: BLE001 -- fault-barrier: an unclaimed row is today's behaviour, not an outage
         logger.warning(
             "file_claim_pass_failed",
@@ -88,6 +93,35 @@ def claim_declared_rows() -> int | None:
             logger.warning("file_claim_row_failed", mcp_server_id=row.mcp_server_id, error=str(e))
     if claimed:
         logger.info("file_claimed_rows", mcp_server_ids=claimed)
+    return len(claimed) + _claim_group_rows(writer, group_rows)
+
+
+def _group_rows(stored: StoredGroups) -> list[tuple[str, str | None, bool, bool]]:
+    """Each group row and member row: its group, its member, whether it is claimed, whether the file declares it."""
+    from ..config import declared_group_members
+
+    rows: list[tuple[str, str | None, bool, bool]] = []
+    for g in stored.groups:
+        rows.append((g.group_id, None, g.claimed_by_file, declared_group_members(g.group_id) is not None))
+    for m in stored.members:
+        named = m.member_id in (declared_group_members(m.group_id) or ())
+        rows.append((m.group_id, m.member_id, m.claimed_by_file, named))
+    return rows
+
+
+def _claim_group_rows(writer: Any, rows: list[tuple[str, str | None, bool, bool]]) -> int:
+    """Claim each unclaimed group or member row the file declares; how many this claimed."""
+    claimed = []
+    for group_id, member_id, already, declared in rows:
+        if already or not declared:
+            continue
+        try:
+            if writer.claim_group_row_for_file(group_id, member_id):
+                claimed.append(group_id if member_id is None else f"{group_id}/{member_id}")
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one row must not cost the others their claim
+            logger.warning("file_claim_group_row_failed", group_id=group_id, member_id=member_id, error=str(e))
+    if claimed:
+        logger.info("file_claimed_group_rows", rows=claimed)
     return len(claimed)
 
 

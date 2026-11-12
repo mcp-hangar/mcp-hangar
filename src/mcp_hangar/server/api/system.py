@@ -101,8 +101,9 @@ def _instance_info() -> dict[str, Any]:
         "manages_fleet": True if keeper is None else keeper.may_manage(),
         "storage_is_shareable": shared,
         "rate_limits_are_per_instance": True,
-        # Rows the file claimed for servers this replica's file no longer
-        # declares, as of its last claim pass: kept, never restored (#2171).
+        # Rows the file claimed for servers, groups and group members this
+        # replica's file no longer declares, as of its last claim pass: kept,
+        # never restored (#2171).
         "dormant_file_claimed_rows": dormant_claimed_rows(),
     }
     if keeper is not None:

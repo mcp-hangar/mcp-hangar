@@ -285,10 +285,26 @@ def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[st
     is the file's and takes the stored members it does not name, and a member row
     under no group is of a group the file dropped. Neither joins
     `_DECLARED_GROUPS`, so a reload after this keeps them as it keeps any other.
+
+    A row a file claimed (#2171) is the file's, not the group API's: a group row
+    whose group the file in force does not declare is skipped, and its member
+    rows are then under no group, and a member row whose member the file does
+    not name in that group is skipped. Each stays in place for a peer whose
+    file still declares them.
     """
     restored: list[McpServerGroup] = []
     with swapping():
         for record in stored.groups:
+            if record.claimed_by_file and declared_group_members(record.group_id) is None:
+                logger.warning(
+                    "recovery_skipped_group_row_a_file_claimed",
+                    group_id=record.group_id,
+                    detail=(
+                        "the configuration file no longer declares this group; declare it in the file again, "
+                        "or create it with POST /api/groups, to restore it"
+                    ),
+                )
+                continue
             if record.group_id not in groups:
                 strategy = _parse_strategy(record.strategy, record.group_id)
                 group = McpServerGroup(record.group_id, strategy, record.min_healthy, description=record.description)
@@ -297,7 +313,20 @@ def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[st
                 restored.append(group)
         for row in stored.members:
             member_group, server = groups.get(row.group_id), _server_of_member(row.member_id, repository)
-            if member_group is not None and server is not None and member_group.get_member(row.member_id) is None:
+            if member_group is None or member_group.get_member(row.member_id) is not None:
+                continue
+            if row.claimed_by_file and row.member_id not in (declared_group_members(row.group_id) or ()):
+                logger.warning(
+                    "recovery_skipped_member_row_a_file_claimed",
+                    group_id=row.group_id,
+                    member_id=row.member_id,
+                    detail=(
+                        "the configuration file no longer names this member in the group; name it in the file "
+                        "again, or add it with POST /api/groups/{group_id}/members, to restore it"
+                    ),
+                )
+                continue
+            if server is not None:
                 member_group.restore_member(server, row.weight, row.priority)
     for group in restored:
         observe_group_circuit(group)

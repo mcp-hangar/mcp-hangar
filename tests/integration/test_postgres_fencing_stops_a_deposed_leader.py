@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
+from mcp_hangar.domain.contracts.persistence import GroupMemberRecord, GroupRecord, McpServerConfigSnapshot
 from mcp_hangar.infrastructure.persistence.backends.postgresql.config_repository import (
     PostgresMcpServerConfigRepository,
 )
@@ -32,6 +32,9 @@ psycopg2 = pytest.importorskip("psycopg2", reason="the postgres extra is not ins
 
 if not DSN:
     pytest.skip("HANGAR_TEST_POSTGRES_DSN is not set", allow_module_level=True)
+
+
+_TABLES = "management_lease, mcp_server_configs, mcp_server_groups, mcp_server_group_members"
 
 
 class _DirectFactory:
@@ -48,13 +51,13 @@ class _DirectFactory:
 def storage():
     factory = _DirectFactory()
     with factory.get_connection() as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS management_lease, mcp_server_configs")
+        cur.execute(f"DROP TABLE IF EXISTS {_TABLES}")
         conn.commit()
     configs = PostgresMcpServerConfigRepository(factory)
     lease = PostgresManagementLease(factory)
     yield configs, lease
     with factory.get_connection() as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS management_lease, mcp_server_configs")
+        cur.execute(f"DROP TABLE IF EXISTS {_TABLES}")
         conn.commit()
 
 
@@ -191,3 +194,75 @@ class TestTheFileClaimIsFencedToo:
         assert not await configs.claim_for_file(_claimed_copy(row), version, (current.holder, current.generation))
 
         assert await _recovered(configs) == []
+
+
+async def _group_claims(configs) -> dict[str, bool]:
+    stored = await configs.read_groups()
+    claims = {g.group_id: g.claimed_by_file for g in stored.groups}
+    return {**claims, **{f"{m.group_id}/{m.member_id}": m.claimed_by_file for m in stored.members}}
+
+
+@pytest.mark.asyncio
+class TestTheGroupClaimIsFencedToo:
+    """The claim pass's write to a group or member row (#2171)."""
+
+    async def _seed(self, configs) -> None:
+        await configs.create_group(GroupRecord("runtime", "priority"))
+        await configs.save_group_member(GroupMemberRecord("pool", "kept", 3, 2))
+
+    async def test_the_current_holder_claims(self, storage) -> None:
+        configs, lease_store = storage
+        current = lease_store.acquire("gateway-b", ttl_s=30)
+        await self._seed(configs)
+        lease = (current.holder, current.generation)
+
+        assert await configs.claim_group_row_for_file("runtime", None, lease)
+        assert await configs.claim_group_row_for_file("pool", "kept", lease)
+
+        assert await _group_claims(configs) == {"runtime": True, "pool/kept": True}
+
+    async def test_a_deposed_holder_claims_nothing(self, storage) -> None:
+        configs, lease_store = storage
+        stale = lease_store.acquire("gateway-a", ttl_s=0.3)
+        await self._seed(configs)
+        time.sleep(0.5)
+        lease_store.acquire("gateway-b", ttl_s=30)
+        lease = (stale.holder, stale.generation)
+
+        assert not await configs.claim_group_row_for_file("runtime", None, lease)
+        assert not await configs.claim_group_row_for_file("pool", "kept", lease)
+
+        assert await _group_claims(configs) == {"runtime": False, "pool/kept": False}
+
+    async def test_a_lapsed_tenure_claims_nothing(self, storage) -> None:
+        configs, lease_store = storage
+        lapsed = lease_store.acquire("gateway-a", ttl_s=0.3)
+        await self._seed(configs)
+        time.sleep(0.5)
+
+        assert not await configs.claim_group_row_for_file("runtime", None, (lapsed.holder, lapsed.generation))
+
+    async def test_a_deleted_row_stays_deleted(self, storage) -> None:
+        configs, lease_store = storage
+        current = lease_store.acquire("gateway-b", ttl_s=30)
+        await self._seed(configs)
+        await configs.delete_group("runtime")
+
+        assert not await configs.claim_group_row_for_file("runtime", None, (current.holder, current.generation))
+
+        assert await _group_claims(configs) == {"pool/kept": False}
+
+    async def test_a_rest_write_over_a_claimed_row_takes_the_claim_off(self, storage) -> None:
+        configs, lease_store = storage
+        current = lease_store.acquire("gateway-b", ttl_s=30)
+        await self._seed(configs)
+        lease = (current.holder, current.generation)
+        await configs.claim_group_row_for_file("runtime", None, lease)
+        await configs.claim_group_row_for_file("pool", "kept", lease)
+
+        assert await configs.create_group(GroupRecord("runtime", "random"))
+        assert not await configs.create_group(GroupRecord("runtime", "priority"))
+        await configs.save_group_member(GroupMemberRecord("pool", "kept", 5, 1))
+
+        assert await _group_claims(configs) == {"runtime": False, "pool/kept": False}
+        assert (await configs.read_groups()).groups == (GroupRecord("runtime", "random"),)

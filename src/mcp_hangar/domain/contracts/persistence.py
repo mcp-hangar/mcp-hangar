@@ -416,6 +416,10 @@ class GroupRecord:
     strategy: str
     min_healthy: int = 1
     description: str | None = None
+    #: Whether a configuration file declared the group (#2171). Such a row is not
+    #: restored where the file in force does not declare it. NULL in a row an
+    #: older release wrote, which reads as False.
+    claimed_by_file: bool = False
 
 
 @dataclass(frozen=True)
@@ -426,6 +430,8 @@ class GroupMemberRecord:
     member_id: str
     weight: int = 1
     priority: int = 1
+    #: Whether a configuration file named the member in that group (#2171), as for `GroupRecord`.
+    claimed_by_file: bool = False
 
 
 @dataclass(frozen=True)
