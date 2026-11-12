@@ -199,6 +199,14 @@ Everything else it takes to run a fleet:
 - **OAuth ingress** -- advertise as an RFC 9728 protected resource and challenge external agents for verified tokens.
 - **Observability built in** -- OpenTelemetry traces, Prometheus metrics, and structured logs.
 
+## What Hangar is not
+
+Hangar decides what happens to a tool call. Three jobs sit next to that one and are out of scope by design:
+
+- **Not an LLM gateway.** Hangar does not route model traffic, fail over between model providers, or enforce token budgets. Run an LLM gateway for that; Hangar governs the tool calls the models make.
+- **Not a device inventory.** Hangar does not discover or report the MCP servers configured on developer machines across a fleet, and ships no endpoint agent. `mcp-hangar init` imports the client configs on the one machine it runs on, and stops there.
+- **Not ML-based detection.** No anomaly score, classifier or LLM judge decides a verdict. Every allow, deny or hold is reproducible from the policy that produced it.
+
 ## One config gotcha: `tools:` is overloaded
 
 The per-server `tools:` key accepts two forms that look similar and mean
