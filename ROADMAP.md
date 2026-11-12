@@ -13,7 +13,7 @@
 
 ## Vision
 
-MCP Hangar is **the MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy**.
+MCP Hangar is **a policy enforcement plane for MCP: it pins every tool, holds risky calls for approval, and enforces egress policy**.
 
 In MCP, the tool list is a hint the client caches; the call path is the only surface a gateway mediates in real
 time. Hangar sits on that path and gives every call three things:

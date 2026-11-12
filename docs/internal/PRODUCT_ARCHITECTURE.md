@@ -16,8 +16,10 @@
 
 ### One-liner
 
-**MCP Hangar is the MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy.**
-(Decided 2026-11-08 in #1783; the candidates below are kept for history.)
+**MCP Hangar is a policy enforcement plane for MCP: it pins every tool, holds risky calls for approval, and enforces egress policy.**
+(Decided 2026-11-08 in #1783 as "the MCP gateway that…"; reworded 2026-11-12 in #2240 to match the website, where
+Hangar is compared with six MCP gateways and described by what it does on the call path. "MCP gateway" stays a
+search keyword. The candidates below are kept for history.)
 
 ### Positioning matrix
 
