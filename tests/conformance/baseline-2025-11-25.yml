@@ -1,0 +1,88 @@
+# Known non-passes of the official MCP conformance suite against `serve --http`,
+# run on the `0.2.0-alpha` line with `--requirements 2025-11-25` (the scenarios
+# that revision requires, frozen at its release, plus the ones the suite runs
+# but does not score for it).
+#
+# This is the 2025-11-25 half of #1902 for the server role. baseline.yml covers
+# the same generation on the published `latest` suite (0.1.16); this file pins
+# the alpha line so both revisions Hangar serves are judged by one suite
+# version, the same one the 2026-07-28 and client runs use.
+#
+# Same semantics as baseline.yml: a failure listed here is known, a failure not
+# listed is a regression, and a listed scenario that now passes is a stale entry
+# that fails the run until its line is deleted.
+#
+# The gateway under test is the one conformance.yml starts: one subprocess
+# backend (`examples/provider_math`), no authentication, `mode` left at its
+# default. The classes are the ones baseline.yml and baseline-2026-07-28.yml
+# use; none of them is a defect in Hangar, and each line reads "not evaluated
+# in this setup" rather than "broken".
+#
+# 1. Fixture-dependent. The scenario calls a tool the suite's reference server
+#    defines (image/audio/resource tools, `test_reconnection`,
+#    `json_schema_2020_12_tool`, eliciting or sampling tools). The math backend
+#    serves none of them, and the front_door topology that would expose the
+#    reference server's tools needs an identity the suite's `server` command
+#    cannot present.
+#
+# 2. Capability not advertised. Hangar declares no `completions`, `prompts` or
+#    `resources` for this configuration, so those methods answer -32601. The
+#    suite runs the scenarios regardless of what `initialize` advertised.
+#
+# 3. Deliberately not implemented. `logging/setLevel` is removed in 2026-07-28
+#    (SEP-2575) and the Logging feature is deprecated (SEP-2577); see the
+#    reasoning in baseline.yml. `tools-call-with-logging` goes through the same
+#    method.
+#
+# 4. Not evaluable without a session id. `serve --http` hands out none since
+#    #877 (the specification makes the session optional). The scenario returns
+#    a single WARNING, "Server provides session ID for multiple streams test",
+#    without running its own check; the suite's console summary shows it with
+#    a tick, but the baseline logic counts a WARNING as a non-pass.
+#
+# `server-sse-polling` is not purely fixture-dependent. Its FAILURE is the
+# missing `test_reconnection` tool, but the same run warns that Hangar's POST
+# SSE stream carries no priming event (id, empty data) and no `retry` field,
+# which is Hangar's own server behaviour; #2232 tracks that.
+#
+# New against the 0.1.16 run: `server-sse-polling` and `json-schema-2020-12`.
+# The suite marks both "pending" and does not score them for 2025-11-25, so its
+# exit code ignores them either way (measured: removing both lines still exits
+# 0). They are listed so the pass table, which reads this file, reports them as
+# known rather than as regressions; when they become scored, the suite's own
+# stale-entry rule takes over.
+
+server:
+  # -- 1. fixture-dependent ---------------------------------------------------
+  - tools-call-image # no image-returning tool upstream
+  - tools-call-audio # no audio-returning tool upstream
+  - tools-call-embedded-resource # no embedded-resource tool upstream
+  - tools-call-mixed-content # no mixed-content tool upstream
+  - tools-call-with-progress # backend emits no progress notifications
+  - tools-call-sampling # backend issues no sampling request
+  - tools-call-elicitation # backend issues no elicitation request
+  - elicitation-sep1034-defaults # needs an eliciting backend
+  - elicitation-sep1330-enums # needs an eliciting backend
+  - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored)
+  - server-sse-polling # needs the test_reconnection tool; also #2232 (pending, not scored)
+
+  # -- 2. capability not advertised -------------------------------------------
+  - completion-complete # `completions` is absent from initialize
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe # subscribe rides the resources capability
+  - resources-unsubscribe
+
+  # -- 3. deliberately not implemented ----------------------------------------
+  - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
+  - tools-call-with-logging # needs logging/setLevel, which answers -32601
+
+  # -- 4. not evaluable without a session id ----------------------------------
+  - server-sse-multiple-streams # short-circuits to WARNING before its own check (#877)
