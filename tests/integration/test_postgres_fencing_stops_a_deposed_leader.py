@@ -136,3 +136,58 @@ class TestTheDeposedLeaderSequence:
         current = lease_store.acquire("gateway-b", ttl_s=30)
 
         assert await configs.delete_while_leased("nothing-here", current.holder, current.generation) is False
+
+
+def _claimed_copy(row: McpServerConfigSnapshot) -> McpServerConfigSnapshot:
+    return McpServerConfigSnapshot.from_dict({**row.to_dict(), "claimed_by_file": True})
+
+
+async def _claims(configs) -> dict[str, bool]:
+    return {config.mcp_server_id: config.claimed_by_file for config in await configs.get_all()}
+
+
+@pytest.mark.asyncio
+class TestTheFileClaimIsFencedToo:
+    """The claim pass's write, under the same condition as a deregistration (#2171)."""
+
+    async def test_the_current_holder_claims(self, storage) -> None:
+        configs, lease_store = storage
+        current = lease_store.acquire("gateway-b", ttl_s=30)
+        await configs.save(_snapshot("math"))
+        row, version = await configs.get_with_version("math")
+
+        assert await configs.claim_for_file(_claimed_copy(row), version, (current.holder, current.generation))
+
+        assert await _claims(configs) == {"math": True}
+
+    async def test_a_deposed_holder_claims_nothing(self, storage) -> None:
+        configs, lease_store = storage
+        stale = lease_store.acquire("gateway-a", ttl_s=0.3)
+        await configs.save(_snapshot("math"))
+        row, version = await configs.get_with_version("math")
+        time.sleep(0.5)
+        lease_store.acquire("gateway-b", ttl_s=30)
+
+        assert not await configs.claim_for_file(_claimed_copy(row), version, (stale.holder, stale.generation))
+
+        assert await _claims(configs) == {"math": False}
+
+    async def test_a_lapsed_tenure_claims_nothing(self, storage) -> None:
+        configs, lease_store = storage
+        lapsed = lease_store.acquire("gateway-a", ttl_s=0.3)
+        await configs.save(_snapshot("math"))
+        row, version = await configs.get_with_version("math")
+        time.sleep(0.5)
+
+        assert not await configs.claim_for_file(_claimed_copy(row), version, (lapsed.holder, lapsed.generation))
+
+    async def test_a_row_deleted_after_it_was_read_stays_deleted(self, storage) -> None:
+        configs, lease_store = storage
+        current = lease_store.acquire("gateway-b", ttl_s=30)
+        await configs.save(_snapshot("math"))
+        row, version = await configs.get_with_version("math")
+        await configs.delete("math")
+
+        assert not await configs.claim_for_file(_claimed_copy(row), version, (current.holder, current.generation))
+
+        assert await _recovered(configs) == []

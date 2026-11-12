@@ -281,7 +281,8 @@ def _dropped(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
 
 
 def _boot_only(gateway: _Operator) -> dict[str, Any]:
-    return {"ids": gateway.ids(), "described": {sid: gateway.description(sid) for sid in TAKEN_OVER}}
+    ids = gateway.ids()
+    return {"ids": ids, "described": {sid: gateway.description(sid) for sid in TAKEN_OVER if sid in ids}}
 
 
 def _upstream_reload(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:

@@ -506,6 +506,45 @@ class SQLiteMcpServerConfigRepository:
             logger.error(f"Failed to delete mcp_server config under a lease: {e}")
             raise PersistenceError(f"Failed to delete mcp_server config: {e}") from e
 
+    async def claim_for_file(
+        self, config: McpServerConfigSnapshot, expected_version: int, lease: tuple[str, int] | None = None
+    ) -> bool:
+        """Write *config*, the row read at *expected_version* now claimed by the file (#2171).
+
+        One conditional statement, as `delete_while_leased` is: the row must
+        still be live at the version read, so a server deleted or rewritten
+        meanwhile is left as it is. With *lease* (holder, generation) the
+        holder must also still hold that tenure; without it the gateway is
+        standalone and its own manager. The version moves, so a write read
+        before the claim is refused rather than dropping it.
+
+        Returns:
+            True if the row was claimed, False when nothing matched.
+        """
+        fence = ""
+        params: tuple[Any, ...] = ()
+        if lease is not None:
+            fence = "AND EXISTS (SELECT 1 FROM management_lease WHERE name = ? AND holder = ? AND generation = ?)"
+            params = (FLEET_MANAGEMENT, *lease)
+        try:
+            async with self._db.transaction() as conn:
+                result = await conn.execute(
+                    f"""
+                    UPDATE mcp_server_configs SET config_json = ?, version = version + 1, updated_at = ?
+                    WHERE mcp_server_id = ? AND version = ? AND enabled = 1 {fence}
+                    """,  # The fence is a constant; every value is a parameter.
+                    (
+                        json.dumps(config.to_dict()),
+                        datetime.now(UTC).isoformat(),
+                        config.mcp_server_id,
+                        expected_version,
+                        *params,
+                    ),
+                )
+                return result.rowcount > 0
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            raise PersistenceError(f"Failed to claim mcp_server config for the file: {e}") from e
+
     async def hard_delete(self, mcp_server_id: str) -> bool:
         """Permanently delete mcp_server configuration.
 
