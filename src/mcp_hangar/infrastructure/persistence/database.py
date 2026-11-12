@@ -390,6 +390,16 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "008_group_row_claims",
+        """
+        -- Whether a configuration file declared the group, or named the member
+        -- in it (#2171). An older release ignores the column, and its inserts
+        -- leave it NULL, which reads as unclaimed.
+        ALTER TABLE mcp_server_groups ADD COLUMN claimed_by_file INTEGER;
+        ALTER TABLE mcp_server_group_members ADD COLUMN claimed_by_file INTEGER;
+        """,
+    ),
 ]
 
 

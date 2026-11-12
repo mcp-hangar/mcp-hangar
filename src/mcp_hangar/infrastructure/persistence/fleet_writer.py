@@ -28,6 +28,7 @@ from mcp_hangar.domain.contracts.persistence import (
     IMcpServerConfigRepository,
     McpServerConfigSnapshot,
     PeerKeyClaim,
+    StoredGroups,
 )
 from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
 from mcp_hangar.logging_config import get_logger
@@ -167,15 +168,34 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
         if recorded is None or recorded[0].claimed_by_file:
             return False
         snapshot, version = recorded
-        lease: tuple[str, int] | None = None
-        if self._lease_provider is not None and self._is_shared():
-            held = self._lease_provider()
-            if held is None:
-                return False
-            lease = (held.holder, held.generation)
+        may_claim, lease = self._claim_fence()
+        if not may_claim:
+            return False
         rows: Any = self._repository  # Both durable repositories carry the claim; the port does not.
         claimed = dataclasses.replace(snapshot, claimed_by_file=True)
         return bool(self._loop.run(rows.claim_for_file(claimed, version, lease), self._timeout_s))
+
+    def read_groups(self) -> StoredGroups:
+        """Every stored group and member, waiting for the read."""
+        return cast("StoredGroups", self._loop.run(self._group_rows.read_groups(), self._timeout_s))
+
+    def claim_group_row_for_file(self, group_id: str, member_id: str | None = None) -> bool:
+        """Mark a group's row, or a member's, as claimed by the configuration file (#2171).
+
+        Fenced as `claim_for_file` is. Returns True if this call claimed the row.
+        """
+        may_claim, lease = self._claim_fence()
+        if not may_claim:
+            return False
+        claim = self._group_rows.claim_group_row_for_file(group_id, member_id, lease)
+        return bool(self._loop.run(claim, self._timeout_s))
+
+    def _claim_fence(self) -> tuple[bool, tuple[str, int] | None]:
+        """Whether this instance may claim, and the tenure (holder, generation) the statement must find."""
+        if self._lease_provider is None or not self._is_shared():
+            return True, None  # Standalone: its own manager, unfenced.
+        held = self._lease_provider()
+        return (False, None) if held is None else (True, (held.holder, held.generation))
 
     def _is_shared(self) -> bool:
         """Whether a fenced write must prove a tenure: True unless the storage is known to be one process's."""
