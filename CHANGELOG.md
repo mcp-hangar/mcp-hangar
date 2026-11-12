@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.7](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.6...v2.36.7) (2026-11-12)
+
+### Fixed
+
+- **core:** a server created again after a restart no longer inherits the tool-access policy of the server a reload removed under the same id. The reload cleared the removed server's policies from memory and left the rows the REST endpoint had stored for it, so the next restart, and the next reload, applied them again. A reload now deletes those rows as well. On a gateway whose policy store replicas may share (PostgreSQL, or a coordinated fleet) the rows are kept, because a replica whose file still declares the server replays them on its own restart. ([#2234](https://github.com/mcp-hangar/mcp-hangar/pull/2234))
+
 ## [2.36.6](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.5...v2.36.6) (2026-11-12)
 
 ### Fixed
