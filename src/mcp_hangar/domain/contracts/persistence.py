@@ -156,6 +156,13 @@ class McpServerConfigSnapshot:
     # coming back protected as static (#2106). None for every other row, and for
     # a discovered row written before the field: an older replica drops the key.
     discovered_as: DiscoveryOrigin | None = None
+    # Whether the row was written for a server the configuration file declared
+    # (#2171). Such a row holds what the file cannot declare, the L7 policy, and
+    # is not a registration: recovery carries its policy onto the server the
+    # file builds, and skips the row once the file no longer declares the id.
+    # False for every other row, and for one written before the field: an
+    # older replica drops the key, and the row is then read as it always was.
+    claimed_by_file: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -213,6 +220,7 @@ class McpServerConfigSnapshot:
             "l7_policy": self.l7_policy,
             "tls": self.tls,
             "discovered_as": self.discovered_as.to_dict() if self.discovered_as is not None else None,
+            "claimed_by_file": self.claimed_by_file,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -249,6 +257,7 @@ class McpServerConfigSnapshot:
             l7_policy=data.get("l7_policy"),
             tls=data.get("tls"),
             discovered_as=data.get("discovered_as"),
+            claimed_by_file=bool(data.get("claimed_by_file", False)),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )
