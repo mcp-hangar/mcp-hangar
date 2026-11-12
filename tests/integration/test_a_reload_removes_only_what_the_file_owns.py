@@ -24,7 +24,9 @@ import pytest
 pytestmark = pytest.mark.timeout(300)
 
 HARNESS = Path(__file__).with_name("_reload_ownership_harness.py")
-PHASES = ("first", "restart", "takeover", "after_takeover", "dropped", "after_dropped")
+PHASES = ("first", "restart", "takeover", "after_takeover", "dropped", "after_dropped", "upstream_restart")
+#: A file server pushed its policies at runtime, then dropped by a reload (#2171).
+FILE_SERVER_PHASES = ("edit", "upstream_reload", "after_upstream_reload")
 NON_FILE = ("crud-one", "found-one")
 AFTER_FIRST_RELOAD = ["crud-one", "found-one", "member", "upstream"]
 FROM_THE_FILE = "as the file says"
@@ -48,6 +50,11 @@ def _phases(workdir: Path, backend: str, phases: tuple[str, ...]) -> dict[str, A
 @pytest.fixture(scope="module")
 def sqlite(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     return _phases(tmp_path_factory.mktemp("reload-ownership-sqlite"), "sqlite", PHASES)
+
+
+@pytest.fixture(scope="module")
+def file_server(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    return _phases(tmp_path_factory.mktemp("reload-ownership-file-server"), "sqlite", FILE_SERVER_PHASES)
 
 
 @pytest.fixture(scope="module", name="memory")
@@ -177,3 +184,28 @@ def test_a_row_outlives_a_servers_removal_from_the_file(sqlite: dict[str, Any]) 
     from that row at its next restart.
     """
     assert "crud-one" in sqlite["after_dropped"]["ids"]
+
+
+def test_a_file_server_edited_at_runtime_and_dropped_at_a_restart_does_not_come_back(sqlite: dict[str, Any]) -> None:
+    # `first` edited it over REST, which wrote a row: the file's, not a registration (#2171).
+    restart = sqlite["upstream_restart"]
+    assert "upstream" not in restart["ids"]
+    # The id is free: a create replaces the row the file left.
+    assert restart["create_status"] == 201
+
+
+def test_a_file_server_dropped_by_a_reload_does_not_come_back_at_a_restart(file_server: dict[str, Any]) -> None:
+    assert file_server["edit"]["policies"] == {"deny_list": ["add"], "l7_action": "Allow"}
+    assert file_server["upstream_reload"]["removed"] == ["upstream"]
+    assert "upstream" not in file_server["upstream_reload"]["ids"]
+    assert "upstream" not in file_server["after_upstream_reload"]["ids"]
+
+
+def test_a_server_created_over_the_row_the_file_left_keeps_its_l7_policy(file_server: dict[str, Any]) -> None:
+    # An L7 policy only narrows what runs, so it is carried; a peer still on the
+    # old file reads it from this row at its next start.
+    created = file_server["after_upstream_reload"]
+    assert created["create_status"] == 201
+    assert created["policies"]["l7_action"] == "Allow"
+    # Its deny list here is the policy store's replay at boot, keyed by id, and
+    # not the row's: the row holds no tool access policy to carry.

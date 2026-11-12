@@ -21,6 +21,14 @@ The phases, in the order the test runs them on one directory:
 * ``after_takeover``: boots that file.
 * ``dropped``: the file stops declaring ``crud-one`` again.
 * ``after_dropped``: boots that file.
+* ``upstream_restart``: boots a file without ``upstream``, which ``first``
+  edited at runtime, with no reload in between (#2171).
+
+A second directory runs a file server dropped by a reload (#2171):
+
+* ``edit``: boots ``upstream`` and pushes its policies.
+* ``upstream_reload``: reloads a file without it.
+* ``after_upstream_reload``: boots that file, and creates it over REST.
 """
 
 from __future__ import annotations
@@ -48,10 +56,13 @@ def _server(**extra: Any) -> dict[str, Any]:
     return {"mode": "subprocess", "command": COMMAND, "idle_ttl_s": 600, **extra}
 
 
-def _config(backend: str, servers: dict[str, Any], *, members: tuple[str, ...] = ("member",)) -> dict[str, Any]:
+def _config(
+    backend: str, servers: dict[str, Any], *, members: tuple[str, ...] = ("member",), upstream: bool = True
+) -> dict[str, Any]:
     pool = {"mode": "group", "auto_start": False, "members": [{"id": sid, **_server()} for sid in members]}
+    declared = {"upstream": _server(description=FROM_THE_FILE)} if upstream else {}
     config: dict[str, Any] = {
-        "mcp_servers": {"upstream": _server(description=FROM_THE_FILE), "pool": pool, **servers},
+        "mcp_servers": {**declared, "pool": pool, **servers},
         "discovery": {
             "enabled": True,
             "auto_register": False,
@@ -273,8 +284,33 @@ def _boot_only(gateway: _Operator) -> dict[str, Any]:
     return {"ids": gateway.ids(), "described": {sid: gateway.description(sid) for sid in TAKEN_OVER}}
 
 
+def _upstream_reload(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
+    _write(config, _config(backend, FILES["reloaded"], upstream=False))
+    result = gateway.reload()
+    return {"removed": result["mcp_servers_removed"], "ids": gateway.ids()}
+
+
+def _created_again(gateway: _Operator) -> dict[str, Any]:
+    booted = gateway.ids()
+    created = gateway.send(
+        "POST",
+        "/mcp_servers",
+        {"mcp_server_id": "upstream", "mode": "subprocess", "command": COMMAND, "idle_ttl_s": 600},
+    )
+    return {
+        "ids": booted,
+        "create_status": created.status_code,
+        "policies": gateway.policies("upstream") if created.status_code == 201 else None,
+    }
+
+
 #: The file each phase boots from, unless the phase before left one.
 BOOT_FILE = {"first": "boot"}
+#: A file written before a phase boots, without a reload: a restart on an edited file.
+RESTART_ON = {
+    "edit": (FILES["reloaded"], True),
+    "upstream_restart": (FILES["dropped"], False),
+}
 
 
 def run(phase: str, backend: str, workdir: Path) -> dict[str, Any]:
@@ -287,6 +323,10 @@ def run(phase: str, backend: str, workdir: Path) -> dict[str, Any]:
     if phase in BOOT_FILE:
         _write_definition(workdir)
         _write(config, _config(backend, FILES[BOOT_FILE[phase]], members=("member", "gone-member")))
+    if phase in RESTART_ON:
+        _write_definition(workdir)
+        servers, upstream = RESTART_ON[phase]
+        _write(config, _config(backend, servers, upstream=upstream))
     context = bootstrap(config_path=str(config))
     repository = context.runtime.repository
     key = context.auth_components.api_key_store.create_key(principal_id=PRINCIPAL, name="operator")
@@ -301,6 +341,13 @@ def run(phase: str, backend: str, workdir: Path) -> dict[str, Any]:
             out = _takeover(gateway, config, backend, workdir)
         elif phase == "dropped":
             out = _dropped(gateway, config, backend)
+        elif phase == "edit":
+            gateway.set_policies("upstream", backend)
+            out = {"policies": gateway.policies("upstream")}
+        elif phase == "upstream_reload":
+            out = _upstream_reload(gateway, config, backend)
+        elif phase in ("upstream_restart", "after_upstream_reload"):
+            out = _created_again(gateway)
         else:
             out = _boot_only(gateway)
     for server in repository.get_all().values():

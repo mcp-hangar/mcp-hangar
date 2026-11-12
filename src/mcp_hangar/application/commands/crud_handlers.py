@@ -18,6 +18,7 @@ from ...domain.contracts.persistence import (
     ConcurrentModificationError,
     GroupMemberRecord,
     GroupRecord,
+    McpServerConfigSnapshot,
     PeerKeyClaim,
     PeerKeyNameRefused,
 )
@@ -37,6 +38,7 @@ from ...domain.exceptions import (
 )
 from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
+from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.services.fleet_snapshot import snapshot_of
@@ -160,7 +162,12 @@ def _refuse_plaintext_for_a_peer_identity(mcp_server_id: str, endpoint: str | No
 
 
 def _record_fields(
-    fleet_writer: IFleetWriter, mcp_server: McpServer, peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM, **fields: Any
+    fleet_writer: IFleetWriter,
+    mcp_server: McpServer,
+    peer_key: PeerKeyClaim = PeerKeyClaim.CLAIM,
+    *,
+    declared: bool = False,
+    **fields: Any,
 ) -> None:
     """Record a change to some fields of a server, on top of the recorded row (#1954).
 
@@ -169,12 +176,19 @@ def _record_fields(
     older L7 policy included -- and win. The write is refused if the row changed
     after it was read. A server with no row (one from the configuration file)
     is recorded from this replica's copy, and only if no row appeared meanwhile.
+
+    *declared* says the configuration file declares the server. A row created
+    for such a server is born claimed by the file (#2171): it holds what the
+    file cannot declare, and a restart on a file that no longer declares the
+    id does not read it as a registration. A row that already exists keeps
+    the claim it has, through `dataclasses.replace`.
     """
     recorded = fleet_writer.read(mcp_server.mcp_server_id)
     if recorded is None:
-        # A server from the configuration file: its peer-key entries are the
-        # file's, derived at load. A row written for it claims none.
-        fleet_writer.save_versioned(dataclasses.replace(snapshot_of(mcp_server), **fields), 0, PeerKeyClaim.SKIP)
+        # A server from the configuration file, or one hot-loaded: its peer-key
+        # entries are derived at load. A row written for it claims none.
+        snapshot = dataclasses.replace(snapshot_of(mcp_server), claimed_by_file=declared, **fields)
+        fleet_writer.save_versioned(snapshot, 0, PeerKeyClaim.SKIP)
         return
     base, version = recorded
     fleet_writer.save_versioned(dataclasses.replace(base, **fields), version, peer_key)
@@ -216,6 +230,7 @@ class CreateMcpServerHandler(CommandHandler):
         peer_identity_authority: IPeerIdentityAuthority | None = None,
         drain: Callable[[str, float], bool] | None = None,
         groups: dict | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -240,6 +255,9 @@ class CreateMcpServerHandler(CommandHandler):
             groups: The groups, whose members hold a server by reference and
                 follow a replaced discovered server to its new copy, or fill
                 with a server created under a deleted one's id (#2107).
+            declared_in_config: Whether the configuration declares a server. A
+                row the file claimed is replaced by a create only when it does
+                not (#2171). Omitted means none is.
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -249,6 +267,7 @@ class CreateMcpServerHandler(CommandHandler):
         self._peer_identity_authority = peer_identity_authority
         self._drain = drain
         self._groups = groups
+        self._declared_in_config = declared_in_config
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -337,10 +356,12 @@ class CreateMcpServerHandler(CommandHandler):
         # server, a published event, and no record -- which is what a restart
         # then quietly resolves by forgetting the server.
         # Insert-only: another replica may have created it already, before this
-        # one heard of it (#1954). Its row is refused rather than overwritten.
+        # one heard of it (#1954). Its row is refused rather than overwritten,
+        # unless it is a row the file claimed for a server it no longer
+        # declares, which is replaced at the version it was read (#2171).
         elif self._fleet_writer is not None:
             try:
-                self._fleet_writer.save_versioned(snapshot_of(mcp_server), None)
+                self._record_new(mcp_server)
             except ConcurrentModificationError as e:
                 raise ValidationError(f"McpServer already exists: {command.mcp_server_id}") from e
             except PeerKeyNameRefused as e:
@@ -373,6 +394,69 @@ class CreateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "created": True}
+
+    def _record_new(self, mcp_server: McpServer) -> None:
+        """Insert the new server's row, or replace a dormant row the file claimed under its id (#2171).
+
+        Raises:
+            ConcurrentModificationError: A live row is there that is not a
+                dormant claimed one, or it changed after it was read.
+        """
+        writer = cast(IFleetWriter, self._fleet_writer)
+        try:
+            writer.save_versioned(snapshot_of(mcp_server), None)
+            return
+        except ConcurrentModificationError:
+            dormant = self._dormant_claimed_row(mcp_server.mcp_server_id)
+            if dormant is None:
+                raise
+        row, version = dormant
+        self._carry_l7_policy(mcp_server, row)
+        writer.save_versioned(snapshot_of(mcp_server), version)
+
+    def _dormant_claimed_row(self, mcp_server_id: str) -> tuple[McpServerConfigSnapshot, int] | None:
+        """The row a file claimed under this id, with its version, when nothing else holds the id (#2171).
+
+        Called only for an id that is not in the fleet. A claimed row the file
+        in force still declares is the file's overlay and is never replaced.
+        """
+        if self._fleet_writer is None:
+            return None
+        if self._declared_in_config is not None and self._declared_in_config(mcp_server_id):
+            return None
+        recorded = self._fleet_writer.read(mcp_server_id)
+        if recorded is None or not recorded[0].claimed_by_file:
+            return None
+        return recorded
+
+    @staticmethod
+    def _carry_l7_policy(mcp_server: McpServer, row: McpServerConfigSnapshot) -> None:
+        """Carry a dormant claimed row's L7 policy onto the server created over it (#2171).
+
+        An L7 policy only narrows what runs, so carrying it fails closed: a
+        replica whose file still declares the id reads its policy from this
+        row at its next start, and must not find it gone. The operator's next
+        push replaces it. The tool access policies are not carried: they left
+        with the server the file dropped (#1028). A payload that does not parse
+        denies every tool, as recovery does.
+        """
+        if row.l7_policy is None:
+            return
+        try:
+            policy = L7Policy.from_dict(row.l7_policy)
+        except (ValueError, TypeError) as e:
+            mcp_server.set_l7_policy(L7Policy())
+            logger.error(
+                "l7_policy_unreadable_denying_all",
+                mcp_server_id=mcp_server.mcp_server_id,
+                error=str(e),
+                detail="every tool call to this server is denied until the operator delivers its policy again",
+            )
+            return
+        mcp_server.set_l7_policy(policy)
+        logger.info(
+            "l7_policy_carried_from_claimed_row", mcp_server_id=mcp_server.mcp_server_id, policy_id=policy.policy_id
+        )
 
     def _discovered_server_to_replace(self, command: CreateMcpServerCommand) -> McpServer | None:
         """The server this command replaces, None when the id is free; refused otherwise.
@@ -617,7 +701,13 @@ class UpdateMcpServerHandler(CommandHandler):
                     enforce_ssrf=endpoint is not None,
                 )
             try:
-                _record_fields(self._fleet_writer, mcp_server, self._peer_key_claim(mcp_server, connection), **fields)
+                _record_fields(
+                    self._fleet_writer,
+                    mcp_server,
+                    self._peer_key_claim(mcp_server, connection),
+                    declared=self._declared(command.mcp_server_id),
+                    **fields,
+                )
             except PeerKeyNameRefused as e:
                 raise PeerKeyNameTaken(str(e)) from e
 
@@ -640,6 +730,9 @@ class UpdateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "updated": True}
+
+    def _declared(self, mcp_server_id: str) -> bool:
+        return self._declared_in_config is not None and self._declared_in_config(mcp_server_id)
 
     @staticmethod
     def _peer_key_claim(
@@ -669,7 +762,7 @@ class UpdateMcpServerHandler(CommandHandler):
         if command.endpoint is None and command.tls is None:
             return None
         name = command.mcp_server_id
-        if self._declared_in_config is not None and self._declared_in_config(name):
+        if self._declared(name):
             raise McpServerDeclaredInConfigError(name)
         if mcp_server.mode != McpServerMode.REMOTE:
             raise ValidationError(f"mcp_server '{name}': only a remote server has an endpoint and a tls block")
@@ -724,6 +817,7 @@ class SetL7PolicyHandler(CommandHandler):
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
         restore_gap: str | None = None,
+        declared_in_config: Callable[[str], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -735,11 +829,14 @@ class SetL7PolicyHandler(CommandHandler):
             restore_gap: Why the next start will not read the record back, or
                 None when it will. With *fleet_writer* it decides what the push
                 reports as ``persisted`` (#1306).
+            declared_in_config: Whether the configuration declares a server,
+                whose row a push creates claimed by the file (#2171).
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
         self._not_persisted_reason = "no_durable_backend" if fleet_writer is None else restore_gap
+        self._declared_in_config = declared_in_config
 
     def handle(self, command: SetL7PolicyCommand) -> dict[str, Any]:
         """Set (or clear) the mcp_server's L7 policy.
@@ -762,6 +859,7 @@ class SetL7PolicyHandler(CommandHandler):
             _record_fields(
                 self._fleet_writer,
                 cast(McpServer, mcp_server),
+                declared=self._declared_in_config is not None and self._declared_in_config(command.mcp_server_id),
                 l7_policy=command.policy.to_wire() if command.policy is not None else None,
             )
 
@@ -1322,7 +1420,8 @@ def register_crud_handlers(
         restore_gap: Why the next start will not read the fleet back, or None
             when it will; reported by the L7 policy push (#1306).
         declared_in_config: Whether the configuration declares a server, which
-            the delete handler then refuses (#1744).
+            the delete handler then refuses (#1744), and whose row a write
+            creates claimed by the file (#2171).
         peer_identity_authority: Who may declare or remove a peer identity
             (ADR-030 §9). None refuses every such change.
         drain: Waits for a server's calls in flight before discovery replaces
@@ -1340,6 +1439,7 @@ def register_crud_handlers(
             peer_identity_authority=peer_identity_authority,
             drain=drain,
             groups=groups,
+            declared_in_config=declared_in_config,
         ),
     )
     command_bus.register(
@@ -1366,7 +1466,11 @@ def register_crud_handlers(
     command_bus.register(
         SetL7PolicyCommand,
         SetL7PolicyHandler(
-            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, restore_gap=restore_gap
+            repository=repository,
+            event_bus=event_bus,
+            fleet_writer=fleet_writer,
+            restore_gap=restore_gap,
+            declared_in_config=declared_in_config,
         ),
     )
     command_bus.register(

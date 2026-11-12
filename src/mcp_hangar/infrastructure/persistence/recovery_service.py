@@ -136,6 +136,23 @@ class RecoveryService:
                         logger.debug(f"Recovery: {config.mcp_server_id} already declared in configuration")
                         continue
 
+                    # A row written for a server the file declared, which this
+                    # file no longer does (#2171). It is the file's overlay, not
+                    # a registration: restoring it would bring back a server the
+                    # file dropped. It stays in place, since a peer whose file
+                    # still declares the server reads its L7 policy from it.
+                    if config.claimed_by_file:
+                        result.skipped_count += 1
+                        logger.warning(
+                            "recovery_skipped_row_a_file_claimed",
+                            mcp_server_id=config.mcp_server_id,
+                            detail=(
+                                "the configuration file no longer declares this server; declare it in the file "
+                                "again, or create it with POST /api/mcp_servers, to restore it"
+                            ),
+                        )
+                        continue
+
                     # A row under a recorded name that does not declare the
                     # recorded key: what an older replica's plain create leaves
                     # behind. Serving it would serve the name unchecked (ADR-030 §4e).
