@@ -39,6 +39,8 @@ logging:
   level: WARNING
 tool_access:
   mode: front_door
+  required_catalogue:
+    servers: [math]
 auth:
   enabled: true
   allow_anonymous: true
@@ -111,7 +113,13 @@ def front_door(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_FrontDoor]
         pytest.skip(f"could not seed tenant API keys: {exc}")
 
     config = _CONFIG.format(auth_db=str(auth_db), tenant=_TENANT, python=sys.executable, server=str(_MATH_SERVER))
-    with running_hangar(workdir, config) as hangar:
+    # /health/live returns before the front-door warm-up has projected math.
+    # tools/list waits at most WARMUP_LIST_WAIT_S (5s) for that warm-up; a
+    # slower math backend answers with management tools only, so `power` is
+    # missing from the first listing (#2173). required_catalogue keeps
+    # /health/ready at 503 until math is on the projection; the harness waits
+    # on readiness instead of polling tools/list.
+    with running_hangar(workdir, config, wait_for_ready=True) as hangar:
         yield _FrontDoor(base_url=hangar.base_url, api_key=keys[_TENANT])
 
 
