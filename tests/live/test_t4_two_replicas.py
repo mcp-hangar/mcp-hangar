@@ -432,6 +432,72 @@ def test_group_changes_reach_a_running_replica_and_a_restart_reads_the_same_rows
     assert _group(fleet.start("group-gone"), group) is None, "a deleted group came back from the rows"
 
 
+# --- a server the file took over and then dropped (#2171) -------------------------------
+
+_DENY_ECHO = {"tools": {"allow": ["ping"]}, "defaultAction": "Deny", "mode": "Enforce"}
+_L7_DENIED = "EgressPolicyDeniedError"
+
+
+def test_a_replica_whose_file_dropped_a_taken_over_server_does_not_restore_it_and_a_peer_keeps_its_policy(
+    tmp_path: Path,
+) -> None:
+    """Two replicas on two files over one database: the lease holder claims the row, nothing deletes it.
+
+    A server created over the API, with an L7 policy, is taken over by the file
+    of both replicas, so the lease holder claims its row. A restarts on a file
+    that no longer declares it and does not bring it back; B restarts on a file
+    that still does and refuses the denied tool from its first call, since the
+    row and its policy are still there. A database of its own, because the
+    claim is decided by the holder's file and the module's replicas declare
+    nothing.
+    """
+    address = tr.host_address()
+    if address is None:
+        pytest.skip("no non-loopback address to serve the upstreams on; the API refuses loopback endpoints")
+    server = tr.name("taken-over")
+    with ExitStack() as stack:
+        database = stack.enter_context(tr.fresh_database(DSN))
+        keys = tr.seed_keys(database, list(_ROLES))
+        endpoint = stack.enter_context(tr.upstream(None, address, tmp_path))
+        empty = tr.replica_config(database, address, _ROLES)
+        declares = empty.replace(
+            "mcp_servers: {}", f"mcp_servers:\n  {server}:\n    mode: remote\n    endpoint: {endpoint}"
+        )
+
+        def replica(label: str, config: str, stack: ExitStack) -> tr.Replica:
+            (tmp_path / label).mkdir()
+            hangar = stack.enter_context(running_hangar(tmp_path / label, config))
+            return tr.Replica(label=label, base_url=hangar.base_url, keys=keys)
+
+        with ExitStack() as seeding:
+            seed = replica("seed", empty, seeding)
+            created = seed.create(OP, {"mcp_server_id": server, "mode": "remote", "endpoint": endpoint})
+            assert created.status_code == 201, created.text
+            pushed = seed.api("PUT", f"/mcp_servers/{server}/l7_policy", ADMIN, _DENY_ECHO)
+            assert pushed.status_code == 200, pushed.text
+        assert (database.row(server) or {}).get("claimed_by_file") is False, "the API's row started claimed"
+
+        with ExitStack() as a_running:
+            replica("a", declares, a_running)
+            with ExitStack() as b_running:
+                replica("b", declares, b_running)
+                tr.eventually(
+                    lambda: True if (database.row(server) or {}).get("claimed_by_file") is True else None,
+                    "the lease holder claims the row its file took over",
+                    timeout=60,
+                )
+            b_again = replica("b-again", declares, stack)
+            result = b_again.call(DEV, server)
+            assert result.get("success") is False and result.get("error_type") == _L7_DENIED, (
+                f"B, restarted on a file that declares the server, served the denied tool: {result}"
+            )
+        a_again = replica("a-again", empty, stack)
+        assert a_again.state(OP, server) is None, "A, restarted on a file without the server, restored it"
+        assert database.row(server) is not None, "the row a peer reads its L7 policy from was deleted"
+        system = a_again.api("GET", "/system/", OP).json()["system"]["instance"]
+        assert system["dormant_file_claimed_rows"] == 1, system
+
+
 # --- mixed versions ------------------------------------------------------------------
 
 

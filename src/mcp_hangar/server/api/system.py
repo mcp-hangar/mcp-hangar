@@ -86,6 +86,7 @@ def _instance_info() -> dict[str, Any]:
     from ...infrastructure.persistence.registry import is_shared
     from ..bootstrap.composition import get_persistence_backend
     from ..bootstrap.coordination import get_lease_keeper
+    from ..bootstrap.file_claims import dormant_claimed_rows
 
     keeper = get_lease_keeper()
     # Whether the *backend* can be shared, not whether a lease keeper exists.
@@ -100,6 +101,9 @@ def _instance_info() -> dict[str, Any]:
         "manages_fleet": True if keeper is None else keeper.may_manage(),
         "storage_is_shareable": shared,
         "rate_limits_are_per_instance": True,
+        # Rows the file claimed for servers this replica's file no longer
+        # declares, as of its last claim pass: kept, never restored (#2171).
+        "dormant_file_claimed_rows": dormant_claimed_rows(),
     }
     if keeper is not None:
         info["management_lease"] = _lease_info(keeper)

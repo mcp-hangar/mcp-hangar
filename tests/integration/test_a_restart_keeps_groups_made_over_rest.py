@@ -128,12 +128,16 @@ def test_a_further_restart_changes_nothing(run: dict[str, Any]) -> None:
 def test_a_row_outlives_the_file_taking_over_what_it_records(run: dict[str, Any]) -> None:
     """A known gap, pinned so that closing it is seen: the state a reload and a restart disagree on.
 
-    A row written before the file named its group or member is still there when
+    A group row written before the file declared the group is still there when
     the file drops it again, so a restart restores it where a reload would
     remove it. Rows are shared and a reload is local, as for a server's row.
+
+    The server ``kept-member`` the file declared is not: its row was claimed by
+    the file at the ``file_takes`` boot, so the restart on a file without it
+    skips the server, and with it its stored membership (#2171).
     """
     dropped = run["file_drops"]["at_boot"]
-    assert dropped["pool"]["members"]["kept-member"] == [3, 2]
+    assert "kept-member" not in dropped["pool"]["members"]
     assert dropped["runtime"] == RUNTIME
 
 

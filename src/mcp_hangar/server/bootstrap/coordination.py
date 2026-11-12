@@ -14,6 +14,7 @@ did before this existed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ...application.services.lease_keeper import ManagementLeaseKeeper
@@ -23,13 +24,16 @@ from .composition import get_persistence_backend
 
 if TYPE_CHECKING:
     from ...application.services.event_tailer import EventTailer
+    from ...domain.contracts.management_lease import Lease
 
 logger = get_logger(__name__)
 
 _keeper: ManagementLeaseKeeper | None = None
 
 
-def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKeeper | None:
+def init_lease_keeper(
+    config: dict[str, Any] | None = None, on_acquired: Callable[[Lease], None] | None = None
+) -> ManagementLeaseKeeper | None:
     """Create the keeper, if the selected backend can hold a lease.
 
     Does not start it: bootstrap assembles, lifecycle starts. Starting here
@@ -39,6 +43,7 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
     Args:
         config: Full configuration. `coordination.lease_ttl_s` and
             `coordination.renew_interval_s` override the defaults.
+        on_acquired: Called on the keeper's thread when a tenure begins.
 
     Returns:
         The keeper, or None when there is nothing to coordinate through.
@@ -89,7 +94,9 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
     if "renew_deadline_s" in coordination:
         kwargs["renew_deadline_s"] = float(coordination["renew_deadline_s"])
 
-    _keeper = ManagementLeaseKeeper(backend.management_lease(), current_instance_id(), **kwargs)
+    _keeper = ManagementLeaseKeeper(
+        backend.management_lease(), current_instance_id(), on_acquired=on_acquired, **kwargs
+    )
 
     # Local-mode servers are the lease holder's to run: they are child processes
     # of one gateway, so a follower starting its own copy makes a second server

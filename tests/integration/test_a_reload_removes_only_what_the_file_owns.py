@@ -174,16 +174,15 @@ def test_a_taken_over_server_the_file_drops_again_goes(sqlite: dict[str, Any]) -
     assert "crud-one" not in sqlite["dropped"]["ids"]
 
 
-def test_a_row_outlives_a_servers_removal_from_the_file(sqlite: dict[str, Any]) -> None:
-    """A known gap, pinned so that closing it is seen: the one state a reload and a restart disagree on.
+def test_a_server_the_file_took_over_and_dropped_does_not_come_back_at_a_restart(sqlite: dict[str, Any]) -> None:
+    """The row the API wrote stays, claimed by the file at the takeover reload (#2171).
 
-    A row written for a server while the file owned it, or before it did, is
-    left by the reload that removes it, so a restart restores it as a non-file
-    server. It is not deleted here because rows are shared and a reload is local:
-    a replica whose file still declares the server reads its stored L7 policy
-    from that row at its next restart.
+    SQLite is standalone, so the replica is its own manager and claims at its
+    reload. The row is kept, since a replica whose file still declares the
+    server reads its stored L7 policy from it at its next restart, and a restart
+    on a file that no longer declares it skips it.
     """
-    assert "crud-one" in sqlite["after_dropped"]["ids"]
+    assert "crud-one" not in sqlite["after_dropped"]["ids"]
 
 
 def test_a_file_server_edited_at_runtime_and_dropped_at_a_restart_does_not_come_back(sqlite: dict[str, Any]) -> None:

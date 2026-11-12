@@ -16,6 +16,7 @@ exact failure this writer exists to remove. Waiting costs the command path the
 latency of one row write, on registration only.
 """
 
+import dataclasses
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -143,6 +144,38 @@ class RepositoryFleetWriter(IFleetWriter, IGroupWriter):
             generation=lease.generation,
             detail="the row was already absent, or this tenure had ended by the time the write reached the database",
         )
+
+    def read_all(self) -> list[McpServerConfigSnapshot]:
+        """Every live row, waiting for the read."""
+        return cast("list[McpServerConfigSnapshot]", self._loop.run(self._repository.get_all(), self._timeout_s))
+
+    def claim_for_file(self, mcp_server_id: str) -> bool:
+        """Mark a live row as claimed by the configuration file, if it is not yet (#2171).
+
+        Fenced exactly as `delete(fenced=True)` is, decided per write: on
+        storage peers share, only the lease holder's current tenure may claim,
+        and the database checks it in the statement. A standalone gateway is its
+        own manager and claims unfenced. The row read is the row claimed: one
+        deleted or rewritten meanwhile does not match.
+
+        Returns:
+            True if this call claimed the row. False when there is no live row,
+            it was claimed already, it changed meanwhile, or this instance holds
+            no tenure.
+        """
+        recorded = self.read(mcp_server_id)
+        if recorded is None or recorded[0].claimed_by_file:
+            return False
+        snapshot, version = recorded
+        lease: tuple[str, int] | None = None
+        if self._lease_provider is not None and self._is_shared():
+            held = self._lease_provider()
+            if held is None:
+                return False
+            lease = (held.holder, held.generation)
+        rows: Any = self._repository  # Both durable repositories carry the claim; the port does not.
+        claimed = dataclasses.replace(snapshot, claimed_by_file=True)
+        return bool(self._loop.run(rows.claim_for_file(claimed, version, lease), self._timeout_s))
 
     def _is_shared(self) -> bool:
         """Whether a fenced write must prove a tenure: True unless the storage is known to be one process's."""

@@ -690,10 +690,18 @@ def bootstrap(
     # Before the workers and the orchestrator, which ask it whether they may
     # run. Created here and started by lifecycle: holding the lease before the
     # loops it gates exist would mean being the manager with nothing to manage.
-    init_lease_keeper(full_config)
+    # A tenure's start asks for a claim pass, run on the claim timer's thread (#2171).
+    from .file_claims import install_file_claims, request_claim_pass
+
+    init_lease_keeper(full_config, on_acquired=request_claim_pass)
 
     # Create background workers (not started)
     workers: list[WorkerLike] = create_background_workers(config=full_config)
+    # The rows of the servers the file declares are claimed before anything is
+    # served, after a reload, and by the lease holder (#2171).
+    claim_worker = install_file_claims(runtime)
+    if claim_worker is not None:
+        workers.append(claim_worker)
 
     # Add config reload worker if enabled
     reload_config = full_config.get("config_reload", {})

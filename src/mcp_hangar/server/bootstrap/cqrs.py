@@ -23,6 +23,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: The writer `init_cqrs` built, for the claim pass (`file_claims`); None without a durable repository.
+_writer: Any = None
+
+
+def get_fleet_writer() -> Any:
+    """The fleet writer of the last `init_cqrs`, or None when nothing keeps the fleet."""
+    return _writer
+
 
 def _drain_in_flight_calls(mcp_server_id: str, timeout_s: float) -> bool:
     """Wait for the calls in flight to *mcp_server_id*; what a graceful reload waits on (#1662)."""
@@ -134,7 +142,8 @@ def init_cqrs(
         runtime_store=RUNTIME_PROVIDERS,
         event_store=runtime.event_bus.event_store,
     )
-    fleet_writer = _fleet_writer(runtime)
+    global _writer
+    fleet_writer = _writer = _fleet_writer(runtime)
     register_crud_handlers(
         runtime.command_bus,
         repository,
