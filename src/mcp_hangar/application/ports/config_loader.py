@@ -103,6 +103,20 @@ class IConfigLoader(ABC):
         """
 
     @abstractmethod
+    def forget_stored_policies(self, prepared: PreparedServers, mcp_server_ids: list[str]) -> None:
+        """Delete the stored tool-access policies of servers the file removed (#2224).
+
+        The removed id is free for a later server, which must not inherit them
+        (#1028), and a restart replays every stored row. A reload calls it after
+        the servers are removed and before `commit_mcp_servers`, whose replay
+        must not put them back. Does not fail: a row left behind only narrows.
+
+        Args:
+            prepared: What `prepare_mcp_servers` returned.
+            mcp_server_ids: The servers the reload removed.
+        """
+
+    @abstractmethod
     def commit_mcp_servers(self, prepared: PreparedServers) -> None:
         """Put a prepared section in force, replacing the previous one's.
 

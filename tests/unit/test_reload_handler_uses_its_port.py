@@ -48,6 +48,7 @@ class TestTheAdapterSatisfiesThePort:
             "apply_process_config",
             "declared_mcp_server_ids",
             "prepare_mcp_servers",
+            "forget_stored_policies",
             "commit_mcp_servers",
         ],
     )
