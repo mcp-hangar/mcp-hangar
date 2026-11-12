@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.4...v2.36.5) (2026-11-12)
+
+### Fixed
+
+- **core:** a server the configuration file declared, and that was edited at
+  runtime (an L7 policy push, a `PUT /api/mcp_servers/{id}`), no longer comes
+  back as a registered server after the file drops it. The write stored a row
+  that recovery read as a registration once the file stopped declaring the id,
+  so a restart restored the server the file had removed. A row created for a
+  server the file declares is now claimed by the file: recovery still carries
+  its L7 policy onto the server while the file declares it, and skips the row,
+  with a `recovery_skipped_row_a_file_claimed` warning, once the file does not.
+  `POST /api/mcp_servers` or a discovery registration under that id replaces
+  the row instead of answering "already exists", and keeps its L7 policy
+  (`l7_policy_carried_from_claimed_row`) but not its tool access policies.
+  Rows written before this release are not claimed yet ([#2223](https://github.com/mcp-hangar/mcp-hangar/pull/2223))
+
 ## [2.36.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.3...v2.36.4) (2026-11-11)
 
 ### Fixed

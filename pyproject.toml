@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.36.4"
+version = "2.36.5"
 description = "The MCP gateway that pins every tool, holds risky calls for approval, and enforces egress policy."
 readme = "README.md"
 license = {text = "MIT"}
