@@ -1,1 +1,0 @@
-An L7 push or a server edit that read a stored row just before the gateway marked it as the configuration file's no longer fails with a 500. The write is applied on the row as it now is. Any other change made in between, such as another edit or a delete, still refuses the write.

@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.6](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.5...v2.36.6) (2026-11-12)
+
+### Fixed
+
+- An L7 push or a server edit that read a stored row just before the gateway marked it as the configuration file's no longer fails with a 500. The write is applied on the row as it now is. Any other change made in between, such as another edit or a delete, still refuses the write. ([#2230](https://github.com/mcp-hangar/mcp-hangar/pull/2230))
+- **core:** a group the configuration file took over from the group API, and a
+  member the file named after the API added it, no longer come back after a
+  restart on a file that dropped them. A reload removed them, but their rows
+  stayed registrations, so a restart restored them. The claim pass now also
+  claims the group rows the manager's file declares and the member rows it names
+  in them, under the same rules as a server's row: standalone at boot and after
+  each reload, on PostgreSQL only the lease holder, fenced by the lease
+  generation. A restart skips a claimed row the file in force does not declare,
+  with a `recovery_skipped_group_row_a_file_claimed` or
+  `recovery_skipped_member_row_a_file_claimed` warning, and leaves it in place: a
+  replica whose file still declares the group keeps the members added over REST,
+  and the group's deny list keeps applying to them. `POST /api/groups` over a
+  claimed row this replica's file does not declare replaces it instead of
+  answering "already exists", and adding a member over REST takes the claim off
+  its row. Migration `008_group_row_claims` adds a nullable `claimed_by_file`
+  column to both group tables; `instance.dormant_file_claimed_rows` now counts
+  group and member rows too ([#2228](https://github.com/mcp-hangar/mcp-hangar/pull/2228))
+- **core:** a server the configuration file took over from the API, and later
+  dropped, no longer comes back as a registered server after a restart; one
+  taken over from discovery comes back only if its source still reports it.
+  The takeover wrote nothing, so the row stayed a
+  registration. The manager now claims the row of every server its file
+  declares: a standalone gateway at boot, before anything is served, and after
+  each reload; on PostgreSQL only the lease holder, when its tenure begins,
+  after its own reloads and every minute, each write fenced by the lease
+  generation. A claim never deletes a row: a replica whose file still declares
+  the server keeps reading its L7 policy from it. `GET /api/system` reports the
+  claimed rows this replica's file no longer declares as
+  `instance.dormant_file_claimed_rows` ([#2226](https://github.com/mcp-hangar/mcp-hangar/pull/2226))
+
 ## [2.36.5](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.4...v2.36.5) (2026-11-12)
 
 ### Fixed
