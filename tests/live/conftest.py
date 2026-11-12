@@ -80,6 +80,35 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _poll_live(hangar: RunningHangar, proc: subprocess.Popen[bytes], deadline: float) -> bool:
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False
+        try:
+            if httpx.get(f"{hangar.base_url}/health/live", timeout=1.0).status_code == 200:
+                return True
+        except httpx.HTTPError:
+            pass
+        time.sleep(_POLL_INTERVAL_S)
+    return False
+
+
+def _poll_ready(hangar: RunningHangar, proc: subprocess.Popen[bytes], deadline: float) -> tuple[bool, str]:
+    last_body = ""
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False, last_body
+        try:
+            response = httpx.get(f"{hangar.base_url}/health/ready", timeout=1.0)
+            last_body = response.text
+            if response.status_code == 200:
+                return True, last_body
+        except httpx.HTTPError:
+            pass
+        time.sleep(_POLL_INTERVAL_S)
+    return False, last_body
+
+
 @dataclass
 class RunningHangar:
     """A live `serve --http` process: its URL, the process, and its output file."""
@@ -94,17 +123,28 @@ class RunningHangar:
 
 @contextmanager
 def running_hangar(
-    workdir: Path, config_text: str, env: dict[str, str] | None = None, binary: str | None = None
+    workdir: Path,
+    config_text: str,
+    env: dict[str, str] | None = None,
+    binary: str | None = None,
+    *,
+    wait_for_ready: bool = False,
 ) -> Iterator[RunningHangar]:
     """Start `mcp-hangar serve --http` with ``config_text``; yield it once healthy.
 
     Shared engine for every "run a real hangar over HTTP" fixture. Writes the
-    config into ``workdir``, binds a free loopback port, polls ``/health/live``
-    until healthy, then yields and tears the process down on exit. ``env``, when
-    given, is the process's whole environment. Output goes to a file, not a pipe
-    nobody reads, so a chatty server cannot block on a full pipe. Skips cleanly
-    (never fails) if the server does not become healthy within the startup
-    budget; fails if the executable is missing or is not this checkout's.
+    config into ``workdir``, binds a free loopback port, polls until the process
+    is up, then yields and tears the process down on exit. Every call polls
+    ``/health/live`` first; a timeout there skips (the environment never came
+    up). When ``wait_for_ready`` is true it then polls ``/health/ready`` until
+    HTTP 200 (for example with ``tool_access.required_catalogue``, which keeps
+    readiness at 503 until the front door has projected the named servers). A
+    readiness timeout fails the test instead of skipping, so a catalogue
+    regression does not masquerade as a green tier. Transient ``httpx.HTTPError``
+    responses are ignored while polling. ``env``, when given, is the process's
+    whole environment. Output goes to a file, not a pipe nobody reads, so a chatty
+    server cannot block on a full pipe. Fails if the executable is missing or is
+    not this checkout's.
     ``binary``, when given, is another `mcp-hangar` to run instead: a published
     release, for a replica set that mixes versions.
     """
@@ -126,27 +166,28 @@ def running_hangar(
     hangar = RunningHangar(base_url=f"http://127.0.0.1:{port}", proc=proc, log_path=log_path)
 
     deadline = time.monotonic() + _STARTUP_TIMEOUT_S
-    healthy = False
     try:
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:  # process exited before becoming healthy
-                break
-            try:
-                # `serve --http` exposes liveness at /health/live (the operational probe).
-                if httpx.get(f"{hangar.base_url}/health/live", timeout=1.0).status_code == 200:
-                    healthy = True
-                    break
-            except httpx.HTTPError:
-                pass
-            time.sleep(_POLL_INTERVAL_S)
-
-        if not healthy:
+        if not _poll_live(hangar, proc, deadline):
             proc.terminate()
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
             pytest.skip(f"hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{hangar.output()[-2000:]}")
+
+        if wait_for_ready:
+            ready_deadline = time.monotonic() + _STARTUP_TIMEOUT_S
+            ready, last_ready_body = _poll_ready(hangar, proc, ready_deadline)
+            if not ready:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                pytest.fail(
+                    f"hangar did not become ready in {_STARTUP_TIMEOUT_S}s:\n"
+                    f"last /health/ready body:\n{last_ready_body}\n{hangar.output()[-2000:]}"
+                )
 
         yield hangar
     finally:
