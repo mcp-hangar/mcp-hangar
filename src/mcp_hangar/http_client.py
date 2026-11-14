@@ -13,12 +13,13 @@ Follows the same interface as StdioClient for consistency.
 
 import hashlib
 import json
+import re
 import ssl
 import threading
 import time
 import uuid
 import zlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -27,6 +28,7 @@ from typing import Any, cast
 
 import httpx
 from cryptography import x509
+from mcp.shared.inbound import NAME_BEARING_METHODS, encode_header_value
 
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMismatchError
@@ -44,6 +46,19 @@ from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject
 from .response_limit import default_max_response_bytes
 
 logger = get_logger(__name__)
+
+#: SEP-2243 standard request headers (Streamable HTTP, "Standard Request
+#: Headers"): ``Mcp-Method`` mirrors the body's ``method`` on every POST,
+#: ``Mcp-Name`` its ``params.name`` or ``params.uri`` on the methods
+#: ``NAME_BEARING_METHODS`` lists. Set per request, after the client's default
+#: headers, so an operator's ``extra_headers`` cannot make them disagree with
+#: the body an upstream validates them against.
+MCP_METHOD_HEADER = "Mcp-Method"
+MCP_NAME_HEADER = "Mcp-Name"
+#: A JSON-RPC method Hangar sends is its own literal; one outside visible ASCII
+#: would be a bug, refused rather than written into a header (the spec defines
+#: no encoding for ``Mcp-Method``).
+_HEADER_SAFE_METHOD = re.compile(r"[\x21-\x7E]+")
 
 
 class AuthType(Enum):
@@ -442,6 +457,27 @@ class _BoundedStream(httpx.SyncByteStream):
         self._stream.close()
 
 
+def _standard_headers(method: str, sent: Mapping[str, Any]) -> dict[str, str]:
+    """The SEP-2243 standard headers of one POST, taken from the body it carries (#2011).
+
+    ``Mcp-Method`` on every request and notification; ``Mcp-Name`` from
+    ``params.name`` (``tools/call``, ``prompts/get``) or ``params.uri``
+    (``resources/read``). The name can come from a caller (a resource URI, a
+    tool name), so it goes through the SDK's ``encode_header_value``: anything
+    outside printable ASCII, with edge whitespace, or shaped like the sentinel
+    is sent as ``=?base64?...?=``, so a CR or LF never reaches the header raw.
+    A name that is not a string has no header form and is left out; the
+    upstream judges the body.
+    """
+    if not _HEADER_SAFE_METHOD.fullmatch(method):
+        raise ClientError(f"method {method!r} cannot be sent as an {MCP_METHOD_HEADER} header")
+    headers = {MCP_METHOD_HEADER: method}
+    name_key = NAME_BEARING_METHODS.get(method)
+    if name_key is not None and isinstance(name := sent.get(name_key), str):
+        headers[MCP_NAME_HEADER] = encode_header_value(name)
+    return headers
+
+
 class HttpClient:
     """
     Thread-safe HTTP client for MCP-over-HTTP mcp_servers.
@@ -719,7 +755,7 @@ class HttpClient:
         # Unreachable: the loop returns or raises on its last attempt.
         raise ClientError("retry_loop_exhausted")
 
-    def _outbound_carriers(self, params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, str]]:
+    def _outbound_carriers(self, method: str, params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, str]]:
         """Fresh params and headers for one send, both carrying the current trace context.
 
         Call it inside the CLIENT span so both traceparents name that span, as
@@ -727,9 +763,12 @@ class HttpClient:
         no traceparent without one (#1271). A new copy per send: the caller's
         ``params`` are never mutated, and a re-send never carries the context
         injected for an earlier one.
+
+        The headers also carry the SEP-2243 standard headers, read from the
+        params actually sent (#2011): see `_standard_headers`.
         """
         sent = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
-        headers: dict[str, str] = {}
+        headers = _standard_headers(method, sent)
         # SEP-414: trace context rides in params._meta as well as the headers,
         # so it survives across MCP hops regardless of transport. The shared
         # outbound chokepoint also removes any baggage, as over stdio.
@@ -793,7 +832,7 @@ class HttpClient:
             # this one. It stays open until the answer is classified, so a
             # failure read from the response ends it in ERROR too (#1277).
             with upstream_call_span(method, params) as span:
-                sent_params, extra_headers = self._outbound_carriers(params)
+                sent_params, extra_headers = self._outbound_carriers(method, params)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 self._served.peer_spki = None
@@ -1162,7 +1201,7 @@ class HttpClient:
             # Carriers built inside the CLIENT span, as in `call`, and the
             # status read inside it; the rejection is still raised below.
             with upstream_call_span(method, params) as span:
-                sent_params, headers = self._outbound_carriers(params)
+                sent_params, headers = self._outbound_carriers(method, params)
                 body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
                 with self._lease() as pool:
