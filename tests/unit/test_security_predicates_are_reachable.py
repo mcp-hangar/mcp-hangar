@@ -645,6 +645,9 @@ def _served(topology: str, upstream_url: str, workdir: Path) -> Iterator[_Gatewa
         pins = get_tool_projection_registry()
         pins.set_config_pin(_UPSTREAM, "add", None, ToolDigest(tool_name="add", sha256="0" * 64))
         pins.set_digest_enforcement(_UPSTREAM, DigestEnforcement.WARN)
+        if topology == "front_door":
+            # The front door projects the tools its configuration names (#1372).
+            pins.set_flat(_UPSTREAM, frozenset({"add", "long_job"}))
 
         with TestClient(app, base_url=_BASE_URL, client=_PEER) as client:
             yield _Gateway(client=client, api_key=api_key, tenant_api_key=tenant_api_key, app=app)

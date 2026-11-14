@@ -63,6 +63,7 @@ def _schema(name: str) -> ToolSchema:
 
 def _catalogue(*names: str) -> None:
     get_tool_projection_registry().build_from_tools(SERVER, [_schema(n) for n in names])
+    get_tool_projection_registry().set_flat(SERVER, frozenset(names))  # as `tool_projection.flat` declares it
 
 
 def _ctx(tenant_id: str | None, *, method: str, user: str = "user:one", session: str | None = None) -> SimpleNamespace:

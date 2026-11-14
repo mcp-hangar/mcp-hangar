@@ -436,6 +436,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{server}"]
     idle_ttl_s: 60
+    tool_projection:
+      flat: [echo]
 tool_access:
   mode: front_door
 auth:

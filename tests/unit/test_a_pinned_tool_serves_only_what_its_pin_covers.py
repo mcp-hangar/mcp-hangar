@@ -57,6 +57,7 @@ def registry() -> Iterator[tp.ToolProjectionRegistry]:
     tp.reset_tool_projection_registry()
     registry = tp.get_tool_projection_registry()
     registry.build_from_tools(SERVER, [GOOD])
+    registry.set_flat(SERVER, frozenset({GOOD.name}))  # as `tool_projection.flat` declares it (#1372)
     yield registry
     tp.reset_tool_projection_registry()
 

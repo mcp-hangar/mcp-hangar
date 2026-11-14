@@ -193,6 +193,7 @@ def check_front_door_projection(choose: Choose) -> int:
         for server in _some(choose, _SERVERS, 3):
             names = sorted(set(_some(choose, _TOOLS, 4)))
             registry.build_from_tools(server, [ToolSchema(name=n, description="", input_schema={}) for n in names])
+            registry.set_flat(server, frozenset(_some(choose, _TOOLS, 4)))
             for _ in range(choose(3)):
                 registry.set_config_withdrawal(server, _pick(choose, _TOOLS), _pick(choose, _TENANTS))
             for _ in range(choose(3)):
@@ -220,6 +221,8 @@ def check_front_door_projection(choose: Choose) -> int:
                     raise InvariantViolated(f"tenant {tenant!r}: {server}/{tool} is listed as {flat_name!r} but denied")
                 if registry.is_withdrawn(server, tool, tenant_id=tenant):
                     raise InvariantViolated(f"tenant {tenant!r}: {server}/{tool} is listed but withdrawn")
+                if tool not in (registry.flat_names(server) or ()):
+                    raise InvariantViolated(f"tenant {tenant!r}: {server}/{tool} is listed but not named in flat")
         return listed
     finally:
         reset_tool_projection_registry()
@@ -253,6 +256,7 @@ _NESTED_KEYS = (
     "deny_list",
     "approval_list",
     "pins",
+    "flat",
     "withdrawn",
     "tenant_overrides",
     "upstream",

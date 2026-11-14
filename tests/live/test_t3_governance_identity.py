@@ -80,9 +80,11 @@ mcp_servers:
     env:
       MCP_TRANSPORT: stdio
     idle_ttl_s: 60
-"""
+{flat}"""
 
 _FRONT_DOOR = "tool_access:\n  mode: front_door\n"
+#: The tools a front door projects under their own names (#1372); a front-door key only.
+_FLAT = "    tool_projection:\n      flat: [add, subtract, multiply, divide, power]\n"
 
 
 @dataclass
@@ -111,6 +113,7 @@ def _env(receiver: OtlpReceiver, run_id: str) -> dict[str, str]:
 def _config(auth_db: Path, *, front_door: bool) -> str:
     return _CONFIG.format(
         topology=_FRONT_DOOR if front_door else "",
+        flat=_FLAT if front_door else "",
         auth_db=str(auth_db),
         tenant=_TENANT,
         python=sys.executable,

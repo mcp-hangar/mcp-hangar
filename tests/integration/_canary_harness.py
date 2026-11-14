@@ -199,6 +199,10 @@ def _config(surface: str, endpoint: str, http_upstream: str, stdio_record: Path)
     }
     if surface == "front_door":
         config["tool_access"] = {"mode": "front_door"}
+        for transport, server_id in SERVERS.items():
+            # Every canary tool projected under its own name (#1372).
+            flat = [upstream.prefix(transport) + tool for tool in upstream.TOOLS]
+            config["mcp_servers"][server_id]["tool_projection"] = {"flat": flat}
     return config
 
 

@@ -68,6 +68,7 @@ def _make_schema(name: str) -> ToolSchema:
 def _populate_registry(registry: ToolProjectionRegistry, server: str, tools: list[str]) -> None:
     schemas = [_make_schema(t) for t in tools]
     registry.build_from_tools(server, schemas)
+    registry.set_flat(server, frozenset(tools))  # as `tool_projection.flat` declares it (#1372)
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +826,7 @@ class TestGroupsBehindFrontDoor:
         _populate_registry(registry, "search-v1", ["read_item", "get_item"])
         _populate_registry(registry, "search-v2", ["read_item", "get_item"])
         groups = {"search": _fake_group("search", ["search-v1", "search-v2"])}
+        registry.set_flat("search", frozenset({"read_item", "get_item"}))
 
         p1, p2, p3 = self._patches(registry, resolver, groups)
         with p1, p2, p3, caplog.at_level(logging.WARNING, logger="mcp_hangar.fastmcp_server.flat_tool_projection"):
@@ -852,6 +854,7 @@ class TestGroupsBehindFrontDoor:
         """The call targets the GROUP, so member selection stays with its strategy."""
         _populate_registry(registry, "search-v1", ["read_item"])
         groups = {"search": _fake_group("search", ["search-v1", "search-v2"])}
+        registry.set_flat("search", frozenset({"read_item"}))
 
         from mcp_hangar.server.tools.batch.models import BatchResult, CallResult
 

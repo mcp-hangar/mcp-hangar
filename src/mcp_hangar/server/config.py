@@ -1302,6 +1302,39 @@ def _register_header_exposure_block(scope_id: str, block: Any) -> None:
     )
 
 
+#: What a ``tool_projection.flat`` entry may not contain: a wildcard (#1372).
+_FLAT_WILDCARD = frozenset("*?[]")
+
+
+def flat_tool_names(scope_id: str, flat: Any) -> frozenset[str]:
+    """The tool names a ``tool_projection.flat`` list declares, refused when it is not a list of names (#1372).
+
+    There is no ``flat: all`` and no wildcard. The shortcut would be taken by
+    the first operator in a hurry, and its result is the front door that lists
+    every upstream tool, which is the state the key exists to leave. Each tool
+    is named, or it is not projected.
+
+    Raises:
+        ConfigurationError: *flat* is not a list of tool names, or names ``all``
+            or a pattern.
+    """
+    where = f"tool_projection.flat for '{scope_id}'"
+    if not isinstance(flat, list):
+        raise ConfigurationError(
+            f"Invalid {where}: expected a list of tool names, got {type(flat).__name__} {flat!r}. "
+            "There is no `flat: all`: name each tool to project under its own name."
+        )
+    for name in flat:
+        if not (isinstance(name, str) and name):
+            raise ConfigurationError(f"Invalid {where}: expected a tool name, got {name!r}")
+        if name == "all" or _FLAT_WILDCARD & set(name):
+            raise ConfigurationError(
+                f"Invalid {where}: {name!r} is a shorthand or a pattern, and flat takes no wildcard. "
+                "Name each tool to project under its own name."
+            )
+    return frozenset(flat)
+
+
 def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) -> None:
     """Apply one ``tool_projection:`` block, whatever scope declared it (#1038).
 
@@ -1359,6 +1392,9 @@ def _register_tool_projection_block(scope_id: str, tool_projection_config: Any) 
                 f"Invalid tool_projection.new_tools for '{scope_id}': expected 'withhold' or 'allow', got {new_tools!r}"
             )
         tp_registry.set_new_tools_policy(scope_id, new_tools)
+
+    if "flat" in tool_projection_config:
+        tp_registry.set_flat(scope_id, flat_tool_names(scope_id, tool_projection_config["flat"]))
 
     upstream = tool_projection_config.get("upstream")
     if upstream is not None and not (isinstance(upstream, str) and upstream):
@@ -2355,6 +2391,80 @@ _PROCESS_SECTIONS: tuple[Callable[[dict[str, Any]], None], ...] = (
 )
 
 
+def _check_flat_projection(full_config: dict[str, Any]) -> None:
+    """Refuse a configuration whose ``tool_projection.flat`` keys do not fit its mode (#1372).
+
+    On a front door every server and group in ``mcp_servers`` chooses which of
+    its tools are projected under their own names, and one that does not
+    choose refuses to start. The choice used to be made for it: every tool was
+    projected. Under ``egress`` the key is refused: egress installs no flat
+    handlers, so it would be accepted and do nothing (ADR-027, Decision 3). A
+    reload runs this before it stops anything, so a file that drops the key
+    leaves the running configuration as it was.
+
+    Raises:
+        ConfigurationError: Naming the server and the missing or contradictory key.
+    """
+    from ..domain.services.tool_access_resolver import configured_topology_mode
+
+    servers = full_config.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return
+    front_door = configured_topology_mode(full_config) == "front_door"
+    for scope_id, spec in servers.items():
+        if not isinstance(spec, dict):
+            continue
+        block = spec.get("tool_projection")
+        declared = isinstance(block, dict) and "flat" in block
+        if declared and not front_door:
+            raise ConfigurationError(
+                f"mcp_servers.{scope_id}.tool_projection.flat is set on an egress gateway. flat chooses the "
+                "tools a front door projects under their own names, and egress projects none, so the key "
+                "would do nothing (ADR-027). Remove it, or set tool_access.mode: front_door."
+            )
+        if not front_door:
+            continue
+        if not (declared and isinstance(block, dict)):
+            raise ConfigurationError(
+                f"mcp_servers.{scope_id} is served on a front door (tool_access.mode: front_door) and has not "
+                "chosen which of its tools are projected under their own names. That surface must be chosen "
+                f"explicitly: add tool_projection.flat to '{scope_id}' with the tools to project, or flat: [] "
+                "for none. There is no `flat: all`. The upgrade notes show how to list the tools served today."
+            )
+        hidden = sorted(_not_visible(scope_id, spec, flat_tool_names(scope_id, block["flat"])))
+        if hidden:
+            raise ConfigurationError(
+                f"mcp_servers.{scope_id}.tool_projection.flat names {hidden}, which mcp_servers.{scope_id}.tools "
+                "does not make visible. Project a tool that tools: lists or allows, or change tools:."
+            )
+
+
+def _not_visible(scope_id: str, spec: dict[str, Any], names: frozenset[str]) -> set[str]:
+    """The *names* the scope's own ``tools:`` does not make visible (#1372).
+
+    ``tools:`` is two things. As a list it declares the server's tools, and a
+    name it does not list is not one. As a mapping it is an access policy, and
+    a name the policy does not allow is hidden by it. With no ``tools:`` nothing
+    is known at load. A policy that does not parse is left to the loader, which
+    refuses it with its own message.
+    """
+    from ..domain.model.mcp_server_config import parse_tools_access_config
+
+    tools = spec.get("tools")
+    if isinstance(tools, list):
+        return set(names) - {tool.get("name") for tool in tools if isinstance(tool, dict)}
+    if not isinstance(tools, dict):
+        return set()
+    try:
+        parsed = parse_tools_access_config(tools, where=f"mcp_servers.{scope_id}.tools")
+    except (ValueError, TypeError):
+        return set()
+    if parsed is None:
+        return set()
+    policy = parsed.to_policy()
+    return {name for name in names if not policy.is_tool_allowed(name)}
+
+
 def check_process_config(full_config: dict[str, Any]) -> None:
     """Refuse a configuration whose process-wide sections cannot be applied, and apply none.
 
@@ -2392,6 +2502,7 @@ def check_process_config(full_config: dict[str, Any]) -> None:
         build_validator_pipeline(_validator_specs(full_config))
     except (TypeError, ValueError) as e:
         raise ConfigurationError(f"Invalid interceptors.validators: {e}") from e
+    _check_flat_projection(full_config)
 
 
 def apply_process_config(full_config: dict[str, Any]) -> None:

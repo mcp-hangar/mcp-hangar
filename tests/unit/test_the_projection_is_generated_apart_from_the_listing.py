@@ -65,6 +65,9 @@ class _Fleet:
             sid: SimpleNamespace(tools=ToolCatalog({t: _schema(t) for t in tools}), state=SimpleNamespace(value="cold"))
             for sid, tools in catalogue.items()
         }
+        for sid, tools in catalogue.items():
+            # The tools the configuration names in `tool_projection.flat` (#1372).
+            get_tool_projection_registry().set_flat(sid, frozenset(tools))
         self.started: list[str] = []
         self.repository = self
         self.command_bus = self

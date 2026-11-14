@@ -235,6 +235,10 @@ def main(mode: str, out: Path, endpoint: str) -> None:
             "storage": {"driver": "memory"},
         }
 
+    if mode == "front_door":
+        from _flat_surface import MOCK_PROVIDER_TOOLS, name_every_tool
+
+        name_every_tool(config, {"math": MOCK_PROVIDER_TOOLS})
     context = bootstrap(config_dict=config)
     if mode == "front_door":
         from mcp_hangar.server.lifecycle import warm_the_front_door_catalogue

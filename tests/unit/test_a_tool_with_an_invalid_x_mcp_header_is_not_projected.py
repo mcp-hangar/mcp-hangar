@@ -56,6 +56,7 @@ def _tools() -> list[ToolSchema]:
 def registry():
     reg = get_tool_projection_registry()
     reg.build_from_tools(SERVER, _tools())
+    reg.set_flat(SERVER, frozenset(tool.name for tool in _tools()))  # as `tool_projection.flat` declares it
     # The verdict cache is keyed on (server, tool, digest) and outlives one
     # test; a stale entry would hide a regression in the check itself.
     flat_tool_projection._ANNOTATION_VERDICTS.clear()

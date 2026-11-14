@@ -275,6 +275,39 @@ def _build_flat_map(tenant_id: str | None) -> dict[str, tuple[str, str]]:
     return read_as_one_set(functools.partial(_flat_map_now, tenant_id))
 
 
+def _build_governed_map(tenant_id: str | None) -> dict[str, tuple[str, str]]:
+    """`_build_flat_map` before ``tool_projection.flat`` is applied (#1372).
+
+    Which upstreams a tenant may reach, for the prompts and resources surfaces:
+    a server whose tools are not projected under their own names still serves
+    its prompts and resources, so they must not be filtered by `flat`.
+    """
+    return read_as_one_set(functools.partial(_governed_map_now, tenant_id))
+
+
+def _flat_map_now(tenant_id: str | None) -> dict[str, tuple[str, str]]:
+    """The governed map narrowed to the tools ``tool_projection.flat`` names (#1372). Through `_build_flat_map`.
+
+    Applied last, to a map every other rule has already filtered, so it only
+    ever removes an entry: a tool policy denies, a withdrawal hides or a
+    collision drops is not brought back by naming it here.
+    """
+    group_of = _member_to_group()
+    return {name: route for name, route in _governed_map_now(tenant_id).items() if _named_flat(*route, group_of)}
+
+
+def _named_flat(mcp_server: str, tool: str, group_of: Mapping[str, str]) -> bool:
+    """Does the scope a call of *tool* routes to name it in ``tool_projection.flat``?
+
+    That scope is the group for a member of one group (#857), else the server,
+    as for the access policy a call is governed by. A scope that declared no
+    ``flat``, which only a server registered over REST or by discovery can be,
+    projects nothing.
+    """
+    names = get_tool_projection_registry().flat_names(group_of.get(mcp_server, mcp_server))
+    return names is not None and tool in names
+
+
 def _reserved_names() -> frozenset[str]:
     """The names of the gateway's own management tools, which no upstream tool may take (#2031).
 
@@ -291,10 +324,10 @@ def _reserved_names() -> frozenset[str]:
     return frozenset(TOOL_PERMISSIONS) | SELF_SCOPED_TOOLS | INVOKE_PATH_TOOLS
 
 
-def _flat_map_now(
+def _governed_map_now(
     tenant_id: str | None,
 ) -> dict[str, tuple[str, str]]:
-    """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*. Through `_build_flat_map`.
+    """Build a per-request flat_name -> (mcp_server, tool) map for *tenant_id*, before ``flat``.
 
     Rules applied:
     1. Only tools the call this entry routes to would be allowed for
@@ -1042,8 +1075,8 @@ def _report_empty_projection(tenant_id: str | None) -> None:
         )
     else:
         logger.info(
-            "empty_projection reason=filtered tenant=%s -- tools are discovered but policy or withdrawal "
-            "removed all of them for this tenant. This is a correct answer.",
+            "empty_projection reason=filtered tenant=%s -- tools are discovered but policy, withdrawal or "
+            "tool_projection.flat removed all of them for this tenant. This is a correct answer.",
             tenant_id,
         )
 

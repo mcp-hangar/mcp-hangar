@@ -74,7 +74,7 @@ def _file(*, deny: str, withdrawn: str, pin: str, exposure: str, group_deny: str
     return {
         SERVER: _server(
             tools={"deny_list": [deny]},
-            tool_projection={"withdrawn": [withdrawn], "pins": {"p": pin}},
+            tool_projection={"withdrawn": [withdrawn], "pins": {"p": pin}, "flat": ["t", "u", "w"]},
             header_exposure={"deny_annotated": [exposure]},
         ),
         # Built from another command in each file, so a reload replaces it.

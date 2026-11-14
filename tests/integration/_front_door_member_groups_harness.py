@@ -136,7 +136,7 @@ def _config(topology: str, order: str, shared_endpoint: str, single_endpoint: st
         ),
     }
     first, second = (POOL_A, POOL_B) if order == "ab" else (POOL_B, POOL_A)
-    return {
+    config = {
         "tool_access": {"mode": topology},
         "rate_limit": {"rps": 1000, "burst": 1000},
         "auth": {
@@ -153,6 +153,12 @@ def _config(topology: str, order: str, shared_endpoint: str, single_endpoint: st
             POOL_C: _pool(SINGLE, tools={"deny_list": ["c_denied"]}, tool_projection={"withdrawn": ["c_withdrawn"]}),
         },
     }
+    if topology != FRONT_DOOR:
+        return config
+    from _flat_surface import name_every_tool
+
+    shared, single = {SHARED: SHARED_TOOLS, POOL_A: SHARED_TOOLS, POOL_B: SHARED_TOOLS}, {SINGLE: SINGLE_TOOLS}
+    return name_every_tool(config, {**shared, **single, POOL_C: SINGLE_TOOLS})
 
 
 def _jsonrpc(text: str) -> dict[str, Any]:

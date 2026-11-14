@@ -106,6 +106,7 @@ def _runtime(registry: ToolProjectionRegistry, server_ids: list[str], hold: thre
             command.mcp_server_id,
             [ToolSchema(name=t, description=t, input_schema={"type": "object"}) for t in ("add", "subtract")],
         )
+        registry.set_flat(command.mcp_server_id, frozenset({"add", "subtract"}))  # as `tool_projection.flat` does
 
     repository = Mock()
     repository.get_all_ids.return_value = server_ids

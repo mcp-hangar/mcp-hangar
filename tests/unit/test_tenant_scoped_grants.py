@@ -601,6 +601,7 @@ class TestTheFrontDoorServesATenantGrantNoControlPlane:
         get_tool_projection_registry().build_from_tools(
             "payments", [ToolSchema(name="refund", description="Refund a payment", input_schema={"type": "object"})]
         )
+        get_tool_projection_registry().set_flat("payments", frozenset({"refund"}))
         principal = granted(role, scope)
         low = lowlevel_server(server)
         request_ctx = SimpleNamespace(

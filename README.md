@@ -147,6 +147,8 @@ mcp_servers:
     command: [uvx, mcp-server-github]
     env:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
+    tool_projection:
+      flat: [search_repositories, get_file_contents]  # the tools your client is served
 tool_access:
   mode: front_door
 auth:

@@ -12,6 +12,9 @@ mcp_servers:
   demo:
     mode: subprocess
     command: [python, ../server.py]
+    # The tools the front door serves under their own names.
+    tool_projection:
+      flat: [echo]
 tool_access:
   mode: front_door
 auth:

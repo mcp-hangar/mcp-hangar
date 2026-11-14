@@ -184,7 +184,15 @@ def _front_door_config(workdir: Path, *, mode: str, sections: dict[str, Any]) ->
                 {"principal": "group:admins", "role": "admin", "scope": "global"},
             ],
         },
-        "mcp_servers": {"stub": {"mode": "subprocess", "command": [sys.executable, str(UPSTREAM)], "idle_ttl_s": 600}},
+        "mcp_servers": {
+            "stub": {
+                "mode": "subprocess",
+                "command": [sys.executable, str(UPSTREAM)],
+                "idle_ttl_s": 600,
+                # Both upstream tools projected under their own names (#1372).
+                **({"tool_projection": {"flat": ["echo", "links"]}} if mode == "front_door" else {}),
+            }
+        },
         **sections,
     }
 

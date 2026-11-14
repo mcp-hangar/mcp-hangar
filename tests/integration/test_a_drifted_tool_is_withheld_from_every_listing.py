@@ -66,6 +66,7 @@ def _pin_read_as_served() -> None:
     """Pin READ for all tenants to what the upstream serves now, the way a reload adopts a pin."""
     staged = ToolProjectionRegistry()
     staged.set_config_pin(SERVER, READ, None, _current_digest())
+    staged.set_flat(SERVER, frozenset({READ, WRITE}))  # the file still names both (#1372)
     get_tool_projection_registry().adopt_config_overlays(staged, replace=True)
 
 

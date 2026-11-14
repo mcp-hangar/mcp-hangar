@@ -79,6 +79,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{server}"]
     idle_ttl_s: 600
+    tool_projection:
+      flat: [add, subtract, multiply, divide, power]
 """
 
 

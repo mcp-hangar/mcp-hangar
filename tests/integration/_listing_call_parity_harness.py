@@ -294,6 +294,11 @@ def config(topology: str, endpoints: dict[str, str], governance: Governance) -> 
         block = specs[scope].setdefault("tool_projection", {})
         block["digest_enforcement"] = "block"
         block.setdefault("pins", {})[tool] = hashlib.sha256(b"not the schema " + tool.encode()).hexdigest()
+    if topology == FRONT_DOOR:
+        from _flat_surface import name_every_tool
+
+        catalogue = {ALPHA: POOL_TOOLS, BETA: POOL_TOOLS, GROUP: POOL_TOOLS, GAMMA: GAMMA_TOOLS}
+        name_every_tool({"mcp_servers": specs}, catalogue)
     return {
         "tool_access": {"mode": topology},
         "logging": {"level": "ERROR"},

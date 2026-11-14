@@ -70,13 +70,17 @@ class TestPromptMap:
 
         assert flat == {"summarize": ("server_b", _SUMMARIZE)}
 
-    def test_upstream_ids_come_from_the_tenants_flat_tool_map(self) -> None:
-        """Scope = the tenant's own projected upstreams, group members collapsed (#857)."""
+    def test_upstream_ids_come_from_the_tenants_governed_tool_map(self) -> None:
+        """Scope = the tenant's own governed upstreams, group members collapsed (#857).
+
+        The map before `tool_projection.flat`: a server whose tools are not
+        projected under their own names still serves its prompts (#1372).
+        """
         from mcp_hangar.fastmcp_server import flat_tool_projection as ftp
 
         flat_map = {"t1": ("member_1", "t1"), "t2": ("member_2", "t2"), "t3": ("server_c", "t3")}
         with (
-            patch.object(ftp, "_build_flat_map", return_value=flat_map) as build,
+            patch.object(ftp, "_build_governed_map", return_value=flat_map) as build,
             patch.object(ftp, "_member_to_group", return_value={"member_1": "group_g", "member_2": "group_g"}),
         ):
             assert pp._upstream_ids("tenant:a") == ["group_g", "server_c"]

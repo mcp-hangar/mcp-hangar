@@ -169,11 +169,16 @@ def _front_door(out: Path) -> dict[str, Any]:
         json.dumps(
             {
                 "mcp_servers": {
-                    WARM: {"mode": "subprocess", "command": [sys.executable, str(MOCK_PROVIDER)]},
+                    WARM: {
+                        "mode": "subprocess",
+                        "command": [sys.executable, str(MOCK_PROVIDER)],
+                        "tool_projection": {"flat": ["add"]},
+                    },
                     DOWN: {
                         "mode": "subprocess",
                         "command": [sys.executable, "-c", "raise SystemExit(1)"],
                         "max_consecutive_failures": 100,
+                        "tool_projection": {"flat": []},
                     },
                 },
                 "tool_access": {

@@ -13,9 +13,10 @@ with an admin key, and the tenant's listing and calls over streamable HTTP with
 its own key, while a ``GET /mcp`` stream is held open on a real socket. In
 ``egress`` a reload still starts nothing.
 
-A server that leaves the fleet, by reload or by ``DELETE /api/mcp_servers``,
-leaves the listing too, the client is told, and one added back under the same
-name is listed again, started or not (#2088).
+A server that leaves the fleet by reload leaves the listing too, the client is
+told, and one added back under the same name is listed again (#2088). A server
+registered over REST names no tool in ``tool_projection.flat``, so none of its
+tools is listed (#1372).
 """
 
 from __future__ import annotations
@@ -108,22 +109,16 @@ def test_a_server_a_reload_adds_back_is_listed_again(front_door: dict[str, Any])
     assert readded["late_call"] == "served"
 
 
-def test_a_server_deleted_over_rest_leaves_the_listing_and_comes_back_when_registered_again_unstarted(
-    front_door: dict[str, Any],
-) -> None:
+def test_a_server_registered_over_rest_is_not_projected(front_door: dict[str, Any]) -> None:
+    # Flattening is opt-in per tool (#1372), and REST declares no `tool_projection.flat`:
+    # the server is registered and started, and none of its tools is listed or callable.
     rest = front_door["rest"]
 
-    assert (rest["created"], rest["started"], rest["listed"], rest["told_added"]) == (201, 200, True, True), rest
-    assert rest["deleted"] == 200
-    assert rest["told"] is True
+    assert (rest["created"], rest["started"]) == (201, 200), rest
     assert LATE_TOOL not in rest["tools"]
     assert "add" in rest["tools"]
     assert rest["call"] == METHOD_NOT_FOUND
-    # Registered again with no start: listed with its last tools, and the first
-    # call starts the new copy, as a re-created server was served before #2088.
-    assert (rest["recreated"], rest["state_recreated"], rest["listed_again"]) == (201, "cold", True), rest
-    assert rest["call_again"] == "served"
-    assert rest["state_after_call"] == "ready"
+    assert rest["told"] is False, "nothing a caller is shown changed"
 
 
 def test_egress_starts_nothing_on_a_reload(egress: dict[str, Any]) -> None:

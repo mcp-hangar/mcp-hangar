@@ -50,7 +50,9 @@ class _Channel:
 @pytest.fixture
 def gateway() -> Iterator[FrontDoor]:
     tool_list_changed.reset()
-    with front_door(("read_item", "write_item")) as door:
+    with front_door(("read_item", "write_item"), also_flat=("late_item",)) as door:
+        # A server added while serving, and the tool it brings, as its file would name it (#1372).
+        get_tool_projection_registry().set_flat("catalog", frozenset({"find_item"}))
         tool_list_changed.serve_push_channel("stdio")
         try:
             yield door
@@ -133,6 +135,8 @@ async def test_many_upstreams_landing_at_once_cost_each_channel_one_notification
     monkeypatch.setattr(loop, "call_later", hold_window)
     channels = [_listen(TENANT_A) for _ in range(3)] + [_listen(TENANT_B)]
     registry = get_tool_projection_registry()
+    for n in range(40):
+        registry.set_flat(f"shelf-{n}", frozenset({f"shelf_item_{n}"}))  # named before they land (#1372)
 
     # track_listing opened a comparison window; drain it so the storm's window
     # comes only from _on_projection_changed, not leftover _pending state.

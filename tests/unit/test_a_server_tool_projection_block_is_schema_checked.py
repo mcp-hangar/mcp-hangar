@@ -47,7 +47,8 @@ def test_the_schema_copies_hold_to_what_the_reader_looks_up():
     assert scope == {"digest_enforcement", "new_tools", "pins", "tenant_overrides", "upstream"}, (
         f"the scan or the reader changed: {scope}"
     )
-    assert scope | set(_WITHDRAWAL_KEYS) == TOOL_PROJECTION_SCOPE_KEYS
+    # `flat` is read by subscript, not `.get`: present-but-null is refused, absent is not (#1372).
+    assert scope | set(_WITHDRAWAL_KEYS) | {"flat"} == TOOL_PROJECTION_SCOPE_KEYS
     assert {"pins"} | set(_WITHDRAWAL_KEYS) == TOOL_PROJECTION_TENANT_KEYS
 
 

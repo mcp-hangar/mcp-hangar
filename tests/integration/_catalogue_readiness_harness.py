@@ -118,6 +118,9 @@ def _config(mode: str, work: Path) -> dict[str, Any]:
     tool_access: dict[str, Any] = {"required_catalogue": {"servers": list(servers), "retry_for_s": window}}
     if mode != "egress":
         tool_access["mode"] = "front_door"
+        for spec in servers.values():
+            # Readiness is about the catalogue, not the surface: none projected flat (#1372).
+            spec["tool_projection"] = {"flat": []}
     return {"mcp_servers": servers, "tool_access": tool_access}
 
 

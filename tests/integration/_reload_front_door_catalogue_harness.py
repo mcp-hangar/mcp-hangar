@@ -63,6 +63,11 @@ def _config(workdir: Path, mode: str, phase: str) -> dict[str, Any]:
     servers: dict[str, Any] = {"edit": _edit("before" if phase == "boot" else "after")}
     if phase in ("added", "readded"):
         servers["late"] = {"mode": "subprocess", "command": [sys.executable, str(UPSTREAM)], "idle_ttl_s": 600}
+    if mode == "front_door":
+        # Each server's visible tools projected under their own names (#1372).
+        servers["edit"]["tool_projection"] = {"flat": ["add", "divide", "multiply", "power", "subtract"]}
+        if "late" in servers:
+            servers["late"]["tool_projection"] = {"flat": ["echo", "links"]}
     return {
         "tool_access": {"mode": mode},
         "config_reload": {"enabled": False},
@@ -253,27 +258,15 @@ def run(mode: str, workdir: Path) -> dict[str, Any]:
                 door.reload("admin")
                 door.until(lambda t: LATE_TOOL not in t)
 
+                # A server registered over REST has no `tool_projection.flat` to name a
+                # tool in, so the front door projects none of its tools (#1372).
                 api = {"mcp_server_id": "api", "mode": "subprocess", "command": [sys.executable, str(UPSTREAM)]}
                 stream.settle()  # the reloads just above are announced first
                 rest: dict[str, Any] = {"created": door.admin("POST", "/api/mcp_servers", api)}
                 rest["started"] = door.admin("POST", "/api/mcp_servers/api/start")
-                rest["listed"] = LATE_TOOL in door.until(lambda t: LATE_TOOL in t)
-                # Told of the add before the delete: changes inside one coalescing
-                # window that cancel out are, rightly, no notification at all.
-                rest["told_added"] = stream.told(timeout=20.0)
-                stream.drain()
-                rest["deleted"] = door.admin("DELETE", "/api/mcp_servers/api")
-                rest["told"] = stream.told(timeout=20.0)
-                rest["tools"] = sorted(door.until(lambda t: LATE_TOOL not in t))
+                rest["tools"] = sorted(door.until(lambda t: LATE_TOOL in t, timeout=5.0))
                 rest["call"] = door.call(LATE_TOOL)
-                # Registered again and NOT started, as a discovery re-appearance or an
-                # operator re-create is: listed with its last tools, and the first
-                # call starts the new copy.
-                rest["recreated"] = door.admin("POST", "/api/mcp_servers", api)
-                rest["state_recreated"] = state("api")
-                rest["listed_again"] = LATE_TOOL in door.until(lambda t: LATE_TOOL in t)
-                rest["call_again"] = door.call(LATE_TOOL)
-                rest["state_after_call"] = state("api")
+                rest["told"] = stream.told(timeout=2.0)
                 out["rest"] = rest
         finally:
             if stream is not None:

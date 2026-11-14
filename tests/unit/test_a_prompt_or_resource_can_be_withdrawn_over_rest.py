@@ -177,6 +177,7 @@ class TestAPromptIsWithdrawnOverRest:
         get_tool_projection_registry().build_from_tools(
             _SERVER, [ToolSchema(name="search", description="Search tool", input_schema={"type": "object"})]
         )
+        get_tool_projection_registry().set_flat(_SERVER, frozenset({"search"}))
         assert "search" in _build_flat_map(_TENANT)
 
         _withdraw(client, "search", kind="prompt")

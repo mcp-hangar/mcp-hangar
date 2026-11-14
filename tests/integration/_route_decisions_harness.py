@@ -121,6 +121,8 @@ def _unreachable_endpoint() -> str:
 
 
 def _config(topology: str, endpoint_a: str, endpoint_b: str) -> dict[str, Any]:
+    # The upstream's one tool projected under its own name, on a front door (#1372).
+    flat = {"tool_projection": {"flat": [TOOL]}} if topology == FRONT_DOOR else {}
     return {
         "tool_access": {"mode": topology},
         # An endpoint turns OTLP audit export on; tracing stays off (the
@@ -134,9 +136,10 @@ def _config(topology: str, endpoint_a: str, endpoint_b: str) -> dict[str, Any]:
             "storage": {"driver": "memory"},
         },
         "mcp_servers": {
-            MEMBER_A: {"mode": "remote", "endpoint": endpoint_a},
-            MEMBER_B: {"mode": "remote", "endpoint": endpoint_b},
+            MEMBER_A: {"mode": "remote", "endpoint": endpoint_a, **flat},
+            MEMBER_B: {"mode": "remote", "endpoint": endpoint_b, **flat},
             GROUP: {
+                **flat,
                 "mode": "group",
                 "strategy": "priority",
                 "min_healthy": 1,

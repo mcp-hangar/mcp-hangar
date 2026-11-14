@@ -49,6 +49,7 @@ def _pin_read_as_served() -> None:
     (projection,) = [p for p in get_tool_projection_registry().list_for_server(SERVER) if p.tool == READ]
     staged = ToolProjectionRegistry()
     staged.set_config_pin(SERVER, READ, None, projection.digest)
+    staged.set_flat(SERVER, frozenset({READ, WRITE}))  # the file still names both (#1372)
     get_tool_projection_registry().adopt_config_overlays(staged, replace=True)
 
 

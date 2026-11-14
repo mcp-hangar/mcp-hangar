@@ -67,7 +67,7 @@ mcp_servers:
     env:
       MCP_TRANSPORT: stdio
     idle_ttl_s: 60
-"""
+{flat}"""
 
 
 @dataclass
@@ -107,6 +107,10 @@ def gateways(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, _Ga
                 pytest.skip(f"could not seed tenant API keys: {exc}")
             config = _CONFIG.format(
                 topology="tool_access:\n  mode: front_door\n" if topology == "front_door" else "",
+                # The tools a front door projects under their own names (#1372).
+                flat="    tool_projection:\n      flat: [add, subtract, multiply, divide, power]\n"
+                if topology == "front_door"
+                else "",
                 auth_db=str(auth_db),
                 svc_group=gs.SVC_GROUP,
                 cap=_CAP,
