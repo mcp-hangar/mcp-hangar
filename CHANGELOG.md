@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.8](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.7...v2.36.8) (2026-11-14)
+
+### Fixed
+
+- **core:** the MCP Registry entry describes Hangar as "a policy enforcement plane for MCP: pins every tool, holds risky calls, enforces egress policy". The registry accepts at most 100 characters and rejected the longer sentence from 2.36.7, so the registry still listed 2.36.6. PyPI, the README and `mcp-hangar --help` keep the full sentence. A test now holds the registry description to the limit. ([#2245](https://github.com/mcp-hangar/mcp-hangar/pull/2245))
+
 ## [2.36.7](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.6...v2.36.7) (2026-11-12)
 
 ### Changed
