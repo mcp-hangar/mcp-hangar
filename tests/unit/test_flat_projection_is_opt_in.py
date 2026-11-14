@@ -152,6 +152,22 @@ class TestFlatNamesOnlyWhatToolsMakesVisible:
     def test_with_no_tools_key_nothing_is_known_at_load(self) -> None:
         check_process_config(_front_door(**{SERVER: _spec(tool_projection={"flat": ["anything"]})}))
 
+    def test_a_tools_mapping_that_declares_no_policy_hides_nothing(self) -> None:
+        check_process_config(_front_door(**{SERVER: _spec(tools={}, tool_projection={"flat": ["add"]})}))
+
+    def test_a_tools_policy_that_does_not_parse_is_left_to_the_loaders_refusal(self) -> None:
+        config = _front_door(**{SERVER: _spec(tools={"deny_list": "add"}, tool_projection={"flat": ["add"]})})
+        check_process_config(config)
+
+        with pytest.raises(ConfigurationError, match="tools access policy"):
+            load_config(config["mcp_servers"])
+
+    @pytest.mark.parametrize("servers", [None, [], {SERVER: "not a mapping"}], ids=repr)
+    def test_a_section_of_another_shape_is_left_to_its_own_check(self, servers: Any) -> None:
+        from mcp_hangar.server.config import _check_flat_projection
+
+        _check_flat_projection({"tool_access": {"mode": "front_door"}, "mcp_servers": servers})
+
 
 class TestNoKeyIsInferredFromAnother:
     def test_a_pinned_tool_is_not_projected_unless_named(self) -> None:
