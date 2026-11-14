@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.8...v2.37.0) (2026-11-14)
+
+### Added
+
+- **core:** Hangar now sends the SEP-2243 standard request headers on every HTTP request to an upstream: `Mcp-Method` from the JSON-RPC method, and `Mcp-Name` from the tool or prompt name or the resource URI on `tools/call`, `prompts/get` and `resources/read`. A name that is not plain printable ASCII is sent in the `=?base64?...?=` form, so a CR or LF in it never reaches a header, and an operator header of the same name in `extra_headers` no longer decides these values. Mirroring a tool's `x-mcp-header` parameters as `Mcp-Param-*` headers follows separately. ([#2249](https://github.com/mcp-hangar/mcp-hangar/pull/2249))
+- **core:** a front door (`tool_access.mode: front_door`) now projects only the upstream tools each server and group names in a new `tool_projection.flat` list, instead of every tool. The list is the tools served under their own names in `tools/list`, `tools/call`, `server/discover` and the `list_changed` notifications; it only narrows what policy, withdrawals and pins already allow, and prompts, resources and subscriptions do not read it. A front door with a server or group that has no `flat` key refuses to start, and a reload that drops one is refused and changes nothing. `flat` takes tool names only: `flat: all` and any wildcard are refused, a name the scope's own `tools:` does not make visible is refused naming both, and the key under `egress` is refused as contradictory (ADR-027). A server registered over REST or by discovery declares no list, so a front door projects none of its tools. `mcp-hangar init` writes the list from the tools its smoke test saw. ([#2251](https://github.com/mcp-hangar/mcp-hangar/pull/2251))
+
+### Security
+
+- **deps:** the `opentelemetry` extra requires `opentelemetry-api`, `-sdk` and `-exporter-otlp` 1.45.2 or newer. The API 1.45.1 carries CVE-2026-126360, a regular-expression denial of service in `TraceContextTextMapPropagator.extract()`, and the old floor let an install resolve to it. `uv.lock` already pinned 1.45.2, so the published image was not affected. ([#2248](https://github.com/mcp-hangar/mcp-hangar/pull/2248))
+
 ## [2.36.8](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.7...v2.36.8) (2026-11-14)
 
 ### Fixed
