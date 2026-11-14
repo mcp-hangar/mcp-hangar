@@ -41,7 +41,6 @@ client:
   - auth/token-endpoint-auth-post # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - auth/wif-jwt-bearer # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - http-custom-headers # #2011
-  - http-standard-headers # #2011
   - json-schema-2020-12-preservation # #2009
   - request-metadata # #2009
   - sep-2322-client-request-state # #2010
