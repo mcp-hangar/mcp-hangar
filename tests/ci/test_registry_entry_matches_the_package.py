@@ -11,6 +11,9 @@ Two couplings that no other check sees, and both fail late and permanently:
   `extra-files` updater. If that updater stops firing, the release publishes a
   stale version, and the registry rejects a re-publish of a version it already
   has.
+* The registry caps `description` at 100 characters and rejects a longer one
+  with a 422 at publish time; 2.36.7 shipped everywhere but the registry that
+  way (#2244).
 """
 
 import json
@@ -51,3 +54,11 @@ def test_the_published_package_is_the_pypi_distribution() -> None:
     # and there is no hosted instance to point a URL at.
     assert pkg["transport"] == {"type": "stdio"}
     assert "remotes" not in SERVER_JSON
+
+
+def test_the_description_fits_the_registry_limit() -> None:
+    description = SERVER_JSON["description"]
+
+    assert len(description) <= 100, (
+        f"server.json description is {len(description)} characters; the MCP Registry accepts at most 100"
+    )
