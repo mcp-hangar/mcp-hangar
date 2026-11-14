@@ -1,0 +1,1 @@
+**deps:** the `opentelemetry` extra requires `opentelemetry-api`, `-sdk` and `-exporter-otlp` 1.45.2 or newer. The API 1.45.1 carries CVE-2026-126360, a regular-expression denial of service in `TraceContextTextMapPropagator.extract()`, and the old floor let an install resolve to it. `uv.lock` already pinned 1.45.2, so the published image was not affected.
