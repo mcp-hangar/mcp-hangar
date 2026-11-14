@@ -88,7 +88,12 @@ def _config(surface: str, endpoint: str) -> dict[str, Any]:
                 "endpoint": endpoint,
                 # A pin that does not match, under `warn`: the digest check runs
                 # and the call still goes through to the gates after it.
-                "tool_projection": {"pins": {"add": "0" * 64}, "digest_enforcement": "warn"},
+                "tool_projection": {
+                    "pins": {"add": "0" * 64},
+                    "digest_enforcement": "warn",
+                    # A front door projects only the tools it names (#1372).
+                    **({"flat": ["add", "long_job"]} if surface == "stdio_front_door" else {}),
+                },
             }
         },
         "interceptors": {"validators": [{"type": "payload_size", "max_bytes": 1_000_000}]},

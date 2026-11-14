@@ -128,6 +128,12 @@ def import_client_servers(
 
     if report.imported:
         merged = merge_pins({**existing, "mcp_servers": servers}, observations)
+        if ((merged.get("tool_access") or {}).get("mode")) == "front_door":
+            # Served as the client served it: every tool it was seen to have (#1372).
+            for observation in observations:
+                merged["mcp_servers"][observation.mcp_server_id]["tool_projection"]["flat"] = sorted(
+                    observation.digests
+                )
         report.backup = _write(config_path, merged)
     return report
 

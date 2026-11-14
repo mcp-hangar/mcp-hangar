@@ -88,7 +88,7 @@ logging:
     mode: subprocess
     command: ["{python}", "{server}"]
     idle_ttl_s: 60
-"""
+{flat}"""
 
 
 class _Issuer:
@@ -173,6 +173,8 @@ def _gateway(
 
     config = _CONFIG.format(
         topology="tool_access:\n  mode: front_door\n" if front_door else "",
+        # The tools a front door projects under their own names (#1372); a front-door key only.
+        flat="    tool_projection:\n      flat: [add, subtract, multiply, divide, power]\n" if front_door else "",
         rate_limit=_LOCKING if locking else "",
         auth_db=auth_db,
         issuer=issuer.issuer,

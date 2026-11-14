@@ -54,7 +54,7 @@ def _requests() -> list[ToolAdmissionRequested]:
 
 
 def test_the_front_door_does_not_list_or_serve_a_tool_added_after_the_pins() -> None:
-    with front_door((BASELINE,)) as door:
+    with front_door((BASELINE,), also_flat=(ADDED,)) as door:
         requested = _requests()
         _pin_the_baseline(policy="withhold")
         assert door.names(TENANT_A) == [BASELINE]
@@ -84,7 +84,7 @@ def test_hangar_call_refuses_it_and_admission_is_pinning_it() -> None:
 
 
 def test_it_asks_once_for_one_definition() -> None:
-    with front_door((BASELINE,)) as door:
+    with front_door((BASELINE,), also_flat=(ADDED,)) as door:
         requested = _requests()
         _pin_the_baseline(policy="withhold")
         _the_upstream_adds_a_tool(door)
@@ -97,7 +97,7 @@ def test_it_asks_once_for_one_definition() -> None:
 
 @pytest.mark.parametrize("policy", [None, "allow"])
 def test_without_withhold_the_new_tool_is_served_as_before(policy: str | None) -> None:
-    with front_door((BASELINE,)) as door:
+    with front_door((BASELINE,), also_flat=(ADDED,)) as door:
         requested = _requests()
         _pin_the_baseline(policy=policy)
 
@@ -108,7 +108,7 @@ def test_without_withhold_the_new_tool_is_served_as_before(policy: str | None) -
 
 
 def test_a_server_with_no_pins_has_no_baseline_and_withholds_nothing() -> None:
-    with front_door((BASELINE,)) as door:
+    with front_door((BASELINE,), also_flat=(ADDED,)) as door:
         get_tool_projection_registry().set_new_tools_policy(SERVER, "withhold")
 
         _the_upstream_adds_a_tool(door)

@@ -109,6 +109,9 @@ class _Gateway:
         subscribe_tool_projection_restore(self.bus, handler)
 
     def start(self, mcp_server_id: str, tools: list[str]) -> None:
+        # The tools the configuration names in `tool_projection.flat` (#1372).
+        registry = get_tool_projection_registry()
+        registry.set_flat(mcp_server_id, frozenset(tools) | (registry.flat_names(mcp_server_id) or frozenset()))
         self.repository.add(mcp_server_id, tools)
         self.bus.publish(
             McpServerStarted(
@@ -243,6 +246,7 @@ class TestWhatStays:
     def test_a_group_keeps_its_entry_when_one_member_leaves(self, gateway) -> None:
         gateway.start("search-v1", ["find"])
         gateway.start("search-v2", ["find"])
+        get_tool_projection_registry().set_flat("search", frozenset({"find"}))
 
         def group(*members: str) -> Any:
             ms = [SimpleNamespace(id=m) for m in members]

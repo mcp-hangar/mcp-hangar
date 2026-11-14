@@ -263,6 +263,21 @@ def _config(
         "endpoint": solo_endpoint,
         "tool_access": {"member": {TENANTS[0]: {"approval_list": ["solo_held_a"], "approval_timeout_seconds": 1}}},
     }
+    servers: dict[str, Any] = {
+        MEMBER: {"mode": "remote", "endpoint": group_endpoint},
+        SIBLING: {"mode": "remote", "endpoint": group_endpoint},
+        SOLO: solo,
+        GROUP: group,
+        **({FLAT_SERVER: {"mode": "remote", "endpoint": flat_endpoint}} if flat_endpoint else {}),
+        **({SPEC_SERVER: {"mode": "remote", "endpoint": spec_endpoint}} if spec_endpoint else {}),
+    }
+    if topology == FRONT_DOOR:
+        # Each server's tools projected under their own names (#1372); the group's
+        # deny-listed one is not visible, so it cannot be named.
+        flat = {MEMBER: GROUP_TOOLS, SIBLING: GROUP_TOOLS, SOLO: SOLO_TOOLS, FLAT_SERVER: FLAT_TOOLS}
+        flat |= {GROUP: tuple(t for t in GROUP_TOOLS if t != "job_denied"), SPEC_SERVER: SPEC_TOOLS}
+        for server_id, spec in servers.items():
+            spec.setdefault("tool_projection", {})["flat"] = list(flat[server_id])
     return {
         "tool_access": {"mode": topology},
         "rate_limit": {"rps": 1000, "burst": 1000},
@@ -272,14 +287,7 @@ def _config(
             "api_key": {"enabled": True, "header_name": "X-API-Key"},
             "storage": {"driver": "memory"},
         },
-        "mcp_servers": {
-            MEMBER: {"mode": "remote", "endpoint": group_endpoint},
-            SIBLING: {"mode": "remote", "endpoint": group_endpoint},
-            SOLO: solo,
-            GROUP: group,
-            **({FLAT_SERVER: {"mode": "remote", "endpoint": flat_endpoint}} if flat_endpoint else {}),
-            **({SPEC_SERVER: {"mode": "remote", "endpoint": spec_endpoint}} if spec_endpoint else {}),
-        },
+        "mcp_servers": servers,
     }
 
 

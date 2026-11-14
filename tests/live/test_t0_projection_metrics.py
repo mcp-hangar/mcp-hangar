@@ -61,6 +61,8 @@ mcp_servers:
     env:
       MCP_TRANSPORT: stdio
     idle_ttl_s: 60
+    tool_projection:
+      flat: [add, subtract, multiply, divide, power]
 """
 
 

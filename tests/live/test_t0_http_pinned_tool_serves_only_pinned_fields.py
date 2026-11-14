@@ -69,6 +69,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{server}"]
     idle_ttl_s: 300
+    tool_projection:
+      flat: [echo]
 """
 
 _PLAIN = """\
@@ -79,6 +81,8 @@ _PLAIN = """\
     env:
       UPSTREAM_TOOL: note
       UPSTREAM_EXTRAS: {extras}
+    tool_projection:
+      flat: [note]
 """
 
 

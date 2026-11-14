@@ -62,7 +62,14 @@ class TestTheGeneratedConfigGoverns:
     def test_no_observation_means_no_pins(self, tmp_path: Path):
         # An unverified pin is worse than none: it would refuse every call to a
         # tool nobody digested.
-        assert "tool_projection" not in generate(tmp_path)["mcp_servers"]["filesystem"]
+        # The front door still chooses its surface explicitly, and with nothing
+        # measured it chooses no tool (#1372).
+        assert generate(tmp_path)["mcp_servers"]["filesystem"]["tool_projection"] == {"flat": []}
+
+    def test_the_tools_seen_are_the_tools_served(self, tmp_path: Path):
+        config = generate(tmp_path, pins=PINS)
+
+        assert config["mcp_servers"]["filesystem"]["tool_projection"]["flat"] == sorted(PINS["filesystem"])
 
     def test_every_key_is_one_hangar_reads(self, tmp_path: Path):
         # Asked against the real schema rather than a list repeated here. The

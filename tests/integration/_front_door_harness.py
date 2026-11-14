@@ -275,6 +275,7 @@ def front_door(
     also: tuple[str, ...] = (),
     upstream_class: type[Upstream] = Upstream,
     auth: Any = None,
+    also_flat: tuple[str, ...] = (),
 ) -> Iterator[FrontDoor]:
     """A served front door over one upstream exposing *tools*, each tenant with an API key.
 
@@ -287,6 +288,8 @@ def front_door(
     more than answer POSTs. *auth* replaces the API-key authentication with
     another object carrying an ``authn_middleware``, for a test of another
     credential; the keys are still minted but nothing accepts them.
+    *also_flat* names tools the upstream does not serve yet in
+    ``tool_projection.flat``, for a test whose catalogue grows (#1372).
     """
     from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
     from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
@@ -303,6 +306,10 @@ def front_door(
     resolver.set_topology_mode(topology)
     for tenant, allowed in (policies or {}).items():
         resolver.set_standalone_member_policy(SERVER, tenant, ToolAccessPolicy(allow_list=allowed))
+    if topology == "front_door":
+        # Every upstream tool projected under its own name, as `tool_projection.flat` declares it (#1372).
+        for server_id in (SERVER, *also):
+            get_tool_projection_registry().set_flat(server_id, frozenset((*tools, *also_flat)))
 
     handler: type[Upstream] = type(
         "_ThisUpstream",

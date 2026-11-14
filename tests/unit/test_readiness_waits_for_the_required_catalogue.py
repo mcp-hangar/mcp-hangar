@@ -58,6 +58,8 @@ bootstrap_package = importlib.import_module("mcp_hangar.server.bootstrap")
 
 SPEC = {"mode": "subprocess", "command": [sys.executable, "-c", "pass"]}
 REMOTE = {"mode": "remote", "endpoint": "http://127.0.0.1:9/mcp"}
+#: A front door chooses its flat surface explicitly (#1372); readiness does not depend on it.
+NO_FLAT_TOOLS = {"tool_projection": {"flat": []}}
 #: Short enough for a unit test, and never zero: a busy loop would hide a missing wait.
 FAST = {"poll_s": 0.01, "spacing_s": 0.0}
 #: A window a unit test can outlive.
@@ -78,9 +80,9 @@ def _clean() -> Iterator[None]:
 def _config(*names: str, **block: Any) -> dict[str, Any]:
     return {
         "mcp_servers": {
-            "payments": dict(SPEC),
-            "search": dict(SPEC),
-            "pool": {"mode": "group", "members": [{"id": "pool-a"}, {"id": "pool-b"}]},
+            "payments": {**SPEC, **NO_FLAT_TOOLS},
+            "search": {**SPEC, **NO_FLAT_TOOLS},
+            "pool": {"mode": "group", "members": [{"id": "pool-a"}, {"id": "pool-b"}], **NO_FLAT_TOOLS},
         },
         "tool_access": {"mode": "front_door", "required_catalogue": {"servers": list(names), **block}},
     }
@@ -188,6 +190,8 @@ class TestTheConfiguration:
     def test_egress_checks_it_and_does_not_apply_it(self) -> None:
         config = _config("payments")
         del config["tool_access"]["mode"]
+        for spec in config["mcp_servers"].values():
+            del spec["tool_projection"]  # a front-door key, refused under egress
 
         apply_process_config(config)
 

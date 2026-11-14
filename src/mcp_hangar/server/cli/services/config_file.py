@@ -339,8 +339,14 @@ class ConfigFileManager:
             lines.append("    idle_ttl_s: 300")
 
             server_pins = (pins or {}).get(mcp_server.name) or {}
+            lines.append("    tool_projection:")
+            # The front door serves only the tools named here (#1372): the ones
+            # the smoke test saw, or none until a tool is named.
+            lines.append("      # The tools served under their own names. Remove one to stop serving it.")
+            if not server_pins:
+                lines.append("      # None yet: `mcp-hangar pin --write` writes each tool it finds under pins.")
+            lines.append(f"      flat: {json.dumps(sorted(server_pins))}")
             if server_pins:
-                lines.append("    tool_projection:")
                 lines.append("      # A tool whose schema or description changes stops being")
                 lines.append("      # callable until you re-pin it: `mcp-hangar pin --check`")
                 lines.append("      # shows the drift, `--write` adopts it.")

@@ -50,6 +50,7 @@ def _populate(registry: ToolProjectionRegistry, server: str, tools: list[str]) -
         server,
         [ToolSchema(name=t, description=f"Does {t}", input_schema={"type": "object", "properties": {}}) for t in tools],
     )
+    registry.set_flat(server, frozenset(tools))  # as `tool_projection.flat` declares it (#1372)
 
 
 @pytest.fixture(autouse=True)

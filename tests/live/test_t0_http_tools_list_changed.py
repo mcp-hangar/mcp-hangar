@@ -60,6 +60,8 @@ mcp_servers:
     env:
       MCP_TRANSPORT: stdio
     idle_ttl_s: 120
+    tool_projection:
+      flat: [add, subtract, multiply, divide, power]
 """
 
 #: The stub backend, started late. A file rather than ``python -c``: the launcher refuses shell metacharacters.

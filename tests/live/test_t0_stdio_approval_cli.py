@@ -43,6 +43,8 @@ mcp_servers:
     tools:
       approval_list: [echo]
       approval_timeout_seconds: 60
+    tool_projection:
+      flat: [echo]
 tool_access:
   mode: front_door
 auth:

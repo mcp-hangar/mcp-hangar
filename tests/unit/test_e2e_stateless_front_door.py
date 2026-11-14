@@ -89,6 +89,7 @@ def _make_schema(name: str) -> ToolSchema:
 
 def _populate_registry(registry: ToolProjectionRegistry, server: str, tools: list[str]) -> None:
     registry.build_from_tools(server, [_make_schema(t) for t in tools])
+    registry.set_flat(server, frozenset(tools))  # as `tool_projection.flat` declares it (#1372)
 
 
 def _configure_two_tenants(registry: ToolProjectionRegistry, resolver: ToolAccessResolver) -> None:

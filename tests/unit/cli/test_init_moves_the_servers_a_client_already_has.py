@@ -112,6 +112,10 @@ def test_the_hangar_config_has_the_moved_servers_and_no_default_bundle(machine) 
     assert sorted(servers) == ["alpha", "beta", "delta", "gamma"]
     assert servers["beta"]["env"]["TOKEN"] == SECRET
     assert all(servers[name]["tool_projection"]["pins"] for name in servers)
+    # Served on the front door as the client served them: every tool each was seen to have (#1372).
+    assert all(
+        servers[name]["tool_projection"]["flat"] == sorted(servers[name]["tool_projection"]["pins"]) for name in servers
+    )
 
 
 def test_pin_check_passes_straight_after_init(machine) -> None:

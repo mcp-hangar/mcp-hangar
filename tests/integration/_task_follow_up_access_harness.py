@@ -66,7 +66,7 @@ def _config(topology: str, group_endpoint: str, solo_endpoint: str, *, taken_awa
             "tenant_overrides": {TENANTS[0]: {"withdrawn": ["job_withdrawn_a"]}},
         }
         solo["tool_access"] = {"member": {TENANTS[0]: {"deny_list": ["solo_denied_a"]}}}
-    return {
+    config = {
         "tool_access": {"mode": topology},
         "rate_limit": {"rps": 1000, "burst": 1000},
         "config_reload": {"enabled": False},
@@ -78,6 +78,11 @@ def _config(topology: str, group_endpoint: str, solo_endpoint: str, *, taken_awa
         },
         "mcp_servers": {MEMBER: {"mode": "remote", "endpoint": group_endpoint}, SOLO: solo, GROUP: group},
     }
+    if topology != "front_door":
+        return config
+    from _flat_surface import name_every_tool
+
+    return name_every_tool(config, {MEMBER: GROUP_TOOLS, GROUP: GROUP_TOOLS, SOLO: SOLO_TOOLS})
 
 
 def _answer(payload: dict[str, Any]) -> dict[str, Any]:

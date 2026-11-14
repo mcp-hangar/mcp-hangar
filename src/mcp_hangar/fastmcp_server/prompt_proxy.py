@@ -99,10 +99,12 @@ def _upstream_ids(tenant_id: str | None) -> list[str]:
     ponytail: an upstream with prompts but zero visible tools for this tenant
     is invisible here; give prompts their own projection when that case is real.
     """
-    from .flat_tool_projection import _build_flat_map, _member_to_group
+    from .flat_tool_projection import _build_governed_map, _member_to_group
 
     group_of = _member_to_group()
-    return list(dict.fromkeys(group_of.get(server, server) for server, _tool in _build_flat_map(tenant_id).values()))
+    return list(
+        dict.fromkeys(group_of.get(server, server) for server, _tool in _build_governed_map(tenant_id).values())
+    )
 
 
 #: The relayed methods that list: answered by a member a call may be routed

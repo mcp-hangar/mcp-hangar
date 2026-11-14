@@ -72,6 +72,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{server}"{args}]
     idle_ttl_s: 300
+    tool_projection:
+      flat: [echo]
 """
 
 #: A stdio MCP upstream with one tool whose description is read from a file on

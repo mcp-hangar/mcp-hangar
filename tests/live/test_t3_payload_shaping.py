@@ -74,7 +74,10 @@ mcp_servers:
 """
 
 
-_FRONT_DOOR_CONFIG = _CONFIG.replace("mcp_servers:", "tool_access:\n  mode: front_door\nmcp_servers:")
+_FRONT_DOOR_CONFIG = _CONFIG.replace("mcp_servers:", "tool_access:\n  mode: front_door\nmcp_servers:") + (
+    # The tools a front door projects under their own names (#1372).
+    "    tool_projection:\n      flat: [add, subtract, multiply, divide, power]\n"
+)
 
 
 @dataclass

@@ -214,6 +214,10 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
         # Servers whose tools that appear after their pins were taken are withheld
         # (`tool_projection.new_tools: withhold`, #1801). Absent: served unpinned.
         self._withhold_new_tools: set[str] = set()
+        # The tools each scope projects under their own names on a front door
+        # (`tool_projection.flat`, #1372). A scope absent here declared none and
+        # projects nothing: flattening is opt-in per tool.
+        self._flat: dict[str, frozenset[str]] = {}
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -496,6 +500,17 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
                 self._withhold_new_tools.discard(mcp_server)
         _projection_changed()
 
+    def set_flat(self, scope: str, names: frozenset[str]) -> None:
+        """Declare the tools *scope* projects under their own names on a front door (#1372)."""
+        with self._lock:
+            self._flat[scope] = frozenset(names)
+        _projection_changed()
+
+    def flat_names(self, scope: str) -> frozenset[str] | None:
+        """The tools *scope* declared in ``tool_projection.flat``, or None when it declared none."""
+        with self._lock:
+            return self._flat.get(scope)
+
     def new_tools_policy(self, mcp_server: str) -> str:
         """``withhold`` or ``allow`` for *mcp_server*."""
         with self._lock:
@@ -518,6 +533,7 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
             self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
             self._withhold_new_tools.clear()
+            self._flat.clear()
         logger.debug("config_pins_cleared")
         _projection_changed()
 
@@ -544,9 +560,11 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
             pins_all_tenants = dict(staged._config_pins_all_tenants)
             enforcement = dict(staged._digest_enforcement)
             withhold = set(staged._withhold_new_tools)
+            flat = dict(staged._flat)
         with self._lock:
             if replace:
                 self._withhold_new_tools = withhold
+                self._flat = flat
                 self._config_withdrawals = withdrawals
                 self._config_pins = pins
                 self._config_pins_all_tenants = pins_all_tenants
@@ -564,6 +582,7 @@ class ToolProjectionRegistry(IWithdrawalOverlay):
                     self.set_config_pin(mcp_server, tool, None, digest)
                 self._digest_enforcement.update(enforcement)
                 self._withhold_new_tools |= withhold
+                self._flat.update(flat)
         _projection_changed()
 
     # ------------------------------------------------------------------

@@ -64,13 +64,17 @@ TENANT = "tenant:a"
 METHOD_NOT_FOUND = -32601
 
 
+#: Both tools projected under their own names, in every file here (#1372).
+FLAT = {"flat": [TOOL, OPEN]}
+
+
 def _server(**extra: Any) -> dict[str, Any]:
     """A server that is never started: the calls are refused, or answered by a mock command bus."""
-    return {"mode": "subprocess", "command": ["python", "-c", "pass"], **extra}
+    return {"mode": "subprocess", "command": ["python", "-c", "pass"], "tool_projection": FLAT, **extra}
 
 
 DENIED = {SERVER: _server(tools={"deny_list": [TOOL]})}
-WITHDRAWN = {SERVER: _server(tool_projection={"withdrawn": [TOOL]})}
+WITHDRAWN = {SERVER: _server(tool_projection={**FLAT, "withdrawn": [TOOL]})}
 
 MEMBER = "member"  # a server a reload moves from one group to the other
 GROUP_A, GROUP_B = "group-a", "group-b"
@@ -85,15 +89,21 @@ def _groups(*, member_in: str, group_a: dict[str, Any]) -> dict[str, Any]:
     members[member_in].append({"id": MEMBER})
     return {
         MEMBER: _server(),
-        GROUP_A: {"mode": "group", "auto_start": False, **group_a, "members": members[GROUP_A]},
-        GROUP_B: {"mode": "group", "auto_start": False, "members": members[GROUP_B]},
+        GROUP_A: {
+            "mode": "group",
+            "auto_start": False,
+            "tool_projection": FLAT,
+            **group_a,
+            "members": members[GROUP_A],
+        },
+        GROUP_B: {"mode": "group", "auto_start": False, "tool_projection": FLAT, "members": members[GROUP_B]},
     }
 
 
 #: `member` in group A, which denies `t`.
 IN_A = _groups(member_in=GROUP_A, group_a={"tools": {"deny_list": [TOOL]}})
 #: `member` moved to group B, which allows `t`. Group A still refuses `t`, by a withdrawal now.
-IN_B = _groups(member_in=GROUP_B, group_a={"tool_projection": {"withdrawn": [TOOL]}})
+IN_B = _groups(member_in=GROUP_B, group_a={"tool_projection": {**FLAT, "withdrawn": [TOOL]}})
 
 
 def _reset() -> None:

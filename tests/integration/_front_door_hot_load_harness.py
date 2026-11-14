@@ -60,6 +60,8 @@ def _config(workdir: Path, mode: str) -> dict[str, Any]:
                 "command": [sys.executable, str(UPSTREAM)],
                 "idle_ttl_s": 600,
                 "tools": {"deny_list": ["echo"]},
+                # The tool the deny list leaves visible, projected under its own name (#1372).
+                **({"tool_projection": {"flat": ["links"]}} if mode == "front_door" else {}),
             }
         },
     }

@@ -74,6 +74,8 @@ mcp_servers:
     tools:
       approval_list: [echo]
       approval_timeout_seconds: 40
+    tool_projection:
+      flat: [add, subtract, multiply, divide, power, echo]
 tool_access:
   mode: front_door
 auth:

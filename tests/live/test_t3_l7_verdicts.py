@@ -96,6 +96,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{stub}"]
     idle_ttl_s: 60
+    tool_projection:
+      flat: [lookup, ping]
 """
 
 

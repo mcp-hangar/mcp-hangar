@@ -161,6 +161,7 @@ def front_door(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     get_tool_projection_registry().build_from_tools(
         _SERVER, [ToolSchema(name=name, description=name, input_schema={"type": "object"}) for name in projected]
     )
+    get_tool_projection_registry().set_flat(_SERVER, frozenset(projected))  # as `tool_projection.flat` declares it
     resolver.set_standalone_member_policy(_SERVER, _TENANT, ToolAccessPolicy(deny_list=(_DENIED_BY_POLICY,)))
 
     monkeypatch.setattr("mcp_hangar.server.tools.batch._executor", _Upstream())

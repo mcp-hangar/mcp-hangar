@@ -167,6 +167,7 @@ def _front_door(monkeypatch, role: str | None, *, enabled: bool = True):
         _SERVER,
         [ToolSchema(name=_UPSTREAM_TOOL, description="Refund a payment", input_schema={"type": "object"})],
     )
+    get_tool_projection_registry().set_flat(_SERVER, frozenset({_UPSTREAM_TOOL}))
 
     principal = _principal_with_tenant()
     monkeypatch.setattr(

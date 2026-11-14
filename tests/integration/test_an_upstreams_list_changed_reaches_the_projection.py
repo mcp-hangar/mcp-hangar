@@ -95,7 +95,7 @@ def upstream_class() -> type[StreamingUpstream]:
 def test_a_relist_after_list_changed_has_the_added_tool_and_not_the_removed_one(
     upstream_class: type[StreamingUpstream],
 ) -> None:
-    with front_door(("read_item", "write_item"), upstream_class=upstream_class) as door:
+    with front_door(("read_item", "write_item"), upstream_class=upstream_class, also_flat=("delete_item",)) as door:
         assert door.names(TENANT_A) == ["read_item", "write_item"]
 
         _change_catalogue(door, ("read_item", "delete_item"))
@@ -110,7 +110,7 @@ def test_the_handshake_era_relist_sees_the_change_too(upstream_class: type[Strea
     """The projection is one registry: both protocol eras list from it."""
     from ._front_door_harness import LEGACY
 
-    with front_door(("read_item", "write_item"), upstream_class=upstream_class) as door:
+    with front_door(("read_item", "write_item"), upstream_class=upstream_class, also_flat=("delete_item",)) as door:
         _change_catalogue(door, ("read_item", "delete_item"))
 
         assert _eventually(lambda: door.names(TENANT_A, era=LEGACY), ["delete_item", "read_item"]) == [
@@ -120,7 +120,7 @@ def test_the_handshake_era_relist_sees_the_change_too(upstream_class: type[Strea
 
 
 def test_the_added_tool_is_callable_through_the_front_door(upstream_class: type[StreamingUpstream]) -> None:
-    with front_door(("read_item",), upstream_class=upstream_class) as door:
+    with front_door(("read_item",), upstream_class=upstream_class, also_flat=("delete_item",)) as door:
         _change_catalogue(door, ("read_item", "delete_item"))
         _eventually(lambda: door.names(TENANT_A), ["delete_item", "read_item"])
 
@@ -138,7 +138,9 @@ def test_a_tenant_still_sees_only_what_its_policy_allows_after_the_change(
     tenant A's listing and leaves tenant B's exactly as it was.
     """
     policies = {TENANT_B: ("read_item",)}
-    with front_door(("read_item", "write_item"), policies, upstream_class=upstream_class) as door:
+    with front_door(
+        ("read_item", "write_item"), policies, upstream_class=upstream_class, also_flat=("delete_item",)
+    ) as door:
         assert door.names(TENANT_B) == ["read_item"]
 
         _change_catalogue(door, ("read_item", "write_item", "delete_item"))

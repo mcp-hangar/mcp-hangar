@@ -63,6 +63,7 @@ def _populate(registry: ToolProjectionRegistry) -> None:
         "math",
         [ToolSchema(name=t, description=t, input_schema={"type": "object"}) for t in ("add", "subtract")],
     )
+    registry.set_flat("math", frozenset({"add", "subtract"}))  # as `tool_projection.flat` declares it (#1372)
 
 
 async def _discover(registry, resolver, tenant_id: str | None) -> set[str]:

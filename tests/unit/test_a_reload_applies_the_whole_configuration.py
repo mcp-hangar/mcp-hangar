@@ -83,6 +83,10 @@ def _config(*, mode: str | None = None, servers: dict[str, Any] | None = None, *
     config: dict[str, Any] = {"mcp_servers": servers if servers is not None else {SERVER: _server()}}
     if mode is not None:
         config["tool_access"] = {"mode": mode}
+    if mode == "front_door":
+        # A front door chooses the tools it projects (#1372); none, here.
+        for spec in config["mcp_servers"].values():
+            spec.setdefault("tool_projection", {}).setdefault("flat", [])
     config.update(sections)
     return config
 
@@ -170,6 +174,34 @@ class TestTheTopologyModeSurvivesAReload:
         assert resolver.topology_mode == "front_door"
         assert not may(resolver, Target.server(SERVER), "anything"), "a caller with no tenant is still denied"
         assert may(resolver, Target.server(SERVER), "anything", Caller(tenant_id=TENANT))
+
+
+class TestAReloadThatDropsTheFlatKeyIsRefused:
+    """A front door's surface is chosen in the file; a reload cannot leave it unchosen (#1372)."""
+
+    def test_it_is_refused_before_anything_stops_and_the_surface_stays(
+        self, gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gateway.boot(_config(mode="front_door", servers={SERVER: _server(tool_projection={"flat": ["add"]})}))
+        before, shutdown = _spy_on_shutdown(monkeypatch, SERVER)
+
+        with pytest.raises(ConfigurationError, match=r"must be chosen explicitly: add tool_projection\.flat"):
+            gateway.reload({"tool_access": {"mode": "front_door"}, "mcp_servers": {SERVER: _server()}})
+
+        assert get_tool_projection_registry().flat_names(SERVER) == frozenset({"add"})
+        assert get_runtime().repository.get(SERVER) is before
+        shutdown.assert_not_called()
+        (failed,) = [
+            c.args[0] for c in gateway.events.publish.call_args_list if isinstance(c.args[0], ConfigurationReloadFailed)
+        ]
+        assert failed.error_type == "ConfigurationError"
+
+    def test_a_reload_that_changes_the_list_applies_it(self, gateway: _Gateway) -> None:
+        gateway.boot(_config(mode="front_door", servers={SERVER: _server(tool_projection={"flat": ["add"]})}))
+
+        gateway.reload(_config(mode="front_door", servers={SERVER: _server(tool_projection={"flat": ["subtract"]})}))
+
+        assert get_tool_projection_registry().flat_names(SERVER) == frozenset({"subtract"})
 
 
 class TestAModeChangeIsRefused:

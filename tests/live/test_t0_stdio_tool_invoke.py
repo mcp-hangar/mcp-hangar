@@ -54,7 +54,16 @@ mcp_servers:
     env:
       MCP_TRANSPORT: stdio
     idle_ttl_s: 60
-"""
+{flat}"""
+
+
+def _flat(topology: str) -> str:
+    """The tools a front door projects under their own names (#1372); a front-door key only."""
+    return (
+        "    tool_projection:\n      flat: [add, subtract, multiply, divide, power]\n"
+        if topology == "front_door"
+        else ""
+    )
 
 
 def _call(workdir: Path, topology: str, role: str) -> tuple[bool, str]:
@@ -62,7 +71,11 @@ def _call(workdir: Path, topology: str, role: str) -> tuple[bool, str]:
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
     config = workdir / "config.yaml"
-    config.write_text(_CONFIG.format(topology=topology, role=role, python=sys.executable, server=str(_MATH_SERVER)))
+    config.write_text(
+        _CONFIG.format(
+            topology=topology, role=role, python=sys.executable, server=str(_MATH_SERVER), flat=_flat(topology)
+        )
+    )
     from tests.live._mcp_client import open_stdio_streams
 
     async def _run() -> tuple[bool, str]:

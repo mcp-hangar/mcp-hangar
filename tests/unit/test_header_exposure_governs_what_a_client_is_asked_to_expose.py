@@ -64,6 +64,7 @@ def _tools() -> list[ToolSchema]:
 def registry():
     reg = get_tool_projection_registry()
     reg.build_from_tools(SERVER, _tools())
+    reg.set_flat(SERVER, frozenset(tool.name for tool in _tools()))  # as `tool_projection.flat` declares it
     flat_tool_projection._EXPOSURE_VERDICTS.clear()
     flat_tool_projection._ANNOTATION_VERDICTS.clear()
     try:
@@ -213,6 +214,7 @@ class TestTheProjection:
         """A group is a governed scope; a block declared there must not be dead
         config just because the projection iterates members (#1038)."""
         monkeypatch.setattr(flat_tool_projection, "_member_to_groups", lambda: {SERVER: ("the-group",)})
+        registry.set_flat("the-group", frozenset({"routes_by_region", "leaks_a_token"}))
         set_header_exposure_policy("the-group", HeaderExposurePolicy(SECRETY, "withdraw"))
 
         names = {tool.name for tool in _list(handlers).tools}

@@ -205,6 +205,8 @@ mcp_servers:
       tools:
         expected_tools: [add]
       enforcement_mode: {mode}
+    tool_projection:
+      flat: [add, exfiltrate]
 tool_access:
   mode: front_door
 auth:

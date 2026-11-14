@@ -116,12 +116,12 @@ auth:
 
 
 def write_config(tmp_path: Path, *, principal: bool, pin: str | None = None, provider: str = UPSTREAM) -> Path:
-    pins = ""
+    pins = "    tool_projection:\n      flat: [add, subtract, multiply, divide, power, echo]\n"
     if pin is not None:
         # The digest is quoted on purpose: an all-digit pin is valid hex and
         # YAML would hand it over as an int, which the loader then drops with
         # `invalid_config_digest_pin`.
-        pins = f'    tool_projection:\n      digest_enforcement: block\n      pins:\n        echo: "{pin}"\n'
+        pins += f'      digest_enforcement: block\n      pins:\n        echo: "{pin}"\n'
     config = tmp_path / "config.yaml"
     config.write_text(
         CONFIG.format(

@@ -62,10 +62,15 @@ def _server() -> dict[str, Any]:
     return {"mode": "subprocess", "command": [sys.executable, "-c", "pass"], "tools": {"deny_list": ["divide"]}}
 
 
+def _front_door_server() -> dict[str, Any]:
+    """`_server` on a front door, which chooses the tools it projects (#1372)."""
+    return {**_server(), "tool_projection": {"flat": ["add"]}}
+
+
 def _config() -> dict[str, Any]:
     """Every top-level section of the schema, each set away from its default where it has one."""
     return {
-        "mcp_servers": {SERVER: _server()},
+        "mcp_servers": {SERVER: _front_door_server()},
         "approvals": {"enabled": False},
         "auth": {
             "enabled": True,
@@ -330,7 +335,7 @@ def test_a_section_a_standalone_boot_refuses_is_refused_alike(boot, tmp_path, se
 def test_a_dict_is_not_merged_into_the_file_in_the_working_directory(boot, tmp_path) -> None:
     """The dict path read `./config.yaml` and applied *its* topology, then laid the dict over the rest."""
     Path("config.yaml").write_text(
-        yaml.safe_dump({"mcp_servers": {"from-cwd": _server()}, "tool_access": {"mode": "front_door"}}),
+        yaml.safe_dump({"mcp_servers": {"from-cwd": _front_door_server()}, "tool_access": {"mode": "front_door"}}),
         encoding="utf-8",
     )
 
@@ -375,7 +380,7 @@ class TestTheSchemaCheck:
     #: `tool_access.rules` was in the schema and never read (#1422). It is named
     #: as removed, on a dict as on a file.
     RULES: dict[str, Any] = {
-        "mcp_servers": {SERVER: _server()},
+        "mcp_servers": {SERVER: _front_door_server()},
         "config_reload": {"enabled": False},
         "tool_access": {"mode": "front_door", "rules": [{"deny": ["divide"]}]},
     }

@@ -54,7 +54,11 @@ def _group(*members: dict[str, Any], **extra: Any) -> dict[str, Any]:
 def _config(phase: str, mode: str) -> dict[str, Any]:
     if mode == "front_door":  # one group and nothing else: a tool listed would be the member's
         servers = {"file-member": _server(), "pool": _group({"id": "file-member"}, tools=DENY_ADD)}
-        return _gateway_config(mode, servers)
+        from _flat_surface import MOCK_PROVIDER_TOOLS, name_every_tool
+
+        return name_every_tool(
+            _gateway_config(mode, servers), {"file-member": MOCK_PROVIDER_TOOLS, "pool": MOCK_PROVIDER_TOOLS}
+        )
     servers: dict[str, Any] = {
         "file-member": _server(),
         "was-a-file-member": _server(),
@@ -99,6 +103,10 @@ def _restart_config(backend: str, phase: str) -> dict[str, Any]:
     config = _gateway_config(mode, servers, durable_auth=backend != "memory")
     if backend == "memory":
         del config["persistence"]
+    if mode == "front_door":
+        from _flat_surface import MOCK_PROVIDER_TOOLS, name_every_tool
+
+        name_every_tool(config, dict.fromkeys(servers, MOCK_PROVIDER_TOOLS))
     return config
 
 

@@ -75,12 +75,14 @@ def _start(tmp_path: Path, bound_s: int | None, *, front_door: bool = False) -> 
     http_section = f"http:\n  graceful_shutdown_timeout_s: {bound_s}\n" if bound_s is not None else ""
     if front_door:  # the mode that serves the `list_changed` GET stream
         http_section += "tool_access:\n  mode: front_door\n"
+    flat = "    tool_projection:\n      flat: [sleep]\n" if front_door else ""
     config = tmp_path / "config.yaml"
     config.write_text(
         "mcp_servers:\n"
         "  slow:\n"
         "    mode: subprocess\n"
         f"    command: {json.dumps([sys.executable, str(_PROVIDER), str(upstream_log)])}\n"
+        f"{flat}"
         "event_store:\n"
         "  driver: memory\n" + http_section
     )

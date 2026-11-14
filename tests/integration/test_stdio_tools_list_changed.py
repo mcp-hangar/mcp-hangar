@@ -123,6 +123,8 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{upstream}", "{delay}"]
     idle_ttl_s: 120
+    tool_projection:
+      flat: [read_item, grow_item, late_item]
 tool_access:
   mode: front_door
 auth:

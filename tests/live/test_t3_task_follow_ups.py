@@ -88,7 +88,7 @@ mcp_servers:
     mode: subprocess
     command: ["{python}", "{task_server}", "{upstream_log}"]
     idle_ttl_s: 120
-"""
+{flat}"""
 
 
 @dataclass
@@ -199,6 +199,8 @@ def run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
         python=sys.executable,
         task_server=_TASK_SERVER,
         upstream_log=upstream_log,
+        # The tool a front door projects under its own name (#1372); a front-door key only.
+        flat=f"    tool_projection:\n      flat: [{_TOOL}]\n" if topology == "front_door" else "",
     )
     receiver = OtlpReceiver()
     try:
