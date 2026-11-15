@@ -19,9 +19,12 @@ from typing import Any
 
 from mcp.shared.inbound import find_invalid_x_mcp_header
 
-from mcp_hangar.domain.policies.header_exposure import HeaderExposurePolicy, get_header_exposure_policy
+from mcp_hangar.domain.policies.header_exposure import HeaderExposurePolicy, can_withhold, exposure_policies
 
 from .. import metrics as prometheus_metrics
+
+#: `can_withhold` is the batch gates' question, asked here beside the verdict.
+__all__ = ["can_withhold", "denied_header_exposure", "invalid_header_annotation", "withholding_verdict"]
 
 logger = logging.getLogger(__name__)
 
@@ -82,25 +85,6 @@ def invalid_header_annotation(proj: Any) -> str | None:
         )
         prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason=INVALID_X_MCP_HEADER)
     return reason
-
-
-def exposure_policies(mcp_server: str, owning_groups: tuple[str, ...]) -> list[HeaderExposurePolicy]:
-    """The `header_exposure` blocks that govern *mcp_server*.
-
-    Its own block when it declares one. Otherwise a member inherits the block
-    each group that owns it declared (#1038 scope shape), and a member of
-    several groups is held to every one of them.
-    """
-    own = get_header_exposure_policy(mcp_server)
-    if own:
-        return [own]
-    blocks = (get_header_exposure_policy(group) for group in owning_groups)
-    return [block for block in blocks if block]
-
-
-def can_withhold(mcp_server: str, owning_groups: tuple[str, ...]) -> bool:
-    """Whether a block governing *mcp_server* withholds a tool it denies, rather than only warning."""
-    return any(policy.on_violation != "warn" for policy in exposure_policies(mcp_server, owning_groups))
 
 
 def denied_header_exposure(proj: Any, owning_groups: tuple[str, ...]) -> HeaderVerdict | None:

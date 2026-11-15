@@ -11,6 +11,7 @@ Thread-safe HTTP client with:
 Follows the same interface as StdioClient for consistency.
 """
 
+import copy
 import hashlib
 import json
 import re
@@ -28,10 +29,18 @@ from typing import Any, cast
 
 import httpx
 from cryptography import x509
-from mcp.shared.inbound import NAME_BEARING_METHODS, encode_header_value
+from mcp.shared.inbound import (
+    MCP_PARAM_HEADER_PREFIX,
+    NAME_BEARING_METHODS,
+    encode_header_value,
+    find_invalid_x_mcp_header,
+    mcp_param_headers,
+    x_mcp_header_map,
+)
 
 from . import metrics as prometheus_metrics
-from .domain.exceptions import ClientError, ResponseTooLarge, UpstreamPeerKeyMismatchError
+from .domain.exceptions import ClientError, ParamHeaderRefusedError, ResponseTooLarge, UpstreamPeerKeyMismatchError
+from .domain.policies.header_exposure import mirror_refusal
 from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
 from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
@@ -59,6 +68,32 @@ MCP_NAME_HEADER = "Mcp-Name"
 #: would be a bug, refused rather than written into a header (the spec defines
 #: no encoding for ``Mcp-Method``).
 _HEADER_SAFE_METHOD = re.compile(r"[\x21-\x7E]+")
+#: Headers an ``Mcp-Param-*`` name must never be, whatever an upstream annotates
+#: (#2011): the credentials, the framing, the routing headers and the hop-by-hop
+#: set. The prefix already keeps an RFC 9110 token clear of every one of them;
+#: this is checked on the name as sent, beside the client's own default headers.
+_NEVER_MIRRORED = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "host",
+        "content-length",
+        "content-type",
+        "accept",
+        "mcp-session-id",
+        "mcp-method",
+        "mcp-name",
+        "mcp-protocol-version",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 
 
 class AuthType(Enum):
@@ -557,6 +592,16 @@ class HttpClient:
         # by compliance exporters, which is untouched by SEP-2567.
         self._mcp_session_id: str | None = None
 
+        #: Each tool's ``inputSchema`` as the upstream's last ``tools/list``
+        #: served it (#2011): the schema its ``Mcp-Param-*`` headers are built
+        #: from, and judged on, when it is called. Rebound whole, never edited.
+        self._input_schemas: dict[str, Any] = {}
+        #: The headers this client sends on every request, in lower case: a
+        #: mirrored header named like one would replace it (an API key).
+        self._own_headers = frozenset(
+            name.lower() for name in (*self._auth_config.get_headers(), *self._http_config.extra_headers)
+        )
+
         # Client state
         self._closed = False
         self._schedule_pool_replacement()
@@ -755,7 +800,9 @@ class HttpClient:
         # Unreachable: the loop returns or raises on its last attempt.
         raise ClientError("retry_loop_exhausted")
 
-    def _outbound_carriers(self, method: str, params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, str]]:
+    def _outbound_carriers(
+        self, method: str, params: dict[str, Any] | None, mirrored: dict[str, str] | None = None
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         """Fresh params and headers for one send, both carrying the current trace context.
 
         Call it inside the CLIENT span so both traceparents name that span, as
@@ -765,10 +812,12 @@ class HttpClient:
         injected for an earlier one.
 
         The headers also carry the SEP-2243 standard headers, read from the
-        params actually sent (#2011): see `_standard_headers`.
+        params actually sent (#2011): see `_standard_headers`, and the
+        *mirrored* ``Mcp-Param-*`` headers of a ``tools/call``.
         """
         sent = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
         headers = _standard_headers(method, sent)
+        headers.update(mirrored or {})
         # SEP-414: trace context rides in params._meta as well as the headers,
         # so it survives across MCP hops regardless of transport. The shared
         # outbound chokepoint also removes any baggage, as over stdio.
@@ -781,11 +830,83 @@ class HttpClient:
             headers["Mcp-Session-Id"] = self._mcp_session_id
         return sent, headers
 
+    def _learn_tools(self, params: Mapping[str, Any] | None, answer: Mapping[str, Any]) -> None:
+        """Keep each tool's ``inputSchema`` from a ``tools/list`` answer (#2011).
+
+        A first page (no ``cursor``) starts the catalogue afresh; a later page
+        adds to it. A copy, so what the caller does with the answer cannot
+        change what is mirrored.
+        """
+        result = answer.get("result")
+        tools = result.get("tools") if isinstance(result, Mapping) else None
+        if not isinstance(tools, list):
+            return
+        learned = dict(self._input_schemas) if (params or {}).get("cursor") else {}
+        for tool in tools:
+            if isinstance(tool, Mapping) and isinstance(tool.get("name"), str):
+                learned[tool["name"]] = copy.deepcopy(tool.get("inputSchema"))
+        self._input_schemas = learned
+
+    def _param_headers(self, sent: Mapping[str, Any]) -> dict[str, str]:
+        """The SEP-2243 ``Mcp-Param-*`` headers of one ``tools/call`` (#2011).
+
+        Built by the SDK's codec from the arguments actually sent and the
+        schema this client last listed for the tool, after that same schema is
+        judged by the rule the batch gates apply (#2253): an invalid
+        annotation, or a ``header_exposure`` block that withholds it, refuses
+        the call here too, so a path that skipped the gates still sends
+        nothing. A tool never listed has no headers. A null or absent value is
+        omitted; a value outside printable ASCII, or with edge whitespace, is
+        sent base64-wrapped, so a CR or LF never reaches a header raw.
+        """
+        tool = sent.get("name")
+        if not isinstance(tool, str) or (schema := self._input_schemas.get(tool)) is None:
+            return {}
+        server = self._mcp_server_id or ""
+        if find_invalid_x_mcp_header(schema) is not None:
+            raise ParamHeaderRefusedError(tool, "invalid_x_mcp_header", server)
+        header_map = x_mcp_header_map(schema)
+        if not header_map:
+            return {}
+        if (refusal := mirror_refusal(self._mcp_server_id, schema)) is not None:
+            raise ParamHeaderRefusedError(tool, refusal, server)
+        arguments = sent.get("arguments")
+        headers = mcp_param_headers(header_map, arguments if isinstance(arguments, Mapping) else {})
+        for name in headers:
+            lowered = name.lower()
+            if (
+                not name.startswith(MCP_PARAM_HEADER_PREFIX)
+                or lowered in _NEVER_MIRRORED
+                or lowered in self._own_headers
+            ):
+                raise ParamHeaderRefusedError(tool, "header_collision", server)
+        return headers
+
     def call(
         self,
         method: str,
         params: dict[str, Any],
         timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Synchronous RPC call over HTTP; see `_call`.
+
+        A ``tools/list`` answer is also where this client learns each tool's
+        schema, for the ``Mcp-Param-*`` headers of its calls (#2011).
+        """
+        # Before the CLIENT span: a refused call sends nothing (#2011). The
+        # arguments are the ones sent; only `_meta` is added to the params.
+        mirrored = self._param_headers(params) if method == "tools/call" else None
+        answer = self._call(method, params, timeout, mirrored)
+        if method == "tools/list":
+            self._learn_tools(params, answer)
+        return answer
+
+    def _call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        timeout: float | None,
+        mirrored: dict[str, str] | None,
     ) -> dict[str, Any]:
         """
         Synchronous RPC call over HTTP.
@@ -794,6 +915,7 @@ class HttpClient:
             method: JSON-RPC method name
             params: Method parameters
             timeout: Request timeout in seconds. If None, uses configured read_timeout.
+            mirrored: The ``Mcp-Param-*`` headers of a ``tools/call``, or None.
 
         Returns:
             Response dictionary with either 'result' or 'error' key
@@ -832,7 +954,7 @@ class HttpClient:
             # this one. It stays open until the answer is classified, so a
             # failure read from the response ends it in ERROR too (#1277).
             with upstream_call_span(method, params) as span:
-                sent_params, extra_headers = self._outbound_carriers(method, params)
+                sent_params, extra_headers = self._outbound_carriers(method, params, mirrored)
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 self._served.peer_spki = None

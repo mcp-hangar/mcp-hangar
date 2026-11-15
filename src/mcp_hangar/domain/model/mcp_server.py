@@ -49,6 +49,7 @@ from ..exceptions import (
     McpServerNotHereError,
     McpServerNotReadyError,
     McpServerStartError,
+    ParamHeaderRefusedError,
     ResponseTooLarge,
     ToolInvocationError,
     ToolNotFoundError,
@@ -2173,9 +2174,10 @@ class McpServer(AggregateRoot):
                 _tool_call_params(tool_name, arguments, progress_token),
                 timeout=timeout,
             )
-        except ResponseTooLarge:
-            # A limit the gateway enforces, not a fault of the server: it keeps its
-            # own type for the caller and does not count against the server.
+        except (ResponseTooLarge, ParamHeaderRefusedError):
+            # A limit the gateway enforces, or a call its client would not send
+            # (#2011), not a fault of the server: each keeps its own type for the
+            # caller and does not count against the server.
             raise
         except (OSError, TimeoutError, ClientError) as e:
             invocation_error = e

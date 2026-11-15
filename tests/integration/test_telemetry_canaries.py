@@ -244,7 +244,34 @@ class ShapeRedacted:
         assert not [s for s in strings if canary(kind, transport) in s], "the secret-shaped part was kept"
 
 
-Rule = Forbidden | Bounded | Kept | Redacted | ShapeRedacted
+@dataclass(frozen=True)
+class MirroredParam:
+    """Sent to an HTTP upstream as the ``Mcp-Param-*`` header its tool declares, and nowhere else (#2011).
+
+    SEP-2243 obliges a client to mirror an ``x-mcp-header`` argument; the
+    operator's control over that is a ``header_exposure`` block (#1057). The
+    argument is plain ASCII, so it goes unwrapped. Over stdio there are no
+    headers, and nothing carries it.
+    """
+
+    header: str
+
+    def check(self, records: list[Any], kind: str, transport: str) -> None:
+        if transport != "http":
+            return Forbidden().check(records, kind, transport)
+        sent = [r["headers"] for r in records if isinstance(r, dict) and "headers" in r]
+        mirrored = [v for h in sent for k, v in h.items() if k.lower() == self.header.lower()]
+        assert canary(kind, transport) in mirrored, f"{self.header} does not carry the argument"
+        rest = [
+            {**r, "headers": {k: v for k, v in r["headers"].items() if k.lower() != self.header.lower()}}
+            for r in records
+            if isinstance(r, dict) and "headers" in r
+        ]
+        Forbidden().check(rest + [r for r in records if not (isinstance(r, dict) and "headers" in r)], kind, transport)
+        return None
+
+
+Rule = Forbidden | Bounded | Kept | Redacted | ShapeRedacted | MirroredParam
 
 #: What #1276 allows each sink to carry; every cell it leaves out is ``Forbidden``.
 #: The event store and ``/ws/events`` are the one different trust boundary: they
@@ -266,6 +293,13 @@ _RETAINED: dict[str, Rule] = {
 CONTRACT: dict[str, dict[str, Rule]] = {sink: {} for sink in SINKS}
 CONTRACT["event_store"] = dict(_RETAINED)
 CONTRACT["ws_events"] = dict(_RETAINED)
+# What a tool declares with `x-mcp-header` reaches an HTTP upstream as its
+# `Mcp-Param-*` header too (SEP-2243, #2011): the argument the upstream gets in
+# the body, mirrored for the routing layer in front of it.
+CONTRACT["upstream_carriers"] = {
+    "l7_header": MirroredParam("Mcp-Param-Region"),
+    "l7_header_encoded": MirroredParam("Mcp-Param-Zone"),
+}
 
 #: Cells tracked outside this suite. Each is a strict xfail, so the change that
 #: resolves one has to delete its entry here.
@@ -494,7 +528,8 @@ def enforced(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, An
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-@pytest.mark.parametrize("sink", [sink for sink in SINKS if not CONTRACT[sink]])
+# The upstream carriers too: a refused call reaches no upstream, mirrored or not (#2011).
+@pytest.mark.parametrize("sink", [sink for sink in SINKS if not CONTRACT[sink] or sink == "upstream_carriers"])
 @pytest.mark.parametrize("kind", ["l7_argument", "l7_header", "l7_header_encoded"])
 def test_an_enforced_refusal_keeps_the_l7_canaries_off_telemetry(enforced, surface, sink, kind):
     """The deny path writes its own lines and events; none of them may carry what the policy matched."""
