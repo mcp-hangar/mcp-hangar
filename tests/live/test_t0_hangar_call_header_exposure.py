@@ -10,6 +10,10 @@ stub's ``lookup`` annotates its ``region`` argument ``x-mcp-header: Region``;
 - ``eager`` declares the same block and starts its member at config load,
   before the projection handler is subscribed. Its start is published once the
   handlers are, so it is projected and governed as a lazily started one (#2257).
+- ``joined`` declares the same block and has no member in the file. ``joiner``,
+  a server in no group, is added to it over ``POST /api/groups/joined/members``,
+  which starts it. Its start is published by the add, so it is projected and
+  governed as a lazily started one (#2258).
 
 Before #2253 the block only withheld ``lookup`` from the flat listing, and
 ``hangar_call`` invoked it. Now the call is refused with
@@ -81,6 +85,17 @@ mcp_servers:
         mode: subprocess
         command: ["{python}", "{stub}"]
         idle_ttl_s: 60
+  joiner:
+    mode: subprocess
+    command: ["{python}", "{stub}"]
+    idle_ttl_s: 60
+  joined:
+    mode: group
+    strategy: round_robin
+    header_exposure:
+      deny_annotated: ["region"]
+      on_violation: withdraw
+    members: []
 """
 
 
@@ -170,3 +185,25 @@ def test_a_member_started_at_config_load_is_governed_like_one_started_by_a_call(
     served = _hangar_call(hangar.base_url, "eager", "ping", {})
     assert served["success"] is True, served
     assert len(_refusal_lines(hangar, "eager")) == 1, "ping is not refused"
+
+
+def test_a_member_added_over_rest_is_governed_like_one_started_by_a_call(hangar: RunningHangar) -> None:
+    """Projected by the add, with no call first: ``ping`` is served and ``lookup`` refused by the block.
+
+    Before #2258 the add drained only the group's events, so nothing projected
+    ``joiner`` and both were refused as ``schema_unknown``.
+    """
+    added = httpx.post(f"{hangar.base_url}/api/groups/joined/members", json={"member_id": "joiner"}, timeout=60)
+    assert added.status_code == 201, added.text
+
+    refused = _hangar_call(hangar.base_url, "joined", "lookup", {"region": "eu"})
+
+    assert refused["success"] is False, refused
+    assert refused["error_type"] == "ToolHeaderWithheldError", refused
+    [line] = _refusal_lines(hangar, "joined")
+    assert line["gate"] in {"header_exposure", "deferred_header_exposure"}, line
+    assert line["reason"] == "header_exposure_withdraw", line
+
+    served = _hangar_call(hangar.base_url, "joined", "ping", {})
+    assert served["success"] is True, served
+    assert len(_refusal_lines(hangar, "joined")) == 1, "ping is not refused"

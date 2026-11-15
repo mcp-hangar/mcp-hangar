@@ -48,7 +48,7 @@ from ...domain.value_objects.peer_identity import PeerIdentity, max_connection_a
 from ...domain.value_objects.provenance import Provenance
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER
-from ..group_events import publish_group_events
+from ..group_events import publish_group_events, publish_server_events
 from ..group_membership import fill_vacant_member, vacate_member
 from ..ports.log_buffers import ILogBuffers
 from ..ports.peer_identity import IPeerIdentityAuthority
@@ -1349,6 +1349,9 @@ class AddGroupMemberHandler(CommandHandler):
 
         # Collect GroupMemberAdded event and forward
         publish_group_events(self._event_bus, group)
+        # And the member's start, when the group started it (`auto_start`): it
+        # is recorded on the server, which no command drains here (#2258).
+        publish_server_events(self._event_bus, mcp_server)
 
         logger.info("group_member_added", group_id=command.group_id, mcp_server_id=command.mcp_server_id)
         return {"group_id": command.group_id, "mcp_server_id": command.mcp_server_id, "added": True}
