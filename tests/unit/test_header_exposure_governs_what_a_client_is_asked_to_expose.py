@@ -31,7 +31,7 @@ from mcp_hangar.domain.policies.header_exposure import (
     set_header_exposure_policy,
 )
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
-from mcp_hangar.fastmcp_server import flat_tool_projection
+from mcp_hangar.fastmcp_server import flat_tool_projection, header_verdicts
 
 SERVER = "everything"
 
@@ -65,15 +65,15 @@ def registry():
     reg = get_tool_projection_registry()
     reg.build_from_tools(SERVER, _tools())
     reg.set_flat(SERVER, frozenset(tool.name for tool in _tools()))  # as `tool_projection.flat` declares it
-    flat_tool_projection._EXPOSURE_VERDICTS.clear()
-    flat_tool_projection._ANNOTATION_VERDICTS.clear()
+    header_verdicts._EXPOSURE_VERDICTS.clear()
+    header_verdicts._ANNOTATION_VERDICTS.clear()
     try:
         yield reg
     finally:
         reg.invalidate()
         clear_header_exposure_policies()
-        flat_tool_projection._EXPOSURE_VERDICTS.clear()
-        flat_tool_projection._ANNOTATION_VERDICTS.clear()
+        header_verdicts._EXPOSURE_VERDICTS.clear()
+        header_verdicts._ANNOTATION_VERDICTS.clear()
 
 
 @pytest.fixture()

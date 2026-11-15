@@ -147,7 +147,7 @@ class Dispatch:
 class Gate:
     """What each stage of the batch executor's `_GATES` decided about a call (#1285, ADR-029 s5).
 
-    One call passes up to thirteen gates, so a decision is a span EVENT on
+    One call passes up to fifteen gates, so a decision is a span EVENT on
     `batch.call.<tool>`, not an attribute: the last gate to write a scalar
     would erase every decision before it, and a deferred digest pin has two.
     The call's summary -- its outcome and the first gate that refused it --

@@ -27,7 +27,7 @@ from mcp_hangar._sdk_compat import McpError
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
-from mcp_hangar.fastmcp_server import flat_tool_projection
+from mcp_hangar.fastmcp_server import flat_tool_projection, header_verdicts
 
 SERVER = "everything"
 
@@ -59,12 +59,12 @@ def registry():
     reg.set_flat(SERVER, frozenset(tool.name for tool in _tools()))  # as `tool_projection.flat` declares it
     # The verdict cache is keyed on (server, tool, digest) and outlives one
     # test; a stale entry would hide a regression in the check itself.
-    flat_tool_projection._ANNOTATION_VERDICTS.clear()
+    header_verdicts._ANNOTATION_VERDICTS.clear()
     try:
         yield reg
     finally:
         reg.invalidate()
-        flat_tool_projection._ANNOTATION_VERDICTS.clear()
+        header_verdicts._ANNOTATION_VERDICTS.clear()
 
 
 @pytest.fixture()

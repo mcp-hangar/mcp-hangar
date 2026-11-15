@@ -82,6 +82,7 @@ def ctx():
     group.select_member.return_value = member
     # Drained after the call reports its outcome (#1410).
     group.collect_events.return_value = []
+    group.members = []  # read by the header gate's owners_by_member (#2253)
 
     context = Mock()
     context.event_bus = Mock()

@@ -25,11 +25,18 @@ from unittest.mock import patch
 import pytest
 import structlog
 
+from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.application.services.validator_pipeline import ValidatorPipeline
 from mcp_hangar.approvals.models import ApprovalResult
 from mcp_hangar.domain.contracts.validator import ValidationResult
 from mcp_hangar.domain.exceptions import CannotStartMcpServerError
 from mcp_hangar.domain.model.mcp_server import START_REFUSED_NOT_REVIVED_BY_CALLS
+from mcp_hangar.domain.model.tool_catalog import ToolSchema
+from mcp_hangar.domain.policies.header_exposure import (
+    HeaderExposurePolicy,
+    clear_header_exposure_policies,
+    set_header_exposure_policy,
+)
 from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
@@ -131,6 +138,24 @@ def _pin_unverifiable(ctx: Any, stack: ExitStack) -> dict[str, Any]:
     return {}
 
 
+def _header_withheld(_ctx: Any, stack: ExitStack) -> dict[str, Any]:
+    annotated = {"type": "object", "properties": {"api_token": {"type": "string", "x-mcp-header": "Api-Token"}}}
+    get_tool_projection_registry().build_from_tools(
+        _SERVER, [ToolSchema(name=_TOOL, description="t", input_schema=annotated)]
+    )
+    set_header_exposure_policy(_SERVER, HeaderExposurePolicy(("*token*",), "withdraw"))
+    stack.callback(clear_header_exposure_policies)
+    return {}
+
+
+def _header_unverifiable(ctx: Any, stack: ExitStack) -> dict[str, Any]:
+    ctx.get_mcp_server.return_value.state.value = "cold"
+    set_header_exposure_policy(_SERVER, HeaderExposurePolicy(("*token*",), "withdraw"))
+    stack.callback(clear_header_exposure_policies)
+    stack.enter_context(_budget({_TENANT: TenantLimits(max_concurrency=5, rps=100, burst=100)}))
+    return {}
+
+
 def _budget_spent(_ctx: Any, _stack: ExitStack) -> dict[str, Any]:
     return {"global_timeout": 0}
 
@@ -144,12 +169,14 @@ _THROUGH_EXECUTE: dict[str, tuple[Callable[[Any, ExitStack], dict[str, Any]], bo
     "tool_access": (_tool_access, False),
     "withdrawal": (_withdrawn, False),  # the tool name
     "digest_pin": (_stale_pin, False),  # the tool name
+    "header_exposure": (_header_withheld, False),  # the tool name
     "circuit_breaker": (_circuit_open, False),
     "validators": (_validator_says_why, True),  # the validator's reason
     "tenant_budget": (_no_budget, False),
     "approval": (_approver_says_why, True),  # the approver's reason
     "cold_start": (_start_refused, False),
     "deferred_digest_pin": (_pin_unverifiable, False),  # the tool name
+    "deferred_header_exposure": (_header_unverifiable, False),  # the tool name
 }
 
 #: The two cancellation stages, which `execute` reaches only on a race; run on
@@ -177,7 +204,7 @@ class TestARefusalLine:
     @pytest.mark.parametrize("gate", sorted(_THROUGH_EXECUTE))
     def test_carries_no_gate_free_text(self, ctx, gate: str) -> None:
         arrange, planted = _THROUGH_EXECUTE[gate]
-        if gate != "deferred_digest_pin":  # that one needs a catalogue not loaded yet
+        if not gate.startswith("deferred_"):  # those need a catalogue not loaded yet
             _arrange_catalogue()
         with ExitStack() as stack:
             run_kwargs = arrange(ctx, stack)

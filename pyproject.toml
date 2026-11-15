@@ -407,6 +407,9 @@ drift_allowance = 3.0
   # Set under them for the run-to-run swing, as the others are; the unit of
   # progress is raising them.
   "fastmcp_server/flat_tool_projection.py" = 96.0
+  # The header verdict both the flat listing and hangar_call ask (#2253): 100.00
+  # on 3.11 over unit + integration, every branch driven by a test of its own.
+  "fastmcp_server/header_verdicts.py" = 100.0
   "server/config.py" = 95.5
 
 [tool.pytest.ini_options]
