@@ -51,7 +51,13 @@ from .observability.tracing import (
     record_upstream_outcome,
     upstream_call_span,
 )
-from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject_protocol_meta
+from .protocol import (
+    _META_PROTOCOL_VERSION_KEY,
+    SESSION_TERMINATED_CODE,
+    SESSION_TERMINATED_REASON,
+    UNSUPPORTED_PROTOCOL_VERSION_CODE,
+    inject_protocol_meta,
+)
 from .response_limit import default_max_response_bytes
 
 logger = get_logger(__name__)
@@ -64,6 +70,9 @@ logger = get_logger(__name__)
 #: the body an upstream validates them against.
 MCP_METHOD_HEADER = "Mcp-Method"
 MCP_NAME_HEADER = "Mcp-Name"
+#: SEP-2575: every POST on a 2026-07-28 connection names its protocol version,
+#: the same one its ``_meta`` carries (#2009).
+MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
 #: A JSON-RPC method Hangar sends is its own literal; one outside visible ASCII
 #: would be a bug, refused rather than written into a header (the spec defines
 #: no encoding for ``Mcp-Method``).
@@ -513,6 +522,22 @@ def _standard_headers(method: str, sent: Mapping[str, Any]) -> dict[str, str]:
     return headers
 
 
+def _http_error(response: httpx.Response) -> dict[str, Any]:
+    """The JSON-RPC error a 4xx/5xx answer is returned as.
+
+    An upstream's own -32022 is kept whole (#2009): its ``data.supported`` is
+    what the start's version retry reads. Every other status keeps the
+    ``HTTP error`` shape callers key on.
+    """
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        error = None
+    if isinstance(error, dict) and error.get("code") == UNSUPPORTED_PROTOCOL_VERSION_CODE:
+        return error
+    return {"code": -32000, "message": f"HTTP error: {response.status_code}", "data": response.text[:500]}
+
+
 class HttpClient:
     """
     Thread-safe HTTP client for MCP-over-HTTP mcp_servers.
@@ -520,6 +545,11 @@ class HttpClient:
     Implements the same interface as StdioClient for consistency.
     Supports both standard request/response and SSE streaming patterns.
     """
+
+    #: The start probes ``server/discover`` before ``initialize`` (#2009): an
+    #: upstream that answers it with 2026-07-28 is spoken to statelessly.
+    #: A class attribute, read with ``is True``, so a test double is not probed.
+    probes_server_discover = True
 
     def __init__(
         self,
@@ -823,10 +853,16 @@ class HttpClient:
         # outbound chokepoint also removes any baggage, as over stdio.
         for carrier in (sent["_meta"], headers):
             inject_trace_context(carrier)
-        # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
-        # legacy session-based upstream that established one. Declaring the
-        # upstream stateless keeps _mcp_session_id None, so this is skipped.
-        if not self._http_config.stateless_upstream and self._mcp_session_id:
+        if self.modern_envelope:
+            # Read off the `_meta` sent, so a caller-set version and the header agree.
+            version = sent["_meta"].get(_META_PROTOCOL_VERSION_KEY)
+            if isinstance(version, str):
+                headers[MCP_PROTOCOL_VERSION_HEADER] = version
+        elif not self._http_config.stateless_upstream and self._mcp_session_id:
+            # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
+            # legacy session-based upstream that established one. A modern
+            # connection has no session; declaring the upstream stateless keeps
+            # _mcp_session_id None, so this is skipped either way.
             headers["Mcp-Session-Id"] = self._mcp_session_id
         return sent, headers
 
@@ -975,7 +1011,7 @@ class HttpClient:
                 # backward-compat with legacy session-based upstreams. Stateless
                 # upstreams do not return this header, and declaring the upstream
                 # stateless suppresses capture entirely so no session is ever tracked.
-                if not self._http_config.stateless_upstream:
+                if not self._http_config.stateless_upstream and not self.modern_envelope:
                     session_id = response.headers.get("Mcp-Session-Id")
                     if session_id:
                         self._mcp_session_id = session_id
@@ -1047,13 +1083,7 @@ class HttpClient:
                         mcp_server=mcp_server_label, error_type=f"http_{status_code}"
                     )
                     record_upstream_outcome(span, http_status=response.status_code)
-                    return {
-                        "error": {
-                            "code": -32000,
-                            "message": f"HTTP error: {response.status_code}",
-                            "data": response.text[:500],
-                        }
-                    }
+                    return {"error": _http_error(response)}
 
                 try:
                     result = response.json()
@@ -1372,6 +1402,11 @@ class HttpClient:
                 handler must not kill the channel.
         """
         if self._sse_thread is not None or self._closed:
+            return
+        if self.modern_envelope:
+            # 2026-07-28 has no standalone GET stream: it needs a session, and a
+            # stateless connection has none (the SDK client skips it the same way).
+            logger.info("http_client_get_stream_skipped_stateless", mcp_server=self._mcp_server_id or self._host)
             return
         self._sse_running = True
         self._sse_thread = threading.Thread(

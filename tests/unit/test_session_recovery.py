@@ -120,7 +120,7 @@ class TestDomainRenegotiates:
         result = server._call_with_session_recovery(client, "tools/call", {"name": "t"})
 
         assert result == OK
-        server._perform_mcp_handshake.assert_called_once_with(client)
+        server._perform_mcp_handshake.assert_called_once_with(client, probe=False)
         assert client.call.call_count == 2
 
     def test_a_successful_renegotiation_records_no_health_failure(self) -> None:

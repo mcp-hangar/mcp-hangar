@@ -114,9 +114,11 @@ def inject_protocol_meta(params: dict[str, Any], *, modern_envelope: bool = True
     meta.setdefault(_META_PROTOCOL_VERSION_KEY, SUPPORTED_PROTOCOL_VERSION)
     meta.setdefault(_META_CLIENT_INFO_KEY, dict(HANGAR_CLIENT_INFO))
 
-    capabilities = forwardable_client_capabilities()
-    if capabilities is not None:
-        meta.setdefault(_META_CLIENT_CAPABILITIES_KEY, capabilities)
+    # Always present, `{}` when Hangar declares nothing (#2009): the key is
+    # required on every modern request, and a stateless upstream answers a
+    # request without it -32602. Roots, sampling and elicitation are never
+    # declared: Hangar refuses every server-to-client request it is sent.
+    meta.setdefault(_META_CLIENT_CAPABILITIES_KEY, forwardable_client_capabilities() or {})
     return {**params, "_meta": meta}
 
 
@@ -200,3 +202,7 @@ SESSION_TERMINATED_CODE = -32600
 #: protocol module, so the domain layer can recognise the condition without
 #: importing a transport client.
 SESSION_TERMINATED_REASON = "mcp_session_terminated"
+
+#: JSON-RPC code a 2026-07-28 upstream answers a protocol version it does not
+#: serve with, naming the ones it does in ``data.supported`` (SEP-2575).
+UNSUPPORTED_PROTOCOL_VERSION_CODE = -32022
