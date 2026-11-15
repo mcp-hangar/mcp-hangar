@@ -52,6 +52,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..domain.events import CircuitBreakerStateChanged, DomainEvent
+from ..domain.model.mcp_server import McpServer
 from ..domain.model.mcp_server_group import (
     GroupCircuitClosed,
     GroupCircuitOpened,
@@ -150,26 +151,34 @@ def publish_member_starts(event_bus: Any, groups: Iterable[McpServerGroup]) -> N
     of them. Bootstrap calls this once its handlers, overlays and pins are in
     place, and a reload once its commit is.
 
-    Published as `StartMcpServerHandler` publishes a start, to the server's own
-    stream, so every subscriber sees it as it sees any other start. The group's
-    own events are not drained here: they are `publish_group_events`'.
-    `collect_events` returns each event once, so a call, a sweep or a warm-up
-    that drains the same server first leaves nothing here, and the reverse.
+    The group's own events are not drained here: they are `publish_group_events`'.
     """
     for group in groups:
         for member in group.members:
             if member.vacant:  # Its server was deleted, and its stream with it.
                 continue
-            server = member.mcp_server
-            events = list(server.collect_events())
-            if not events:
-                continue
-            try:
-                event_bus.publish_aggregate_events(MCP_SERVER, server.mcp_server_id, events)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: as a start command's publish, it must not undo the load
-                logger.error(
-                    "event_publish_failed",
-                    mcp_server_id=server.mcp_server_id,
-                    event_types=[type(event).__name__ for event in events],
-                    error_type=type(e).__name__,
-                )
+            publish_server_events(event_bus, member.mcp_server)
+
+
+def publish_server_events(event_bus: Any, server: McpServer) -> None:
+    """Publish what *server* recorded when a group, not a command, started it (#2257, #2258).
+
+    For `publish_member_starts`, and for the group API's add, whose group
+    starts the member it is given. Published as `StartMcpServerHandler`
+    publishes a start, to the server's own stream, so every subscriber sees it
+    as it sees any other start. `collect_events` returns each event once, so a
+    call, a sweep or a warm-up that drains the same server first leaves nothing
+    here, and the reverse.
+    """
+    events = list(server.collect_events())
+    if not events:
+        return
+    try:
+        event_bus.publish_aggregate_events(MCP_SERVER, server.mcp_server_id, events)
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: as a start command's publish, it must not undo the load or the add
+        logger.error(
+            "event_publish_failed",
+            mcp_server_id=server.mcp_server_id,
+            event_types=[type(event).__name__ for event in events],
+            error_type=type(e).__name__,
+        )

@@ -39,7 +39,7 @@ from mcp_hangar.application.commands.crud_handlers import (
     UpdateGroupHandler,
     UpdateProviderHandler,
 )
-from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerUpdated
+from mcp_hangar.domain.events import McpServerDeregistered, McpServerRegistered, McpServerStarted, McpServerUpdated
 from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
 from mcp_hangar.domain.model.mcp_server_group import (
     GroupCreated,
@@ -49,6 +49,7 @@ from mcp_hangar.domain.model.mcp_server_group import (
 )
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.domain.value_objects import ProviderState
+from mcp_hangar.stream_ids import MCP_SERVER, MCP_SERVER_GROUP
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -466,6 +467,40 @@ class TestAddGroupMemberHandler:
         cmd = AddGroupMemberCommand(group_id="unknown", mcp_server_id="p")
         with pytest.raises(ProviderNotFoundError):
             self.handler.handle(cmd)
+
+    def _group_that_starts_its_members(self) -> McpServer:
+        """``g`` with ``auto_start``, whose start of ``p`` records what a real start does (#2258)."""
+        provider = self.repo.get("p")
+        started = McpServerStarted(mcp_server_id="p", mode="subprocess", tools_count=0, startup_duration_ms=1.0)
+        provider.ensure_ready = lambda: provider._record_event(started)
+        group = McpServerGroup(group_id="g")
+        group.collect_events()
+        self.groups["g"] = group
+        return provider
+
+    def test_the_start_the_group_made_is_published_to_the_members_stream(self):
+        provider = self._group_that_starts_its_members()
+
+        self.handler.handle(AddGroupMemberCommand(group_id="g", mcp_server_id="p"))
+
+        streams = [(c.args[0], c.args[1]) for c in self.event_bus.publish_aggregate_events.call_args_list]
+        assert streams == [(MCP_SERVER_GROUP, "g"), (MCP_SERVER, "p")]
+        [started] = self.event_bus.publish_aggregate_events.call_args_list[1].args[2]
+        assert isinstance(started, McpServerStarted)
+        assert provider.has_uncommitted_events() is False
+
+    def test_a_failed_publish_of_the_start_does_not_fail_the_add(self):
+        self._group_that_starts_its_members()
+
+        def refuse_the_servers_stream(aggregate_type, _aggregate_id, _events):
+            if aggregate_type == MCP_SERVER:
+                raise RuntimeError("event store down")
+
+        self.event_bus.publish_aggregate_events.side_effect = refuse_the_servers_stream
+        result = self.handler.handle(AddGroupMemberCommand(group_id="g", mcp_server_id="p"))
+
+        assert result == {"group_id": "g", "mcp_server_id": "p", "added": True}
+        assert [m.id for m in self.groups["g"].members] == ["p"]
 
 
 # ---------------------------------------------------------------------------
