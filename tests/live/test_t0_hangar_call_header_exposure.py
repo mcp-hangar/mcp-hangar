@@ -7,7 +7,9 @@ stub's ``lookup`` annotates its ``region`` argument ``x-mcp-header: Region``;
 
 - ``region`` declares ``header_exposure: {deny_annotated: [region], on_violation: withdraw}``.
 - ``pooled`` is the one member of ``pool``, and the block is the group's.
-- ``eager`` declares the same block and starts its member at config load.
+- ``eager`` declares the same block and starts its member at config load,
+  before the projection handler is subscribed. Its start is published once the
+  handlers are, so it is projected and governed as a lazily started one (#2257).
 
 Before #2253 the block only withheld ``lookup`` from the flat listing, and
 ``hangar_call`` invoked it. Now the call is refused with
@@ -151,19 +153,20 @@ def test_a_tool_the_block_withholds_is_refused_and_another_is_served(hangar: Run
     assert served["success"] is True, served
 
 
-@pytest.mark.parametrize("tool", ["lookup", "ping"])
-def test_a_member_started_at_config_load_fails_closed(hangar: RunningHangar, tool: str) -> None:
-    """No schema to judge: the member started before the catalogue was listening.
+def test_a_member_started_at_config_load_is_governed_like_one_started_by_a_call(hangar: RunningHangar) -> None:
+    """Projected at boot, with no call first: ``ping`` is served and ``lookup`` refused by the block.
 
-    Nothing projected ``eager_member``'s tools, so the verdict cannot be known
-    and every tool is refused under a block that withholds. The flat listing
-    does not show them either. Once such a member is projected at boot (a
-    follow-up to #2253), ``ping``
-    is served and ``lookup`` is refused with ``header_exposure_withdraw``.
+    Before #2257 nothing projected ``eager_member``, so no verdict could be known
+    and both were refused as ``schema_unknown``.
     """
-    refused = _hangar_call(hangar.base_url, "eager", tool, {"region": "eu"} if tool == "lookup" else {})
+    refused = _hangar_call(hangar.base_url, "eager", "lookup", {"region": "eu"})
 
     assert refused["success"] is False, refused
     assert refused["error_type"] == "ToolHeaderWithheldError", refused
-    lines = [line for line in _refusal_lines(hangar, "eager") if line["tool"] == tool]
-    assert [(line["gate"], line["reason"]) for line in lines] == [("deferred_header_exposure", "schema_unknown")]
+    [line] = _refusal_lines(hangar, "eager")
+    assert line["gate"] in {"header_exposure", "deferred_header_exposure"}, line
+    assert line["reason"] == "header_exposure_withdraw", line
+
+    served = _hangar_call(hangar.base_url, "eager", "ping", {})
+    assert served["success"] is True, served
+    assert len(_refusal_lines(hangar, "eager")) == 1, "ping is not refused"

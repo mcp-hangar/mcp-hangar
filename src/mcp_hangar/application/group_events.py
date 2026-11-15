@@ -48,6 +48,7 @@ would carry them to no one.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from ..domain.events import CircuitBreakerStateChanged, DomainEvent
@@ -63,7 +64,10 @@ from ..domain.model.mcp_server_group import (
     GroupUpdated,
     McpServerGroup,
 )
-from ..stream_ids import MCP_SERVER_GROUP
+from ..logging_config import get_logger
+from ..stream_ids import MCP_SERVER, MCP_SERVER_GROUP
+
+logger = get_logger(__name__)
 
 #: What a group records about **this replica's** view of it: which members this
 #: pod is routing to, and whether this pod's breaker is open. Published locally
@@ -133,3 +137,39 @@ def publish_group_events(event_bus: Any, group: McpServerGroup) -> None:
         event_bus.publish_local(event)
     if shared:
         event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, shared)
+
+
+def publish_member_starts(event_bus: Any, groups: Iterable[McpServerGroup]) -> None:
+    """Publish what each member's server recorded while its group started it (#2257).
+
+    A group with ``auto_start`` starts its members while the configuration is
+    built, at boot before any handler is subscribed and on a reload before the
+    commit. The start is recorded on the member's server, and nothing drained
+    it: the projection handler never heard ``McpServerStarted``, so the member's
+    tools were not listed and a withholding ``header_exposure`` block refused all
+    of them. Bootstrap calls this once its handlers, overlays and pins are in
+    place, and a reload once its commit is.
+
+    Published as `StartMcpServerHandler` publishes a start, to the server's own
+    stream, so every subscriber sees it as it sees any other start. The group's
+    own events are not drained here: they are `publish_group_events`'.
+    `collect_events` returns each event once, so a call, a sweep or a warm-up
+    that drains the same server first leaves nothing here, and the reverse.
+    """
+    for group in groups:
+        for member in group.members:
+            if member.vacant:  # Its server was deleted, and its stream with it.
+                continue
+            server = member.mcp_server
+            events = list(server.collect_events())
+            if not events:
+                continue
+            try:
+                event_bus.publish_aggregate_events(MCP_SERVER, server.mcp_server_id, events)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: as a start command's publish, it must not undo the load
+                logger.error(
+                    "event_publish_failed",
+                    mcp_server_id=server.mcp_server_id,
+                    event_types=[type(event).__name__ for event in events],
+                    error_type=type(e).__name__,
+                )

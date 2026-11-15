@@ -14,6 +14,7 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.services import get_tool_access_resolver
 from ...domain.services.tool_access_resolver import configured_topology_mode
 from ...logging_config import get_logger
+from ..group_events import publish_member_starts
 from ..ports.config_loader import IConfigLoader, PreparedServers
 from ..read_models.tool_projection import get_tool_projection_registry
 from ..services.pin_ledger import reconcile_pin_ledger
@@ -243,6 +244,9 @@ class ReloadConfigurationHandler(CommandHandler):
         # header_exposure blocks swapped in rather than cleared and registered
         # again. The group registry is replaced, not emptied first.
         self._config_loader.commit_mcp_servers(prepared)
+        # The members the build started, now the servers they run on and what
+        # governs them are in force; before `ConfigurationReloaded` (#2257).
+        publish_member_starts(self._event_bus, list(self._groups.values()))
 
         for mcp_server_id in diff.added:
             logger.info("mcp_server_added", mcp_server_id=mcp_server_id)
