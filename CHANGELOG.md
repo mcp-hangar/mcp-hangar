@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.37.0...v2.37.1) (2026-11-15)
+
+### Fixed
+
+- **core:** A group member that its group starts while the configuration loads, which `auto_start` (the default) does at boot and on a reload, now has its tools projected. Before, that start was recorded on the member and never published, so in egress the member's tools were missing from the projection until a later health sweep or call published it: a digest pin on it could not be checked, and under a `header_exposure` block that withholds, `hangar_call` refused every one of its tools as `schema_unknown`. The start is now published once the event handlers, withdrawals and pins are in place at boot, and once a reload has committed. ([#2259](https://github.com/mcp-hangar/mcp-hangar/pull/2259))
+- **core:** `hangar_call` now refuses a tool that the flat projection withholds for its `x-mcp-header` annotations. That covers an invalid annotation, and a `header_exposure` block with `on_violation: withdraw` or `refuse_boot` on the server or a group that owns it. Before, such a tool was hidden from the flat listing but could still be called through `hangar_call`. The refusal reads `ToolHeaderWithheldError` and is logged as `batch_call_refused` from the `header_exposure` gate, with the reason the flat path counts. A tool whose schema is not in the catalogue after its cold start is refused as `schema_unknown` when a block that withholds governs it. ([#2256](https://github.com/mcp-hangar/mcp-hangar/pull/2256))
+- **core:** the compose quickstart's `hangar_call` of `everything/echo` failed with `Connection refused`. The example ran `@modelcontextprotocol/server-everything` unpinned, and its 2.3.0 release binds `127.0.0.1` by default, out of reach of the gateway's container. The example now pins 2.3.0 and sets `HOST=0.0.0.0` on a port that is exposed on the compose network only, and the `Examples (compose)` workflow prints a failed call's full response and runs weekly. ([#2254](https://github.com/mcp-hangar/mcp-hangar/pull/2254))
+
 ## [2.37.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.36.8...v2.37.0) (2026-11-14)
 
 ### Added
