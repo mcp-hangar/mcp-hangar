@@ -608,6 +608,14 @@ def bootstrap(
     # Initialize saga with persistence
     init_saga(full_config)
 
+    # And the starts of the members a group started while the file loaded, which
+    # no handler was subscribed to hear (#2257). After the withdrawals and pins,
+    # so the projection they reach is governed as any start's is, and after the
+    # sagas, so the groups hear them too.
+    from ...application.group_events import publish_member_starts
+
+    publish_member_starts(runtime.event_bus, GROUPS.values())
+
     # The command bus's rate limit: the budget every caller shares, config.yaml
     # over env, and `rate_limit.per_caller`, each caller's own under it (#1471).
     from ...bootstrap.runtime import install_command_bus_rate_limit

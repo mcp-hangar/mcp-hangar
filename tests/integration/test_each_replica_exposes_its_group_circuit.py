@@ -86,11 +86,18 @@ def test_member_failures_on_real_calls_open_it(runs):
 
 
 def test_it_changes_on_every_transition_not_once(runs):
-    """math-a's failures open it, math-b's start closes it, math-b's failures open it again."""
+    """math-a's failures open it, math-b's failures keep it open, math-a's recovery closes it.
+
+    math-b started at boot, and its start is reported to the group then (#2257).
+    Before, that start sat on the member until math-b's first call published it,
+    and the group took it for a success in the middle of math-b's failures: the
+    circuit closed between two failing calls.
+    """
     metric = runs["pair"]["metric"]
 
-    assert [step["gauge"] for step in metric["failures"]] == [0.0, 1.0, 0.0, 1.0]
+    assert [step["gauge"] for step in metric["failures"]] == [0.0, 1.0, 1.0, 1.0]
     assert metric["tripped"] == 1.0
+    assert metric["after"] == 0.0
 
 
 @pytest.mark.parametrize("mode", MODES)
