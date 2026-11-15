@@ -36,6 +36,12 @@ on:
     paths:
       - "examples/**"
       - "Dockerfile"
+  # Weekly, so drift in what the examples pull without a pin (base images,
+  # `:latest` tags, upstream packages) fails here before a user meets it. The
+  # quickstart broke for three weeks unseen because nothing under `examples/`
+  # changed in that time (#2252).
+  schedule:
+    - cron: "17 5 * * 1"
   workflow_dispatch: {}
 
 concurrency:
@@ -213,7 +219,7 @@ jobs:
                       raw = response.read().decode()
               except urllib.error.HTTPError as exc:
                   # The body carries the reason; the status alone does not.
-                  last = f"HTTP {exc.code}: {exc.read().decode()[:400]}"
+                  last = f"HTTP {exc.code}: {exc.read().decode()}"
               except (urllib.error.URLError, OSError) as exc:
                   last = f"{type(exc).__name__}: {exc}"
               else:
@@ -225,12 +231,17 @@ jobs:
                   if "error" not in answer and not result.get("isError") and batch_succeeded(result):
                       print("provider answered:", json.dumps(result)[:400])
                       sys.exit(0)
-                  last = payload[:400]
+                  last = payload
               # A cold start pulls the provider image, so early attempts fail
               # for a reason that goes away.
               time.sleep(10)
 
-          print(f"::error::the configured provider never answered; last: {last[:600]}")
+          # In full, never truncated: the reason a call failed sits in the
+          # batch's per-call `error`, past the envelope, and a 600-character
+          # cut hid it for #2252.
+          print("last response:")
+          print(last)
+          print("::error::the configured provider never answered; the last response is printed above in full")
           sys.exit(1)
           PY
 

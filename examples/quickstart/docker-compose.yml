@@ -73,12 +73,24 @@ services:
   # `everything` and not one of the others because it is the only official
   # server that speaks HTTP; the rest are stdio-only, which a gateway in its
   # own container cannot attach to without a bridge beside it.
+  #
+  # The version is pinned. An unpinned `npx -y` took 2.3.0 the day it was
+  # published, and 2.3.0 changed the default bind from every interface to
+  # loopback, so the gateway in its own container got `Connection refused`
+  # (#2252). Raise the pin deliberately, and run the `Examples (compose)`
+  # workflow when you do.
   everything:
     image: node:lts-alpine
     container_name: mcp-everything
-    command: ["npx", "-y", "@modelcontextprotocol/server-everything", "streamableHttp"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything@2.3.0", "streamableHttp"]
     environment:
       - PORT=3001
+      # Since 2.3.0 the server binds 127.0.0.1 unless HOST says otherwise, and
+      # loopback inside this container is unreachable from the gateway's. The
+      # wildcard is safe here only because the port is not published (see
+      # `expose` below): it is reachable on the compose network and nowhere
+      # else. Do not add a `ports:` entry next to this line.
+      - HOST=0.0.0.0
     # Not published on the host: the gateway reaches it over the compose
     # network, and nothing else needs to.
     expose:

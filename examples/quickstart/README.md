@@ -45,6 +45,11 @@ own config:
   released continuously, which is why the docs recommend `npx -y
   @modelcontextprotocol/server-*` for anything you do not have to run as an
   image.
+- **The package is pinned, and told to listen on every interface.** Since 2.3.0
+  the server binds `127.0.0.1` unless `HOST` is set, which a gateway in another
+  container cannot reach: it gets `Connection refused`. The compose file sets
+  `HOST=0.0.0.0` and keeps the port off the host (`expose`, not `ports`), so
+  the server is reachable on the compose network only.
 
 Call the provider through the gateway:
 
