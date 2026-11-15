@@ -54,6 +54,7 @@ from ....domain.value_objects.access import Caller as AccessCaller
 from ....domain.value_objects.identity import IdentityContext
 from ....domain.value_objects.truncation import ContinuationOwner
 from ....errors import bounded_error_type
+from ....fastmcp_server.header_verdicts import can_withhold, withholding_verdict
 from ....infrastructure.observability.l7_verdicts import (
     L7Decision,
     L7VerdictHolder,
@@ -349,6 +350,8 @@ def _groups_owning(server_id: str) -> tuple[str, ...]:
 
 #: What a call refused by tool access is told. A task's follow-up is told the same (#1473).
 _TOOL_ACCESS_DENIED = "Tool not available for this mcp_server"
+#: The `error_type` of a tool withheld for its header annotations (#2253).
+_HEADER_WITHHELD = "ToolHeaderWithheldError"
 
 
 def _withdrawn_message(tool: str) -> str:
@@ -673,6 +676,8 @@ class _CallPipeline:
     #: True when a pin exists but the catalogue was not there to check it
     #: against; the cold start populates it and the gate re-runs (#601).
     digest_pin_deferred: bool = False
+    #: True when the header verdict had no schema to judge; re-run after the cold start (#2253).
+    header_exposure_deferred: bool = False
     #: Set by _gate_tenant_budget: the token taken from the caller's tenant
     #: budget, given back if a later gate refuses the call (#1445).
     reservation: Reservation | None = None
@@ -2261,6 +2266,33 @@ class BatchExecutor:
             return None
         return self._enforce_digest_pins(p, p.projection)
 
+    def _gate_header_exposure(self, p: "_CallPipeline") -> CallResult | None:
+        """Refuse a tool the flat projection withholds for its ``x-mcp-header`` annotations (#2253).
+
+        The verdict is `header_verdicts.withholding_verdict`, the one the flat
+        projection lists by: an invalid annotation (#1056), then the
+        `header_exposure` block of the server, else of each group that owns it
+        (#1057). It judges the projection, the schema the upstream served.
+        A tool not in the catalogue yet is judged after the cold start, by
+        `_gate_deferred_header_exposure`, as the digest pin is (#601).
+        """
+        if p.projection is None:
+            p.header_exposure_deferred = True
+            p.note(Gate.DEFERRED, "catalogue_not_loaded")
+            return None
+        return self._refuse_withheld_header(p, p.projection)
+
+    @staticmethod
+    def _refuse_withheld_header(p: "_CallPipeline", projection: Any) -> CallResult | None:
+        verdict = withholding_verdict(projection, owners_by_member().get(projection.mcp_server, ()))
+        if verdict is None:
+            return None
+        # debug: the refusal is reported by `batch_call_refused`; the verdict's
+        # own reason was logged by `header_verdicts`, as the flat path logs it.
+        logger.debug("tool_header_verdict_rejected", mcp_server_id=p.call.mcp_server, tool=p.call.tool)
+        p.note(Gate.DENY, verdict.code)
+        return p.refuse(f"Tool '{p.call.tool}' is withheld for its header annotations", _HEADER_WITHHELD)
+
     def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
         """Circuit breaker / health degradation of the resolved target.
 
@@ -2592,6 +2624,29 @@ class BatchExecutor:
         return p.refuse(
             f"Tool '{p.call.tool}' is pinned for this tenant but its schema could not be verified",
             "ToolDigestMismatchError",
+        )
+
+    def _gate_deferred_header_exposure(self, p: "_CallPipeline") -> CallResult | None:
+        """Run the header verdict the cold start made possible (#2253).
+
+        Still no schema afterwards fails closed when a `header_exposure` block
+        that withholds governs the server: its verdict cannot be known. With
+        none, the only verdict left is the annotation check, which needs a
+        schema to say anything; the call goes through as before.
+        """
+        if not p.header_exposure_deferred:
+            p.note(Gate.SKIP, "not_deferred")
+            return None
+        late_projection = p.reresolve_projection()
+        if late_projection is not None:
+            return self._refuse_withheld_header(p, late_projection)
+        server = p.target_server_id or p.call.mcp_server
+        if not can_withhold(server, owners_by_member().get(server, ())):
+            p.note(Gate.SKIP, "no_projection")
+            return None
+        p.note(Gate.DENY, "schema_unknown")
+        return p.refuse(
+            f"Tool '{p.call.tool}' is withheld: its header annotations could not be checked", _HEADER_WITHHELD
         )
 
     def _gate_cancelled_after_cold_start(self, p: "_CallPipeline") -> CallResult | None:
@@ -3139,11 +3194,13 @@ _GATES = (
     BatchExecutor._gate_tool_access,
     BatchExecutor._gate_withdrawal,
     BatchExecutor._gate_digest_pin,
+    BatchExecutor._gate_header_exposure,
     BatchExecutor._gate_circuit_breaker,
     BatchExecutor._gate_validators,
     BatchExecutor._gate_tenant_budget,
     BatchExecutor._gate_approval,
     BatchExecutor._gate_cold_start,
     BatchExecutor._gate_deferred_digest_pin,
+    BatchExecutor._gate_deferred_header_exposure,
     BatchExecutor._gate_cancelled_after_cold_start,
 )

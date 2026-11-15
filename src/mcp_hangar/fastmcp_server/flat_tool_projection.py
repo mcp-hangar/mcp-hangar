@@ -83,7 +83,6 @@ from mcp_hangar._sdk_compat import (
     Tool as MCPTool,
 )
 from mcp_hangar.domain.exceptions import ConfigurationError
-from mcp_hangar.domain.policies.header_exposure import get_header_exposure_policy
 
 from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
@@ -103,6 +102,8 @@ from ..logging_config import should_log_now
 from ..tasks_wire import HEADER_MISMATCH
 from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import as_client_result, logging_each_call, note_failure
+from .header_verdicts import HEADER_EXPOSURE_REFUSE_BOOT, denied_header_exposure
+from .header_verdicts import invalid_header_annotation as _invalid_header_annotation
 from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
@@ -434,107 +435,19 @@ def _governed_map_now(
     return flat
 
 
-#: Per-(tool, schema version) verdict on the tool's own ``x-mcp-header``
-#: annotations. The answer depends only on the schema, so it is settled once
-#: per digest rather than on every listing -- a metric that fires per request
-#: measures traffic, not the catalogue (#1049).
-# ponytail: never evicted; bounded by catalogue size x schema drift. Upgrade:
-# clear it where the registry invalidates.
-_ANNOTATION_VERDICTS: dict[tuple[str, str, str], str | None] = {}
-
-
-def _invalid_header_annotation(proj: Any) -> str | None:
-    """Why a conforming client must drop this tool, or ``None`` (#1056).
-
-    SEP-2243 makes it a client-side **MUST**: a tool whose ``x-mcp-header``
-    annotations fail ``find_invalid_x_mcp_header`` is dropped by the client
-    that receives it. Projecting it anyway advertises a tool nobody can call
-    and counts it as governance surface we delivered.
-
-    The annotation is not stripped in place: the JCS digest is taken over
-    ``{name, description, inputSchema, outputSchema}``, so editing the schema
-    would move the digest and read as upstream drift. The tool goes away
-    instead, with a reason.
-    """
-    key = (proj.mcp_server, proj.tool, proj.digest.sha256)
-    if key in _ANNOTATION_VERDICTS:
-        return _ANNOTATION_VERDICTS[key]
-
-    reason = find_invalid_x_mcp_header(proj.schema.get("inputSchema"))
-    _ANNOTATION_VERDICTS[key] = reason
-    if reason is not None:
-        logger.warning(
-            "tool_withheld_invalid_x_mcp_header mcp_server=%s tool=%s reason=%s",
-            proj.mcp_server,
-            proj.tool,
-            reason,
-        )
-        prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason="invalid_x_mcp_header")
-    return reason
-
-
-#: Per-(tool, schema version, policy) verdict on what the tool asks a client to
-#: expose. Keyed like `_ANNOTATION_VERDICTS` and for the same reason: the answer
-#: depends on the schema and the block, never on how often the tool is listed.
-_EXPOSURE_VERDICTS: dict[tuple[str, str, str, Any], str | None] = {}
-
-
 def _denied_header_exposure(proj: Any) -> str | None:
     """The `header_exposure` verdict for this tool, or ``None`` to keep it (#1057).
 
-    SEP-2243's only defence against annotating a secret is a SHOULD NOT. An
-    upstream that annotates `api_key` obliges every conforming client to put
-    the key in an HTTP header, where every intermediary on the path can read
-    it. This is the enforcement point that SHOULD is missing.
-
-    Returns a reason only when the tool must be withheld. ``warn`` -- the
-    default, so adopting the block changes nobody's surface -- logs and counts
-    but keeps the tool. ``refuse_boot`` raises: the operator asked for the
-    catalogue to be unavailable rather than quietly smaller.
-
-    The schema is never edited; see `_invalid_header_annotation`.
+    Decided in `header_verdicts`, which ``hangar_call`` asks too (#2253).
+    ``refuse_boot`` raises: the operator asked for the catalogue to be
+    unavailable rather than quietly smaller.
     """
-    own = get_header_exposure_policy(proj.mcp_server)
-    for policy in [own] if own else _group_exposure_policies(proj.mcp_server):
-        reason = _exposure_verdict(proj, policy)
-        if reason is not None:
-            return reason
-    return None
-
-
-def _exposure_verdict(proj: Any, policy: Any) -> str | None:
-    """What one `header_exposure` block says about this tool: see `_denied_header_exposure`."""
-    # Keyed on the policy VALUE, not its identity: a reload rebuilds the block,
-    # and a recycled id() would answer for a policy that no longer exists.
-    key = (proj.mcp_server, proj.tool, proj.digest.sha256, policy)
-    if key not in _EXPOSURE_VERDICTS:
-        _EXPOSURE_VERDICTS[key] = policy.violation(proj.schema.get("inputSchema"))
-        if _EXPOSURE_VERDICTS[key] is not None:
-            logger.warning(
-                "tool_header_exposure_denied mcp_server=%s tool=%s action=%s reason=%s",
-                proj.mcp_server,
-                proj.tool,
-                policy.on_violation,
-                _EXPOSURE_VERDICTS[key],
-            )
-            prometheus_metrics.PROJECTION_WITHDRAWALS_TOTAL.inc(reason=f"header_exposure_{policy.on_violation}")
-
-    reason = _EXPOSURE_VERDICTS[key]
-    if reason is None:
+    verdict = denied_header_exposure(proj, _member_to_groups().get(proj.mcp_server, ()))
+    if verdict is None:
         return None
-    if policy.on_violation == "refuse_boot":
-        raise ConfigurationError(f"header_exposure refuses to serve {proj.mcp_server}/{proj.tool}: {reason}")
-    return reason if policy.on_violation == "withdraw" else None
-
-
-def _group_exposure_policies(mcp_server: str) -> list[Any]:
-    """A member inherits the block each group that owns it declared (#1038 scope shape).
-
-    A member of several groups is held to every one of them: the tool is
-    withheld when any of their blocks withholds it.
-    """
-    blocks = (get_header_exposure_policy(group) for group in _member_to_groups().get(mcp_server, ()))
-    return [block for block in blocks if block]
+    if verdict.code == HEADER_EXPOSURE_REFUSE_BOOT:
+        raise ConfigurationError(f"header_exposure refuses to serve {proj.mcp_server}/{proj.tool}: {verdict.reason}")
+    return verdict.reason
 
 
 def _build_mcp_tool_list(

@@ -97,7 +97,7 @@ class TestEveryGate:
     @pytest.mark.parametrize("gate", sorted(gate_cases._THROUGH_EXECUTE))
     def test_a_refusal_is_one_record_naming_the_gate_and_its_reason(self, ctx, gate: str) -> None:
         arrange, planted = gate_cases._THROUGH_EXECUTE[gate]
-        if gate != "deferred_digest_pin":  # that one needs a catalogue not loaded yet
+        if not gate.startswith("deferred_"):  # those need a catalogue not loaded yet
             _arrange_catalogue()
         with ExitStack() as stack:
             run_kwargs = arrange(ctx, stack)

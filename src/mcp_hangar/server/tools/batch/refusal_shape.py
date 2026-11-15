@@ -38,6 +38,8 @@ GATE_DISPOSITIONS: dict[str, Disposition] = {
     "tool_access": Disposition.HIDDEN,
     "withdrawal": Disposition.HIDDEN,
     "digest_pin": Disposition.SHAPED,
+    # Withheld from the flat listing, so hidden here as a withdrawal is (#2253).
+    "header_exposure": Disposition.HIDDEN,
     "circuit_breaker": Disposition.SHAPED,
     "validators": Disposition.SHAPED,
     "tenant_budget": Disposition.SHAPED,
@@ -45,6 +47,7 @@ GATE_DISPOSITIONS: dict[str, Disposition] = {
     # By reason: see `_COLD_START_SHAPED`.
     "cold_start": Disposition.NOT_A_REFUSAL,
     "deferred_digest_pin": Disposition.SHAPED,
+    "deferred_header_exposure": Disposition.HIDDEN,
     "cancelled_after_cold_start": Disposition.NOT_A_REFUSAL,
 }
 

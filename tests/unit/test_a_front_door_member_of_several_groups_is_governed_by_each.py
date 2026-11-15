@@ -26,6 +26,7 @@ from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_reso
 from mcp_hangar.domain.value_objects.access import Target
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.fastmcp_server import flat_tool_projection as ftp
+from mcp_hangar.fastmcp_server import header_verdicts
 from mcp_hangar.server.state import GROUPS
 from mcp_hangar.server.tools.batch import executor
 
@@ -120,6 +121,6 @@ def test_each_groups_header_exposure_block_applies_to_the_member(order) -> None:
     set_header_exposure_policy(POOL_B, HeaderExposurePolicy(("*token*",), "withdraw"))
 
     actions = {POOL_A: "warn", POOL_B: "withdraw"}
-    blocks = ftp._group_exposure_policies(SHARED)
+    blocks = header_verdicts.exposure_policies(SHARED, ftp._member_to_groups()[SHARED])
 
     assert [block.on_violation for block in blocks] == [actions[group_id] for group_id in order]
