@@ -18,7 +18,7 @@ merely reported) instead.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any
@@ -141,3 +141,56 @@ def adopt_header_exposure_policies(policies: dict[str, HeaderExposurePolicy], *,
     """
     global _POLICIES
     _POLICIES = dict(policies) if replace else {**_POLICIES, **policies}
+
+
+#: Which groups own a server: registered by the delivery layer, which holds the
+#: groups (#2011). The client reads it to find the blocks that govern a server,
+#: as the flat projection and the batch gates do; None until registered.
+_OWNERS: Callable[[str], tuple[str, ...]] | None = None
+
+
+def set_group_owners(owners: Callable[[str], tuple[str, ...]]) -> None:
+    """Register how to find the ids of every group that owns a server."""
+    global _OWNERS
+    _OWNERS = owners
+
+
+def exposure_policies(mcp_server: str, owning_groups: tuple[str, ...]) -> list[HeaderExposurePolicy]:
+    """The `header_exposure` blocks that govern *mcp_server*.
+
+    Its own block when it declares one. Otherwise a member inherits the block
+    each group that owns it declared (#1038 scope shape), and a member of
+    several groups is held to every one of them.
+    """
+    own = get_header_exposure_policy(mcp_server)
+    if own:
+        return [own]
+    blocks = (get_header_exposure_policy(group) for group in owning_groups)
+    return [block for block in blocks if block]
+
+
+def can_withhold(mcp_server: str, owning_groups: tuple[str, ...]) -> bool:
+    """Whether a block governing *mcp_server* withholds a tool it denies, rather than only warning."""
+    return any(policy.on_violation != "warn" for policy in exposure_policies(mcp_server, owning_groups))
+
+
+def mirror_refusal(mcp_server: str | None, input_schema: Any) -> str | None:
+    """Why Hangar, as a client, must not mirror this schema's ``x-mcp-header`` parameters, or ``None`` (#2011).
+
+    The rule the batch gates and the flat projection apply (#2253), judged on
+    the schema the headers would be built from: a block that withholds rather
+    than warns, and that *input_schema* violates. Fails closed: with a block
+    that withholds anywhere, a server with no id, or one whose groups cannot be
+    read, is refused rather than mirrored.
+    """
+    if not any(policy and policy.on_violation != "warn" for policy in _POLICIES.values()):
+        return None
+    if not mcp_server:
+        return "server_unknown"
+    owners = _OWNERS(mcp_server) if _OWNERS is not None else None
+    if owners is None and not get_header_exposure_policy(mcp_server):
+        return "owners_unknown"
+    for policy in exposure_policies(mcp_server, owners or ()):
+        if policy.on_violation != "warn" and policy.violation(input_schema) is not None:
+            return f"header_exposure_{policy.on_violation}"
+    return None

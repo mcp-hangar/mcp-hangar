@@ -44,6 +44,7 @@ from ....domain.model.mcp_server import (
     START_REFUSED_NOT_REVIVED_BY_CALLS,
 )
 from ....domain.model.mcp_server_group import RouteReason
+from ....domain.policies.header_exposure import set_group_owners
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.access_decision import decide
 from ....domain.services.digest_validator import DigestValidator
@@ -346,6 +347,11 @@ def _groups_owning(server_id: str) -> tuple[str, ...]:
     two groups is refused a tool either group denies, withdraws or pins.
     """
     return owners_by_member().get(server_id, ())
+
+
+# The HTTP client reads group ownership from here too, before it mirrors a
+# tool's `Mcp-Param-*` headers (#2011): the same blocks govern it.
+set_group_owners(_groups_owning)
 
 
 #: What a call refused by tool access is told. A task's follow-up is told the same (#1473).

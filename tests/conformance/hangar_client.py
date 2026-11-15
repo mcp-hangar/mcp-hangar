@@ -6,7 +6,10 @@ The suite starts a scenario's test server and appends its URL to the command.
 Hangar meets upstreams as a client, so this puts that URL in a config as a
 remote server, starts `serve --http` on it, and drives the gateway the way a
 caller would: start the server (Hangar's initialize, or its stateless discover
-on 2026-07-28), read its tools, and call the first one through `hangar_call`.
+on 2026-07-28), read its tools, and call them through `hangar_call`. A scenario
+that names its calls in `MCP_CONFORMANCE_CONTEXT` (`toolCalls`) gets exactly
+those, in order, with the arguments verbatim -- a `null` included, since what is
+judged is how Hangar mirrors it (#2011). Otherwise the first tool is called.
 What the suite then judges is what Hangar sent the test server.
 
 The endpoint is loopback, which the SSRF policy refuses for a server registered
@@ -50,17 +53,25 @@ def _request(method: str, url: str) -> dict:
     return json.loads(body) if body else {}
 
 
-async def _call(gateway: str, tool: str, arguments: dict) -> None:
+async def _call(gateway: str, calls: list[tuple[str, dict]]) -> None:
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
     async with streamable_http_client(gateway + "/mcp") as (read, write, *_):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            result = await session.call_tool(
-                "hangar_call", {"calls": [{"mcp_server": SERVER, "tool": tool, "arguments": arguments}]}
-            )
-            print(result.content[0].text, file=sys.stderr)
+            # One hangar_call per call, in order: a batch runs its calls in parallel.
+            for tool, arguments in calls:
+                result = await session.call_tool(
+                    "hangar_call", {"calls": [{"mcp_server": SERVER, "tool": tool, "arguments": arguments}]}
+                )
+                print(result.content[0].text, file=sys.stderr)
+
+
+def _context_calls() -> list[tuple[str, dict]]:
+    """The calls the scenario asks for in ``MCP_CONFORMANCE_CONTEXT``, or none."""
+    context = json.loads(os.environ.get("MCP_CONFORMANCE_CONTEXT") or "{}")
+    return [(call["name"], call.get("arguments") or {}) for call in context.get("toolCalls") or []]
 
 
 def main() -> int:
@@ -105,9 +116,11 @@ def main() -> int:
             print(f"listed {[t.get('name') for t in tools]}", file=sys.stderr)
             if scenario == SCHEMA_SCENARIO:
                 shown = next((t for t in tools if t.get("name") == SCHEMA_TOOL), {})
-                asyncio.run(_call(gateway, ECHO_TOOL, {"schema": shown.get("inputSchema", {})}))
+                asyncio.run(_call(gateway, [(ECHO_TOOL, {"schema": shown.get("inputSchema", {})})]))
+            elif calls := _context_calls():
+                asyncio.run(_call(gateway, calls))
             elif tools and scenario not in LIST_ONLY:
-                asyncio.run(_call(gateway, tools[0]["name"], {"a": 2, "b": 3}))
+                asyncio.run(_call(gateway, [(tools[0]["name"], {"a": 2, "b": 3})]))
             return 0
         except Exception:
             log.seek(0)

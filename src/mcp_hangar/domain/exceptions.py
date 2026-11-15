@@ -539,6 +539,24 @@ class ResponseTooLarge(ClientError):
         self.limit_bytes = limit_bytes
 
 
+class ParamHeaderRefusedError(ClientError):
+    """The client will not send this ``tools/call`` with its ``Mcp-Param-*`` headers (#2011).
+
+    Raised before any byte is written. The batch gates refuse the same call
+    first (#2253); this is the client holding the line on a path that skipped
+    them. Not a fault of the upstream, so it does not count against its health.
+    *reason* is a bounded code; the message names the tool and nothing it was sent.
+    """
+
+    def __init__(self, tool: str, reason: str, mcp_server_id: str = ""):
+        super().__init__(
+            message=f"tool {tool!r} is not sent: its x-mcp-header parameters cannot be mirrored ({reason})",
+            mcp_server_id=mcp_server_id,
+            details={"tool": tool, "reason": reason},
+        )
+        self.reason = reason
+
+
 # --- Validation Exceptions ---
 
 
