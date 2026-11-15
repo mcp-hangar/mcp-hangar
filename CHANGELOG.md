@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.38.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.37.1...v2.38.0) (2026-11-15)
+
+### Added
+
+- **core:** Hangar, as the client of a remote HTTP upstream, now sends the SEP-2243 `Mcp-Param-*` headers a tool declares with `x-mcp-header`, encoded by the MCP SDK: a null or absent value is omitted, and a value outside printable ASCII or with edge whitespace is sent base64-wrapped. The headers are built from the schema the upstream's last `tools/list` served the client, and that schema is judged by the same rule `hangar_call` applies: a tool with an invalid annotation, or one a `header_exposure` block withholds, is refused by the client too, before anything is sent. A mirrored header named like one the client already sends, such as a configured API-key header, is refused rather than allowed to replace it. The `http-custom-headers` client conformance scenario now passes. ([#2260](https://github.com/mcp-hangar/mcp-hangar/pull/2260))
+
 ## [2.37.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.37.0...v2.37.1) (2026-11-15)
 
 ### Fixed
