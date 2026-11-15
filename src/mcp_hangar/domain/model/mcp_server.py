@@ -329,6 +329,8 @@ class McpServer(AggregateRoot):
         auth: dict[str, Any] | None = None,  # Authentication config
         tls: dict[str, Any] | None = None,  # TLS config
         http: dict[str, Any] | None = None,  # HTTP transport config
+        # `legacy` never probes `server/discover`: always the initialize handshake (#2009).
+        upstream_protocol: str = "auto",
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
         log_buffer: IMcpServerLogBuffer | None = None,
@@ -369,6 +371,7 @@ class McpServer(AggregateRoot):
         self._env = env or {}
         self._inherit_env_names = None if inherit_env_names is None else frozenset(inherit_env_names)
         self._max_response_bytes = max_response_bytes
+        self._upstream_protocol = upstream_protocol
 
         # Idle TTL - normalize to value object
         if isinstance(idle_ttl_s, IdleTTL):
@@ -1422,7 +1425,8 @@ class McpServer(AggregateRoot):
     def _perform_mcp_handshake(self, client: Any, *, probe: bool = True) -> None:
         """Perform the MCP startup handshake and tools/list discovery.
 
-        A client that probes (HTTP) asks ``server/discover`` first, and an
+        A client that probes (HTTP) asks ``server/discover`` first, unless the
+        server is declared ``upstream_protocol: legacy``, and an
         upstream that serves 2026-07-28 is then spoken to statelessly (#2009):
         no ``initialize``, the version and client info in every ``_meta``.
         Legacy upstreams answer ``initialize``; a stateless upstream that is not
@@ -1430,7 +1434,8 @@ class McpServer(AggregateRoot):
         treated as a startup failure. Either way we then discover tools, so
         ``tools/list`` precedes every ``tools/call`` that mirrors a header.
         """
-        if probe and getattr(type(client), "probes_server_discover", False) is True and self._discover_era(client):
+        probes = probe and self._upstream_protocol != "legacy"
+        if probes and getattr(type(client), "probes_server_discover", False) is True and self._discover_era(client):
             self._discover_tools(client)
             return
         # Note: timeout is handled by the client's configuration

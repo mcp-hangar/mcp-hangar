@@ -21,10 +21,11 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from mcp_hangar.domain.exceptions import McpServerStartError
+from mcp_hangar.domain.exceptions import ConfigurationError, McpServerStartError
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.http_client import HttpClient, HttpClientConfig
 from mcp_hangar.protocol import HANGAR_CLIENT_INFO
+from mcp_hangar.server.config import build_config
 
 MODERN = "2026-07-28"
 VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
@@ -78,7 +79,7 @@ def _legacy(discover: Callable[[dict[str, Any]], httpx.Response]) -> Answer:
     return answer
 
 
-def _start(answer: Answer) -> tuple[McpServer, HttpClient, list[httpx.Request]]:
+def _start(answer: Answer, server: McpServer | None = None) -> tuple[McpServer, HttpClient, list[httpx.Request]]:
     seen: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -92,7 +93,7 @@ def _start(answer: Answer) -> tuple[McpServer, HttpClient, list[httpx.Request]]:
     defaults = client._client.headers
     client._client.close()
     client._client = httpx.Client(headers=defaults, transport=httpx.MockTransport(handle))
-    server = McpServer(mcp_server_id="up", mode="remote", endpoint="http://upstream.test/mcp")
+    server = server or McpServer(mcp_server_id="up", mode="remote", endpoint="http://upstream.test/mcp")
     with patch.object(server, "_create_client", return_value=client):
         server.ensure_ready()
     return server, client, seen
@@ -254,3 +255,80 @@ class TestAProbeThatTimesOut:
         assert _methods(seen)[:3] == ["server/discover", "initialize", "notifications/initialized"]
         assert client.modern_envelope is False
         client.close()
+
+
+def _loaded(**spec: Any) -> McpServer:
+    """The server the config loader builds from a remote entry carrying *spec*."""
+    entry = {"mode": "remote", "endpoint": "http://upstream.test/mcp", **spec}
+    return build_config({"up": entry}).servers["up"]
+
+
+class TestUpstreamProtocolLegacy:
+    """``upstream_protocol: legacy`` keeps an upstream on the handshake era, never probing it."""
+
+    def test_it_sends_initialize_first_and_never_discover(self) -> None:
+        """Even to an upstream whose discover would have named 2026-07-28."""
+        modern_discover = _legacy(lambda body: _ok(body, {"supportedVersions": [MODERN]}))
+        _, client, seen = _start(modern_discover, _loaded(upstream_protocol="legacy"))
+
+        methods = _methods(seen)
+        assert methods[0] == "initialize"
+        assert "server/discover" not in methods
+        assert all("MCP-Protocol-Version" not in r.headers for r in seen)
+        client.close()
+
+    def test_it_keeps_the_session_the_upstream_establishes(self) -> None:
+        _, client, seen = _start(_legacy(lambda body: _error(body, -32601)), _loaded(upstream_protocol="legacy"))
+        client.call("tools/list", {})
+
+        assert seen[-1].headers["Mcp-Session-Id"] == "s-1"
+        client.close()
+
+    def test_session_recovery_does_not_probe_either(self) -> None:
+        lost: list[bool] = []
+        legacy = _legacy(lambda body: _error(body, -32601))
+
+        def answer(body: dict[str, Any]) -> httpx.Response:
+            if body["method"] == "tools/call" and not lost:
+                lost.append(True)
+                return httpx.Response(404)
+            if body["method"] == "tools/call":
+                return _ok(body, {"content": []})
+            return legacy(body)
+
+        server, client, seen = _start(answer, _loaded(upstream_protocol="legacy"))
+        result = server._call_with_session_recovery(client, "tools/call", {"name": "lookup", "arguments": {}})
+
+        assert result["result"] == {"content": []}
+        assert _methods(seen).count("initialize") == 2
+        assert "server/discover" not in _methods(seen)
+        client.close()
+
+
+class TestUpstreamProtocolAuto:
+    @pytest.mark.parametrize("spec", [{}, {"upstream_protocol": "auto"}], ids=["absent", "auto"])
+    def test_it_probes_as_before(self, spec: dict[str, Any]) -> None:
+        _, client, seen = _start(_stateless, _loaded(**spec))
+
+        assert _methods(seen) == ["server/discover", "tools/list"]
+        assert client.modern_envelope is True
+        client.close()
+
+
+class TestUpstreamProtocolIsRefused:
+    @pytest.mark.parametrize("value", ["stateless", "LEGACY", "", None, True, 2026])
+    def test_an_unknown_value_names_the_server_and_the_key(self, value: Any) -> None:
+        with pytest.raises(ConfigurationError, match=r"mcp_servers\.up\.upstream_protocol must be one of auto, legacy"):
+            _loaded(upstream_protocol=value)
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"mode": "subprocess", "command": ["python", "-m", "x"]}, id="stdio"),
+            pytest.param({"mode": "docker", "image": "example/x:1"}, id="docker"),
+            pytest.param({"mode": "container", "image": "example/x:1"}, id="container"),
+        ],
+    )
+    def test_the_key_off_a_remote_server_is_contradictory(self, entry: dict[str, Any]) -> None:
+        with pytest.raises(ConfigurationError, match=r"mcp_servers\.up\.upstream_protocol is set on a"):
+            build_config({"up": {**entry, "upstream_protocol": "legacy"}})
