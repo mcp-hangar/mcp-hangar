@@ -34,7 +34,7 @@ permissions:
 
 jobs:
   project-board:
-    uses: mcp-hangar/.github/.github/workflows/project-board.yml@10a1c6b7ee1018f5e58abd85436fe44a035ac08e # main
+    uses: mcp-hangar/.github/.github/workflows/project-board.yml@01170f40d203c12064ad58542d5a613b37bc9993 # main
     with:
       project_number: ${{ vars.PROJECT_NUMBER }}
     secrets:
