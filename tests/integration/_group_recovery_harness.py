@@ -159,9 +159,9 @@ def _config(mode: str, flag: Path) -> dict[str, Any]:
         "health": {"unhealthy_threshold": 2, "healthy_threshold": 1},
         # Open once the last member is driven out, as it was in the live run.
         # The circuit counts failures in a row (#1390), so this is one member's
-        # two. In pair mode it also opens when math-a goes out. math-b's start,
-        # reported to the group as a success, then closes it (min_healthy 1)
-        # and ends the run, and math-b's own two failures open it again. A group
+        # two. In pair mode it opens when math-a goes out and stays open through
+        # math-b's two failures: math-b's start was reported at boot, not on its
+        # first call, so nothing between them is a success (#2257). A group
         # circuit has no timer (#1398): it closes only once members are back,
         # so a recovered group is the members' doing.
         "circuit_breaker": {"failure_threshold": 2},
