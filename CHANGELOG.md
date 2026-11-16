@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.39.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.38.0...v2.39.0) (2026-11-16)
+
+### Added
+
+- **core:** Hangar speaks the 2026-07-28 stateless lifecycle (SEP-2575) to an HTTP upstream that serves it. The start probes `server/discover` first, the way the SDK client's `mode="auto"` does. An upstream that names 2026-07-28 is never sent `initialize`. Every request to it carries the `MCP-Protocol-Version` header, equal to the protocol version, client info and client capabilities in its `_meta`, and no `Mcp-Session-Id`. A -32022 refusal that offers 2026-07-28 is retried once. Any other answer falls back to the `initialize` handshake, so upstreams on 2025-11-25 and earlier are unchanged. The `io.modelcontextprotocol/clientCapabilities` key is now always sent on a modern request (`{}` when Hangar declares nothing), because a stateless upstream refuses a request without it. A remote server's new `upstream_protocol: legacy` skips the probe and always runs the `initialize` handshake. The default is `auto`. Any other value, or the key on a non-remote server, is refused at load. ([#2267](https://github.com/mcp-hangar/mcp-hangar/pull/2267))
+
+### Fixed
+
+- **core:** A member that `POST /api/groups/{group_id}/members` adds to a group with `auto_start` (the default) now has its tools projected when the request returns. The group started the member, but the handler published only the group's events, so the member's start stayed recorded on it until a later health sweep, call or start command published it: in egress its tools were missing from the projection until then, a digest pin on them could not be checked, and under a `header_exposure` block that withholds, `hangar_call` refused every one of them as `schema_unknown`. ([#2266](https://github.com/mcp-hangar/mcp-hangar/pull/2266))
+
 ## [2.38.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.37.1...v2.38.0) (2026-11-15)
 
 ### Added
