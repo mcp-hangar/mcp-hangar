@@ -121,7 +121,8 @@ class TestForwardingTheDeclaration:
         leaving it holding a handle it cannot use. The two ends have to agree.
         """
         assert forwardable_client_capabilities() is None
-        assert _SPEC_KEY not in inject_protocol_meta({})["_meta"]
+        # Declares nothing, but the key is still sent: it is required on every modern request (#2009).
+        assert inject_protocol_meta({})["_meta"][_SPEC_KEY] == {}
 
     def test_a_path_the_middleware_never_wrapped_declares_nothing(self, relay_wired):
         """The unbound default, and the same direction the relay seam takes (#1492).

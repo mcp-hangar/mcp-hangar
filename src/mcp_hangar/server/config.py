@@ -1452,6 +1452,35 @@ def _max_consecutive_failures(mcp_server_id: str, spec_dict: dict[str, Any]) -> 
         ) from e
 
 
+#: The values of a remote server's `upstream_protocol` (#2009).
+_UPSTREAM_PROTOCOLS = ("auto", "legacy")
+
+
+def _upstream_protocol(mcp_server_id: str, spec_dict: dict[str, Any]) -> str:
+    """The server's `upstream_protocol`, refused when unknown or set off a remote server (#2009).
+
+    `auto` probes `server/discover` and speaks 2026-07-28 statelessly to an
+    upstream that serves it; `legacy` always runs the `initialize` handshake.
+    The probe exists only over HTTP, so the key on a subprocess or container
+    server would be accepted and do nothing.
+    """
+    if "upstream_protocol" not in spec_dict:
+        return "auto"
+    value = spec_dict["upstream_protocol"]
+    mode = spec_dict.get("mode", "subprocess")
+    if mode != McpServerMode.REMOTE.value:
+        raise ConfigurationError(
+            f"mcp_servers.{mcp_server_id}.upstream_protocol is set on a {mode!r} server. It chooses how Hangar "
+            "opens an HTTP upstream, and only a remote server has one, so the key would do nothing. Remove it."
+        )
+    if value not in _UPSTREAM_PROTOCOLS:
+        raise ConfigurationError(
+            f"mcp_servers.{mcp_server_id}.upstream_protocol must be one of {', '.join(_UPSTREAM_PROTOCOLS)}, "
+            f"got {value!r}"
+        )
+    return str(value)
+
+
 def _peer_identity_tls(mcp_server_id: str, spec_dict: dict[str, Any]) -> Any:
     """The server's `tls` block, refused when its peer identity cannot be enforced (ADR-030 §4).
 
@@ -1630,6 +1659,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         "auth": auth_config,
         "tls": _peer_identity_tls(mcp_server_id, spec_dict),
         "http": spec_dict.get("http"),
+        "upstream_protocol": _upstream_protocol(mcp_server_id, spec_dict),
         # Capability declarations
         "capabilities": capabilities,
     }

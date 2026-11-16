@@ -6,9 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..._sdk_compat import HANDSHAKE_PROTOCOL_VERSIONS, is_modern_protocol_version
 from ...errors import OTHER_ERROR_TYPE, bounded_error_type
 from ...logging_config import get_logger
-from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
+from ...protocol import (
+    HANGAR_CLIENT_INFO,
+    SESSION_TERMINATED_REASON,
+    SUPPORTED_PROTOCOL_VERSION,
+    UNSUPPORTED_PROTOCOL_VERSION_CODE,
+)
 
 if TYPE_CHECKING:
     from ..policies.egress_l7 import L7Policy
@@ -77,14 +83,14 @@ _DEFAULT_HEALTH_CHECK_INTERVAL_S = 60
 # module (re-exported above) so the transport clients can share them without a
 # domain -> transport import. Re-export keeps existing import sites working.
 
-#: The generation whose `_meta` envelope a connection must have negotiated before
-#: Hangar may keep stamping it. ISO dates compare correctly as strings.
-_MODERN_PROTOCOL_VERSION = "2026-07-28"
-
 # JSON-RPC "method not found". A stateless MCP server (SEP-2575) removed the
 # `initialize` handler and answers with this code; we treat it as "this upstream
 # is stateless, skip the handshake" rather than a startup failure.
 _JSONRPC_METHOD_NOT_FOUND = -32601
+
+#: How long the ``server/discover`` probe waits before reading the upstream as
+#: legacy: the SDK client's ``DISCOVER_TIMEOUT_SECONDS`` (#2009).
+_DISCOVER_TIMEOUT_S = 10.0
 
 #: The enforcement modes that refuse a server serving a tool outside its
 #: `expected_tools`: it serves nothing, and goes DEAD for a capability block
@@ -323,6 +329,8 @@ class McpServer(AggregateRoot):
         auth: dict[str, Any] | None = None,  # Authentication config
         tls: dict[str, Any] | None = None,  # TLS config
         http: dict[str, Any] | None = None,  # HTTP transport config
+        # `legacy` never probes `server/discover`: always the initialize handshake (#2009).
+        upstream_protocol: str = "auto",
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
         log_buffer: IMcpServerLogBuffer | None = None,
@@ -363,6 +371,7 @@ class McpServer(AggregateRoot):
         self._env = env or {}
         self._inherit_env_names = None if inherit_env_names is None else frozenset(inherit_env_names)
         self._max_response_bytes = max_response_bytes
+        self._upstream_protocol = upstream_protocol
 
         # Idle TTL - normalize to value object
         if isinstance(idle_ttl_s, IdleTTL):
@@ -1393,7 +1402,8 @@ class McpServer(AggregateRoot):
             method=method,
         )
         try:
-            self._perform_mcp_handshake(client)
+            # No discover probe: a lost session means this connection is legacy.
+            self._perform_mcp_handshake(client, probe=False)
         except UpstreamPeerKeyMismatchError:
             # Not a renegotiation that failed: the new connection ended at a key
             # outside the key list. Returning the old 404 would bury the reason.
@@ -1412,13 +1422,22 @@ class McpServer(AggregateRoot):
         logger.info("mcp_session_renegotiated", mcp_server_id=self.mcp_server_id, method=method)
         return client.call(method, params, timeout=timeout)
 
-    def _perform_mcp_handshake(self, client: Any) -> None:
+    def _perform_mcp_handshake(self, client: Any, *, probe: bool = True) -> None:
         """Perform the MCP startup handshake and tools/list discovery.
 
-        Legacy upstreams answer ``initialize``; stateless upstreams (SEP-2575)
-        removed it and reply method-not-found, which is tolerated rather than
-        treated as a startup failure. Either way we then discover tools.
+        A client that probes (HTTP) asks ``server/discover`` first, unless the
+        server is declared ``upstream_protocol: legacy``, and an
+        upstream that serves 2026-07-28 is then spoken to statelessly (#2009):
+        no ``initialize``, the version and client info in every ``_meta``.
+        Legacy upstreams answer ``initialize``; a stateless upstream that is not
+        probed (stdio) replies method-not-found, which is tolerated rather than
+        treated as a startup failure. Either way we then discover tools, so
+        ``tools/list`` precedes every ``tools/call`` that mirrors a header.
         """
+        probes = probe and self._upstream_protocol != "legacy"
+        if probes and getattr(type(client), "probes_server_discover", False) is True and self._discover_era(client):
+            self._discover_tools(client)
+            return
         # Note: timeout is handled by the client's configuration
         # (StdioClient: 15s default, HttpClient: configured read_timeout)
         init_resp = client.call(
@@ -1467,7 +1486,7 @@ class McpServer(AggregateRoot):
             # (#1211), so a modern-negotiating upstream needs turning ON just
             # as much as a legacy one needs to stay OFF.
             negotiated = (init_resp.get("result") or {}).get("protocolVersion")
-            client.modern_envelope = isinstance(negotiated, str) and negotiated >= _MODERN_PROTOCOL_VERSION
+            client.modern_envelope = isinstance(negotiated, str) and is_modern_protocol_version(negotiated)
             if not client.modern_envelope:
                 logger.debug(
                     "upstream_legacy_era",
@@ -1486,8 +1505,58 @@ class McpServer(AggregateRoot):
             # reason. Skipped on the stateless branch above: no handshake
             # happened, so there is no session to finish.
             self._notify_initialized(client)
+        self._discover_tools(client)
 
-        # Discover tools
+    def _discover_era(self, client: Any) -> bool:
+        """Probe ``server/discover``; True when the upstream serves 2026-07-28 statelessly (#2009).
+
+        The SDK client's ``mode="auto"`` policy, so Hangar and the SDK read an
+        upstream alike. The probe carries the full modern envelope; only an
+        answer that names 2026-07-28 adopts it. A -32022 naming it is retried
+        once (the version was refused, then offered); one naming no version
+        Hangar speaks fails the start. Anything else -- method-not-found, an
+        HTTP error, a result without the version -- is a legacy upstream, and
+        the envelope is withdrawn before the legacy-shaped ``initialize``.
+        So is a probe that times out, as in the SDK; any other transport
+        failure propagates, as ``initialize``'s would.
+        """
+        client.modern_envelope = True
+        modern = False
+        try:
+            for attempt in range(2):
+                try:
+                    response = client.call("server/discover", {}, timeout=_DISCOVER_TIMEOUT_S)
+                except TimeoutError:
+                    break
+                error = response.get("error")
+                if error is None:
+                    result = response.get("result")
+                    versions = result.get("supportedVersions") if isinstance(result, dict) else None
+                    modern = isinstance(versions, list) and SUPPORTED_PROTOCOL_VERSION in versions
+                    break
+                if not isinstance(error, dict) or error.get("code") != UNSUPPORTED_PROTOCOL_VERSION_CODE:
+                    break
+                data = error.get("data")
+                supported = data.get("supported") if isinstance(data, dict) else None
+                if not isinstance(supported, list):
+                    break
+                if SUPPORTED_PROTOCOL_VERSION in supported and attempt == 0:
+                    continue
+                if not any(version in HANDSHAKE_PROTOCOL_VERSIONS for version in supported):
+                    raise McpServerStartError(
+                        mcp_server_id=self.mcp_server_id,
+                        reason="upstream serves no MCP protocol version Hangar speaks",
+                        suggestion=f"Hangar speaks {SUPPORTED_PROTOCOL_VERSION} and the initialize-era versions.",
+                    )
+                break
+        finally:
+            client.modern_envelope = modern
+        if modern:
+            logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
+        return modern
+
+    def _discover_tools(self, client: Any) -> None:
+        """List the upstream's tools and open its server-to-client channel."""
         tools_resp = _list_all_tools(lambda params: client.call("tools/list", params), self.mcp_server_id)
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")

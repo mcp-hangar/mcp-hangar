@@ -96,6 +96,8 @@ SERVER_SPEC_KEYS = frozenset(
         "tool_projection",
         "tools",
         "transport",
+        # A remote server's era choice: auto (probe server/discover) or legacy (#2009).
+        "upstream_protocol",
         # `current` runs the container as the gateway's own uid:gid (#1664).
         "user",
         "volumes",
