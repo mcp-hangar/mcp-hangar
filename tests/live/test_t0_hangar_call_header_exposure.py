@@ -14,6 +14,10 @@ stub's ``lookup`` annotates its ``region`` argument ``x-mcp-header: Region``;
   a server in no group, is added to it over ``POST /api/groups/joined/members``,
   which starts it. Its start is published by the add, so it is projected and
   governed as a lazily started one (#2258).
+- ``started`` declares the same block, has ``auto_start: false`` and one member
+  nothing starts at load. ``hangar_start("started")`` starts it, and the tool
+  publishes the start, so it is projected and governed as a lazily started one
+  (#2265).
 
 Before #2253 the block only withheld ``lookup`` from the flat listing, and
 ``hangar_call`` invoked it. Now the call is refused with
@@ -96,6 +100,18 @@ mcp_servers:
       deny_annotated: ["region"]
       on_violation: withdraw
     members: []
+  started:
+    mode: group
+    strategy: round_robin
+    auto_start: false
+    header_exposure:
+      deny_annotated: ["region"]
+      on_violation: withdraw
+    members:
+      - id: started_member
+        mode: subprocess
+        command: ["{python}", "{stub}"]
+        idle_ttl_s: 60
 """
 
 
@@ -107,30 +123,33 @@ def hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[RunningHangar]:
         yield running
 
 
-def _hangar_call(base_url: str, mcp_server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """One modern ``hangar_call`` over streamable HTTP; the batch's first result."""
+def _tool_call(base_url: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """One modern ``tools/call`` over streamable HTTP; its result."""
     body = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
-        "params": {
-            "name": "hangar_call",
-            "arguments": {"calls": [{"mcp_server": mcp_server, "tool": tool, "arguments": arguments}]},
-            "_meta": _ENVELOPE,
-        },
+        "params": {"name": name, "arguments": arguments, "_meta": _ENVELOPE},
     }
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": _MODERN,
         "Mcp-Method": "tools/call",
-        "Mcp-Name": "hangar_call",
+        "Mcp-Name": name,
     }
     response = httpx.post(f"{base_url}/mcp", headers=headers, content=json.dumps(body), timeout=60)
     text = response.text.lstrip()
     if not text.startswith("{"):
         text = next(line[len("data: ") :] for line in text.splitlines() if line.startswith("data: "))
-    result = json.loads(text)["result"]
+    result: dict[str, Any] = json.loads(text)["result"]
+    return result
+
+
+def _hangar_call(base_url: str, mcp_server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """One modern ``hangar_call`` over streamable HTTP; the batch's first result."""
+    calls = [{"mcp_server": mcp_server, "tool": tool, "arguments": arguments}]
+    result = _tool_call(base_url, "hangar_call", {"calls": calls})
     batch = result.get("structuredContent") or json.loads(result["content"][0]["text"])
     first: dict[str, Any] = batch["results"][0]
     return first
@@ -207,3 +226,25 @@ def test_a_member_added_over_rest_is_governed_like_one_started_by_a_call(hangar:
     served = _hangar_call(hangar.base_url, "joined", "ping", {})
     assert served["success"] is True, served
     assert len(_refusal_lines(hangar, "joined")) == 1, "ping is not refused"
+
+
+def test_a_member_started_by_hangar_start_is_governed_like_one_started_by_a_call(hangar: RunningHangar) -> None:
+    """Projected by the tool, with no call first: ``ping`` is served and ``lookup`` refused by the block.
+
+    Before #2265 ``hangar_start`` on a group left the member's start recorded,
+    so nothing projected ``started_member`` and both were refused as
+    ``schema_unknown``.
+    """
+    _tool_call(hangar.base_url, "hangar_start", {"mcp_server": "started"})
+
+    refused = _hangar_call(hangar.base_url, "started", "lookup", {"region": "eu"})
+
+    assert refused["success"] is False, refused
+    assert refused["error_type"] == "ToolHeaderWithheldError", refused
+    [line] = _refusal_lines(hangar, "started")
+    assert line["gate"] in {"header_exposure", "deferred_header_exposure"}, line
+    assert line["reason"] == "header_exposure_withdraw", line
+
+    served = _hangar_call(hangar.base_url, "started", "ping", {})
+    assert served["success"] is True, served
+    assert len(_refusal_lines(hangar, "started")) == 1, "ping is not refused"

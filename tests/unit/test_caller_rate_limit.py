@@ -475,9 +475,12 @@ class TestTheToolLevelCheck:
             healthy_count=1,
             members_in_rotation_count=1,
             total_count=1,
+            members=[],
+            collect_events=lambda: [],
             **{does: Mock(return_value=1)},
         )
         fleet = SimpleNamespace(
+            event_bus=Mock(),
             group_exists=lambda name: name == "pool",
             get_group=lambda _name: group,
             mcp_server_exists=lambda name: name == "store",
