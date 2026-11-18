@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.39.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.0...v2.39.1) (2026-11-18)
+
+### Fixed
+
+- **cli:** `mcp-hangar approvals list` showed a held call differently from what it
+  asked. Every table cell was parsed as Rich markup, so arguments such as
+  `[rm -rf /]` were listed as nothing and `[conceal]` hid text on the terminal,
+  and non-ASCII arguments were escaped (`Treść`). Cells are now listed
+  verbatim, non-ASCII as written, with control, format and bidi characters
+  escaped. The `--json` output is unchanged ([#2275](https://github.com/mcp-hangar/mcp-hangar/pull/2275))
+- **core:** an approval of a held call the gateway had already abandoned was
+  accepted by a resolver in another process. When a batch was cancelled while a
+  call was held for approval, only the gateway's memory knew, so
+  `mcp-hangar approvals approve` (or REST on another replica) recorded
+  `approved`, printed `approved by ...` and exited 0 for a call that never ran;
+  the record turned `cancelled` only when the approval window ended. The gateway
+  now moves the record from `pending` to `cancelled` by compare-and-swap the
+  moment it abandons the hold, so `approvals list` stops showing it as pending
+  and every resolver is refused: the CLI exits 1 with "was cancelled: the held
+  call will not run", and REST answers 409. An approval that reaches the record
+  just before the cancel is still recorded `cancelled`, never granted ([#2276](https://github.com/mcp-hangar/mcp-hangar/pull/2276))
+- **core:** the time a call is held for approval no longer counts against its
+  call budget. The hold ran inside the budget, so a front-door flat call (30 s),
+  a `hangar_call` with a short `timeout` and a facade `invoke` (`timeout_s`, 30 s
+  by default) were refused `CancellationError` when a human approved after the
+  budget had passed, although the approval was reported as successful and the
+  call never ran. A call approved inside its approval window now runs exactly
+  once, with the budget it had when the hold began. A call nobody approves is
+  still refused when its window ends and its approval is recorded `expired`. A
+  call that is not held keeps the budget it had ([#2277](https://github.com/mcp-hangar/mcp-hangar/pull/2277))
+- **core:** `hangar_start` on a group now publishes what the start recorded: each started member's `McpServerStarted` and the group's own events. The group started its members itself, outside the command bus, so those events stayed recorded until a later health sweep, call or start command drained them: in egress the members' tools were missing from the projection until then, a digest pin on them could not be checked, and under a `header_exposure` block that withholds, `hangar_call` refused them as `schema_unknown`. `hangar_stop` on a group and the delete of a group now publish the members' stops and the group's events the same way, instead of leaving them for a late log row. ([#2270](https://github.com/mcp-hangar/mcp-hangar/pull/2270))
+
 ## [2.39.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.38.0...v2.39.0) (2026-11-16)
 
 ### Added
