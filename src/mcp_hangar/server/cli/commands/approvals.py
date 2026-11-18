@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import unicodedata
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from ..errors import CLIError
 from ..main import GlobalOptions
@@ -179,6 +181,33 @@ def _row(r: Any) -> dict[str, Any]:
     }
 
 
+#: Characters escaped in the table: controls (C0, DEL and C1, CSI among them), format characters
+#: (the bidi overrides among them), line and paragraph separators, and surrogate, private-use or
+#: unassigned code points. Each can change or hide how a terminal shows the rest of the cell.
+_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def _escaped(char: str) -> str:
+    if unicodedata.category(char) not in _ESCAPED_CATEGORIES:
+        return char
+    code = ord(char)
+    return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
+
+
+def _cell(value: object) -> Text:
+    """*value* as the approver reads it: every character shown, none of them interpreted (#2273, #2274).
+
+    The caller writes a held call's arguments, and its tool and identity strings
+    can come from an upstream or a token. A plain string in a Rich table is parsed
+    as markup and emoji codes, so ``[rm -rf /]`` was listed as nothing and
+    ``[conceal]`` hid text on the terminal. ``Text`` is never parsed. Non-ASCII is
+    shown as written, and only the characters that change or hide what follows
+    them are escaped, which ``ensure_ascii=False`` alone does not do for C1, DEL
+    or U+202E.
+    """
+    return Text("".join(_escaped(char) for char in str(value)))
+
+
 def _list(global_opts: GlobalOptions, config: Path | None, db: Path | None, state: str) -> None:
     from mcp_hangar.approvals.models import ApprovalState
 
@@ -202,8 +231,8 @@ def _list(global_opts: GlobalOptions, config: Path | None, db: Path | None, stat
     for r in approvals:
         row = _row(r)
         row["expires_at"] = r.expires_at.strftime("%Y-%m-%d %H:%M:%S")
-        row["arguments"] = json.dumps(r.arguments, sort_keys=True)
-        table.add_row(*(row[k] or "" for k in _COLUMNS))
+        row["arguments"] = json.dumps(r.arguments, sort_keys=True, ensure_ascii=False)
+        table.add_row(*(_cell(row[k] or "") for k in _COLUMNS))
     console.print(f"Approval store: {where}")
     console.print(table)
 

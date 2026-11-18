@@ -37,6 +37,7 @@ from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_reso
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.server.tools.batch import BatchExecutor, CallResult, CallSpec
 from mcp_hangar.server.tools.batch.executor import _run_approval_coroutine
+from mcp_hangar.server.tools.batch.shutdown import track_batch
 
 SERVER = "ledger"
 TOOL = "transfer"
@@ -242,7 +243,7 @@ def _timed_out(world: World, n: int) -> list[CallResult]:
 
 
 def _cancelled(world: World, n: int) -> list[CallResult]:
-    """The batch's own deadline passes while the call is held; the hold ends there, recorded cancelled (#2272).
+    """The batch's own deadline passes while the call is held; the held call still runs to its approval timeout.
 
     The deadline must fall after the hold begins, and a fixed short
     `global_timeout` cannot promise that: the budget gate runs before the
@@ -251,8 +252,9 @@ def _cancelled(world: World, n: int) -> list[CallResult]:
     the budget is generous, so the budget gate always lets the call through,
     and each batch's collector -- the `as_completed` wait that enforces the
     deadline -- first waits until all `n` calls are held, then times out at
-    once. That is the collector's own `TimeoutError` branch: it sets the cancel
-    event and waits for the held worker, exactly as a spent deadline does.
+    once. That is the collector's own `TimeoutError` branch, as a spent deadline
+    takes it: the hold is outside the budget, so the branch leaves it alone and
+    waits for the held worker (#2271).
 
     Every batch waits for all `n` rather than its own call: all calls look
     alike to the approver, and a collector that fired early could cancel a
@@ -279,6 +281,41 @@ def _cancelled(world: World, n: int) -> list[CallResult]:
     return results
 
 
+def _abandoned(world: World, n: int) -> list[CallResult]:
+    """The batch is cancelled while the call is held, as fail_fast cancels it; the hold ends there (#2272).
+
+    Each batch's collector waits until all `n` calls are held, then sets its
+    own batch's cancel event and waits as usual. The hold sees the cancel,
+    records the approval cancelled and returns at once -- its watch on the
+    cancel event must not outlive it.
+    """
+    world.approver.answer = None
+    _hold_for(30)  # the cancel ends the hold; the window only bounds a broken test
+    world.approver.reset_held()
+    held_at_cancel: list[int] = []
+    own = threading.local()
+
+    def tracked(cancel_event: threading.Event) -> Any:
+        own.cancel_event = cancel_event
+        return track_batch(cancel_event)
+
+    def cancel_after_every_hold(fs: Any, timeout: float | None = None) -> Iterator[Any]:
+        world.approver.wait_until_held(n, timeout=10)
+        held_at_cancel.append(world.approver.held)
+        own.cancel_event.set()  # as fail_fast sets it
+        return as_completed(fs, timeout=timeout)
+
+    with (
+        patch("mcp_hangar.server.tools.batch.executor.as_completed", cancel_after_every_hold),
+        patch("mcp_hangar.server.tools.batch.executor.track_batch", tracked),
+    ):
+        results = _concurrently(n, lambda: _one_batch(global_timeout=30.0))
+
+    assert held_at_cancel == [n] * n, f"calls held when each batch was cancelled: {held_at_cancel}"
+    assert world.approver.held == n
+    return results
+
+
 @dataclass(frozen=True)
 class Outcome:
     run: Callable[[World, int], list[CallResult]]
@@ -290,7 +327,8 @@ OUTCOMES = {
     "approved": Outcome(_approved, True, None),
     "denied": Outcome(_denied, False, "approval_denied"),
     "timed_out": Outcome(_timed_out, False, "approval_timeout"),
-    "cancelled_batch": Outcome(_cancelled, False, "CancellationError"),
+    "cancelled_batch": Outcome(_cancelled, False, "approval_timeout"),
+    "abandoned": Outcome(_abandoned, False, "CancellationError"),
 }
 
 

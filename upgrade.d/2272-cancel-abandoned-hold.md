@@ -1,8 +1,10 @@
 ### an abandoned approval hold reads cancelled from the moment it is abandoned
 
-When the caller of a held call gives up on it -- its batch deadline passes, a
-`fail_fast` sibling fails, or a bounded HTTP stop abandons it -- the gateway now
-ends the hold there and records the approval `cancelled` at once. Before, the
+When the batch of a held call is cancelled -- a `fail_fast` sibling fails, or a
+bounded HTTP stop abandons the batches in flight -- the gateway now ends the
+hold there and records the approval `cancelled` at once. A batch deadline that
+passes does not cancel a held call (see the note on the approval hold and the
+call budget), so it does not abandon the hold either. Before, the
 hold went on to the end of its approval window and the record stayed `pending`
 meanwhile, so a resolver in another process could approve a call that would
 not run.
@@ -19,6 +21,6 @@ Two outcomes read differently:
   record stays `cancelled`, `approvals deny` exits 1 and REST answers 409. Only
   a denial that reached the record before the abandonment reads `denied`.
 
-Anything that counted abandoned holds as `expired`, or read `approval_timeout`
-or `approval_denied` for a call whose batch was cancelled, should count the
-`cancelled` state and `CancellationError` instead.
+Anything that counted holds of a cancelled batch as `expired`, or read
+`approval_timeout` or `approval_denied` for a call whose batch was cancelled,
+should count the `cancelled` state and `CancellationError` instead.

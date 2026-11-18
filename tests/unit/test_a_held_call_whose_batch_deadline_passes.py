@@ -1,32 +1,45 @@
-"""Which deadline names a held call when its batch's deadline passes too (#1541).
+"""Which deadline names a held call when its batch's deadline passes or its batch is cancelled (#1541, #2271, #2272).
 
 The rule: the gate that stopped the call names it.
 
 - The batch budget is spent before the call reaches the approval gate: the
   budget gate refuses it, `TimeoutError`, and nobody is asked to approve.
-- The call is already held when the batch deadline passes: the hold ends
-  there and reads `CancellationError`. The record moves from pending to
-  `cancelled` at that moment, so an approval or a denial that arrives after
-  it, from any process, is refused (#2272). Before #2272 the hold ran on to
-  its window's end so that its own outcome -- `approval_timeout` or
-  `approval_denied` -- named the call (#1541), and an approver who could not
-  see the in-process cancel was told a call was approved that never ran.
-- A decision that reached the record before the deadline still counts: an
-  approval is recorded `cancelled`, never granted (#1702) -- the audit trail
-  must not say someone let through a call that did not run.
+- The call is already held when the batch deadline passes: the hold is not
+  cut short, and it does not count against the budget (#2271). The hold's own
+  outcome names the call -- `approval_timeout` if nobody answers, recorded
+  `expired`; `approval_denied` if the approver says no. An approval that
+  arrives after the deadline, inside the approval window, dispatches the call
+  once. Before #2271 the deadline cancelled the batch, and such an approval
+  was refused and the call read `CancellationError`.
+- The batch is cancelled while the call is held -- fail_fast, or a stop that
+  abandons the batch: the hold ends there and the call reads
+  `CancellationError`. The record moves from pending to `cancelled` at that
+  moment, nobody named, so an approval or a denial that arrives after it, from
+  any process, is refused (#2272). Before #2272 the hold ran on to its
+  window's end, and an approver who could not see the in-process cancel was
+  told a call was approved that never ran.
+- A decision that reached the record just before the cancel is not a grant
+  either: the approval is recorded `cancelled`, never granted (#1702) -- the
+  audit trail must not say someone let through a call that did not run.
+
+A consequence a caller should know: the batch deadline does not bound how long
+a batch with a held call takes to return. The collector waits for the held
+worker, so the batch returns when the hold ends.
 
 The deadline is made to pass while the call is held without a clock: the
 collector's `as_completed` wait first waits until the call is held, then times
 out at once -- the collector's own `TimeoutError` branch, as a spent deadline
 takes it. An answer "after the deadline" is sent from the cancellation counter
-the collector bumps right after it sets the batch's cancel event, once the
-record reads cancelled; one "before the deadline" from the `as_completed` patch,
-after the call is held.
+the collector bumps in that branch. A cancel is the batch's cancel event, set
+the way fail_fast sets it, once the call is held; an answer after it waits
+until the record reads cancelled, and one "just before" it is sent before the
+event is set.
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import as_completed
@@ -46,6 +59,7 @@ from mcp_hangar.domain.events import ToolApprovalCancelled, ToolApprovalGranted
 from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 from mcp_hangar.server.tools.batch import executor as executor_mod
 from mcp_hangar.server.tools.batch.executor import BatchResult
+from mcp_hangar.server.tools.batch.shutdown import track_batch
 from tests.unit.test_an_approval_hold_leaves_nothing_behind import SERVER, TOOL, World, _hold_for, served_world
 
 _EXECUTOR = "mcp_hangar.server.tools.batch.executor"
@@ -74,25 +88,37 @@ def _deadline_while_held(
     answer: bool | None,
     answer_with: Callable[[ApprovalGateService, str], None] | None = None,
     *,
-    before_deadline: Callable[[ApprovalGateService, str], None] | None = None,
+    cancel: bool = False,
+    before_cancel: Callable[[ApprovalGateService, str], None] | None = None,
 ) -> BatchResult:
     """Run one batch whose deadline passes while its call is held, then answer `answer` (None: never).
 
     `answer_with`, when given, answers instead -- over another surface than the service.
-    `before_deadline` runs once the call is held, before the deadline passes.
+    `cancel` cancels the batch instead of passing its deadline, and answers once
+    the hold has recorded the cancel. `before_cancel` runs just before the cancel.
     """
     world.approver.answer = None  # the double never answers on its own here
     held_at_deadline: list[bool] = []
+    cancel_events: list[threading.Event] = []
     resolved: list[bool] = []
+
+    def tracked(cancel_event: threading.Event) -> Any:
+        cancel_events.append(cancel_event)
+        return track_batch(cancel_event)
 
     def deadline_after_the_hold(fs: Any, timeout: float | None = None) -> Iterator[Any]:
         held_at_deadline.append(world.approver.wait_until_held(1, timeout=10))
-        if before_deadline is not None:
+        if not cancel:
+            return as_completed(fs, timeout=0)
+        if before_cancel is not None:
             service = world.approver.service
             assert service is not None
             (approval_id,) = world.approver.approval_ids
-            before_deadline(service, approval_id)
-        return as_completed(fs, timeout=0)
+            before_cancel(service, approval_id)
+        (cancel_event,) = cancel_events
+        cancel_event.set()  # as fail_fast sets it
+        answer_after_the_deadline()
+        return as_completed(fs, timeout=timeout)
 
     def answer_after_the_deadline(**_: Any) -> None:
         service = world.approver.service
@@ -100,7 +126,8 @@ def _deadline_while_held(
         if answer is None and answer_with is None:
             return
         (approval_id,) = world.approver.approval_ids
-        _until_cancelled(service, approval_id)
+        if cancel:
+            _until_cancelled(service, approval_id)
         if answer_with is not None:
             answer_with(service, approval_id)
             return
@@ -114,13 +141,16 @@ def _deadline_while_held(
     cancellations.inc.side_effect = answer_after_the_deadline
     with (
         patch(f"{_EXECUTOR}.as_completed", deadline_after_the_hold),
+        patch(f"{_EXECUTOR}.track_batch", tracked),
         patch(f"{_EXECUTOR}.BATCH_CANCELLATIONS_TOTAL", cancellations),
     ):
         batch = _batch(global_timeout=30.0)
 
     assert held_at_deadline == [True], "the deadline passed before the call was held"
-    cancellations.inc.assert_called_once_with(reason="timeout")
-    assert resolved == ([] if answer is None else [False]), "an answer after the deadline was accepted"
+    if not cancel:
+        cancellations.inc.assert_called_once_with(reason="timeout")
+    # After a deadline the answer is taken; after a cancel it is refused.
+    assert resolved == ([] if answer is None else [not cancel]), resolved
     return batch
 
 
@@ -133,11 +163,53 @@ def test_a_budget_spent_before_the_hold_reads_batch_timeout_and_nobody_is_asked(
     assert world.approver.held == 0
 
 
-def test_a_held_call_nobody_answers_is_recorded_cancelled_when_the_deadline_passes() -> None:
-    """The hold ends with the deadline, not at its window's end, and nobody is named (#2272)."""
+def test_a_held_call_nobody_answers_reads_approval_timeout_after_the_deadline() -> None:
+    with served_world() as world:
+        _hold_for(1)
+        batch = _deadline_while_held(world, answer=None)
+        service = world.approver.service
+        assert service is not None
+        (approval_id,) = world.approver.approval_ids
+
+    result = batch.results[0]
+    assert (result.success, result.error_type) == (False, "approval_timeout"), result
+    assert _record(service, approval_id).state is ApprovalState.EXPIRED
+    # The deadline did not cut the hold short: the batch returned when the hold ended.
+    assert batch.elapsed_ms >= 1000, batch.elapsed_ms
+
+
+def test_a_held_call_denied_after_the_deadline_reads_approval_denied() -> None:
     with served_world() as world:
         _hold_for(30)
-        batch = _deadline_while_held(world, answer=None)
+        result = _deadline_while_held(world, answer=False).results[0]
+
+    assert (result.success, result.error_type) == (False, "approval_denied"), result
+
+
+def test_a_held_call_approved_after_the_deadline_runs_once() -> None:
+    """The hold is outside the budget (#2271): an approval inside the window dispatches the call."""
+    with served_world() as world:
+        context = executor_mod.get_context()
+        _hold_for(30)
+        result = _deadline_while_held(world, answer=True).results[0]
+        service = world.approver.service
+        assert service is not None
+        (approval_id,) = world.approver.approval_ids
+
+    assert (result.success, result.error_type) == (True, None), result
+    context.command_bus.send.assert_called_once()
+    assert _record(service, approval_id).state is ApprovalState.APPROVED
+    assert [e for e in _published(service) if isinstance(e, ToolApprovalGranted)]
+
+
+# --- a cancel abandons the hold, recorded at once (#2272) ------------------------
+
+
+def test_a_held_call_nobody_answers_is_recorded_cancelled_when_its_batch_is_cancelled() -> None:
+    """The hold ends with the cancel, not at its window's end, and nobody is named (#2272)."""
+    with served_world() as world:
+        _hold_for(30)
+        batch = _deadline_while_held(world, answer=None, cancel=True)
         service = world.approver.service
         assert service is not None
         (approval_id,) = world.approver.approval_ids
@@ -151,10 +223,10 @@ def test_a_held_call_nobody_answers_is_recorded_cancelled_when_the_deadline_pass
     assert (cancelled.attempted_by, cancelled.reason) == ("", ABANDONED_REASON)
 
 
-def test_a_denial_after_the_deadline_is_refused_and_the_call_reads_cancelled() -> None:
+def test_a_denial_after_a_cancel_is_refused_and_the_call_reads_cancelled() -> None:
     with served_world() as world:
         _hold_for(30)
-        result = _deadline_while_held(world, answer=False).results[0]
+        result = _deadline_while_held(world, answer=False, cancel=True).results[0]
         service = world.approver.service
         assert service is not None
         (approval_id,) = world.approver.approval_ids
@@ -163,11 +235,11 @@ def test_a_denial_after_the_deadline_is_refused_and_the_call_reads_cancelled() -
     assert _record(service, approval_id).state is ApprovalState.CANCELLED
 
 
-def test_a_held_call_approved_after_the_deadline_is_not_dispatched() -> None:
+def test_a_held_call_approved_after_its_batch_is_cancelled_is_not_dispatched() -> None:
     with served_world() as world:
         context = executor_mod.get_context()
         _hold_for(30)
-        result = _deadline_while_held(world, answer=True).results[0]
+        result = _deadline_while_held(world, answer=True, cancel=True).results[0]
 
     assert (result.success, result.error_type) == (False, "CancellationError"), result
     context.command_bus.send.assert_not_called()
@@ -184,7 +256,7 @@ def _record(service: ApprovalGateService, approval_id: str) -> Any:
     return asyncio.run(service._repository.get(approval_id))
 
 
-def test_an_approval_after_the_deadline_is_refused_and_recorded_cancelled() -> None:
+def test_an_approval_after_a_cancel_is_refused_and_recorded_cancelled() -> None:
     refused: list[bool] = []
 
     def approve(service: ApprovalGateService, approval_id: str) -> None:
@@ -192,7 +264,7 @@ def test_an_approval_after_the_deadline_is_refused_and_recorded_cancelled() -> N
 
     with served_world() as world:
         _hold_for(30)
-        result = _deadline_while_held(world, answer=None, answer_with=approve).results[0]
+        result = _deadline_while_held(world, answer=None, answer_with=approve, cancel=True).results[0]
         service = world.approver.service
         assert service is not None
         (approval_id,) = world.approver.approval_ids
@@ -207,7 +279,7 @@ def test_an_approval_after_the_deadline_is_refused_and_recorded_cancelled() -> N
     assert _record(service, approval_id).state is ApprovalState.CANCELLED
 
 
-def test_an_approval_after_the_deadline_over_rest_answers_409() -> None:
+def test_an_approval_after_a_cancel_over_rest_answers_409() -> None:
     responses: list[Any] = []
 
     def approve_over_rest(service: ApprovalGateService, approval_id: str) -> None:
@@ -221,7 +293,7 @@ def test_an_approval_after_the_deadline_over_rest_answers_409() -> None:
     with served_world() as world:
         context = executor_mod.get_context()
         _hold_for(30)
-        result = _deadline_while_held(world, answer=None, answer_with=approve_over_rest).results[0]
+        result = _deadline_while_held(world, answer=None, answer_with=approve_over_rest, cancel=True).results[0]
         service = world.approver.service
         assert service is not None
 
@@ -235,13 +307,13 @@ def test_an_approval_after_the_deadline_over_rest_answers_409() -> None:
     context.command_bus.send.assert_not_called()
 
 
-def test_an_approval_recorded_elsewhere_just_before_the_deadline_is_not_granted() -> None:
+def test_an_approval_recorded_elsewhere_just_before_a_cancel_is_not_granted() -> None:
     """The approver reached another instance a moment before the cancel: the record says approved.
 
-    The instance holding the call has not polled the record yet when the
-    deadline passes. Its cancel loses the compare-and-swap, it reads the
-    approval, sees its batch was cancelled, and records the approval cancelled
-    instead of granted -- the residual race #2272 leaves.
+    The instance holding the call has not polled the record yet when its batch
+    is cancelled. Its cancel loses the compare-and-swap, it reads the approval,
+    sees its batch was cancelled, and records the approval cancelled instead of
+    granted -- the residual race #2272 leaves.
     """
 
     def approve_elsewhere(service: ApprovalGateService, approval_id: str) -> None:
@@ -258,7 +330,7 @@ def test_an_approval_recorded_elsewhere_just_before_the_deadline_is_not_granted(
 
     with served_world() as world, patch.object(service_mod, "SHARED_POLL_INTERVAL_S", 30.0):
         _hold_for(30)
-        result = _deadline_while_held(world, answer=None, before_deadline=approve_elsewhere).results[0]
+        result = _deadline_while_held(world, answer=None, cancel=True, before_cancel=approve_elsewhere).results[0]
         service = world.approver.service
         assert service is not None
         (approval_id,) = world.approver.approval_ids

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from .domain.model import McpServer
     from .server.bootstrap import ApplicationContext
     from .server.catalogue_readiness import CatalogueRetry
+    from .server.tools.batch.hold_clock import HoldClock
 
 logger = get_logger(__name__)
 
@@ -717,10 +719,10 @@ class Hangar:
 
         A tool that needs approval holds one of this facade's pool threads
         until the approval is decided or expires (`approval_timeout_seconds`,
-        300 s by default), even after `invoke` has raised `TimeoutError` at
-        `timeout_s`. An approval given after that is refused. The same pool
-        runs `stop()` and `health()`, so size `max_concurrency` for the
-        approvals that can be pending at once.
+        300 s by default). The hold does not count against `timeout_s`: a call
+        approved inside its window runs with the time it had left when the
+        hold began (#2271). The same pool runs `stop()` and `health()`, so
+        size `max_concurrency` for the approvals that can be pending at once.
 
         Args:
             mcp_server_name: Name of the mcp_server or group.
@@ -750,18 +752,18 @@ class Hangar:
         self._ensure_started()
         # Imported here: the batch package reaches `server.bootstrap`.
         from .server.tools.batch import call_as
+        from .server.tools.batch.hold_clock import HoldClock, watching
 
         caller = principal if principal is not None else Principal.anonymous()
         loop = asyncio.get_event_loop()
+        clock = HoldClock()
+
+        def call() -> dict[str, Any]:
+            with watching(clock):
+                return call_as(caller, mcp_server_name, tool_name, arguments or {}, timeout=timeout_s)
 
         # Run in the thread pool: the executor blocks until the call returns.
-        batch = await asyncio.wait_for(
-            loop.run_in_executor(
-                self._executor,
-                lambda: call_as(caller, mcp_server_name, tool_name, arguments or {}, timeout=timeout_s),
-            ),
-            timeout=timeout_s,
-        )
+        batch = await _wait_outside_holds(loop.run_in_executor(self._executor, call), timeout_s, clock)
         return _invoke_outcome(mcp_server_name, tool_name, batch)
 
     async def start_mcp_server(self, name: str) -> None:
@@ -908,6 +910,31 @@ _RAISED_AS_BEFORE: dict[str, Any] = {
 }
 
 
+#: While a call is held, how soon the wait looks at the clock again at the least.
+_HOLD_RECHECK_S = 0.1
+
+
+async def _wait_outside_holds(pending: asyncio.Future[Any], timeout_s: float, clock: HoldClock) -> Any:
+    """Wait for *pending* for *timeout_s*, the time its call is held for approval left out (#2271).
+
+    Raises:
+        TimeoutError: If the call outlives *timeout_s* of unheld time.
+    """
+    started = time.perf_counter()
+    while True:
+        left = timeout_s + clock.held_s() - (time.perf_counter() - started)
+        if clock.holding():
+            left = max(left, _HOLD_RECHECK_S)
+        if left <= 0:
+            pending.cancel()
+            raise TimeoutError(f"The call did not return within {timeout_s} s")
+        try:
+            return await asyncio.wait_for(asyncio.shield(pending), timeout=left)
+        except TimeoutError:
+            if pending.done():
+                raise  # the call's own TimeoutError, not this wait's
+
+
 def _invoke_outcome(mcp_server_name: str, tool_name: str, batch: dict[str, Any]) -> Any:
     """The tool result of the one call `call_as` made, or the exception its failure raises.
 
@@ -1025,7 +1052,7 @@ class SyncHangar:
         """Invoke a tool on a mcp_server or group, under the controls `hangar_call` applies.
 
         See Hangar.invoke() for full documentation. Blocks the calling thread
-        for up to `timeout_s`.
+        for up to `timeout_s`, plus the time the call is held for approval.
         """
         return self._run(
             self._hangar.invoke(mcp_server_name, tool_name, arguments, timeout_s=timeout_s, principal=principal)
