@@ -11,14 +11,17 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
 from mcp_hangar.approvals.persistence.sqlite_approval_repository import SqliteApprovalRepository
 from mcp_hangar.infrastructure.persistence.database import Database, DatabaseConfig
+from mcp_hangar.server.cli.commands import approvals as approvals_command
 from mcp_hangar.server.cli.errors import CLIError
 from mcp_hangar.server.cli.main import app
 
@@ -48,13 +51,21 @@ def _config(tmp_path: Path, *, roles: str = "provider-admin", principal: bool = 
     return config
 
 
-def _seed(tmp_path: Path, *, tenant: str | None = "local", expired: bool = False, state=ApprovalState.PENDING) -> str:
+def _seed(
+    tmp_path: Path,
+    *,
+    tenant: str | None = "local",
+    expired: bool = False,
+    state=ApprovalState.PENDING,
+    tool: str = "echo",
+    arguments: dict | None = None,
+) -> str:
     now = datetime.now(UTC)
     request = ApprovalRequest(
         approval_id="0f1e2d3c-aaaa-bbbb-cccc-000000000001",
         provider_id="math",
-        tool_name="echo",
-        arguments={"text": "hi"},
+        tool_name=tool,
+        arguments={"text": "hi"} if arguments is None else arguments,
         arguments_hash="h",
         requested_at=now - timedelta(minutes=10),
         expires_at=now - timedelta(seconds=1) if expired else now + timedelta(minutes=5),
@@ -205,3 +216,84 @@ def test_an_absolute_sqlite_backend_is_the_store(runner: CliRunner, tmp_path: Pa
 
     assert result.exit_code == 0, result.output
     assert _record(tmp_path, approval_id).decided_by == "local-user"
+
+
+def _table(runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """The human listing as a terminal receives it, escape sequences included."""
+    out = StringIO()
+    monkeypatch.setattr(approvals_command, "console", Console(file=out, force_terminal=True, width=400))
+    result = runner.invoke(app, ["approvals", "list", "-c", str(_config(tmp_path))])
+    assert result.exit_code == 0, result.output
+    return out.getvalue()
+
+
+def test_non_ascii_arguments_are_listed_as_written(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(tmp_path, arguments={"text": "Treść wiadomości"})
+
+    table = _table(runner, tmp_path, monkeypatch)
+
+    assert "Treść wiadomości" in table
+    assert "\\u015b" not in table
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["[rm -rf /]", "[conceal]hidden[/conceal]", "[bold red]loud[/]", ":thumbs_up:", "[link=x]y[/link]"],
+)
+def test_markup_in_a_held_call_is_listed_verbatim(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    _seed(tmp_path, tool=value, arguments={"cmd": value})
+
+    table = _table(runner, tmp_path, monkeypatch)
+
+    assert table.count(value) == 2, table
+    assert "\x1b[8m" not in table and "\x1b]8;" not in table
+
+
+@pytest.mark.parametrize(
+    ("char", "shown", "in_json"),
+    [
+        # JSON already writes a C0 control as \\u00XX; the table escapes the rest itself.
+        ("\x1b", "\\x1b", "\\u001b"),
+        ("\x9b", "\\x9b", "\\x9b"),
+        ("\x7f", "\\x7f", "\\x7f"),
+        ("\u202e", "\\u202e", "\\u202e"),
+        ("\u2028", "\\u2028", "\\u2028"),
+        ("\u200b", "\\u200b", "\\u200b"),
+    ],
+)
+def test_a_character_that_rewrites_the_terminal_is_listed_escaped(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, char: str, shown: str, in_json: str
+) -> None:
+    _seed(tmp_path, tool=f"a{char}b", arguments={"text": f"a{char}b"})
+
+    table = _table(runner, tmp_path, monkeypatch)
+
+    assert f"a{char}b" not in table, "the raw character reached the terminal"
+    assert f"a{shown}b" in table, table
+    assert f'"a{in_json}b"' in table, table
+
+
+def test_a_newline_in_arguments_stays_escaped(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(tmp_path, arguments={"text": "one\ntwo"})
+
+    table = _table(runner, tmp_path, monkeypatch)
+
+    assert '"one\\ntwo"' in table
+
+
+def test_the_json_listing_is_unchanged(runner: CliRunner, tmp_path: Path) -> None:
+    _seed(tmp_path, arguments={"text": "Treść [rm -rf /] \u202e"})
+
+    result = runner.invoke(app, ["--json", "approvals", "list", "-c", str(_config(tmp_path))])
+
+    assert result.exit_code == 0, result.output
+    line = result.output.strip().splitlines()[-1]
+    assert "\\u015b" in line and "\\u202e" in line
+    [row] = json.loads(line)
+    assert row["arguments"] == {"text": "Treść [rm -rf /] \u202e"}
