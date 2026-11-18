@@ -15,6 +15,7 @@ from ...application.commands import (
     StopMcpServerCommand,
     UnloadMcpServerCommand,
 )
+from ...application.group_events import publish_group_events, publish_member_starts
 from ...application.mcp.tooling import ToolErrorPayload, key_global, mcp_tool_wrapper
 from ...application.queries import ListMcpServersQuery
 from ...application.read_models.mcp_server_views import REVIVED_BY_START, DeadInfo, dead_dict, dead_info
@@ -235,6 +236,10 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             group = ctx.get_group(mcp_server)
             assert group is not None
             started = group.start_all()
+            # The members' starts and the group's own events are recorded, not
+            # published, by a group that no command started (#2265).
+            publish_group_events(ctx.event_bus, group)
+            publish_member_starts(ctx.event_bus, [group])
             tenant_id = _caller_tenant_id()
             if tenant_id is not None:
                 # A tenant is told of the members its calls may be routed to
@@ -314,6 +319,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18
             group = ctx.get_group(mcp_server)
             assert group is not None
             group.stop_all()
+            # Likewise the members' stops (#2265).
+            publish_group_events(ctx.event_bus, group)
+            publish_member_starts(ctx.event_bus, [group])
             return {
                 "group": mcp_server,
                 "state": group.state.value,
