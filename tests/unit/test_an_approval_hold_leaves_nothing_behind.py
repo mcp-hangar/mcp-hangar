@@ -242,7 +242,7 @@ def _timed_out(world: World, n: int) -> list[CallResult]:
 
 
 def _cancelled(world: World, n: int) -> list[CallResult]:
-    """The batch's own deadline passes while the call is held; the held call still runs to its approval timeout.
+    """The batch's own deadline passes while the call is held; the hold ends there, recorded cancelled (#2272).
 
     The deadline must fall after the hold begins, and a fixed short
     `global_timeout` cannot promise that: the budget gate runs before the
@@ -290,7 +290,7 @@ OUTCOMES = {
     "approved": Outcome(_approved, True, None),
     "denied": Outcome(_denied, False, "approval_denied"),
     "timed_out": Outcome(_timed_out, False, "approval_timeout"),
-    "cancelled_batch": Outcome(_cancelled, False, "approval_timeout"),
+    "cancelled_batch": Outcome(_cancelled, False, "CancellationError"),
 }
 
 
