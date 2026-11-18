@@ -64,9 +64,11 @@ class ToolApprovalExpired(DomainEvent):
 @accepts_legacy_provider_id
 @dataclass
 class ToolApprovalCancelled(DomainEvent):
-    """Published when an approval arrives for a held call its caller already abandoned (#1702).
+    """Published when a held call's caller abandons it, or an approval arrives for one it abandoned (#1702).
 
     The batch was cancelled while the call was held, so the call does not run.
+    The hold records that at once, and ``attempted_by`` is then empty: nobody
+    had decided the call (#2272).
     Also published after a ``ToolApprovalGranted`` when the cancel landed after
     the hold, before the call was dispatched (#1730); the grant is then not an
     effective one. Not a grant: ``attempted_by`` is who tried to approve it, deliberately not

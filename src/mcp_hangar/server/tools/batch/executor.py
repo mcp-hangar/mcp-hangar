@@ -1610,8 +1610,9 @@ class BatchExecutor:
                         # approval reads its approval outcome, and one approved
                         # inside its window runs with the budget it had when the
                         # hold began. Leaving the pool below waits for it. Only
-                        # fail_fast and a stop's abandonment set `cancel_event`,
-                        # and only they refuse an approval as `cancelled` (#1702).
+                        # fail_fast and a stop's abandonment set `cancel_event`;
+                        # only they abandon a hold, which records the approval
+                        # `cancelled` at once and refuses it (#1702, #2272).
                         logger.warning(
                             "batch_global_timeout",
                             batch_id=batch_id,

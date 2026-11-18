@@ -53,6 +53,10 @@ SHARED_POLL_INTERVAL_S = 2.0
 #: Why an approval was recorded `cancelled` rather than `approved` (#1702).
 CANCELLED_REASON = "approved after the held call was cancelled; the call did not run"
 
+#: Why a held call was recorded `cancelled` when its caller gave up on it (#2272):
+#: nobody had decided it yet, and nobody can now.
+ABANDONED_REASON = "the held call was cancelled before a decision; it did not run"
+
 #: Why a granted approval was recorded `cancelled` afterwards (#1730): the human
 #: approved in time and the batch was cancelled before the call was dispatched.
 CANCELLED_AFTER_GRANT_REASON = "approved, then the call was cancelled before it ran; the call did not run"
@@ -176,9 +180,14 @@ class ApprovalGateService:
         6. Publish outcome event, return result
 
         ``abandoned`` is the caller's cancel event. Once it is set the caller
-        will not run the call, so an approval that arrives after it is recorded
-        ``cancelled``, not granted (#1702). The hold itself is not cut short: a
-        denial or a timeout still names the call (#1541).
+        will not run the call, so the hold ends there: the record moves from
+        pending to cancelled by compare-and-swap, and every resolver, in this
+        process or another, then reads it cancelled and refuses (#2272). Before
+        this the hold went on to its window's end so that a denial or a timeout
+        still named the call (#1541), and a resolver that could not see the
+        in-process abandonment recorded an approval for a call that would not
+        run. A decision that reached the record first still stands: a denial is
+        honoured, and an approval is recorded ``cancelled``, not granted (#1702).
         """
         resolved_provider_id = provider_id or mcp_server_id
         if resolved_provider_id is None:
@@ -287,12 +296,14 @@ class ApprovalGateService:
                 (updated is not None and updated.state is ApprovalState.CANCELLED)
                 or (decision is True and abandoned is not None and abandoned.is_set())
             ):
-                # The caller gave up on the call while it was held, and then an
-                # approval arrived. Resolved here, it was already refused and
-                # recorded; resolved on another instance, or a moment before the
-                # cancel, it was accepted -- and is recorded cancelled now.
-                # Either way the trail says cancelled, never granted.
+                # The caller gave up on the call while it was held. The wait
+                # recorded that itself, or an approval arrived: resolved here, it
+                # was already refused and recorded; resolved on another instance
+                # a moment before the cancel, it was accepted -- and is recorded
+                # cancelled now. Either way the trail says cancelled, never granted.
                 attempted_by = updated.decided_by if updated is not None else None
+                recorded = updated.reason if updated is not None and updated.state is ApprovalState.CANCELLED else None
+                cancel_reason = recorded or CANCELLED_REASON
                 cancelled_at = datetime.now(UTC)
                 if updated is not None and updated.state is ApprovalState.APPROVED:
                     # Only from approved: a record already cancelled stays as the
@@ -313,7 +324,7 @@ class ApprovalGateService:
                         tool_name=tool_name,
                         attempted_by=attempted_by or "",
                         cancelled_at=cancelled_at.isoformat(),
-                        reason=CANCELLED_REASON,
+                        reason=cancel_reason,
                     )
                 )
                 gate_span.set_attribute("approval.result", "cancelled")
@@ -396,7 +407,14 @@ class ApprovalGateService:
         when it approves a call held here that its caller has abandoned: that
         approval is recorded ``cancelled`` and the hold is released with a
         refusal, so nothing records a grant for a call that will not run
-        (#1702). A denial of an abandoned call is still recorded as a denial.
+        (#1702).
+
+        The instance holding a call records its abandonment itself, moving the
+        record to ``cancelled`` the moment the caller gives up (#2272), so a
+        resolver anywhere -- this process, the ``approvals`` CLI, another
+        replica -- is refused through the same compare-and-swap. A denial that
+        arrives after that is refused too and the record stays ``cancelled``;
+        only one that reaches the record first is recorded as a denial.
         """
         request = await self._repository.get(approval_id)
         if request is None or request.is_terminal():
@@ -460,13 +478,24 @@ class ApprovalGateService:
             True if approved, False if denied, None if the wait elapsed.
         """
         deadline = time.monotonic() + float(timeout_seconds)
+        abandonment_recorded = False
         try:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
 
-                decision = await self._hold_registry.wait_slice(approval_id, min(SHARED_POLL_INTERVAL_S, remaining))
+                if not abandonment_recorded and self._hold_registry.is_abandoned(approval_id):
+                    # Once: a record the cancel could not move stays as it is,
+                    # and the wait goes on as before for whatever it holds.
+                    abandonment_recorded = True
+                    abandoned_with = await self._cancel_abandoned(approval_id)
+                    if abandoned_with is not None:
+                        return abandoned_with
+
+                decision = await self._hold_registry.wait_slice(
+                    approval_id, min(SHARED_POLL_INTERVAL_S, remaining), until_abandoned=not abandonment_recorded
+                )
                 if decision is not None:
                     return decision
 
@@ -476,6 +505,36 @@ class ApprovalGateService:
                     return decided
         finally:
             self._hold_registry.release(approval_id)
+
+    async def _cancel_abandoned(self, approval_id: str) -> bool | None:
+        """Record that the caller gave up on the held call: pending to cancelled, by compare-and-swap (#2272).
+
+        Done the moment the abandonment is seen, so no resolver anywhere can
+        approve the call after it: the in-process hold registry is invisible to
+        the ``approvals`` CLI and to other replicas, and the record is not.
+
+        Returns False when this recorded the cancel; otherwise the decision the
+        record already holds -- an approval or a denial that landed first, whose
+        compare-and-swap won -- or None when it holds none.
+        """
+        try:
+            cancelled = await self._repository.transition(
+                approval_id,
+                (ApprovalState.PENDING,),
+                ApprovalState.CANCELLED,
+                None,
+                datetime.now(UTC),
+                ABANDONED_REASON,
+            )
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: the call is not run either way
+            # The record stays pending. An approval that lands on it now is
+            # still recorded cancelled when this wait reads it (#1702).
+            logger.warning("approval_abandonment_write_failed", approval_id=approval_id, error=str(e))
+            return None
+        if cancelled:
+            logger.info("approval_cancelled_call_abandoned", approval_id=approval_id)
+            return False
+        return await self._decision_from_record(approval_id)
 
     async def _decision_from_record(self, approval_id: str) -> bool | None:
         """A decision already written to the approval record, if there is one.

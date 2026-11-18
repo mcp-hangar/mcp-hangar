@@ -14,7 +14,16 @@ where the decision lands where the call is waiting.
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass, field
+
+#: How often a wait that watches for abandonment looks at the caller's cancel event (#2272).
+#:
+#: A `threading.Event` cannot be waited on together with another one, and the
+#: cancel event is the caller's, so it cannot be made to set the hold's. The
+#: wait is cut into steps this long instead: an abandonment is seen within one
+#: step, with no storage read, and a decision still wakes it at once.
+ABANDON_CHECK_INTERVAL_S = 0.05
 
 
 @dataclass
@@ -78,7 +87,9 @@ class ApprovalHoldRegistry:
         finally:
             self.release(approval_id)
 
-    async def wait_slice(self, approval_id: str, timeout_seconds: float) -> bool | None:
+    async def wait_slice(
+        self, approval_id: str, timeout_seconds: float, *, until_abandoned: bool = False
+    ) -> bool | None:
         """Wait up to `timeout_seconds` for a local resolution, keeping the hold.
 
         Separate from `wait` because the caller polls shared storage between
@@ -89,6 +100,10 @@ class ApprovalHoldRegistry:
         Runs the blocking `threading.Event.wait()` via `asyncio.to_thread` so
         the event loop stays free for the REST handler that resolves it.
 
+        With *until_abandoned*, the slice also ends, undecided, as soon as the
+        caller abandons the call, so the abandonment can be recorded at once
+        rather than at the next storage poll (#2272).
+
         Returns:
             True if approved, False if denied, None if this slice elapsed.
         """
@@ -96,10 +111,25 @@ class ApprovalHoldRegistry:
             entry = self._holds.get(approval_id)
         if entry is None:
             return None
-        signaled = await asyncio.to_thread(entry.event.wait, float(timeout_seconds))
+        abandoned = entry.abandoned if until_abandoned else None
+        signaled = await asyncio.to_thread(_wait, entry.event, abandoned, float(timeout_seconds))
         return entry.approved if signaled else None
 
     def release(self, approval_id: str) -> None:
         """Forget a hold. Safe to call for one that is already gone."""
         with self._lock:
             self._holds.pop(approval_id, None)
+
+
+def _wait(event: threading.Event, abandoned: threading.Event | None, timeout_seconds: float) -> bool:
+    """Wait up to *timeout_seconds* for *event*; stop early once *abandoned* is set. Whether *event* is set."""
+    if abandoned is None:
+        return event.wait(timeout_seconds)
+    deadline = time.monotonic() + timeout_seconds
+    while not abandoned.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if event.wait(min(ABANDON_CHECK_INTERVAL_S, remaining)):
+            return True
+    return event.is_set()
