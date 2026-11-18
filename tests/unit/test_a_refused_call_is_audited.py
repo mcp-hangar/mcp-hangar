@@ -135,6 +135,7 @@ class TestEveryGate:
             caller_tenant_id=_TENANT,
             global_timeout=60.0,
             batch_start_time=time.perf_counter(),
+            held_s=0.0,
             route_backend=None if gate in _BEFORE_A_BACKEND else _SERVER,
             observed_peer_spki=None,
         )

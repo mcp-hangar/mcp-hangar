@@ -99,6 +99,7 @@ from ....retry import RetryPolicy, RetryResult, configured_retry_policy, retry_s
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
+from .hold_clock import held_for_approval
 from .member_health import MemberOutcome, member_outcome
 from .models import BatchResult, CallResult, CallSpec, RelayCapture, RetryMetadata
 from .refusal_shape import DISPATCH_REFUSALS, Disposition, disposition, shape_refusal
@@ -664,8 +665,12 @@ class _CallPipeline:
     #: Set by _gate_cold_start when the upstream presented a key outside its key
     #: list: the key pin it presented, for the refusal's record (ADR-030 §6).
     observed_peer_spki: str | None = None
-    #: Set by _gate_global_timeout: what is left of the batch budget.
+    #: Set by _gate_global_timeout, and again by _gate_approval after a grant:
+    #: what is left of the call's budget, capped by its own timeout.
     effective_timeout: float = 0.0
+    #: Set by _gate_approval when a human granted the call: the seconds it was
+    #: held. The budget does not count them (#2271), see `_remaining_budget`.
+    held_s: float = 0.0
     #: Set by _gate_resolve_target.
     mcp_server_obj: Any = None
     is_group: bool = False
@@ -1146,18 +1151,21 @@ class BatchExecutor:
             _tenant_id = _caller.tenant_id if _caller is not None else None
             _requested_by = (_caller.user_id or _caller.agent_id) if _caller is not None else None
 
-            result = _run_approval_coroutine(
-                gate_service.check(
-                    mcp_server_id=call.mcp_server,
-                    tool_name=call.tool,
-                    arguments=call.arguments,
-                    policy=policy,
-                    correlation_id=call.call_id,
-                    tenant_id=_tenant_id,
-                    requested_by=_requested_by,
-                    abandoned=abandoned,
+            # The hold runs on the clock of a caller that waits from outside,
+            # so that caller leaves it out of its own wait (#2271).
+            with held_for_approval():
+                result = _run_approval_coroutine(
+                    gate_service.check(
+                        mcp_server_id=call.mcp_server,
+                        tool_name=call.tool,
+                        arguments=call.arguments,
+                        policy=policy,
+                        correlation_id=call.call_id,
+                        tenant_id=_tenant_id,
+                        requested_by=_requested_by,
+                        abandoned=abandoned,
+                    )
                 )
-            )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
             # The exception's text can carry anything its source put in it (a
             # store's connection string, a policy engine's echo of the
@@ -1595,19 +1603,20 @@ class BatchExecutor:
                                 break
 
                     except TimeoutError:
-                        # Global timeout exceeded. The gate that stopped a call
-                        # names it (#1541): a call not yet past the budget gate
-                        # reads `batch_timeout`; a call already held for approval
-                        # is not interrupted -- it reads its approval outcome, an
-                        # approval after this point is refused, recorded
-                        # `cancelled` and reads `CancellationError` (#1702) -- and
-                        # leaving the pool below waits for that hold to end.
+                        # Global timeout exceeded. It does not cancel the batch:
+                        # each call keeps its own clock, which stops while the
+                        # call is held for approval (#2271). A call not yet past
+                        # the budget gate reads `batch_timeout`; a call held for
+                        # approval reads its approval outcome, and one approved
+                        # inside its window runs with the budget it had when the
+                        # hold began. Leaving the pool below waits for it. Only
+                        # fail_fast and a stop's abandonment set `cancel_event`,
+                        # and only they refuse an approval as `cancelled` (#1702).
                         logger.warning(
                             "batch_global_timeout",
                             batch_id=batch_id,
                             timeout=global_timeout,
                         )
-                        cancel_event.set()
                         BATCH_CANCELLATIONS_TOTAL.inc(reason="timeout")
                 finally:
                     # Every call is waited for, as leaving the `with` did, unless
@@ -2006,9 +2015,9 @@ class BatchExecutor:
     # run in.
 
     def _gate_cancelled_before_execution(self, p: "_CallPipeline") -> CallResult | None:
-        # A spent budget sets the event too: the collector's `as_completed`
-        # timed out. That call is the `global_timeout` gate's to refuse, so it
-        # reads `batch_timeout` whichever thread got there first (#1587).
+        # A call whose budget is spent is the `global_timeout` gate's to refuse,
+        # so it reads `batch_timeout` even when the batch was cancelled as well
+        # (#1587).
         if p.cancel_event.is_set() and _remaining_budget(p) > 0:
             # elapsed_ms is 0.0 rather than measured: nothing ran.
             return CallResult(
@@ -2033,7 +2042,7 @@ class BatchExecutor:
                 error_type="TimeoutError",
                 elapsed_ms=0.0,
             )
-        p.effective_timeout = min(p.call.timeout, remaining_global) if p.call.timeout is not None else remaining_global
+        p.effective_timeout = _call_timeout(p, remaining_global)
         return None
 
     def _gate_resolve_target(self, p: "_CallPipeline") -> CallResult | None:
@@ -2439,6 +2448,7 @@ class BatchExecutor:
         with p.tracer.start_as_current_span("approval_gate.check") as approval_span:
             approval_span.set_attribute(McpServer.ID, p.call.mcp_server)
             approval_span.set_attribute("gen_ai.tool.name", p.call.tool)
+            hold_started = time.perf_counter()
             approval_result = self._check_approval_gate(
                 p.call,
                 p.resolver,
@@ -2462,6 +2472,10 @@ class BatchExecutor:
             granted_id = getattr(_approval_loop_local, "approval_id", None)
             p.granted_approval_id = granted_id
             if granted_id is not None:
+                # The hold is outside the budget (#2271): the upstream gets what
+                # was left when the hold began, not what the wall clock left.
+                p.held_s = time.perf_counter() - hold_started
+                p.effective_timeout = _call_timeout(p, _remaining_budget(p))
                 # Any pin stands for "there is something to re-verify". The
                 # callback re-verifies all of them, the group pins of a member
                 # named directly included.
@@ -2656,7 +2670,9 @@ class BatchExecutor:
         )
 
     def _gate_cancelled_after_cold_start(self, p: "_CallPipeline") -> CallResult | None:
-        if not p.cancel_event.is_set():
+        # The budget is the call's own clock (#2271): the batch's deadline does
+        # not set the cancel event, and a hold does not spend the budget.
+        if not p.cancel_event.is_set() and _remaining_budget(p) > 0:
             return None
         self._cancel_granted_approval(p)
         return p.refuse("Cancelled after cold start", "CancellationError")
@@ -2960,8 +2976,17 @@ def _upstream_result_of(error: BaseException | None) -> dict[str, Any] | None:
 
 
 def _remaining_budget(p: _CallPipeline) -> float:
-    """What is left of the batch's global budget, in seconds; zero or less when it is spent."""
-    return p.global_timeout - (time.perf_counter() - p.batch_start_time)
+    """What is left of the call's share of the batch budget, in seconds; zero or less when it is spent.
+
+    The time the call was held for approval is not counted (#2271): a human's
+    decision does not spend the budget its upstream call runs on.
+    """
+    return p.global_timeout - (time.perf_counter() - p.batch_start_time - p.held_s)
+
+
+def _call_timeout(p: _CallPipeline, remaining: float) -> float:
+    """The upstream call's timeout: what is left of the budget, capped by the call's own timeout."""
+    return min(p.call.timeout, remaining) if p.call.timeout is not None else remaining
 
 
 def _gate_decision(p: _CallPipeline, refusal: CallResult | None) -> tuple[str, str | None, str | None]:

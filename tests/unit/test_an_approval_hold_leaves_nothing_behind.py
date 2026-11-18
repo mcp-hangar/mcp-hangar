@@ -251,8 +251,9 @@ def _cancelled(world: World, n: int) -> list[CallResult]:
     the budget is generous, so the budget gate always lets the call through,
     and each batch's collector -- the `as_completed` wait that enforces the
     deadline -- first waits until all `n` calls are held, then times out at
-    once. That is the collector's own `TimeoutError` branch: it sets the cancel
-    event and waits for the held worker, exactly as a spent deadline does.
+    once. That is the collector's own `TimeoutError` branch, as a spent deadline
+    takes it: the hold is outside the budget, so the branch leaves it alone and
+    waits for the held worker (#2271).
 
     Every batch waits for all `n` rather than its own call: all calls look
     alike to the approver, and a collector that fired early could cancel a
