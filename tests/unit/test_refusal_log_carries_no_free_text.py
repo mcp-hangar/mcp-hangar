@@ -239,6 +239,7 @@ class TestARefusalLine:
             caller_tenant_id=_TENANT,
             global_timeout=60.0,
             batch_start_time=time.perf_counter(),
+            held_s=0.0,
         )
         refusal = getattr(BatchExecutor, f"_gate_{gate}")(BatchExecutor(), p)
         with structlog.testing.capture_logs() as captured:
