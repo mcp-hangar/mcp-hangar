@@ -26,10 +26,11 @@ entered the system on that surface and transport, and ``test_the_sink_was_read``
 that the sink is not trivially empty: an absence proves nothing about a value
 never sent or a sink never captured.
 
-Not covered here yet, and tracked on #1535: the live-gateway tier with a real
-OTLP receiver (#1293, ``tests/live``), exceptions raised on other paths (a
-validation error), metric labels and
-the rest of the identifier table. Of that table, the calling principal is a
+The same contract on the wire, from a real ``serve --http`` to a real OTLP
+receiver, is ``tests/live/test_t3_telemetry_canaries.py``: it imports
+``CONTRACT`` and the rules from here. Not covered yet, and tracked on #1535:
+exceptions raised on other paths (a validation error), metric labels and the
+rest of the identifier table. Of that table, the calling principal is a
 canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
 (#1580).
 """
