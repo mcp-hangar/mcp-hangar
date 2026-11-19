@@ -43,6 +43,13 @@ def _value(any_value: Any) -> Any:
     return getattr(any_value, field) if field in ("string_value", "bool_value", "int_value", "double_value") else None
 
 
+def _whole(message: Any) -> dict[str, Any]:
+    """A protobuf message as JSON, every field it carries."""
+    from google.protobuf.json_format import MessageToDict
+
+    return dict(MessageToDict(message))
+
+
 def _attributes(key_values: Any) -> dict[str, Any]:
     return {kv.key: _value(kv.value) for kv in key_values}
 
@@ -61,6 +68,10 @@ class OtlpReceiver:
         self._lock = threading.Lock()
         self._spans: list[tuple[dict[str, Any], Received]] = []
         self._logs: list[tuple[dict[str, Any], Received]] = []
+        # Every record whole, as protobuf JSON: what a scan for a value must read,
+        # since `Received` keeps scalar attributes only.
+        self._raw_spans: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self._raw_logs: list[tuple[dict[str, Any], dict[str, Any]]] = []
         receiver = self
 
         class _Traces(trace_rpc.TraceServiceServicer):
@@ -109,6 +120,7 @@ class OtlpReceiver:
                             links=tuple((link.trace_id.hex(), link.span_id.hex()) for link in span.links),
                         )
                         self._spans.append((resource, record))
+                        self._raw_spans.append((resource, _whole(span)))
 
     def _keep_logs(self, request: Any) -> None:
         with self._lock:
@@ -124,6 +136,7 @@ class OtlpReceiver:
                             attributes=_attributes(log.attributes),
                         )
                         self._logs.append((resource, record))
+                        self._raw_logs.append((resource, {"scope": scope_logs.scope.name, **_whole(log)}))
 
     def spans(self, instance_id: str) -> list[Received]:
         """Every span received from the process whose ``service.instance.id`` is ``instance_id``."""
@@ -134,6 +147,16 @@ class OtlpReceiver:
         """Every log record received from the process whose ``service.instance.id`` is ``instance_id``."""
         with self._lock:
             return [r for res, r in self._logs if res.get("service.instance.id") == instance_id]
+
+    def raw_spans(self, instance_id: str) -> list[dict[str, Any]]:
+        """Every span from ``instance_id`` whole, as protobuf JSON: arrays, maps and link attributes included."""
+        with self._lock:
+            return [r for res, r in self._raw_spans if res.get("service.instance.id") == instance_id]
+
+    def raw_logs(self, instance_id: str) -> list[dict[str, Any]]:
+        """Every log record from ``instance_id`` whole, as protobuf JSON, with its scope's name under ``scope``."""
+        with self._lock:
+            return [r for res, r in self._raw_logs if res.get("service.instance.id") == instance_id]
 
 
 def poll(probe: Callable[[], T | None], timeout: float, interval: float = 0.1) -> T | None:
