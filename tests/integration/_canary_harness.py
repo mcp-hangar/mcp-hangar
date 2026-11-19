@@ -89,6 +89,7 @@ SCENARIOS = {
     "approval": "guarded",
     "shaping": "big_result",
     "transport_error": "transport_error",
+    "unknown_target": "unknown_target",
 }
 
 #: Batch truncation (#1298): a budget the other scenarios' results fit in and
@@ -294,7 +295,13 @@ def _keys(context: Any) -> tuple[str, str]:
 
 
 def _post(
-    client: Any, key: str, transport: str, method: str, params: dict[str, Any], mirrored: bool = False
+    client: Any,
+    key: str,
+    transport: str,
+    method: str,
+    params: dict[str, Any],
+    mirrored: bool = False,
+    refused: bool = False,
 ) -> dict[str, Any]:
     """One stateless request to ``/mcp`` carrying the transport's baggage and header canaries; its response."""
     params = {**params, "_meta": {**ENVELOPE, "baggage": f"canary.meta={canary('baggage', transport)}"}}
@@ -312,6 +319,8 @@ def _post(
         headers["Mcp-Param-Zone"] = upstream.encoded("l7_header_encoded", transport)
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
     response = client.post("/mcp", headers=headers, content=body)
+    if refused:  # The answer is an error status with a JSON-RPC error in the body; keep both.
+        return {"status": response.status_code, "body": response.text}
     response.raise_for_status()
     text = response.text.lstrip()
     if not text.startswith("{"):  # SSE framing: take the data line
@@ -320,6 +329,13 @@ def _post(
 
 
 def _call(client: Any, key: str, surface: str, transport: str, tool: str) -> dict[str, Any]:
+    if tool == "unknown_target":
+        # A name nothing declares: the front door's tool, `hangar_call`'s server.
+        made_up = canary("unknown_target", transport)
+        if surface == "front_door":
+            return _post(client, key, transport, "tools/call", {"name": made_up, "arguments": {}}, refused=True)
+        calls = [{"mcp_server": made_up, "tool": prefix(transport) + "note", "arguments": {}}]
+        return _post(client, key, transport, "tools/call", {"name": "hangar_call", "arguments": {"calls": calls}})
     name, args = prefix(transport) + tool, arguments(tool, transport)
     mirrored = "region" in args
     if surface == "front_door":

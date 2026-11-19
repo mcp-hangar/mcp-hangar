@@ -168,13 +168,16 @@ def test_the_init_log_lists_the_attached_exporters_and_no_endpoint(env: dict[str
         + """
 config = _parse_observability_config({"observability": {"tracing": {"otlp_endpoint": ENDPOINT}}})
 initialized = init_tracing(config.tracing)
-# One span processor per exporter attached: what the registered provider really holds.
-emit(initialized=initialized, processors=len(trace.get_tracer_provider()._active_span_processor._span_processors))
+# What the registered provider really holds: the span bounds first (#2285),
+# then one span processor per exporter attached.
+held = [type(p).__name__ for p in trace.get_tracer_provider()._active_span_processor._span_processors]
+emit(initialized=initialized, first=held[0], processors=len(held) - 1)
 """,
         **env,
     )
 
     assert seen["initialized"] is True
+    assert seen["first"] == "_ForeignSpanBounds"
     assert seen["processors"] == len(exporters)
     [initialized] = _named(events, "tracing_initialized")
     assert initialized["exporters"] == exporters

@@ -50,6 +50,7 @@ KINDS = (
     "l7_header_encoded",  # the same, sent in the ``=?base64?...?=`` sentinel form the SDK decodes (#1600)
     "shaped_result",  # the text of a result big enough for batch truncation to cut (#1298)
     "transport_error",  # upstream output that is not JSON-RPC: a stdout line, an SSE data line (#2282)
+    "unknown_target",  # a server or tool name the caller makes up, which a validator refuses
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
