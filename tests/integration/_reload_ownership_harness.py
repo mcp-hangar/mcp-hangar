@@ -24,6 +24,15 @@ The phases, in the order the test runs them on one directory:
 * ``upstream_restart``: boots a file without ``upstream``, which ``first``
   edited at runtime, with no reload in between (#2171).
 
+Then ``found-one``, discovery's again, taken over and dropped three ways (#2222):
+
+* ``found_dropped``: booted from a file that declares it; reloads a file
+  without it, scans, and approves.
+* ``found_retaken``: one reload takes it over and the next drops it, in one
+  process; scans and approves.
+* ``found_taken_over``: a reload takes it over.
+* ``found_restart``: boots a file without it, with no reload; scans and approves.
+
 A second directory runs a file server dropped by a reload (#2171):
 
 * ``edit``: boots ``upstream`` and pushes its policies.
@@ -285,6 +294,43 @@ def _boot_only(gateway: _Operator) -> dict[str, Any]:
     return {"ids": ids, "described": {sid: gateway.description(sid) for sid in TAKEN_OVER if sid in ids}}
 
 
+def _rediscovered(gateway: _Operator) -> dict[str, Any]:
+    """What discovery does with ``found-one`` once the file has dropped it."""
+    ids = gateway.ids()
+    scan = gateway.scan()
+    approved = gateway.send("POST", "/discovery/approve/found-one", {})
+    server = gateway.repository.get("found-one")
+    return {
+        "ids": ids,
+        "pending": scan["pending"],
+        "approve_status": approved.status_code,
+        "ids_after_approve": gateway.ids(),
+        "provenance": None if server is None else server.provenance.value,
+    }
+
+
+def _found_dropped(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
+    _write(config, _config(backend, FILES["reloaded"]))
+    return {"removed": gateway.reload()["mcp_servers_removed"], **_rediscovered(gateway)}
+
+
+def _found_retaken(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
+    # A scan first, so discovery takes it back and tracks it through the takeover.
+    tracked = gateway.scan()["pending"]
+    taken = _found_taken_over(gateway, config, backend)
+    taken["tracked_pending"] = tracked
+    taken["rescan_pending"] = gateway.scan()["pending"]
+    return {"taken": taken, **_found_dropped(gateway, config, backend)}
+
+
+def _found_taken_over(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
+    _write(config, _config(backend, FILES["dropped"]))
+    return {
+        "updated": gateway.reload()["mcp_servers_updated"],
+        "provenance": gateway.repository.get("found-one").provenance.value,
+    }
+
+
 def _upstream_reload(gateway: _Operator, config: Path, backend: str) -> dict[str, Any]:
     _write(config, _config(backend, FILES["reloaded"], upstream=False))
     result = gateway.reload()
@@ -311,6 +357,7 @@ BOOT_FILE = {"first": "boot"}
 RESTART_ON = {
     "edit": (FILES["reloaded"], True),
     "upstream_restart": (FILES["dropped"], False),
+    "found_restart": (FILES["reloaded"], True),
 }
 
 
@@ -345,6 +392,14 @@ def run(phase: str, backend: str, workdir: Path) -> dict[str, Any]:
         elif phase == "edit":
             gateway.set_policies("upstream", backend)
             out = {"policies": gateway.policies("upstream")}
+        elif phase == "found_dropped":
+            out = _found_dropped(gateway, config, backend)
+        elif phase == "found_retaken":
+            out = _found_retaken(gateway, config, backend)
+        elif phase == "found_taken_over":
+            out = _found_taken_over(gateway, config, backend)
+        elif phase == "found_restart":
+            out = _rediscovered(gateway)
         elif phase == "upstream_reload":
             out = _upstream_reload(gateway, config, backend)
         elif phase in ("upstream_restart", "after_upstream_reload"):

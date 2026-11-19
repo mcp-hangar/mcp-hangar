@@ -24,7 +24,20 @@ import pytest
 pytestmark = pytest.mark.timeout(300)
 
 HARNESS = Path(__file__).with_name("_reload_ownership_harness.py")
-PHASES = ("first", "restart", "takeover", "after_takeover", "dropped", "after_dropped", "upstream_restart")
+PHASES = (
+    "first",
+    "restart",
+    "takeover",
+    "after_takeover",
+    "dropped",
+    "after_dropped",
+    "upstream_restart",
+    # A discovered server the file took over and dropped (#2222).
+    "found_dropped",
+    "found_retaken",
+    "found_taken_over",
+    "found_restart",
+)
 #: A file server pushed its policies at runtime, then dropped by a reload (#2171).
 FILE_SERVER_PHASES = ("edit", "upstream_reload", "after_upstream_reload")
 NON_FILE = ("crud-one", "found-one")
@@ -183,6 +196,46 @@ def test_a_server_the_file_took_over_and_dropped_does_not_come_back_at_a_restart
     on a file that no longer declares it skips it.
     """
     assert "crud-one" not in sqlite["after_dropped"]["ids"]
+
+
+#: What discovery does with `found-one` once the file has dropped it, by a reload or at a restart.
+REDISCOVERED = {
+    "pending": ["found-one"],
+    "approve_status": 200,
+    "provenance": "discovery",
+}
+
+
+def _rediscovery(outcome: dict[str, Any]) -> dict[str, Any]:
+    assert "found-one" not in outcome["ids"]
+    assert "found-one" in outcome["ids_after_approve"]
+    assert {"member", "upstream"} <= set(outcome["ids_after_approve"])
+    return {key: outcome[key] for key in REDISCOVERED}
+
+
+def test_a_discovered_server_the_file_dropped_at_a_restart_is_discovered_again(sqlite: dict[str, Any]) -> None:
+    assert sqlite["found_taken_over"] == {"updated": ["found-one"], "provenance": "human"}
+    assert _rediscovery(sqlite["found_restart"]) == REDISCOVERED
+
+
+def test_a_discovered_server_a_reload_dropped_is_discovered_again_as_after_a_restart(sqlite: dict[str, Any]) -> None:
+    """Declared at boot, then dropped by a reload: discovery no longer counts it as static (#2222)."""
+    assert sqlite["found_dropped"]["removed"] == ["found-one"]
+    assert _rediscovery(sqlite["found_dropped"]) == _rediscovery(sqlite["found_restart"])
+
+
+def test_one_taken_over_and_dropped_by_reloads_in_one_process_is_discovered_again(sqlite: dict[str, Any]) -> None:
+    """Discovery tracked it through the takeover, and skipped every report after the drop (#2222)."""
+    retaken = sqlite["found_retaken"]
+    # While the file has it, the source's report waits for nothing.
+    assert retaken["taken"] == {
+        "tracked_pending": [],
+        "updated": ["found-one"],
+        "provenance": "human",
+        "rescan_pending": [],
+    }
+    assert retaken["removed"] == ["found-one"]
+    assert _rediscovery(retaken) == _rediscovery(sqlite["found_restart"])
 
 
 def test_a_file_server_edited_at_runtime_and_dropped_at_a_restart_does_not_come_back(sqlite: dict[str, Any]) -> None:

@@ -591,10 +591,11 @@ def bootstrap_auth(
         if event_bus is not None:
             from mcp_hangar.auth.policy_projection import ToolAccessPolicyProjection
             from mcp_hangar.domain.contracts.event_bus import HandlerKind
-            from mcp_hangar.domain.events import ToolAccessPolicySet
+            from mcp_hangar.domain.events import ToolAccessPolicyCleared, ToolAccessPolicySet
 
             projection = ToolAccessPolicyProjection(tap_store)
             event_bus.subscribe(ToolAccessPolicySet, projection.handle, kind=HandlerKind.PROJECTION)
+            event_bus.subscribe(ToolAccessPolicyCleared, projection.handle, kind=HandlerKind.PROJECTION)
 
     return AuthComponents(
         authn_middleware=authn_middleware,

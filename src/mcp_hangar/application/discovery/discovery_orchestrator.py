@@ -1067,12 +1067,7 @@ class DiscoveryOrchestrator:
         definition -- is a new server to register (or park for approval) rather
         than an unchanged one to skip.
         """
-        self._conflict_resolver.deregister(running.name)
-        if self._lifecycle_manager.get_mcp_server(running.name) is not None:
-            self._lifecycle_manager.remove_mcp_server(running.name)
-            self._validator.record_deregistration(running)
-        for pending_change in (self._change_announced, self._change_refused, self._change_logged):
-            pending_change.pop(running.name, None)
+        self._untrack(running.name)
         logger.warning(
             "discovery_change_not_applied",
             mcp_server_name=mcp_server.name,
@@ -1084,6 +1079,70 @@ class DiscoveryOrchestrator:
             detail="no server runs under the name any more; it is no longer tracked, and the next report "
             "registers it as a new server",
         )
+
+    def _untrack(self, name: str) -> DiscoveredMcpServer | None:
+        """Forget *name* in tracking, the resolver, the counts and its change history; what was tracked."""
+        self._conflict_resolver.deregister(name)
+        tracked = self._lifecycle_manager.remove_mcp_server(name)
+        if tracked is not None:
+            self._validator.record_deregistration(tracked)
+        for pending_change in (self._change_announced, self._change_refused, self._change_logged):
+            pending_change.pop(name, None)
+        return tracked
+
+    def forget_removed(self, names: list[str], *, gone: Callable[[str], bool]) -> None:
+        """Forget the servers a reload removed, as a restart on that file would (#2222). Safe from any thread.
+
+        A server discovery registered, that the file took over and then
+        dropped, left discovery holding its name: tracked, so every cycle took
+        the source's report as unchanged and skipped it, or static, when the
+        file declared it at boot. A restart builds both from scratch, and the
+        source's report registers the server again. Forgotten here, the next
+        cycle does the same: it registers the server, or parks it for approval,
+        while the source reports it, and does nothing once it does not.
+
+        Each name is forgotten only while *gone* says no server runs under it,
+        asked when this runs, not when the reload asked: one created again over
+        the API meanwhile is an operator's, and stays protected. What waits for
+        approval under the name goes too, as at a restart.
+
+        Run on discovery's loop, without waiting, when it runs one elsewhere:
+        the caller is a reload holding the reload lock. Synchronous there, like
+        TTL expiry, and a cycle awaiting under the name finds tracking moved.
+        """
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                same_loop = loop is asyncio.get_running_loop()
+            except RuntimeError:
+                same_loop = False
+            if not same_loop:
+                try:
+                    loop.call_soon_threadsafe(self._forget_removed, list(names), gone)
+                    return
+                except RuntimeError:
+                    pass  # closed since: stopped at shutdown, so nothing runs on it to race with
+        self._forget_removed(list(names), gone)
+
+    def _forget_removed(self, names: list[str], gone: Callable[[str], bool]) -> None:
+        for name in names:
+            if not gone(name):
+                continue
+            tracked = self._untrack(name)
+            static = name in self._conflict_resolver.static_mcp_servers
+            self._conflict_resolver.remove_static_mcp_server(name)
+            waited = self._lifecycle_manager.reject(name) is not None
+            waited = self._discovery_service.reject_pending(name) is not None or waited
+            if tracked is None and not static and not waited:
+                continue
+            logger.info(
+                "discovery_forgot_server_removed_by_reload",
+                mcp_server_name=name,
+                was_tracked=tracked is not None,
+                was_static=static,
+                was_waiting=waited,
+                detail="the next report of the name registers it as a new server",
+            )
 
     def _keep_running_definition(
         self, existing: DiscoveredMcpServer, mcp_server: DiscoveredMcpServer, reason: str, *, final: bool
