@@ -21,6 +21,13 @@ import pytest
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 
+#: How long the gateway is left idle after its last answer before the signal.
+#: The SDK reads stdin a line at a time, each read on a worker thread; between
+#: two lines no thread is blocked, and a signal in that window lets the gateway
+#: exit on its own, with nothing to force (#2295). Left idle, the reader is back
+#: in its read, which is what the signal test is about.
+_READER_SETTLE_S = 1.0
+
 _INITIALIZE = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -76,6 +83,7 @@ def _wait(proc: subprocess.Popen[bytes], tmp_path: Path) -> int:
 def test_the_gateway_exits_with_stdin_still_open(tmp_path: Path, signum: int) -> None:
     proc = _start(tmp_path)
     try:
+        time.sleep(_READER_SETTLE_S)
         started = time.monotonic()
         proc.send_signal(signum)
         rc = _wait(proc, tmp_path)
