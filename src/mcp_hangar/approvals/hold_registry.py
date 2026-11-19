@@ -26,6 +26,33 @@ from dataclasses import dataclass, field
 ABANDON_CHECK_INTERVAL_S = 0.05
 
 
+class EitherSet(threading.Event):
+    """Reads set while either of two events is set: what abandons a hold (#2279).
+
+    A hold is abandoned when its batch is cancelled (``fail_fast``, a stop) or
+    when the caller gives up on the request (a client cancel). Only ``is_set``
+    is read on a hold's abandonment; nothing sets or clears this, and ``wait``
+    polls, as the hold's own wait does.
+    """
+
+    def __init__(self, first: threading.Event, second: threading.Event) -> None:
+        super().__init__()
+        self._first = first
+        self._second = second
+
+    def is_set(self) -> bool:
+        return self._first.is_set() or self._second.is_set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not self.is_set():
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            time.sleep(ABANDON_CHECK_INTERVAL_S if remaining is None else min(ABANDON_CHECK_INTERVAL_S, remaining))
+        return True
+
+
 @dataclass
 class _HoldEntry:
     event: threading.Event = field(default_factory=threading.Event)

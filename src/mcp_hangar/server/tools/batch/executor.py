@@ -1055,6 +1055,7 @@ class BatchExecutor:
         tenant_id: str | None = None,
         governance: _Governance | None = None,
         abandoned: threading.Event | None = None,
+        caller_gone: threading.Event | None = None,
     ) -> CallResult | None:
         """Check if the tool requires approval and block until resolved.
 
@@ -1072,6 +1073,9 @@ class BatchExecutor:
                 alone is decided here, through the same `decide()`.
             abandoned: The batch's cancel event. An approval that arrives
                 after it is set is refused and recorded ``cancelled`` (#1702).
+            caller_gone: The caller's own signal that it gave up
+                (``CallSpec.caller_gone``, #2279). It abandons the hold too, but
+                an approval that reached the record before it still runs.
         """
         # Cleared per call: worker threads are reused across calls, so a stale
         # id from the previous call in this thread must never be revalidated
@@ -1164,6 +1168,9 @@ class BatchExecutor:
                         tenant_id=_tenant_id,
                         requested_by=_requested_by,
                         abandoned=abandoned,
+                        # Passed only when there is one, so a gate service
+                        # that predates it is called as before.
+                        **({"caller_gone": caller_gone} if caller_gone is not None else {}),
                     )
                 )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
@@ -2457,6 +2464,7 @@ class BatchExecutor:
                 tenant_id=p.caller_tenant_id,
                 governance=p.governance,
                 abandoned=p.cancel_event,
+                caller_gone=p.call.caller_gone,
             )
             if approval_result is not None:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
