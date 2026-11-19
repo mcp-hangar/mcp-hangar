@@ -100,10 +100,13 @@ try:
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
     OTEL_AVAILABLE = True
+    # The base of `_ForeignSpanBounds`, typed loosely so it reads the same
+    # with and without the SDK installed.
+    _SpanProcessorBase: Any = SpanProcessor
 except ImportError:
     OTEL_AVAILABLE = False
     trace = None  # type: ignore[assignment]
-    SpanProcessor = object  # type: ignore[assignment,misc]
+    _SpanProcessorBase = object
 
 # The OTLP/gRPC span exporter, the default protocol's. OTLP/HTTP is imported
 # only when selected: see _build_otlp_span_exporter().
@@ -377,7 +380,7 @@ def _span_limits() -> Any:
     )
 
 
-class _ForeignSpanBounds(SpanProcessor):
+class _ForeignSpanBounds(_SpanProcessorBase):
     """R2 on every span of Hangar's provider, whichever library starts it (#2285).
 
     Hangar's own spans carry no text by construction (``_TextFreeTracer``,
