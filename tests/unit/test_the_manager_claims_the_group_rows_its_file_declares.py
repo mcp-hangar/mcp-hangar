@@ -174,8 +174,9 @@ class TestTheRowClaimed:
         assert asyncio.run(configs.create_group(GroupRecord("runtime", "priority"))) is False
 
         stored = asyncio.run(configs.read_groups())
-        assert GroupRecord("runtime", "random", 2) in stored.groups
-        assert GroupMemberRecord("runtime", "runtime-member") in stored.members
+        # The replaced row is the group's next creation; the member is of the one before (#2231).
+        assert GroupRecord("runtime", "random", 2, generation=1) in stored.groups
+        assert GroupMemberRecord("runtime", "runtime-member", generation=0) in stored.members
 
 
 def _server(mcp_server_id: str) -> McpServer:

@@ -688,18 +688,20 @@ class SQLiteMcpServerConfigRepository:
         try:
             async with self._db.connection() as conn:
                 groups = await conn.execute_fetchall(
-                    "SELECT group_id, strategy, min_healthy, description, claimed_by_file FROM mcp_server_groups "
+                    "SELECT group_id, strategy, min_healthy, description, claimed_by_file, generation "
+                    "FROM mcp_server_groups "
                     "ORDER BY group_id"
                 )
                 members = await conn.execute_fetchall(
-                    "SELECT group_id, member_id, weight, priority, claimed_by_file FROM mcp_server_group_members "
+                    "SELECT group_id, member_id, weight, priority, claimed_by_file, generation "
+                    "FROM mcp_server_group_members "
                     "ORDER BY group_id, member_id"
                 )
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             raise PersistenceError(f"Failed to read the stored groups: {e}") from e
         return StoredGroups(
-            tuple(GroupRecord(g, s, n, d, bool(claimed)) for g, s, n, d, claimed in groups),
-            tuple(GroupMemberRecord(g, m, w, p, bool(claimed)) for g, m, w, p, claimed in members),
+            tuple(GroupRecord(g, s, n, d, bool(claimed), gen or 0) for g, s, n, d, claimed, gen in groups),
+            tuple(GroupMemberRecord(g, m, w, p, bool(claimed), gen or 0) for g, m, w, p, claimed, gen in members),
         )
 
     async def create_group(self, record: GroupRecord) -> bool:
@@ -708,7 +710,9 @@ class SQLiteMcpServerConfigRepository:
         A row a file claimed is replaced, unclaimed (#2171): the handler creates
         only a group this replica's file does not declare, so that row is dormant
         here. Its member rows stay, since a peer whose file still declares the
-        group restores them.
+        group restores them; the replaced row starts the group's next
+        `generation`, so a restart here does not take them for the new group's
+        (#2231).
         """
         stale = (
             "DELETE FROM mcp_server_group_members WHERE group_id = ? "
@@ -717,7 +721,8 @@ class SQLiteMcpServerConfigRepository:
         insert = (
             "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (?, ?, ?, ?) "
             "ON CONFLICT (group_id) DO UPDATE SET strategy = excluded.strategy, min_healthy = excluded.min_healthy, "
-            "description = excluded.description, claimed_by_file = NULL WHERE mcp_server_groups.claimed_by_file = 1"
+            "description = excluded.description, claimed_by_file = NULL, "
+            "generation = COALESCE(mcp_server_groups.generation, 0) + 1 WHERE mcp_server_groups.claimed_by_file = 1"
         )
         values = (record.group_id, record.strategy, record.min_healthy, record.description)
         statements = (stale, (record.group_id, record.group_id)), (insert, values)
@@ -740,10 +745,11 @@ class SQLiteMcpServerConfigRepository:
         row it replaces is one the file in force no longer names here.
         """
         sql = (
-            "INSERT OR REPLACE INTO mcp_server_group_members (group_id, member_id, weight, priority) "
-            "VALUES (?, ?, ?, ?)"
+            "INSERT OR REPLACE INTO mcp_server_group_members (group_id, member_id, weight, priority, generation) "
+            "VALUES (?, ?, ?, ?, (SELECT generation FROM mcp_server_groups WHERE group_id = ?))"
         )
-        await self._write_group_rows((sql, (record.group_id, record.member_id, record.weight, record.priority)))
+        values = (record.group_id, record.member_id, record.weight, record.priority, record.group_id)
+        await self._write_group_rows((sql, values))
 
     async def claim_group_row_for_file(
         self, group_id: str, member_id: str | None = None, lease: tuple[str, int] | None = None

@@ -400,6 +400,15 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE mcp_server_group_members ADD COLUMN claimed_by_file INTEGER;
         """,
     ),
+    (
+        "009_group_row_generations",
+        """
+        -- Which creation of a group a row is, and which one a member was added
+        -- to (#2231). An older release ignores the column; NULL reads as 0.
+        ALTER TABLE mcp_server_groups ADD COLUMN generation INTEGER;
+        ALTER TABLE mcp_server_group_members ADD COLUMN generation INTEGER;
+        """,
+    ),
 ]
 
 
