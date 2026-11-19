@@ -25,7 +25,7 @@ never sent or a sink never captured.
 
 Not covered here yet, and tracked on #1535: the live-gateway tier with a real
 OTLP receiver (#1293, ``tests/live``), exceptions raised on other paths (a
-transport failure, a validation error), metric labels and
+transport failure, a validation error) and
 the rest of the identifier table. Of that table, the calling principal is a
 canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
 (#1580).
@@ -156,6 +156,9 @@ SINKS: dict[str, Callable[[dict[str, Any]], list[Any]]] = {
     # R8.
     "ws_events": lambda run: run["ws_events"],
     "event_store": lambda run: run["event_store"],
+    # The Prometheus exposition of `/metrics`, every line of it: the series'
+    # names and label values, and the help text beside them.
+    "metrics": lambda run: run["metrics"],
 }
 
 
@@ -435,6 +438,16 @@ def test_the_event_stream_carries_what_the_store_holds(runs, surface):
 
     assert sorted(e["event_id"] for e in run["ws_events"]) == stored
     assert {"ToolInvocationRequested", "ToolInvocationFailed", "ToolApprovalDenied"} <= streamed, streamed
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_the_scrape_carries_a_series_for_every_call(runs, surface):
+    """The calls are in `/metrics`, so a canary's absence from the scrape is a result."""
+    series = [line for line in runs[surface]["metrics"] if line.startswith("mcp_hangar_tool_calls_total{")]
+    for transport in TRANSPORTS:
+        for tool in ("note", "result_text", "is_error", "rpc_error"):
+            label = f'tool="{transport}-{tool}"'
+            assert any(label in line for line in series), (label, series)
 
 
 @pytest.mark.parametrize("surface", SURFACES)
