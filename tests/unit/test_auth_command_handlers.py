@@ -1,7 +1,7 @@
 """The auth command handlers and their registration on the command bus."""
 
 from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 
@@ -326,7 +326,7 @@ class TestSetToolAccessPolicyHandler:
 
         assert result["set"] is True
         mock_tap_store.set_policy.assert_called_once()
-        mock_resolver.set_mcp_server_policy.assert_called_once()
+        mock_resolver.set_stored_policy.assert_called_once_with("provider", "math", ANY)
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_group_scope(self):
@@ -355,7 +355,7 @@ class TestSetToolAccessPolicyHandler:
                 )
             )
 
-        mock_resolver.set_group_policy.assert_called_once()
+        mock_resolver.set_stored_policy.assert_called_once_with("group", "grp1", ANY)
 
     def test_handle_member_scope_with_colon_format(self):
         from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
@@ -383,11 +383,8 @@ class TestSetToolAccessPolicyHandler:
                 )
             )
 
-        mock_resolver.set_member_policy.assert_called_once_with(
-            "grp1",
-            "member1",
-            mock_resolver.set_member_policy.call_args[0][2],
-        )
+        # The resolver splits the target (`test_a_stored_policy_is_addressed_as_the_endpoint_names_it`).
+        mock_resolver.set_stored_policy.assert_called_once_with("member", "grp1:member1", ANY)
 
     def test_handle_member_scope_without_colon(self):
         from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
@@ -415,11 +412,7 @@ class TestSetToolAccessPolicyHandler:
                 )
             )
 
-        mock_resolver.set_member_policy.assert_called_once_with(
-            "single_id",
-            "single_id",
-            mock_resolver.set_member_policy.call_args[0][2],
-        )
+        mock_resolver.set_stored_policy.assert_called_once_with("member", "single_id", ANY)
 
 
 class TestClearToolAccessPolicyHandler:

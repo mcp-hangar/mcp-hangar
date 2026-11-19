@@ -374,6 +374,52 @@ class TestToolAccessPolicy:
 
         assert resolver.get_configured_policy("group", "pool") == in_force
 
+    @staticmethod
+    def _peer_policy_then_cleared(resolver: ToolAccessResolver, *, file: ToolAccessPolicy | None) -> MagicMock:
+        """B applied A's policy over its file's; A then cleared the row."""
+        staged = ToolAccessResolver()
+        if file is not None:
+            staged.set_group_policy("pool", file)
+        resolver.adopt_config_policies(staged, replace=False)
+        store = MagicMock()
+        store.get_policy.return_value = ToolAccessPolicy(deny_list=("add",))
+        ToolAccessPolicyProjection(store, "gateway-b").handle(TestToolAccessPolicy._set())
+        store.get_policy.return_value = None
+        return store
+
+    @pytest.mark.parametrize("file", [ToolAccessPolicy(deny_list=("file",)), None])
+    def test_a_peers_clear_leaves_what_a_restart_would(
+        self, resolver: ToolAccessResolver, file: ToolAccessPolicy | None
+    ) -> None:
+        store = self._peer_policy_then_cleared(resolver, file=file)
+
+        ToolAccessPolicyProjection(store, "gateway-b").handle(ToolAccessPolicyCleared(scope="group", target_id="pool"))
+
+        assert resolver.get_configured_policy("group", "pool") == file
+
+    def test_a_set_whose_row_is_gone_is_read_as_the_clear_it_was(self, resolver: ToolAccessResolver) -> None:
+        # The tail can deliver A's set after A's clear removed the row; either order settles on the row.
+        store = self._peer_policy_then_cleared(resolver, file=None)
+
+        ToolAccessPolicyProjection(store, "gateway-b").handle(self._set())
+
+        assert resolver.get_configured_policy("group", "pool") is None
+
+    def test_this_replicas_own_clear_is_not_read_back(self, resolver: ToolAccessResolver) -> None:
+        store = MagicMock()
+
+        ToolAccessPolicyProjection(store).handle(ToolAccessPolicyCleared(scope="group", target_id="pool"))
+
+        store.get_policy.assert_not_called()
+
+    def test_a_clear_whose_row_cannot_be_read_keeps_the_policy(self, resolver: ToolAccessResolver) -> None:
+        store = self._peer_policy_then_cleared(resolver, file=None)
+        store.get_policy.side_effect = ConnectionError("gone")
+
+        ToolAccessPolicyProjection(store, "gateway-b").handle(ToolAccessPolicyCleared(scope="group", target_id="pool"))
+
+        assert resolver.get_configured_policy("group", "pool") == ToolAccessPolicy(deny_list=("add",))
+
 
 @pytest.mark.parametrize(
     "event",

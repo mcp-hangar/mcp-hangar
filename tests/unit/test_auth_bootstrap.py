@@ -291,7 +291,7 @@ class TestReplayTapPolicies:
             return_value=mock_resolver,
         ):
             _replay_tap_policies(mock_tap_store)
-            mock_resolver.set_mcp_server_policy.assert_called_once()
+            mock_resolver.set_stored_policy.assert_called_once_with("provider", "my-provider", ANY)
 
     def test_replay_group_scope(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
@@ -307,7 +307,7 @@ class TestReplayTapPolicies:
             return_value=mock_resolver,
         ):
             _replay_tap_policies(mock_tap_store)
-            mock_resolver.set_group_policy.assert_called_once()
+            mock_resolver.set_stored_policy.assert_called_once_with("group", "my-group", ANY)
 
     def test_replay_member_scope_with_colon(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
@@ -323,7 +323,7 @@ class TestReplayTapPolicies:
             return_value=mock_resolver,
         ):
             _replay_tap_policies(mock_tap_store)
-            mock_resolver.set_member_policy.assert_called_once_with("group1", "member1", ANY)
+            mock_resolver.set_stored_policy.assert_called_once_with("member", "group1:member1", ANY)
 
     def test_replay_member_scope_without_colon(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
@@ -339,7 +339,7 @@ class TestReplayTapPolicies:
             return_value=mock_resolver,
         ):
             _replay_tap_policies(mock_tap_store)
-            mock_resolver.set_member_policy.assert_called_once_with("standalone", "standalone", ANY)
+            mock_resolver.set_stored_policy.assert_called_once_with("member", "standalone", ANY)
 
     def test_replay_exception_does_not_abort(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
@@ -351,7 +351,7 @@ class TestReplayTapPolicies:
         ]
 
         mock_resolver = MagicMock()
-        mock_resolver.set_mcp_server_policy.side_effect = [RuntimeError("fail"), None]
+        mock_resolver.set_stored_policy.side_effect = [RuntimeError("fail"), None]
 
         with patch(
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
@@ -359,7 +359,7 @@ class TestReplayTapPolicies:
         ):
             # Should not raise -- fault barrier
             _replay_tap_policies(mock_tap_store)
-            assert mock_resolver.set_mcp_server_policy.call_count == 2
+            assert mock_resolver.set_stored_policy.call_count == 2
 
     def test_resolver_none_skips(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
