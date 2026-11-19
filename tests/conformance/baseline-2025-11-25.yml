@@ -42,8 +42,13 @@
 #
 # `server-sse-polling` is not purely fixture-dependent. Its FAILURE is the
 # missing `test_reconnection` tool, but the same run warns that Hangar's POST
-# SSE stream carries no priming event (id, empty data) and no `retry` field,
-# which is Hangar's own server behaviour; #2232 tracks that.
+# SSE stream carries no priming event (id, empty data) and no `retry` field.
+# That is Hangar's own server behaviour and is intended: Hangar does not
+# support SSE stream resumption as a server. `serve --http` runs stateless
+# (#877), where the SDK keeps no event store, and an id with nothing to replay
+# would advertise resumability the gateway cannot deliver. The decision and
+# its reopen conditions are on #2232:
+# https://github.com/mcp-hangar/mcp-hangar/issues/2232#issuecomment-7018561885
 #
 # New against the 0.1.16 run: `server-sse-polling` and `json-schema-2020-12`.
 # The suite marks both "pending" and does not score them for 2025-11-25, so its
@@ -64,7 +69,7 @@ server:
   - elicitation-sep1034-defaults # needs an eliciting backend
   - elicitation-sep1330-enums # needs an eliciting backend
   - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored)
-  - server-sse-polling # needs the test_reconnection tool; also #2232 (pending, not scored)
+  - server-sse-polling # needs the test_reconnection tool; WARNINGs by decision, #2232 (pending, not scored)
 
   # -- 2. capability not advertised -------------------------------------------
   - completion-complete # `completions` is absent from initialize
