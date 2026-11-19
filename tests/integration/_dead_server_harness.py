@@ -57,7 +57,9 @@ Modes:
 
 - ``single``: two servers. Both are broken until the saga gives up. One is
   revived by ``hangar_start``; the other is called inside its backoff, which is
-  refused, and again after it, which revives it.
+  refused, and again after it, which revives it. That backoff is held fixed
+  from the server's give-up to the call inside it, as failover mode holds B's,
+  so the call lands inside it however long the other give-up takes (#2295).
 - ``group``: a one-member group. The member's process is killed between two
   requests: a crash, which a call through the group restarts. Then its upstream
   is broken until the saga gives up: the member leaves rotation and a call
@@ -106,6 +108,8 @@ FAILOVER_CALLS = 20
 #: Failover mode: B's backoff for the twenty calls, the production cap; see the
 #: module docstring.
 FAILOVER_BACKOFF_S = 60.0
+#: Single mode: the called server's backoff from its give-up to the call inside it.
+SINGLE_BACKOFF_S = 60.0
 #: Failover mode's opt-in pacing knobs; see the module docstring.
 PRE_CALL_DELAY_ENV = "DEAD_SERVER_PRE_CALL_DELAY_S"
 CALL_DELAY_ENV = "DEAD_SERVER_CALL_DELAY_S"
@@ -336,18 +340,29 @@ def _single(
     _wait(lambda: all(repository.get(server).state.value != "ready" for server in flags), 10)
     report["broken"] = snapshot()
 
-    # The saga restarts each, the restart fails, and it gives up.
-    _wait(lambda: all(_give_up_delivered(seen, server) for server in flags), GIVE_UP_DEADLINE_S)
-    report["dead"] = snapshot()
-    report["dead_mark"] = len(seen)
+    # The saga restarts each, the restart fails, and it gives up. The called
+    # server's backoff is fixed from its own give-up until the call inside it:
+    # at its real few seconds it ran out while a slow runner waited for the
+    # other server's give-up, and the call started it again (#2295). Set on its
+    # own tracker, the one the call gate reads, and only once it is dead, so the
+    # saga's restart was still free to run.
+    _wait(lambda: _give_up_delivered(seen, BY_CALL), GIVE_UP_DEADLINE_S)
+    held = repository.get(BY_CALL).health
+    held._calculate_backoff = lambda: SINGLE_BACKOFF_S
+    try:
+        _wait(lambda: all(_give_up_delivered(seen, server) for server in flags), GIVE_UP_DEADLINE_S)
+        report["dead"] = snapshot()
+        report["dead_mark"] = len(seen)
 
-    # A call inside the server's backoff: refused, and nothing is started.
-    report["call_in_backoff"] = _call(client, BY_CALL)
+        # A call inside the server's backoff: refused, and nothing is started.
+        report["call_in_backoff"] = _call(client, BY_CALL)
 
-    # Dead, with the health and GC workers running.
-    mark = len(seen)
-    time.sleep(QUIET_WINDOW_S)
-    report["while_dead"] = {"snapshot": snapshot(), "events": events_since(mark)}
+        # Dead, with the health and GC workers running.
+        mark = len(seen)
+        time.sleep(QUIET_WINDOW_S)
+        report["while_dead"] = {"snapshot": snapshot(), "events": events_since(mark)}
+    finally:
+        del held._calculate_backoff
 
     # The upstreams are back. One server is started, the other called once its
     # backoff has run out.
