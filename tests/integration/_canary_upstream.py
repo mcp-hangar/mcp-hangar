@@ -44,6 +44,7 @@ KINDS = (
     "rpc_error",  # an upstream's JSON-RPC error message
     "baggage",  # inbound W3C baggage, as an HTTP header and in ``_meta``
     "header",  # an inbound HTTP header Hangar has no reason to read
+    "spoofed_identity",  # a tenant, user or agent claimed in headers, baggage or ``_meta``, not by authentication
     "approver_reason",  # a human approver's reason for a denial
     "l7_argument",  # a tool argument an L7 egress policy's secret pattern matches (#1295)
     "l7_header",  # an ``Mcp-Param-*`` value an L7 egress policy's header rule matches (#1295)
@@ -57,6 +58,9 @@ LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 #: The calling principal: an identifier, not an input. It is one per run rather
 #: than one per transport, so it sits beside ``KINDS`` instead of in it.
 PRINCIPAL = f"svc:CANARY-PRINCIPAL-{_TAG}"
+
+#: The principal's tenant, bound by authentication with it.
+TENANT = "tenant-canary"
 
 
 def head(kind: str, transport: str) -> str:
