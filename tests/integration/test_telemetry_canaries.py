@@ -12,6 +12,9 @@ door's flat tools). Each run reads back the sinks ``SINKS`` lists.
 The upstream's error text and ``isError`` text also stand for exception
 messages: Hangar raises both as a ``ToolInvocationError`` carrying the text, so
 every span that records the exception is handed a message with a canary in it.
+A transport failure is ``transport_error``: output that is not JSON-RPC, a
+stdout line on stdio and an SSE data line on HTTP, which the client skips and
+logs (#2282).
 
 ``CONTRACT`` is the matrix: for each sink, the form each kind of canary may take
 there. Anything it does not name is forbidden, which is the contract's own
@@ -26,8 +29,8 @@ never sent or a sink never captured.
 The same contract on the wire, from a real ``serve --http`` to a real OTLP
 receiver, is ``tests/live/test_t3_telemetry_canaries.py``: it imports
 ``CONTRACT`` and the rules from here. Not covered yet, and tracked on #1535:
-exceptions raised on other paths (a transport failure, a validation error)
-and the rest of the identifier table. Of that table, the calling principal is a
+exceptions raised on other paths (a validation error) and the rest of the
+identifier table. Of that table, the calling principal is a
 canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
 (#1580).
 """
@@ -75,6 +78,7 @@ SCENARIO = {
     "l7_header": "argument",
     "l7_header_encoded": "argument",
     "shaped_result": "shaping",
+    "transport_error": "transport_error",
 }
 
 
@@ -419,6 +423,10 @@ def test_the_canary_went_in(runs, surface, kind, transport):
             whole = canary(kind, transport) + "-" + "y" * BIG_RESULT_LENGTH
             assert response["result"]["content"] == [{"type": "text", "text": whole}], json.dumps(response)[:500]
             assert not response["result"].get("isError"), json.dumps(response)[:500]
+    elif kind == "transport_error":
+        # The client skipped the garbled line and read the answer after it.
+        assert f"{transport}-transport_error" in [r["tool"] for r in _upstream_calls(run, transport)]
+        assert response["result"].get("isError") is not True, json.dumps(response)[:500]
     elif kind in ("result", "is_error", "rpc_error", "approver_reason"):
         # The caller is owed the whole text; only telemetry is bounded.
         value = canary(kind, transport)
@@ -456,7 +464,7 @@ def test_both_upstreams_were_called_with_every_tool(runs, surface):
     for transport in TRANSPORTS:
         tools = sorted(r["tool"] for r in _upstream_calls(runs[surface], transport))
         # `guarded` never reaches its upstream: the approver denies it.
-        expected = ("note", "result_text", "is_error", "rpc_error", "big_result")
+        expected = ("note", "result_text", "is_error", "rpc_error", "big_result", "transport_error")
         assert tools == sorted(f"{transport}-{t}" for t in expected), tools
 
 

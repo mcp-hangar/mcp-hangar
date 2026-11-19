@@ -88,6 +88,7 @@ SCENARIOS = {
     "rpc_error": "rpc_error",
     "approval": "guarded",
     "shaping": "big_result",
+    "transport_error": "transport_error",
 }
 
 #: Batch truncation (#1298): a budget the other scenarios' results fit in and
@@ -166,6 +167,16 @@ class HttpUpstream(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 -- http.server's handler name
         request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         self.seen.append({**upstream.seen(request), "headers": dict(self.headers.items())})
+        if (request.get("params") or {}).get("name") == upstream.prefix("http") + "transport_error":
+            # An SSE stream whose first data line is not JSON, then the answer (#2282).
+            answered = json.dumps(upstream.answer(request, "http"))
+            body = f"data: {upstream.garbled('http')}\n\ndata: {answered}\n\n".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         response = upstream.answer(request, "http")
         body = b"" if response is None else json.dumps(response).encode()
         self.send_response(202 if response is None else 200)

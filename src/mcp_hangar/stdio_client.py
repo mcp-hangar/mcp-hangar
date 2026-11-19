@@ -213,7 +213,10 @@ class StdioClient:
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError as e:
-                    logger.error("stdio_client_malformed_json", preview=line[:100], error=str(e))
+                    # The line is the upstream's output, which the log carries
+                    # only at DEBUG (#1276 R7, #2282): its size, not its text.
+                    logger.error("stdio_client_malformed_json", length=len(line), error_type=type(e).__name__)
+                    logger.debug("stdio_client_malformed_json_text", preview=line[:100])
                     continue
 
                 prometheus_metrics.record_message_received(
@@ -331,7 +334,10 @@ class StdioClient:
                         # Log first 2000 chars to avoid log spam
                         if len(err_text) > 2000:
                             err_text = err_text[:2000] + "... (truncated)"
-                        log("stdio_client_process_stderr", stderr=err_text, expected=expected)
+                        # Its size at the exit's level, its text at DEBUG: the
+                        # text is the upstream's (#1276 R7, #2282).
+                        log("stdio_client_process_stderr", stderr_bytes=len(err_text), expected=expected)
+                        logger.debug("stdio_client_process_stderr_text", stderr=err_text)
                         stderr_text = err_text
                 except Exception as read_err:  # noqa: BLE001 -- fault-barrier: stderr capture must not crash diagnostics
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
