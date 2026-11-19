@@ -74,7 +74,7 @@ HEADERS = {
 
 #: Who makes the calls. The front door serves only a caller with a tenant.
 CALLER = upstream.PRINCIPAL
-TENANT = "tenant-canary"
+TENANT = upstream.TENANT
 
 #: transport -> the server that reaches its upstream over it.
 SERVERS = {"stdio": "canary-stdio", "http": "canary-http"}
@@ -304,13 +304,21 @@ def _post(
     refused: bool = False,
 ) -> dict[str, Any]:
     """One stateless request to ``/mcp`` carrying the transport's baggage and header canaries; its response."""
-    params = {**params, "_meta": {**ENVELOPE, "baggage": f"canary.meta={canary('baggage', transport)}"}}
+    spoof = canary("spoofed_identity", transport)
+    meta = {**ENVELOPE, "baggage": f"canary.meta={canary('baggage', transport)}"}
+    # Identity is the authenticated principal's only (#1276, principle 4): a
+    # tenant, user or agent claimed anywhere else must not become one.
+    meta |= {"tenant_id": spoof, "user_id": spoof, "agent_id": spoof}
+    params = {**params, "_meta": meta}
     headers = {
         **HEADERS,
         "Mcp-Method": method,
         "X-API-Key": key,
-        "baggage": f"canary.probe={canary('baggage', transport)}",
+        "baggage": f"canary.probe={canary('baggage', transport)},tenant.id={spoof},user.id={spoof},enduser.id={spoof}",
         "X-Canary-Probe": canary("header", transport),
+        "X-Tenant-ID": spoof,
+        "X-User-ID": spoof,
+        "X-Agent-ID": spoof,
     }
     if "name" in params:
         headers["Mcp-Name"] = params["name"]
