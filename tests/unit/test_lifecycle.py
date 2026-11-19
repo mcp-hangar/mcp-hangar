@@ -255,6 +255,7 @@ class TestServerLifecycle:
                 patch(
                     "mcp_hangar.fastmcp_server.tool_list_changed_stream.serve_tool_list_changed_stream"
                 ) as mock_stream,
+                patch("mcp_hangar.fastmcp_server.client_cancel.serve_client_cancels") as mock_cancels,
             ):
                 mock_asyncio_run.side_effect = _close_run_coro
 
@@ -262,7 +263,9 @@ class TestServerLifecycle:
 
             # The list_changed GET stream sits inside the routing wrap, over the SDK app (#1366).
             mock_stream.assert_called_once_with(mock_context.mcp_server.streamable_http_app.return_value)
-            mock_wrap.assert_called_once_with(mock_stream.return_value)
+            # A handshake-era cancel is read between the two (#2289).
+            mock_cancels.assert_called_once_with(mock_stream.return_value)
+            mock_wrap.assert_called_once_with(mock_cancels.return_value)
         finally:
             del sys.modules["uvicorn"]
 

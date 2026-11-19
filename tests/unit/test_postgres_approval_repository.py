@@ -160,12 +160,14 @@ class TestSave:
         assert len(insert_calls) == 1
         sql, params = insert_calls[0].args
         assert "?" not in sql
-        assert sql.count("%s") == 15
+        assert sql.count("%s") == 17
         assert params[0] == "appr-1"
         assert params[1] == "provider-1"
         assert json.loads(params[3]) == {"id": 42}
         assert params[13] == "user:alice"
         assert params[14] == "tenant-a"
+        # The caller's request (#2289): none here, as for a call off HTTP.
+        assert params[15:] == (None, None)
         mock_conn.commit.assert_called()
 
     @pytest.mark.asyncio

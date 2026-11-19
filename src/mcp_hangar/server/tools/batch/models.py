@@ -4,6 +4,7 @@ Contains data classes for batch call specifications and results,
 plus configuration constants.
 """
 
+import json
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,34 @@ from typing import Any
 from ....application.tasks.tool_pin_context import CurrentToolPin
 from ....domain.value_objects.identity import IdentityContext
 from .member_health import MemberOutcome
+
+
+@dataclass(frozen=True)
+class ClientRequest:
+    """The caller's request a call came in, as a later ``notifications/cancelled`` names it (#2289)."""
+
+    #: The JSON-RPC id, as JSON text so ``1`` and ``"1"`` stay apart.
+    request_id: str
+    #: The batch the request made, so the calls of one request are told apart
+    #: from another's that reused the id.
+    batch_id: str
+
+    @classmethod
+    def of(cls, request_context: Any, batch_id: str) -> "ClientRequest | None":
+        """The HTTP request *request_context* carries, or None: stdio, or no request.
+
+        Accepts a ``ServerRequestContext`` or anything exposing one as
+        ``.request_context``, as the identity bridge does. Never raises.
+        """
+        try:
+            inner = getattr(request_context, "request_context", None) or request_context
+            request_id = getattr(inner, "request_id", None)
+            if getattr(inner, "request", None) is None or request_id is None:
+                return None
+            return cls(json.dumps(request_id), batch_id)
+        except Exception:  # noqa: BLE001 -- a request that cannot be named is one no cancel finds
+            return None
+
 
 # =============================================================================
 # Configuration Constants
@@ -73,6 +102,9 @@ class CallSpec:
     #: a call already granted runs, once. None when the caller has no request
     #: that can be cancelled.
     caller_gone: threading.Event | None = None
+    #: The HTTP request the call came in, recorded on its approval so a cancel
+    #: that arrives as a request of its own finds it (#2289). None off HTTP.
+    client_request: ClientRequest | None = None
 
 
 @dataclass

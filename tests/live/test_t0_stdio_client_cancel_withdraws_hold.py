@@ -10,8 +10,8 @@ at once, the CLI is refused, and the upstream never sees the call.
 
 A call a human approved before the client left is not affected: it runs, once.
 
-Over streamable HTTP the client's cancel does not reach the request yet, so
-the hold goes on there; that case is recorded as a strict ``xfail`` (#2289).
+Over streamable HTTP the cancel takes another way to the hold; see
+``test_t0_http_client_cancel_withdraws_hold.py`` (#2289).
 
 BLACK-BOX against a real ``mcp-hangar serve`` over stdio. The upstream appends
 a line to a file each time a tool runs, so "never ran" and "ran once" are read
@@ -37,8 +37,6 @@ import pytest
 from mcp import ClientSession
 
 from tests._hangar_executable import hangar_executable
-from tests.live import _group_support as gs
-from tests.live.conftest import running_hangar
 
 pytestmark = [pytest.mark.live, pytest.mark.t0]
 
@@ -94,46 +92,6 @@ mcp_servers:
     principal:
       id: local-user
       tenant_id: local
-      roles: [provider-admin]
-event_store:
-  driver: sqlite
-  path: "{state}/events.db"
-"""
-
-_TENANT = "tenant-gives-up"
-
-_HTTP = """\
-logging:
-  level: WARNING
-mcp_servers:
-  demo:
-    mode: subprocess
-    command: ["{python}", "{upstream}", "{runs}"]
-    idle_ttl_s: 120
-    tools:
-      approval_list: [send_message, send_slowly]
-      approval_timeout_seconds: 60
-    tool_projection:
-      flat: [send_message, send_slowly]
-tool_access:
-  mode: front_door
-auth:
-  enabled: true
-  allow_anonymous: false
-  api_key:
-    enabled: true
-    header_name: X-API-Key
-  storage:
-    driver: sqlite
-    path: "{auth_db}"
-  role_assignments:
-    - principal: "svc:{tenant}"
-      role: developer
-      scope: global
-  stdio:
-    principal:
-      id: local-approver
-      tenant_id: {tenant}
       roles: [provider-admin]
 event_store:
   driver: sqlite
@@ -201,9 +159,15 @@ async def _call(
         await session.call_tool("hangar_call", {"calls": calls}, read_timeout_seconds=patience)
 
 
-async def _give_up_then_approve(session: ClientSession, config: Path, *, front_door: bool) -> dict[str, Any]:
-    """Hold a call, let the client give up on it, then watch the record and approve it from the CLI."""
-    await session.initialize()
+async def _give_up_then_approve(
+    session: ClientSession, config: Path, *, front_door: bool, connect: bool = True
+) -> dict[str, Any]:
+    """Hold a call, let the client give up on it, then watch the record and approve it from the CLI.
+
+    *connect* runs the handshake first; a caller that already negotiated another way passes False.
+    """
+    if connect:
+        await session.initialize()
     held = asyncio.create_task(_held(config))
     with pytest.raises(Exception):  # noqa: B017 -- the SDK's timeout error type is not part of the contract
         await _call(session, front_door, "send_message", "the agent was told this failed")
@@ -266,39 +230,6 @@ def test_a_hangar_call_the_client_gave_up_on_is_cancelled_and_never_runs(tmp_pat
     config, runs = _write_config(tmp_path, front_door=False)
 
     _assert_withdrawn(_abandon_a_held_call(config, front_door=False), runs)
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="mcp-hangar#2289: over streamable HTTP the client's cancel does not reach the request, so the hold goes on",
-)
-def test_an_http_front_door_call_the_client_gave_up_on_is_cancelled_and_never_runs(tmp_path: Path) -> None:
-    """Over streamable HTTP the same give-up does not reach the hold yet (#2289): the gap, recorded."""
-    from tests.live._mcp_client import open_mcp_streams
-
-    auth_db = tmp_path / "auth.db"
-    try:
-        keys = gs.seed_tenant_keys(auth_db, [_TENANT])
-    except Exception as exc:  # noqa: BLE001 -- fixture prerequisite: skip, never fail
-        pytest.skip(f"could not seed tenant API keys: {exc}")
-    config, runs = _write_config(tmp_path, front_door=True)
-    upstream = tmp_path / "counted.py"
-    config.write_text(
-        _HTTP.format(
-            python=sys.executable, upstream=upstream, runs=runs, auth_db=auth_db, tenant=_TENANT, state=tmp_path
-        )
-    )
-
-    with running_hangar(tmp_path, config.read_text()) as hangar:
-
-        async def run() -> dict[str, Any]:
-            async with open_mcp_streams(f"{hangar.base_url}/mcp", {"X-API-Key": keys[_TENANT]}) as (read, write):
-                async with ClientSession(read, write) as session:
-                    return await _give_up_then_approve(session, config, front_door=True)
-
-        outcome = asyncio.run(asyncio.wait_for(run(), timeout=120))
-
-    _assert_withdrawn(outcome, runs)
 
 
 @pytest.mark.parametrize("front_door", [True, False], ids=["front_door", "hangar_call"])

@@ -62,6 +62,7 @@ from .models import (
     BatchResult,
     CallResult,
     CallSpec,
+    ClientRequest,
     RetryMetadata,
     ValidationError,
 )
@@ -628,6 +629,7 @@ def _run_calls(
             (``CallSpec.caller_gone``, #2279), or None when it cannot.
     """
     batch_id = str(uuid.uuid4())
+    client_request = ClientRequest.of(request_ctx, batch_id)
 
     # Clamp max_attempts to valid range
     if max_attempts is not None:
@@ -732,6 +734,7 @@ def _run_calls(
                     whole_result=whole_result,
                     caller_roles=roles_by_index.get(i, ()),
                     caller_gone=caller_gone,
+                    client_request=client_request,
                 )
             )
             exec_to_orig.append(i)
@@ -833,6 +836,7 @@ __all__ = [
     "BatchResult",
     "CallResult",
     "CallSpec",
+    "ClientRequest",
     "RetryMetadata",
     "ValidationError",
     # Constants

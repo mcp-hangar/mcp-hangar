@@ -71,7 +71,9 @@ class SqliteApprovalRepository:
         reason TEXT,
         correlation_id TEXT DEFAULT '',
         requested_by TEXT,
-        tenant_id TEXT
+        tenant_id TEXT,
+        client_request_id TEXT,
+        batch_id TEXT
     )
     """
 
@@ -82,6 +84,8 @@ class SqliteApprovalRepository:
     MIGRATIONS_SQL = (
         "ALTER TABLE approval_requests ADD COLUMN requested_by TEXT",
         "ALTER TABLE approval_requests ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE approval_requests ADD COLUMN client_request_id TEXT",
+        "ALTER TABLE approval_requests ADD COLUMN batch_id TEXT",
     )
 
     CREATE_INDEX_STATE_SQL = """
@@ -122,8 +126,8 @@ class SqliteApprovalRepository:
                 (approval_id, provider_id, tool_name, arguments_json,
                  arguments_hash, requested_at, expires_at, state, channel,
                  decided_by, decided_at, reason, correlation_id,
-                 requested_by, tenant_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 requested_by, tenant_id, client_request_id, batch_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.approval_id,
@@ -141,6 +145,8 @@ class SqliteApprovalRepository:
                     request.correlation_id,
                     request.requested_by,
                     request.tenant_id,
+                    request.client_request_id,
+                    request.batch_id,
                 ),
             )
 
@@ -256,4 +262,6 @@ class SqliteApprovalRepository:
             # the safe single-tenant default rather than a crash.
             requested_by=row[13] if len(row) > 13 else None,
             tenant_id=row[14] if len(row) > 14 else None,
+            client_request_id=row[15] if len(row) > 15 else None,
+            batch_id=row[16] if len(row) > 16 else None,
         )

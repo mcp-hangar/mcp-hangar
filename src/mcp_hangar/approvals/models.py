@@ -51,6 +51,13 @@ class ApprovalRequest:
     #: by permission alone. ``None`` means single-tenant / no tenant context, in
     #: which case scoping is not applied.
     tenant_id: str | None = None
+    #: The caller's JSON-RPC id for the request that made the call, as JSON
+    #: text so ``1`` and ``"1"`` stay apart, and the batch the call is in.
+    #: Over streamable HTTP a ``notifications/cancelled`` names the request by
+    #: that id alone, and on the handshake era it arrives as a request of its
+    #: own, so the record is where it finds the call (#2289). None off HTTP.
+    client_request_id: str | None = None
+    batch_id: str | None = None
 
     def __init__(
         self,
@@ -70,6 +77,8 @@ class ApprovalRequest:
         correlation_id: str = "",
         requested_by: str | None = None,
         tenant_id: str | None = None,
+        client_request_id: str | None = None,
+        batch_id: str | None = None,
     ) -> None:
         resolved_provider_id = mcp_server_id or provider_id
         if resolved_provider_id is None:
@@ -90,6 +99,8 @@ class ApprovalRequest:
         self.correlation_id = correlation_id
         self.requested_by = requested_by
         self.tenant_id = tenant_id
+        self.client_request_id = client_request_id
+        self.batch_id = batch_id
 
     @property
     def mcp_server_id(self) -> str:
