@@ -4,6 +4,7 @@ Contains data classes for batch call specifications and results,
 plus configuration constants.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -65,6 +66,13 @@ class CallSpec:
     #: The worker sets it on a copy of the caller's identity, so the call's
     #: audit record names it. Empty when auth is off or nothing decided.
     caller_roles: tuple[str, ...] = ()
+    #: Set by the caller when it gives up on the call: the client cancelled
+    #: the request that carries it (#2279). A call held for approval is then
+    #: abandoned, as when its batch is cancelled, so the record turns
+    #: ``cancelled`` at once and nobody can approve it. Only the hold reads it:
+    #: a call already granted runs, once. None when the caller has no request
+    #: that can be cancelled.
+    caller_gone: threading.Event | None = None
 
 
 @dataclass

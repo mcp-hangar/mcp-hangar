@@ -20,8 +20,14 @@ Example:
     ])
 """
 
+import asyncio
+import functools
+import threading
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
+
+import anyio.to_thread
 
 from mcp_hangar._sdk_compat import Context, FastMCP, make_mcp_error
 
@@ -64,6 +70,8 @@ from .relay_seam import govern_relayed_tasks
 from .validator import validate_batch
 
 logger = get_logger(__name__)
+
+_T = TypeVar("_T")
 
 # Global executor instance
 _executor = BatchExecutor()
@@ -433,6 +441,20 @@ def hangar_call(
         hangar_call(calls=[...], max_attempts=3)
         # On failure: {"results": [{"retry_metadata": {"attempts": 3, "retries": [...]}, ...}]}
     """
+    return _hangar_call(calls, max_concurrency, timeout, fail_fast, max_attempts, ctx, caller_gone=None)
+
+
+def _hangar_call(
+    calls: list[dict[str, Any]],
+    max_concurrency: int,
+    timeout: float,
+    fail_fast: bool,
+    max_attempts: int | None,
+    ctx: Context | None,
+    *,
+    caller_gone: threading.Event | None,
+) -> dict[str, Any]:
+    """The body of ``hangar_call``, with the caller's signal that it gave up (``CallSpec.caller_gone``, #2279)."""
     # A suspended session is refused before anything is done on its behalf:
     # no validation, authorization, cold start or upstream call, and no span
     # (GHSA-fhwh-fmq2-7m5c). Raised rather than returned as a batch, so the
@@ -473,7 +495,44 @@ def hangar_call(
         timeout=timeout,
         fail_fast=fail_fast,
         max_attempts=max_attempts,
+        caller_gone=caller_gone,
     )
+
+
+async def run_until_caller_gone(work: Callable[[threading.Event], _T]) -> _T:
+    """Run *work* in a worker thread, and tell it when the awaiting request is cancelled (#2279).
+
+    *work* gets the event to put in each ``CallSpec.caller_gone``. A client that
+    gives up on the request (`notifications/cancelled`, or its own timeout)
+    cancels the await, not the thread: the event is how the batch learns it,
+    so a call held for approval is abandoned and its record cancelled at once.
+    The cancel is re-raised, so the request still ends as cancelled.
+
+    The thread comes from anyio's pool, the one the SDK runs a synchronous
+    tool in, so ``hangar_call`` keeps the concurrency it had. ``abandon_on_cancel``
+    is what lets the cancel through: without it the await waits for the thread.
+    Context variables -- the caller's identity among them -- reach the thread.
+    """
+    caller_gone = threading.Event()
+    try:
+        return await anyio.to_thread.run_sync(work, caller_gone, abandon_on_cancel=True)
+    except asyncio.CancelledError:
+        caller_gone.set()
+        raise
+
+
+@functools.wraps(hangar_call)
+async def _hangar_call_tool(**kwargs: Any) -> dict[str, Any]:
+    """``hangar_call`` as the MCP tool: the same surface, and a client cancel reaches a held call (#2279).
+
+    The SDK runs a synchronous tool in a worker thread that a cancelled request
+    waits for, so a call held for approval went on waiting after the client
+    gave up, and could still be approved and run. Here the batch runs in a
+    thread too, but the cancel ends the await at once and tells the batch: a
+    held call is abandoned and its approval cancelled. A call already granted
+    runs, once.
+    """
+    return await run_until_caller_gone(lambda caller_gone: _hangar_call(caller_gone=caller_gone, **kwargs))
 
 
 def call_as(
@@ -550,6 +609,7 @@ def _run_calls(
     fail_fast: bool,
     max_attempts: int | None,
     whole_result: bool = False,
+    caller_gone: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Validate, authorize and execute *calls* for one caller: the body of ``hangar_call``.
 
@@ -564,6 +624,8 @@ def _run_calls(
         request_ctx: The FastMCP request context, when there is a request.
         whole_result: Whether the caller takes each result whole, uncut by the
             size cap and the configured truncation (``CallSpec.whole_result``).
+        caller_gone: Set when the caller gives up on the calls
+            (``CallSpec.caller_gone``, #2279), or None when it cannot.
     """
     batch_id = str(uuid.uuid4())
 
@@ -669,6 +731,7 @@ def _run_calls(
                     max_retries=max_attempts,  # Internal field uses max_retries
                     whole_result=whole_result,
                     caller_roles=roles_by_index.get(i, ()),
+                    caller_gone=caller_gone,
                 )
             )
             exec_to_orig.append(i)
@@ -750,7 +813,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
     Args:
         mcp: FastMCP server instance.
     """
-    mcp.tool()(hangar_call)
+    mcp.tool()(_hangar_call_tool)
     logger.info("hangar_call_tool_registered")
 
 
@@ -765,6 +828,7 @@ __all__ = [
     "register_batch_tools",
     "configure_interceptors",
     "configured_executor",
+    "run_until_caller_gone",
     # Models
     "BatchResult",
     "CallResult",
