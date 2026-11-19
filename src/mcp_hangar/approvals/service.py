@@ -35,7 +35,7 @@ from mcp_hangar.metrics import (
 from mcp_hangar.observability.tracing import get_tracer
 
 from .delivery.base import ApprovalDelivery
-from .hold_registry import ApprovalHoldRegistry
+from .hold_registry import ApprovalHoldRegistry, EitherSet
 from .models import ApprovalRequest, ApprovalResult, ApprovalState
 from .persistence.sqlite_approval_repository import ApprovalRepository
 
@@ -169,6 +169,7 @@ class ApprovalGateService:
         tenant_id: str | None = None,
         requested_by: str | None = None,
         abandoned: threading.Event | None = None,
+        caller_gone: threading.Event | None = None,
     ) -> ApprovalResult:
         """Called from mcp_tool_wrapper check_approval hook.
 
@@ -188,6 +189,12 @@ class ApprovalGateService:
         in-process abandonment recorded an approval for a call that would not
         run. A decision that reached the record first still stands: a denial is
         honoured, and an approval is recorded ``cancelled``, not granted (#1702).
+
+        ``caller_gone`` is the caller's own signal that it gave up on the request
+        (#2279). It ends the hold the same way, and an approval or a denial that
+        arrives after it is refused. But the batch has not given up on the call:
+        an approval that reached the record before it is granted, and the call
+        runs once, as it would have had the caller waited.
         """
         resolved_provider_id = provider_id or mcp_server_id
         if resolved_provider_id is None:
@@ -246,7 +253,10 @@ class ApprovalGateService:
             )
             await self._publish(requested_event)
 
-            await self._hold_registry.register(approval_id, abandoned=abandoned)
+            hold_abandoned = abandoned
+            if caller_gone is not None:
+                hold_abandoned = caller_gone if abandoned is None else EitherSet(abandoned, caller_gone)
+            await self._hold_registry.register(approval_id, abandoned=hold_abandoned)
 
             try:
                 await self._delivery.send(request)

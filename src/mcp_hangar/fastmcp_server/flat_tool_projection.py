@@ -1199,7 +1199,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # Imported lazily: the batch package reaches `server.bootstrap`, which
         # imports this module back. At module scope that makes this module
         # impossible to import first in a fresh interpreter (#894).
-        from ..server.tools.batch import CallSpec, configured_executor
+        from ..server.tools.batch import CallSpec, configured_executor, run_until_caller_gone
         from ..server.tools.tool_permissions import management_tools_for
         from .flat_call_tasks import govern_flat_call
 
@@ -1286,37 +1286,42 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # the connection -- including the very progress notifications this
         # call asked for.
         executor = configured_executor()
+        # A client that cancels the request ends this await, not the thread:
+        # `caller_gone` tells the call, so a hold it gave up on is cancelled in
+        # its record at once and never runs (#2279).
         try:
-            batch = await asyncio.to_thread(
-                executor.execute,
-                batch_id=call_id,
-                calls=[
-                    CallSpec(
-                        index=0,
-                        call_id=call_id,
-                        mcp_server=mcp_server_id,
-                        tool=tool_name,
-                        arguments=arguments or {},
-                        progress_token=upstream_token,
-                        # One call whose caller expects the upstream's result
-                        # as sent, with no continuation tool to fetch a cut
-                        # part: batch truncation left it an invalid tool
-                        # result (#1609). As the facade does (#1453). The
-                        # response size is bounded where it is read (#1613).
-                        whole_result=True,
-                        caller_roles=caller_roles,
-                    )
-                ],
-                max_concurrency=1,
-                global_timeout=30.0,
-                fail_fast=False,
-                # The same request context `hangar_call` threads through (#1492).
-                # Without it the executor read an empty `params._meta`, so this
-                # call forwarded no protocol negotiation, no inbound W3C trace
-                # context and no routing headers -- and a current-spec upstream,
-                # which mints a task only for a client that declared the tasks
-                # extension, never made one for a front-door caller.
-                request_ctx=mcp_ctx,
+            batch = await run_until_caller_gone(
+                lambda caller_gone: executor.execute(
+                    batch_id=call_id,
+                    calls=[
+                        CallSpec(
+                            index=0,
+                            call_id=call_id,
+                            mcp_server=mcp_server_id,
+                            tool=tool_name,
+                            arguments=arguments or {},
+                            progress_token=upstream_token,
+                            # One call whose caller expects the upstream's result
+                            # as sent, with no continuation tool to fetch a cut
+                            # part: batch truncation left it an invalid tool
+                            # result (#1609). As the facade does (#1453). The
+                            # response size is bounded where it is read (#1613).
+                            whole_result=True,
+                            caller_roles=caller_roles,
+                            caller_gone=caller_gone,
+                        )
+                    ],
+                    max_concurrency=1,
+                    global_timeout=30.0,
+                    fail_fast=False,
+                    # The same request context `hangar_call` threads through (#1492).
+                    # Without it the executor read an empty `params._meta`, so this
+                    # call forwarded no protocol negotiation, no inbound W3C trace
+                    # context and no routing headers -- and a current-spec upstream,
+                    # which mints a task only for a client that declared the tasks
+                    # extension, never made one for a front-door caller.
+                    request_ctx=mcp_ctx,
+                )
             )
         finally:
             progress_relay.unregister(upstream_token)
