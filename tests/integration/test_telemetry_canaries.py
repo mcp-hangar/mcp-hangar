@@ -28,9 +28,11 @@ never sent or a sink never captured.
 
 The same contract on the wire, from a real ``serve --http`` to a real OTLP
 receiver, is ``tests/live/test_t3_telemetry_canaries.py``: it imports
-``CONTRACT`` and the rules from here. Not covered yet, and tracked on #1535:
-exceptions raised on other paths (a validation error) and the rest of the
-identifier table. Of that table, the calling principal is a
+``CONTRACT`` and the rules from here. A validation error is
+``unknown_target``: a server or tool name the caller makes up, which a
+validator refuses and names back to the caller (#2285). Not covered yet, and
+tracked on #1535: the rest of the identifier table. Of that table, the calling
+principal is a
 canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
 (#1580).
 """
@@ -79,6 +81,7 @@ SCENARIO = {
     "l7_header_encoded": "argument",
     "shaped_result": "shaping",
     "transport_error": "transport_error",
+    "unknown_target": "unknown_target",
 }
 
 
@@ -279,7 +282,33 @@ class MirroredParam:
         return None
 
 
-Rule = Forbidden | Bounded | Kept | Redacted | ShapeRedacted | MirroredParam
+@dataclass(frozen=True)
+class Identifier:
+    """A name the caller made up, kept only whole, as the value of a field that names a target.
+
+    The contract lets a span and a log line name the tool a call targeted
+    (``gen_ai.tool.name``, the SDK span's ``tools/call <name>``), and that is the
+    caller's own word when nothing declares it. It may not reach any text: a
+    status description, an event, a message. Absence is allowed too.
+    """
+
+    keys: frozenset[str]
+    name_prefixes: tuple[str, ...] = ()
+
+    def check(self, records: list[Any], kind: str, transport: str) -> None:
+        value = canary(kind, transport)
+        names = {prefix + value for prefix in self.name_prefixes}
+        allowed = sum(
+            1
+            for m in _mappings(records)
+            for k, v in m.items()
+            if isinstance(v, str) and ((k in self.keys and v == value) or (k == "name" and v in names))
+        )
+        carried = [s[:120] for s in _strings(records) if head(kind, transport) in s]
+        assert len(carried) == allowed, f"the name reached text, not only {sorted(self.keys)}: {carried[:3]}"
+
+
+Rule = Forbidden | Bounded | Kept | Redacted | ShapeRedacted | MirroredParam | Identifier
 
 #: What #1276 allows each sink to carry; every cell it leaves out is ``Forbidden``.
 #: The event store and ``/ws/events`` are the one different trust boundary: they
@@ -304,6 +333,12 @@ CONTRACT["ws_events"] = dict(_RETAINED)
 # What a tool declares with `x-mcp-header` reaches an HTTP upstream as its
 # `Mcp-Param-*` header too (SEP-2243, #2011): the argument the upstream gets in
 # the body, mirrored for the routing layer in front of it.
+# A target the caller made up (#2285): named where a span or a log line names
+# the tool it was asked for, and nowhere else.
+CONTRACT["span_attributes"] = {
+    "unknown_target": Identifier(frozenset({"gen_ai.tool.name"}), name_prefixes=("tools/call ",)),
+}
+CONTRACT["structured_logs"] = {"unknown_target": Identifier(frozenset({"tool"}))}
 CONTRACT["upstream_carriers"] = {
     "l7_header": MirroredParam("Mcp-Param-Region"),
     "l7_header_encoded": MirroredParam("Mcp-Param-Zone"),
@@ -405,7 +440,8 @@ def test_the_canary_went_in(runs, surface, kind, transport):
     """The value entered on this surface and transport: an absence elsewhere is then a result."""
     run = runs[surface]
     response = run["calls"][f"{transport}:{SCENARIO[kind]}"]
-    assert "result" in response, response
+    # A front-door call of a made-up tool is answered with an error status.
+    assert "result" in response or (kind == "unknown_target" and surface == "front_door"), response
 
     if kind in _ARGUMENT_KEYS:
         key = _ARGUMENT_KEYS[kind]
@@ -423,6 +459,10 @@ def test_the_canary_went_in(runs, surface, kind, transport):
             whole = canary(kind, transport) + "-" + "y" * BIG_RESULT_LENGTH
             assert response["result"]["content"] == [{"type": "text", "text": whole}], json.dumps(response)[:500]
             assert not response["result"].get("isError"), json.dumps(response)[:500]
+    elif kind == "unknown_target":
+        # Refused by a validator, which names it back to the caller: the front
+        # door's -32601, `hangar_call`'s validation error.
+        assert canary(kind, transport) in json.dumps(response), json.dumps(response)[:500]
     elif kind == "transport_error":
         # The client skipped the garbled line and read the answer after it.
         assert f"{transport}-transport_error" in [r["tool"] for r in _upstream_calls(run, transport)]

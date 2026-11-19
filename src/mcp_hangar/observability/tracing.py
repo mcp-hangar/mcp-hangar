@@ -83,7 +83,7 @@ SPAN_ATTRIBUTE_LENGTH_LIMIT_ENV = "MCP_SPAN_ATTRIBUTE_LENGTH_LIMIT"
 try:
     from opentelemetry import trace
     from opentelemetry.sdk.resources import SERVICE_NAME, OTELResourceDetector, Resource
-    from opentelemetry.sdk.trace import SpanLimits, TracerProvider
+    from opentelemetry.sdk.trace import SpanLimits, SpanProcessor, TracerProvider
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
@@ -100,9 +100,13 @@ try:
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
     OTEL_AVAILABLE = True
+    # The base of `_ForeignSpanBounds`, typed loosely so it reads the same
+    # with and without the SDK installed.
+    _SpanProcessorBase: Any = SpanProcessor
 except ImportError:
     OTEL_AVAILABLE = False
     trace = None  # type: ignore[assignment]
+    _SpanProcessorBase = object
 
 # The OTLP/gRPC span exporter, the default protocol's. OTLP/HTTP is imported
 # only when selected: see _build_otlp_span_exporter().
@@ -376,6 +380,59 @@ def _span_limits() -> Any:
     )
 
 
+class _ForeignSpanBounds(_SpanProcessorBase):
+    """R2 on every span of Hangar's provider, whichever library starts it (#2285).
+
+    Hangar's own spans carry no text by construction (``_TextFreeTracer``,
+    ``mark_span_error``). A span another library starts on the provider Hangar
+    owns does not: the MCP SDK's SERVER span copies a JSON-RPC error's message,
+    which can echo what the caller sent, into its status description. The SDK
+    offers no hook for that, so this processor, installed before any exporter,
+    wraps each span's ``set_status`` and ``update_name`` as it starts:
+
+    - a status description is kept only when it is the span's ``error.type``,
+      the one value the contract (#1276, R2) allows, and dropped otherwise;
+    - a span name is cut to the attribute bound, as an attribute value is.
+
+    A span that cannot be wrapped keeps what its library gives it, and the
+    first such span is logged.
+    """
+
+    def __init__(self, name_limit: int) -> None:
+        self._name_limit = name_limit
+        self._warned = False
+
+    def on_start(self, span: Any, parent_context: Any = None) -> None:
+        try:
+            _bound_span_text(span, self._name_limit)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a span this cannot wrap must still be served
+            if not self._warned:
+                self._warned = True
+                logger.warning("tracing_span_bounds_not_applied", error_type=type(e).__name__)
+
+
+def _bound_span_text(span: Any, name_limit: int) -> None:
+    """Wrap ``span``'s ``set_status`` and ``update_name`` as ``_ForeignSpanBounds`` describes."""
+    set_status, update_name = span.set_status, span.update_name
+
+    def bounded_set_status(status: Any, description: str | None = None) -> None:
+        if isinstance(status, Status):
+            code, description = status.status_code, status.description
+        else:
+            code = status
+        error_type = (span.attributes or {}).get(ERROR_TYPE)
+        kept = description if description and description == error_type else None
+        set_status(Status(code, kept))
+
+    def bounded_update_name(name: str) -> None:
+        update_name(name[:name_limit])
+
+    span.set_status = bounded_set_status
+    span.update_name = bounded_update_name
+    if len(span.name) > name_limit:
+        update_name(span.name[:name_limit])
+
+
 @dataclass(frozen=True)
 class OtlpExporterSettings:
     """What Hangar passes an SDK OTLP exporter. None leaves a value to the SDK."""
@@ -566,7 +623,10 @@ def init_tracing(
         # Create tracer mcp_server. Held locally until registered: a provider
         # the API refused to register must not end up in module state.
         sampler = _build_sampler()
-        provider = TracerProvider(resource=resource, sampler=sampler, span_limits=_span_limits())
+        limits = _span_limits()
+        provider = TracerProvider(resource=resource, sampler=sampler, span_limits=limits)
+        # First, so every processor and exporter after it sees bounded text (#2285).
+        provider.add_span_processor(_ForeignSpanBounds(limits.max_attribute_length or SPAN_ATTRIBUTE_LENGTH_LIMIT))
         logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters
