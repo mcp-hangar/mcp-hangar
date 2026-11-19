@@ -291,8 +291,14 @@ def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[st
     rows are then under no group, and a member row whose member the file does
     not name in that group is skipped. Each stays in place for a peer whose
     file still declares them.
+
+    A group restored from its row takes only the member rows of its own
+    `generation` (#2231): a create over a row a file claimed starts a new one,
+    and the members the earlier group of that id left are not the new group's.
+    A group the file declares takes them, as before.
     """
     restored: list[McpServerGroup] = []
+    generation_of: dict[str, int] = {}
     with swapping():
         for record in stored.groups:
             if record.claimed_by_file and declared_group_members(record.group_id) is None:
@@ -311,6 +317,7 @@ def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[st
                 group.collect_events()  # This is no creation: nothing goes on the log.
                 groups[record.group_id] = group
                 restored.append(group)
+                generation_of[record.group_id] = record.generation
         for row in stored.members:
             member_group, server = groups.get(row.group_id), _server_of_member(row.member_id, repository)
             if member_group is None or member_group.get_member(row.member_id) is not None:
@@ -323,6 +330,17 @@ def restore_stored_groups(stored: StoredGroups, repository: Any, groups: dict[st
                     detail=(
                         "the configuration file no longer names this member in the group; name it in the file "
                         "again, or add it with POST /api/groups/{group_id}/members, to restore it"
+                    ),
+                )
+                continue
+            if row.group_id in generation_of and row.generation != generation_of[row.group_id]:
+                logger.warning(
+                    "recovery_skipped_member_row_of_an_earlier_group",
+                    group_id=row.group_id,
+                    member_id=row.member_id,
+                    detail=(
+                        "the group was created again after a configuration file dropped it; this member was added "
+                        "to the earlier group, so add it with POST /api/groups/{group_id}/members to restore it"
                     ),
                 )
                 continue

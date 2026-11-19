@@ -420,6 +420,10 @@ class GroupRecord:
     #: restored where the file in force does not declare it. NULL in a row an
     #: older release wrote, which reads as False.
     claimed_by_file: bool = False
+    #: Which creation of the group this row is (#2231). A create that replaces a
+    #: row a file claimed starts the next one, so the members an earlier group
+    #: of that id left are not taken for the new group's. NULL reads as 0.
+    generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -432,6 +436,9 @@ class GroupMemberRecord:
     priority: int = 1
     #: Whether a configuration file named the member in that group (#2171), as for `GroupRecord`.
     claimed_by_file: bool = False
+    #: The group row's `generation` when the member was added (#2231); 0 under a
+    #: group with no row, one the file declares. NULL reads as 0.
+    generation: int = 0
 
 
 @dataclass(frozen=True)
