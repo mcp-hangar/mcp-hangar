@@ -202,7 +202,9 @@ class TestPostgresRows:
         asyncio.run(repository.save_group_member(GroupMemberRecord("pool", "kept", 3, 2)))
         sql, parameters = cursor.execute.call_args.args
         assert "DO UPDATE SET weight = excluded.weight, priority = excluded.priority" in sql
-        assert parameters == ("pool", "kept", 3, 2)
+        # The member takes its group row's generation (#2231).
+        assert "(SELECT generation FROM mcp_server_groups WHERE group_id = %s)" in sql
+        assert parameters == ("pool", "kept", 3, 2, "pool")
 
     def test_a_delete_is_one_transaction_over_both_tables(self, fixture) -> None:
         repository, connection, cursor = fixture
@@ -213,9 +215,10 @@ class TestPostgresRows:
 
     def test_groups_are_read_in_one_transaction(self, fixture) -> None:
         repository, _, cursor = fixture
-        cursor.fetchall.side_effect = [[("runtime", "priority", 2, "d", None)], [("pool", "kept", 3, 2, 1)]]
+        cursor.fetchall.side_effect = [[("runtime", "priority", 2, "d", None, 3)], [("pool", "kept", 3, 2, 1, None)]]
         assert asyncio.run(repository.read_groups()) == StoredGroups(
-            (GroupRecord("runtime", "priority", 2, "d"),), (GroupMemberRecord("pool", "kept", 3, 2, True),)
+            (GroupRecord("runtime", "priority", 2, "d", generation=3),),
+            (GroupMemberRecord("pool", "kept", 3, 2, True),),
         )
 
     def test_a_failed_write_rolls_back_and_raises(self, fixture) -> None:

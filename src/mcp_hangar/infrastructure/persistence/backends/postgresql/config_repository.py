@@ -75,6 +75,10 @@ CREATE TABLE IF NOT EXISTS mcp_server_group_members (
 -- (#2171). An older release ignores the column; its inserts leave it NULL.
 ALTER TABLE mcp_server_groups ADD COLUMN IF NOT EXISTS claimed_by_file INTEGER;
 ALTER TABLE mcp_server_group_members ADD COLUMN IF NOT EXISTS claimed_by_file INTEGER;
+-- Which creation of a group a row is, and which one a member was added to
+-- (#2231). An older release ignores the column; NULL reads as 0.
+ALTER TABLE mcp_server_groups ADD COLUMN IF NOT EXISTS generation INTEGER;
+ALTER TABLE mcp_server_group_members ADD COLUMN IF NOT EXISTS generation INTEGER;
 
 -- A live row under a recorded name carries the recorded key_ref (#1987). This
 -- release's writes already do; the trigger binds a release that predates the
@@ -775,25 +779,28 @@ class PostgresMcpServerConfigRepository:
         """Every stored group and member, in one transaction."""
         _, (groups, members) = self._group_rows(
             (
-                "SELECT group_id, strategy, min_healthy, description, claimed_by_file FROM mcp_server_groups "
+                "SELECT group_id, strategy, min_healthy, description, claimed_by_file, generation "
+                "FROM mcp_server_groups "
                 "ORDER BY group_id",
                 (),
             ),
             (
-                "SELECT group_id, member_id, weight, priority, claimed_by_file FROM mcp_server_group_members "
+                "SELECT group_id, member_id, weight, priority, claimed_by_file, generation "
+                "FROM mcp_server_group_members "
                 "ORDER BY group_id, member_id",
                 (),
             ),
         )
         return StoredGroups(
-            tuple(GroupRecord(g, s, n, d, bool(claimed)) for g, s, n, d, claimed in groups),
-            tuple(GroupMemberRecord(g, m, w, p, bool(claimed)) for g, m, w, p, claimed in members),
+            tuple(GroupRecord(g, s, n, d, bool(claimed), gen or 0) for g, s, n, d, claimed, gen in groups),
+            tuple(GroupMemberRecord(g, m, w, p, bool(claimed), gen or 0) for g, m, w, p, claimed, gen in members),
         )
 
     async def create_group(self, record: GroupRecord) -> bool:
         """Store a new group, without any member rows a dropped group of that id left. False when a row exists.
 
-        A row a file claimed is replaced, unclaimed, as on SQLite (#2171).
+        A row a file claimed is replaced, unclaimed, and starts the group's next
+        `generation`, as on SQLite (#2171, #2231).
         """
         stale = (
             "DELETE FROM mcp_server_group_members WHERE group_id = %s "
@@ -802,7 +809,8 @@ class PostgresMcpServerConfigRepository:
         insert = (
             "INSERT INTO mcp_server_groups (group_id, strategy, min_healthy, description) VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (group_id) DO UPDATE SET strategy = excluded.strategy, min_healthy = excluded.min_healthy, "
-            "description = excluded.description, claimed_by_file = NULL WHERE mcp_server_groups.claimed_by_file = 1"
+            "description = excluded.description, claimed_by_file = NULL, "
+            "generation = COALESCE(mcp_server_groups.generation, 0) + 1 WHERE mcp_server_groups.claimed_by_file = 1"
         )
         values = (record.group_id, record.strategy, record.min_healthy, record.description)
         statements = (stale, (record.group_id, record.group_id)), (insert, values)
@@ -825,11 +833,13 @@ class PostgresMcpServerConfigRepository:
         adds only a member the group does not hold, one the file no longer names.
         """
         sql = (
-            "INSERT INTO mcp_server_group_members (group_id, member_id, weight, priority) VALUES (%s, %s, %s, %s) "
+            "INSERT INTO mcp_server_group_members (group_id, member_id, weight, priority, generation) "
+            "VALUES (%s, %s, %s, %s, (SELECT generation FROM mcp_server_groups WHERE group_id = %s)) "
             "ON CONFLICT (group_id, member_id) DO UPDATE SET weight = excluded.weight, priority = excluded.priority, "
-            "claimed_by_file = NULL"
+            "claimed_by_file = NULL, generation = excluded.generation"
         )
-        self._group_rows((sql, (record.group_id, record.member_id, record.weight, record.priority)))
+        values = (record.group_id, record.member_id, record.weight, record.priority, record.group_id)
+        self._group_rows((sql, values))
 
     async def claim_group_row_for_file(
         self, group_id: str, member_id: str | None = None, lease: tuple[str, int] | None = None

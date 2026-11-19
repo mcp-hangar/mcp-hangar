@@ -265,4 +265,5 @@ class TestTheGroupClaimIsFencedToo:
         await configs.save_group_member(GroupMemberRecord("pool", "kept", 5, 1))
 
         assert await _group_claims(configs) == {"runtime": False, "pool/kept": False}
-        assert (await configs.read_groups()).groups == (GroupRecord("runtime", "random"),)
+        # The create over the claimed row is the group's next generation (#2231).
+        assert (await configs.read_groups()).groups == (GroupRecord("runtime", "random", generation=1),)
