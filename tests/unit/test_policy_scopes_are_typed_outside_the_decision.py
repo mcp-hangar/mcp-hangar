@@ -56,6 +56,7 @@ REGISTRATION_API = frozenset(
     {
         "adopt_config_policies",
         "clear_all",
+        "clear_stored_policy",
         "get_configured_policy",
         "get_policy_summary",
         "invalidate_cache",
@@ -71,6 +72,7 @@ REGISTRATION_API = frozenset(
         "set_member_policy",
         "set_provider_policy",
         "set_standalone_member_policy",
+        "set_stored_policy",
         "set_topology_mode",
         "topology_mode",
     }

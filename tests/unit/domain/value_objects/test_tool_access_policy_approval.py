@@ -248,3 +248,24 @@ class TestApprovalConfigFields:
         policy = ToolAccessPolicy(approval_timeout_seconds=60)
         with pytest.raises(AttributeError):
             policy.approval_timeout_seconds = 120  # type: ignore
+
+
+class TestACompositeMergedWithANarrowerAllowList:
+    """A third scope over two that merged into a composite keeps every check and every approval."""
+
+    @staticmethod
+    def _merged() -> ToolAccessPolicy:
+        composite = ToolAccessPolicy.merge(
+            ToolAccessPolicy(allow_list=("a*",), approval_list=("abc",)), ToolAccessPolicy(allow_list=("ab*",))
+        )
+        return ToolAccessPolicy.merge(composite, ToolAccessPolicy(allow_list=("abc", "abd"), approval_list=("abd",)))
+
+    def test_only_what_every_scope_allows_is_allowed(self):
+        merged = self._merged()
+        assert merged.is_tool_allowed("abc") and merged.is_tool_allowed("abd")
+        assert not merged.is_tool_allowed("abe") and not merged.is_tool_allowed("b")
+
+    def test_every_scopes_approval_is_kept(self):
+        merged = self._merged()
+        assert merged.requires_approval("abc") and merged.requires_approval("abd")
+        assert not merged.requires_approval("abe")

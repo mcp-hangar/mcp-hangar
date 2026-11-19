@@ -432,6 +432,25 @@ def test_group_changes_reach_a_running_replica_and_a_restart_reads_the_same_rows
     assert _group(fleet.start("group-gone"), group) is None, "a deleted group came back from the rows"
 
 
+def test_a_policy_cleared_on_one_replica_lifts_on_a_running_peer_and_after_a_restart(fleet: Fleet) -> None:
+    """A tool access policy cleared on A stops applying on A and on B with no restart (#2178)."""
+    a, b = fleet.a, fleet.b
+    server = tr.name("cleared")
+    created = a.create(OP, {"mcp_server_id": server, "mode": "remote", "endpoint": fleet.endpoints["plain"]})
+    assert created.status_code == 201, created.text
+    tr.eventually(_held_by(b, server), "B holds the server")
+
+    policy = a.api("POST", f"/auth/policies/provider/{server}", ADMIN, {"deny_list": ["echo"]})
+    assert policy.status_code == 200, policy.text
+    tr.eventually(_denied_by_group_policy(b, server), "B applies the policy")
+
+    cleared = a.api("DELETE", f"/auth/policies/provider/{server}", ADMIN)
+    assert cleared.status_code == 204, cleared.text
+    _assert_served(a.call(DEV, server), "A, right after its own clear")
+    tr.eventually(_served_again(b, server), "B lifts the cleared policy")
+    _assert_served(fleet.start("cleared-restart").call(DEV, server), "a replica started after the clear")
+
+
 # --- a server the file took over and then dropped (#2171) -------------------------------
 
 _DENY_ECHO = {"tools": {"allow": ["ping"]}, "defaultAction": "Deny", "mode": "Enforce"}

@@ -93,6 +93,19 @@ def _scope_label(scope: str, kind: str) -> str:
 _POLICY_TABLES = ("mcp_server", "group", "member", "standalone_member")
 
 
+def _stored_address(scope: str, target_id: str) -> tuple[str, tuple[str, ...]] | None:
+    """The table and key a policy stored for *scope*/*target_id* is enforced under, as the REST endpoint sets it."""
+    if scope in ("provider", "mcp_server"):
+        return "mcp_server", (target_id, DEFAULT_KIND)
+    if scope == "group":
+        return "group", (target_id, DEFAULT_KIND)
+    if scope == "member":
+        parts = target_id.split(":", 1)
+        group_id, member_id = (parts[0], parts[1]) if len(parts) == 2 else (target_id, target_id)
+        return "member", (group_id, member_id, DEFAULT_KIND)
+    return None
+
+
 def _scope_covers(scope_key: str, prefix: str) -> bool:
     """Is *scope_key* the scope named by *prefix*, or a narrower one under it?
 
@@ -190,6 +203,15 @@ class ToolAccessResolver:
         # caller's. Kind-independent member mappings are tracked the same way.
         self._config_keys: dict[str, set[tuple[str, ...]]] = {table: set() for table in _POLICY_TABLES}
         self._config_mapping_keys: set[tuple[str, str]] = set()
+        # What the file declares, per table, whether or not a runtime caller
+        # has since overwritten it: what a cleared stored policy falls back to,
+        # as a restart adopts the file before it replays the rows (#2178).
+        self._config_declared: dict[str, dict[Any, ToolAccessPolicy]] = {table: {} for table in _POLICY_TABLES}
+        # The entries a stored policy put there -- the REST endpoint, its replay,
+        # a peer's -- each with the runtime policy it covers that is not the
+        # file's (a `hangar_load` deny list), or None. A clear acts only here: a
+        # key no stored policy holds is not the clear's to change (#2178).
+        self._stored_keys: dict[tuple[str, Any], ToolAccessPolicy | None] = {}
 
         # Topology mode controls what happens when caller has no identity
         # (member_id is None and no group context).
@@ -222,6 +244,7 @@ class ToolAccessResolver:
             else:
                 self._mcp_server_policies[(mcp_server_id, kind)] = policy
             self._config_keys["mcp_server"].discard((mcp_server_id, kind))
+            self._stored_keys.pop(("mcp_server", (mcp_server_id, kind)), None)
             self._invalidate_server_scope(mcp_server_id)
 
     def set_provider_policy(self, provider_id: str, policy: ToolAccessPolicy) -> None:
@@ -254,6 +277,60 @@ class ToolAccessResolver:
                 return self._member_policies.get((group_id, member_id or target_id, DEFAULT_KIND))
             return None
 
+    def set_stored_policy(self, scope: str, target_id: str, policy: ToolAccessPolicy) -> None:
+        """Enforce a policy the policy store holds for a scope/target (#2178).
+
+        The REST endpoint, the replay of its rows and a peer's row all write
+        here, so a clear can tell what it may take back. Scopes and targets are
+        the endpoint's: "provider"/"mcp_server", "group", or "member" with a
+        "group_id:member_id" target. The tool kind only, as the endpoint sets.
+        """
+        address = _stored_address(scope, target_id)
+        if address is None:
+            return
+        table, key = address
+        with self._lock:
+            if address in self._stored_keys:
+                covered = self._stored_keys[address]
+            else:
+                covered = None if key in self._config_keys[table] else self._tables()[table].get(key)
+            self._write_default_kind(table, key, policy)
+            self._stored_keys[address] = covered
+
+    def clear_stored_policy(self, scope: str, target_id: str) -> bool:
+        """Take back a stored policy, leaving what a restart would put there (#2178).
+
+        A restart adopts the file and then replays the stored rows, so with the
+        row gone the scope holds the file's policy if the file declares one, and
+        the file owns it again. Otherwise it holds the runtime policy the stored
+        one covered, or none. A key no stored policy holds is left as it is: a
+        policy `hangar_load` set is not lifted by clearing a row that never
+        existed. Returns whether anything was taken back.
+        """
+        address = _stored_address(scope, target_id)
+        if address is None:
+            return False
+        table, key = address
+        with self._lock:
+            if address not in self._stored_keys:
+                return False
+            covered = self._stored_keys.pop(address)
+            declared = self._config_declared[table].get(key)
+            restored = declared if declared is not None else covered
+            self._write_default_kind(table, key, restored if restored is not None else ToolAccessPolicy())
+            if declared is not None:
+                self._config_keys[table].add(key)
+            return True
+
+    def _write_default_kind(self, table: str, key: Any, policy: ToolAccessPolicy) -> None:
+        """Write through the public setter of *table*, so the cache is invalidated by its rule."""
+        if table == "mcp_server":
+            self.set_mcp_server_policy(key[0], policy)
+        elif table == "group":
+            self.set_group_policy(key[0], policy)
+        else:
+            self.set_member_policy(key[0], key[1], policy)
+
     def set_group_policy(self, group_id: str, policy: ToolAccessPolicy, *, kind: PolicyKind = DEFAULT_KIND) -> None:
         """Set the access policy for a group.
 
@@ -268,6 +345,7 @@ class ToolAccessResolver:
             else:
                 self._group_policies[(group_id, kind)] = policy
             self._config_keys["group"].discard((group_id, kind))
+            self._stored_keys.pop(("group", (group_id, kind)), None)
             # Invalidate cache for all members in this group
             self._invalidate_group_cache(group_id)
 
@@ -297,6 +375,7 @@ class ToolAccessResolver:
             else:
                 self._member_policies[key] = policy
             self._config_keys["member"].discard(key)
+            self._stored_keys.pop(("member", key), None)
 
             if resolved_mcp_server_id:
                 self._member_mcp_server_mapping[(group_id, member_id)] = resolved_mcp_server_id
@@ -413,6 +492,7 @@ class ToolAccessResolver:
             for key in [k for k in self._mcp_server_policies if k[0] == mcp_server_id]:
                 self._mcp_server_policies.pop(key, None)
                 self._config_keys["mcp_server"].discard(key)
+                self._stored_keys.pop(("mcp_server", key), None)
             for member_key in [k for k in self._standalone_member_policies if k[0] == mcp_server_id]:
                 self._standalone_member_policies.pop(member_key, None)
                 self._config_keys["standalone_member"].discard(member_key)
@@ -436,6 +516,7 @@ class ToolAccessResolver:
             for key in [k for k in self._group_policies if k[0] == group_id]:
                 self._group_policies.pop(key, None)
                 self._config_keys["group"].discard(key)
+                self._stored_keys.pop(("group", key), None)
             self._invalidate_group_cache(group_id)
 
     def remove_member_policy(self, group_id: str, member_id: str) -> None:
@@ -453,6 +534,7 @@ class ToolAccessResolver:
             for key in [k for k in self._member_policies if k[:2] == (group_id, member_id)]:
                 self._member_policies.pop(key, None)
                 self._config_keys["member"].discard(key)
+                self._stored_keys.pop(("member", key), None)
             # Every kind, after the loop: a member with a mapping and no policy
             # of its own still read the mapped server's policies (#2203).
             self._pop_cache_scope(f"group:{group_id}:member:{member_id}")
@@ -542,6 +624,9 @@ class ToolAccessResolver:
             for keys in self._config_keys.values():
                 keys.clear()
             self._config_mapping_keys.clear()
+            for declared in self._config_declared.values():
+                declared.clear()
+            self._stored_keys.clear()
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -591,9 +676,15 @@ class ToolAccessResolver:
                     for key in self._config_keys[table] - set(entries):
                         live.pop(key, None)
                     self._config_keys[table] = set(entries)
+                    self._config_declared[table] = dict(entries)
                 else:
                     self._config_keys[table] |= set(entries)
+                    self._config_declared[table].update(entries)
                 live.update(entries)
+                # The file's policy replaces a stored one here; a reload replays
+                # the rows over it next, and the replay holds the key again.
+                for key in entries:
+                    self._stored_keys.pop((table, key), None)
             if replace:
                 for mapping_key in self._config_mapping_keys - set(incoming_mapping):
                     self._member_mcp_server_mapping.pop(mapping_key, None)

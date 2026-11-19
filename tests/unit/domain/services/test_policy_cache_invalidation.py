@@ -93,6 +93,18 @@ def test_a_removal_reaches_every_cached_scope(writer: str, server_id: str) -> No
 
 
 @pytest.mark.parametrize("server_id", SERVER_IDS)
+def test_clearing_a_stored_policy_reaches_every_cached_scope(server_id: str) -> None:
+    # The clear writes through the same setter, so the same rule (#2178).
+    resolver = _resolver()
+    resolver.set_stored_policy("provider", server_id, DENY)
+    _warm(resolver)
+
+    assert resolver.clear_stored_policy("provider", server_id)
+
+    _assert_fresh(resolver)
+
+
+@pytest.mark.parametrize("server_id", SERVER_IDS)
 def test_invalidating_one_server_reaches_every_cached_scope(server_id: str) -> None:
     resolver = _resolver()
     _warm(resolver)

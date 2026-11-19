@@ -430,18 +430,9 @@ class SetToolAccessPolicyHandler(CommandHandler):
         #    over the gate (#915).
         self._tap_store.set_policy(command.scope, command.target_id, policy)
 
-        # 2. Update in-memory resolver so runtime enforcement is immediate
-        if command.scope == "provider":
-            resolver.set_mcp_server_policy(command.target_id, policy)
-        elif command.scope == "group":
-            resolver.set_group_policy(command.target_id, policy)
-        elif command.scope == "member":
-            # target_id for member scope is "group_id:member_id"
-            parts = command.target_id.split(":", 1)
-            if len(parts) == 2:
-                resolver.set_member_policy(parts[0], parts[1], policy)
-            else:
-                resolver.set_member_policy(command.target_id, command.target_id, policy)
+        # 2. Update in-memory resolver so runtime enforcement is immediate.
+        #    As a stored policy, so a clear can take it back (#2178).
+        resolver.set_stored_policy(command.scope, command.target_id, policy)
 
         # 3. Emit domain event
         self._event_bus.publish(
@@ -466,7 +457,8 @@ class SetToolAccessPolicyHandler(CommandHandler):
 class ClearToolAccessPolicyHandler(CommandHandler):
     """Handler for ClearToolAccessPolicyCommand.
 
-    Removes the policy from the TAP store and emits ToolAccessPolicyCleared.
+    Removes the policy from the TAP store, takes it back from the in-memory
+    resolver, and emits ToolAccessPolicyCleared.
     """
 
     def __init__(self, tap_store: Any, event_bus: Any):
@@ -486,6 +478,13 @@ class ClearToolAccessPolicyHandler(CommandHandler):
         )
 
         self._tap_store.clear_policy(scope=command.scope, target_id=command.target_id)
+
+        from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
+
+        # What a restart puts there now the row is gone: the file's policy for
+        # the scope if it declares one, else none (#2178). Peers do the same
+        # from the event.
+        get_tool_access_resolver().clear_stored_policy(command.scope, command.target_id)
         self._event_bus.publish(
             ToolAccessPolicyCleared(scope=command.scope, target_id=command.target_id, cleared_by=command.cleared_by)
         )
