@@ -30,11 +30,17 @@ The same contract on the wire, from a real ``serve --http`` to a real OTLP
 receiver, is ``tests/live/test_t3_telemetry_canaries.py``: it imports
 ``CONTRACT`` and the rules from here. A validation error is
 ``unknown_target``: a server or tool name the caller makes up, which a
-validator refuses and names back to the caller (#2285). Not covered yet, and
-tracked on #1535: the rest of the identifier table. Of that table, the calling
-principal is a
-canary here too: ``PRINCIPAL_CONTRACT`` keeps it off every span by default
-(#1580).
+validator refuses and names back to the caller (#2285).
+
+The identifier table of #1276 is checked for the caller authentication binds:
+``PRINCIPAL_CONTRACT`` keeps the principal off every span by default (#1580)
+and in the audit, ``test_the_principal_is_logged_by_security_events_only``
+keeps it to the log lines that need it, and ``TENANT_CONTRACT`` puts the tenant
+on spans and audit records. ``spoofed_identity`` is a tenant, user and agent
+claimed in headers, baggage and ``_meta``: identity comes from authentication
+only (principle 4), so the claim reaches no sink, and
+``test_identity_is_the_authenticated_callers`` shows what did. Not covered: a
+session id, which the stateless requests here do not have.
 """
 
 from __future__ import annotations
@@ -56,7 +62,7 @@ from mcp_hangar.domain.events.base import EVENT_TEXT_LENGTH_LIMIT, FREE_TEXT_FIE
 from mcp_hangar.logging_config import LOG_FIELD_LENGTH_LIMIT
 from mcp_hangar.observability.tracing import SPAN_ATTRIBUTE_LENGTH_LIMIT
 
-from ._canary_upstream import BIG_RESULT_LENGTH, KINDS, PRINCIPAL, TRANSPORTS, canary, encoded, head, tail
+from ._canary_upstream import BIG_RESULT_LENGTH, KINDS, PRINCIPAL, TENANT, TRANSPORTS, canary, encoded, head, tail
 
 pytestmark = [pytest.mark.otel_sdk, pytest.mark.security]
 
@@ -75,6 +81,7 @@ SCENARIO = {
     "rpc_error": "rpc_error",
     "baggage": "argument",
     "header": "argument",
+    "spoofed_identity": "argument",
     "approver_reason": "approval",
     "l7_argument": "argument",
     "l7_header": "argument",
@@ -414,6 +421,56 @@ def test_the_principal_reaches_only_the_sinks_that_may_name_it(runs, surface, si
         assert carried, "the sink is meant to name the caller, and holds no trace of the principal"
     elif rule is False:
         assert carried == [], f"{len(carried)} value(s) name the caller: {carried[:3]}"
+
+
+#: The loggers that may name the caller. The identifier table allows identity
+#: in a log line where a security event needs it: authentication, keys and
+#: roles. The front door's per-call line (#1362) names the principal too, by
+#: design: it is the one record a refused flat call leaves, and it exists to
+#: match a client's failure to the caller who saw it.
+SECURITY_LOGGERS = ("mcp_hangar.auth.", "security", "mcp_hangar.fastmcp_server.flat_call_log")
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_the_principal_is_logged_by_security_events_only(runs, surface):
+    named = [r for r in _logs(runs[surface]) if PRINCIPAL in json.dumps(r)]
+    elsewhere = [
+        (r.get("logger"), r.get("event")) if isinstance(r, dict) else str(r)[:120]
+        for r in named
+        if not (isinstance(r, dict) and str(r.get("logger", "")).startswith(SECURITY_LOGGERS))
+    ]
+
+    assert named, "no security event named the caller, so the rule was not exercised"
+    assert elsewhere == [], elsewhere
+
+
+#: The identifier table of #1276 for the caller's tenant: spans and audit
+#: carry it (decisions 1 and 2), and the rest may.
+TENANT_CONTRACT: dict[str, bool | None] = dict.fromkeys(SINKS, None) | {
+    "span_attributes": True,
+    "otlp_audit_records": True,
+}
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("sink", SINKS)
+def test_the_tenant_reaches_the_sinks_that_carry_it(runs, surface, sink):
+    if TENANT_CONTRACT[sink] is True:
+        assert TENANT in set(_strings(SINKS[sink](runs[surface]))), "the sink is meant to carry the caller's tenant"
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_identity_is_the_authenticated_callers(runs, surface):
+    """Every identity field names the caller authentication bound, not one a request claimed."""
+    run = runs[surface]
+    bound = [e["identity_context"] for e in run["event_store"] if e.get("identity_context")]
+    audited = [r["attributes"] for r in run["audit"] if "mcp.caller.id" in r["attributes"]]
+
+    assert bound, "no event recorded the caller's identity"
+    assert {(i.get("user_id"), i.get("tenant_id")) for i in bound} == {(PRINCIPAL, TENANT)}
+    assert {i.get(k) for i in bound for k in ("agent_id", "session_id")} == {None}
+    assert audited, "no audit record named a caller"
+    assert {(a["mcp.caller.id"], a.get("mcp.caller.tenant_id")) for a in audited} == {(PRINCIPAL, TENANT)}
 
 
 # --- that the matrix means something ----------------------------------------
