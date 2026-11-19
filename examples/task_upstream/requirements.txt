@@ -3,4 +3,4 @@
 # server hand-rolls against b2 internals -- a floating pin would break it
 # silently. Bump deliberately, then re-run smoke_upstream.py.
 # Pulls mcp-types==2.0.0b2, starlette and uvicorn transitively.
-mcp==2.0.0b2
+mcp==2.2.0
