@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 _COLUMNS = (
     "approval_id, provider_id, tool_name, arguments_json, arguments_hash, "
     "requested_at, expires_at, state, channel, decided_by, decided_at, "
-    "reason, correlation_id, requested_by, tenant_id"
+    "reason, correlation_id, requested_by, tenant_id, client_request_id, batch_id"
 )
 
 # This adapter is where the DDL race was first understood, and for a long time
@@ -71,7 +71,9 @@ class PostgresApprovalRepository:
         reason TEXT,
         correlation_id TEXT DEFAULT '',
         requested_by TEXT,
-        tenant_id TEXT
+        tenant_id TEXT,
+        client_request_id TEXT,
+        batch_id TEXT
     )
     """
 
@@ -84,6 +86,8 @@ class PostgresApprovalRepository:
     MIGRATIONS_SQL = (
         "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS requested_by TEXT",
         "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+        "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS client_request_id TEXT",
+        "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS batch_id TEXT",
     )
 
     CREATE_INDEX_STATE_SQL = "CREATE INDEX IF NOT EXISTS idx_approval_state ON approval_requests (state)"
@@ -134,7 +138,7 @@ class PostgresApprovalRepository:
                         f"""
                         INSERT INTO approval_requests
                         ({_COLUMNS})
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             request.approval_id,
@@ -152,6 +156,8 @@ class PostgresApprovalRepository:
                             request.correlation_id,
                             request.requested_by,
                             request.tenant_id,
+                            request.client_request_id,
+                            request.batch_id,
                         ),
                     )
                 conn.commit()
@@ -317,4 +323,6 @@ class PostgresApprovalRepository:
             correlation_id=row[12] or "",
             requested_by=row[13] if len(row) > 13 else None,
             tenant_id=row[14] if len(row) > 14 else None,
+            client_request_id=row[15] if len(row) > 15 else None,
+            batch_id=row[16] if len(row) > 16 else None,
         )

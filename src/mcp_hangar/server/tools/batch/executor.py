@@ -1171,6 +1171,11 @@ class BatchExecutor:
                         # Passed only when there is one, so a gate service
                         # that predates it is called as before.
                         **({"caller_gone": caller_gone} if caller_gone is not None else {}),
+                        **(
+                            {"client_request_id": client_request.request_id, "batch_id": client_request.batch_id}
+                            if (client_request := getattr(call, "client_request", None)) is not None
+                            else {}
+                        ),
                     )
                 )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:

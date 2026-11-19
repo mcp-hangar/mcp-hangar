@@ -1199,7 +1199,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # Imported lazily: the batch package reaches `server.bootstrap`, which
         # imports this module back. At module scope that makes this module
         # impossible to import first in a fresh interpreter (#894).
-        from ..server.tools.batch import CallSpec, configured_executor, run_until_caller_gone
+        from ..server.tools.batch import CallSpec, ClientRequest, configured_executor, run_until_caller_gone
         from ..server.tools.tool_permissions import management_tools_for
         from .flat_call_tasks import govern_flat_call
 
@@ -1309,6 +1309,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
                             whole_result=True,
                             caller_roles=caller_roles,
                             caller_gone=caller_gone,
+                            client_request=ClientRequest.of(mcp_ctx, call_id),
                         )
                     ],
                     max_concurrency=1,

@@ -170,6 +170,8 @@ class ApprovalGateService:
         requested_by: str | None = None,
         abandoned: threading.Event | None = None,
         caller_gone: threading.Event | None = None,
+        client_request_id: str | None = None,
+        batch_id: str | None = None,
     ) -> ApprovalResult:
         """Called from mcp_tool_wrapper check_approval hook.
 
@@ -195,6 +197,12 @@ class ApprovalGateService:
         arrives after it is refused. But the batch has not given up on the call:
         an approval that reached the record before it is granted, and the call
         runs once, as it would have had the caller waited.
+
+        ``client_request_id`` and ``batch_id`` name the caller's request on the
+        record, so a ``notifications/cancelled`` that reaches another request,
+        or another replica, finds the hold (`cancel_client_request`, #2289).
+        When that cancel lands, ``caller_gone`` is set too, so a later call of
+        the same batch is not held for a caller that has left.
         """
         resolved_provider_id = provider_id or mcp_server_id
         if resolved_provider_id is None:
@@ -237,6 +245,8 @@ class ApprovalGateService:
                 correlation_id=correlation_id,
                 tenant_id=tenant_id,
                 requested_by=requested_by,
+                client_request_id=client_request_id,
+                batch_id=batch_id,
             )
 
             await self._repository.save(request)
@@ -281,6 +291,15 @@ class ApprovalGateService:
                     woken_by = await self._repository.get(approval_id)
                     cancelled = woken_by is not None and woken_by.state is ApprovalState.CANCELLED
                     wait_span.set_attribute("approval.decision", "cancelled" if cancelled else "denied")
+                    if (
+                        cancelled
+                        and caller_gone is not None
+                        and woken_by is not None
+                        and woken_by.reason == ABANDONED_REASON
+                    ):
+                        # Abandoned in the record, perhaps by a cancel another
+                        # request or replica wrote: the caller is gone (#2289).
+                        caller_gone.set()
                 else:
                     wait_span.set_attribute("approval.decision", "expired")
 
@@ -461,6 +480,54 @@ class ApprovalGateService:
         if not released_locally:
             logger.info("approval_resolved_without_local_hold", approval_id=approval_id)
         return True
+
+    async def cancel_client_request(
+        self, requested_by: str | None, tenant_id: str | None, client_request_id: str
+    ) -> list[str]:
+        """Cancel the calls held for the caller's request *client_request_id* (#2289).
+
+        Over streamable HTTP on the handshake era a ``notifications/cancelled``
+        is a request of its own. The gateway keeps no session, so it can reach
+        any replica, and the record is the one place every replica shares. Each
+        pending call of the request moves to ``cancelled`` by compare-and-swap,
+        as when the caller's own request is cancelled (#2272): a resolver
+        anywhere is then refused, and the holder reads the record and does not
+        run the call. A call approved first is not pending, so it runs once.
+
+        A JSON-RPC id is the caller's own choice and repeats across its
+        connections, so the cancel acts only when the pending calls of this
+        principal and tenant with that id are all of one batch. None, several
+        batches, or no principal: nothing is cancelled and the holds go on.
+
+        Returns:
+            The approvals this cancelled.
+        """
+        if not requested_by:
+            return []
+        pending = [
+            r
+            for r in await self._repository.list_by_state(ApprovalState.PENDING)
+            if r.client_request_id == client_request_id and r.requested_by == requested_by and r.tenant_id == tenant_id
+        ]
+        batches = {r.batch_id for r in pending}
+        if len(batches) != 1 or None in batches:
+            logger.info("approval_client_cancel_matched_no_one_request", batches=len(batches))
+            return []
+        cancelled: list[str] = []
+        for record in pending:
+            if await self._repository.transition(
+                record.approval_id,
+                (ApprovalState.PENDING,),
+                ApprovalState.CANCELLED,
+                None,
+                datetime.now(UTC),
+                ABANDONED_REASON,
+            ):
+                cancelled.append(record.approval_id)
+                # Wakes a hold on this replica now; another reads the record.
+                await self._hold_registry.resolve(record.approval_id, False)
+                logger.info("approval_cancelled_by_client_cancel", approval_id=record.approval_id)
+        return cancelled
 
     async def _wait_for_decision(self, approval_id: str, timeout_seconds: int) -> bool | None:
         """Wait for a decision from either instance that could make one.

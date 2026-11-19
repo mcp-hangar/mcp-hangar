@@ -500,6 +500,9 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
     there -- the SDK enforces header/body agreement itself -- but the legacy era
     does, and this path served neither before (#560).
 
+    A handshake-era ``notifications/cancelled`` is read before the SDK answers
+    it, because without a session it reaches no request (#2289).
+
     ``GET /mcp`` on the handshake era is answered by the sessionless
     ``list_changed`` stream rather than the SDK (#1366), and serving it is what
     makes ``tools.listChanged`` true on front_door HTTP.
@@ -511,16 +514,19 @@ def mcp_app_for_serving(mcp_server: Any) -> Any:
         The wrapped ASGI application.
     """
     from ..fastmcp_server.asgi import mcp_transport_security
+    from ..fastmcp_server.client_cancel import serve_client_cancels
     from ..fastmcp_server.modern_surface import wrap_front_door_routing
     from ..fastmcp_server.tool_list_changed import serve_push_channel
     from ..fastmcp_server.tool_list_changed_stream import serve_tool_list_changed_stream
 
     serve_push_channel("http")
     return wrap_front_door_routing(
-        serve_tool_list_changed_stream(
-            mcp_server.streamable_http_app(
-                transport_security=mcp_transport_security(),
-                stateless_http=True,
+        serve_client_cancels(
+            serve_tool_list_changed_stream(
+                mcp_server.streamable_http_app(
+                    transport_security=mcp_transport_security(),
+                    stateless_http=True,
+                )
             )
         )
     )
