@@ -128,8 +128,11 @@ def test_hangars_provider_installs_the_bounds_first(monkeypatch: pytest.MonkeyPa
     The registration is refused, so ``init_tracing`` shuts the provider down
     and leaves the module's state as it found it.
     """
+    # Whatever an earlier test or the job's environment left: tracing on, not yet built.
     monkeypatch.setattr(tracing, "_initialized", False)
     monkeypatch.setattr(tracing, "_shut_down", False)
+    monkeypatch.setattr(tracing, "_disabled", False)
+    monkeypatch.setenv("MCP_TRACING_ENABLED", "true")
     added: list[Any] = []
 
     class Recording(TracerProvider):
