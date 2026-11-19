@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.39.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.1...v2.39.2) (2026-11-19)
+
+### Fixed
+
+- **core:** a span Hangar does not create no longer carries text in its status description. The MCP SDK's SERVER span copied a JSON-RPC error's message into the status, so a front-door call of a made-up tool name exported `Tool '<name>' not found` with the caller's text in it. The telemetry data contract allows only the span's `error.type` there. The provider Hangar builds now keeps a status description only when it is `error.type`, and cuts a span name to the span attribute length limit (256 by default), whichever library started the span. The caller still receives the error message in full. A provider registered by someone else is left as its owner configured it. ([#2286](https://github.com/mcp-hangar/mcp-hangar/pull/2286))
+- **core:** three log lines no longer carry an upstream's raw output above DEBUG. A stdout line that is not JSON (`stdio_client_malformed_json`), an SSE data line that is not JSON (`http_client_sse_invalid_json`) and a stdio process's stderr when it exits (`stdio_client_process_stderr`) used to log up to 100 or 2000 characters of that text at ERROR, WARNING or INFO, where the telemetry data contract allows a summary only. They now log the text's size at the same level and the text itself, still bounded, in a `*_text` line at DEBUG. ([#2283](https://github.com/mcp-hangar/mcp-hangar/pull/2283))
+
 ## [2.39.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.0...v2.39.1) (2026-11-18)
 
 ### Fixed

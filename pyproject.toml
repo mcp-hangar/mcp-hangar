@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.39.1"
+version = "2.39.2"
 description = "A policy enforcement plane for MCP: it pins every tool, holds risky calls for approval, and enforces egress policy."
 readme = "README.md"
 license = {text = "MIT"}
