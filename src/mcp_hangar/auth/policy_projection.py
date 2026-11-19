@@ -1,4 +1,4 @@
-"""A tool access policy set on one replica applies on every replica (#2172).
+"""A tool access policy set or cleared on one replica applies on every replica (#2172, #2178).
 
 `ToolAccessPolicySet` carries the two lists and not the approval fields, so as in
 the fleet projection the event is the notification and the row is the content.
@@ -10,13 +10,18 @@ both have arrived, in either order.
 A projection: every replica needs it, and it publishes nothing. Idempotent, as
 the tail requires: applying one row twice is applying it once. This replica's
 own events are skipped, because the handler applied the policy before publishing.
+
+A clear is read the same way: no row means the scope holds what a restart puts
+there, the file's policy when the file declares one. Either event with no row
+behind it is a clear, so a set and a clear arriving in either order settle on
+the row.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from mcp_hangar.domain.events import DomainEvent, ToolAccessPolicySet
+from mcp_hangar.domain.events import DomainEvent, ToolAccessPolicyCleared, ToolAccessPolicySet
 from mcp_hangar.domain.events.producer import current_instance_id
 from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver, get_tool_access_resolver
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
@@ -38,20 +43,11 @@ def apply_stored_policy(resolver: ToolAccessResolver, scope: str, target_id: str
                 target_id=target_id,
                 reason="stored_row_predates_approval_columns",
             )
-    if scope == "provider":
-        resolver.set_mcp_server_policy(target_id, policy)
-    elif scope == "group":
-        resolver.set_group_policy(target_id, policy)
-    elif scope == "member":
-        parts = target_id.split(":", 1)
-        if len(parts) == 2:
-            resolver.set_member_policy(parts[0], parts[1], policy)
-        else:
-            resolver.set_member_policy(target_id, target_id, policy)
+    resolver.set_stored_policy(scope, target_id, policy)
 
 
 class ToolAccessPolicyProjection:
-    """Applies a peer's stored tool access policy to this replica's resolver."""
+    """Applies a peer's stored tool access policy, or its clearing, to this replica's resolver."""
 
     def __init__(self, tap_store: Any, instance_id: str | None = None) -> None:
         """Bind to the policy store the replicas share, as this replica or this process."""
@@ -59,8 +55,10 @@ class ToolAccessPolicyProjection:
         self._instance_id = instance_id or current_instance_id()
 
     def handle(self, event: DomainEvent) -> None:
-        """Read back the policy a peer stored and enforce it here."""
-        if not isinstance(event, ToolAccessPolicySet) or event.produced_by == self._instance_id:
+        """Read back the policy a peer stored or cleared and enforce it here."""
+        if not isinstance(event, (ToolAccessPolicySet, ToolAccessPolicyCleared)):
+            return
+        if event.produced_by == self._instance_id:
             return
         try:
             stored = self._tap_store.get_policy(event.scope, event.target_id)
@@ -73,8 +71,11 @@ class ToolAccessPolicyProjection:
                 detail="a peer changed the policy but the row could not be read; the local policy is unchanged",
             )
             return
+        resolver = get_tool_access_resolver()
         if stored is None:
-            # Cleared since. A clear changes what a restart replays, on each replica alike.
+            # Cleared, by this event or since: the scope falls back as a restart would (#2178).
+            if resolver.clear_stored_policy(event.scope, event.target_id):
+                logger.info("tool_access_policy_cleared_applied", scope=event.scope, target_id=event.target_id)
             return
-        apply_stored_policy(get_tool_access_resolver(), event.scope, event.target_id, stored)
+        apply_stored_policy(resolver, event.scope, event.target_id, stored)
         logger.info("tool_access_policy_applied", scope=event.scope, target_id=event.target_id)
