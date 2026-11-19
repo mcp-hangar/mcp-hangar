@@ -65,3 +65,16 @@ def test_unexpected_exit_still_logs_error():
     error_events = [c.args[0] for c in log.error.call_args_list]
     assert "stdio_client_process_exited" in error_events
     assert "stdio_client_process_stderr" in error_events
+
+
+def test_stderr_text_is_logged_only_at_debug():
+    """The process's stderr is the upstream's text: its size above DEBUG, the text at DEBUG only (#2282)."""
+    client = _client(closed=False, exit_code=1, stderr=b"secret-ish upstream output")
+    with patch("mcp_hangar.stdio_client.logger") as log:
+        client._capture_process_stderr()
+
+    above_debug = [c for level in (log.info, log.warning, log.error) for c in level.call_args_list]
+    assert "secret-ish" not in repr(above_debug)
+    [stderr_line] = [c for c in log.error.call_args_list if c.args[0] == "stdio_client_process_stderr"]
+    assert stderr_line.kwargs["stderr_bytes"] == len("secret-ish upstream output")
+    assert "secret-ish upstream output" in repr(log.debug.call_args_list)

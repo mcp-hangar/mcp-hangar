@@ -1316,7 +1316,9 @@ class HttpClient:
             return None
 
         except json.JSONDecodeError:
-            logger.warning("http_client_sse_invalid_json", data=data_line[:100])
+            # The upstream's text only at DEBUG (#1276 R7, #2282).
+            logger.warning("http_client_sse_invalid_json", length=len(data_line))
+            logger.debug("http_client_sse_invalid_json_text", data=data_line[:100])
             return None
 
     def notify(self, method: str, params: dict[str, Any] | None = None) -> None:

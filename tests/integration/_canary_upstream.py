@@ -49,6 +49,7 @@ KINDS = (
     "l7_header",  # an ``Mcp-Param-*`` value an L7 egress policy's header rule matches (#1295)
     "l7_header_encoded",  # the same, sent in the ``=?base64?...?=`` sentinel form the SDK decodes (#1600)
     "shaped_result",  # the text of a result big enough for batch truncation to cut (#1298)
+    "transport_error",  # upstream output that is not JSON-RPC: a stdout line, an SSE data line (#2282)
 )
 LONG_KINDS = frozenset({"is_error", "rpc_error", "approver_reason"})
 
@@ -83,7 +84,7 @@ def encoded(kind: str, transport: str) -> str:
 
 
 #: The tools, each producing one canary. ``guarded`` is approval-listed by the harness.
-TOOLS = ("note", "result_text", "is_error", "rpc_error", "guarded", "big_result")
+TOOLS = ("note", "result_text", "is_error", "rpc_error", "guarded", "big_result", "transport_error")
 
 #: How long ``big_result``'s text is: past the harness's batch budget, so a
 #: ``hangar_call`` of it is cut and its rest stored under a continuation id.
@@ -143,6 +144,11 @@ def answer(request: dict[str, Any], transport: str) -> dict[str, Any] | None:
     return {"jsonrpc": "2.0", "id": request["id"], **body}
 
 
+def garbled(transport: str) -> str:
+    """The line ``transport_error`` writes before its answer: not JSON, the canary in it."""
+    return "not json " + canary("transport_error", transport)
+
+
 def seen(request: dict[str, Any]) -> dict[str, Any]:
     """What the suite keeps of a request the upstream received."""
     params = request.get("params") or {}
@@ -162,6 +168,9 @@ def main() -> None:
             with open(record, "a", encoding="utf-8") as out:
                 out.write(json.dumps(seen(request)) + "\n")
         response = answer(request, "stdio")
+        if (request.get("params") or {}).get("name") == prefix("stdio") + "transport_error":
+            # Not JSON-RPC, then the answer: the client skips the line and reads on.
+            print(garbled("stdio"), flush=True)
         if response is not None:
             print(json.dumps(response), flush=True)
 
