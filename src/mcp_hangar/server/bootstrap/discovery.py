@@ -12,7 +12,9 @@ from ...application.discovery import (
     DiscoveryOrchestrator,
     DiscoveryServerGone,
 )
+from ...domain.contracts.event_bus import HandlerKind
 from ...domain.contracts.fleet import NotTheManagerError
+from ...domain.events import ConfigurationReloaded
 from ...domain.exceptions import (
     McpServerNotDiscoveredError,
     PeerIdentityChangeDenied,
@@ -26,6 +28,7 @@ from ...infrastructure.discovery.registry import (
     UnknownDiscoverySourceError,
     create_source,
 )
+from ...infrastructure.event_bus import EventBus
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 from .coordination import may_manage
@@ -112,6 +115,20 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
+
+
+def forget_what_a_reload_removes(event_bus: EventBus, repository: Any, orchestrator: DiscoveryOrchestrator) -> None:
+    """After each reload, discovery forgets the servers it removed, as a restart would (#2222).
+
+    `LOCAL_VIEW`: it reads this process's fleet and changes this process's
+    tracking, on the replica that reloaded.
+    """
+
+    def forget(event: object) -> None:
+        if isinstance(event, ConfigurationReloaded) and event.mcp_servers_removed:
+            orchestrator.forget_removed(event.mcp_servers_removed, gone=lambda name: not repository.exists(name))
+
+    event_bus.subscribe(ConfigurationReloaded, forget, kind=HandlerKind.LOCAL_VIEW)
 
 
 def _runtime_event_bus():

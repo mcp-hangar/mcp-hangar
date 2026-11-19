@@ -52,7 +52,7 @@ from .components import ServerComponents, get_auth_compat_exports, load_componen
 from .composition import close_what_bootstrap_started, release_process_wiring, set_running_config_path
 from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_auth_cqrs, init_cqrs, init_saga
-from .discovery import _auto_add_volumes, create_discovery_orchestrator
+from .discovery import _auto_add_volumes, create_discovery_orchestrator, forget_what_a_reload_removes
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
 from .hot_loading import init_hot_loading
@@ -731,6 +731,9 @@ def bootstrap(
     discovery_config = full_config.get("discovery", {})
     if discovery_config.get("enabled", False):
         discovery_orchestrator = create_discovery_orchestrator(full_config)
+    if discovery_orchestrator is not None:
+        # A server a reload removes is forgotten by discovery too (#2222).
+        forget_what_a_reload_removes(runtime.event_bus, runtime.repository, discovery_orchestrator)
 
     # Create DiscoveryRegistry and register CQRS handlers
     discovery_registry = None
