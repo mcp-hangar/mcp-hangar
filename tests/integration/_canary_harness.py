@@ -33,7 +33,8 @@ Surfaces: ``hangar_call`` is the default topology, each call a ``hangar_call``;
 it, each call the upstream tool's own flat ``tools/call``.
 
 Added, and only as observers: in-memory exporters on the providers the
-bootstrap registered, the three compliance formats one process cannot select at
+bootstrap registered, one scrape of ``/metrics`` through the endpoint
+``serve --http`` mounts, the three compliance formats one process cannot select at
 once (LEEF, JSON lines, syslog) subscribed exactly as the bootstrap subscribes
 CEF, and one ``/api/ws/events`` subscriber.
 
@@ -263,19 +264,21 @@ def _subscribe_other_compliance_formats(runtime: Any, directory: Path) -> None:
 def _served_app(context: Any) -> Any:
     """``run_http``'s app: ``/api`` to the REST API, everything else to ``/mcp``, behind its auth enforcement."""
     from starlette.applications import Starlette
-    from starlette.routing import Mount
+    from starlette.routing import Mount, Route
 
     from mcp_hangar.server.api import create_api_router
     from mcp_hangar.server.api.middleware import create_auth_enforced_app
-    from mcp_hangar.server.lifecycle import mcp_app_for_serving
+    from mcp_hangar.server.lifecycle import mcp_app_for_serving, metrics_endpoint
 
     mcp_app = mcp_app_for_serving(context.mcp_server)
     api_app = create_api_router(auth_components=getattr(context, "auth_components", None))
-    aux_app = Starlette(routes=[Mount("/api", app=api_app)])
+    # `/metrics` through the endpoint `serve --http` mounts: what a scraper reads.
+    aux_app = Starlette(routes=[Route("/metrics", metrics_endpoint, methods=["GET"]), Mount("/api", app=api_app)])
 
     async def combined_app(scope: Any, receive: Any, send: Any) -> None:
         path = scope.get("path", "") if scope["type"] in ("http", "websocket") else ""
-        await (aux_app if path == "/api" or path.startswith("/api/") else mcp_app)(scope, receive, send)
+        aux = path in ("/api", "/metrics") or path.startswith("/api/")
+        await (aux_app if aux else mcp_app)(scope, receive, send)
 
     return create_auth_enforced_app(combined_app, context.auth_components)
 
@@ -421,6 +424,11 @@ def main(surface: str, out: Path, endpoint: str, l7_mode: str = "audit") -> None
             expected = sum(1 for _p, _s, e in store.read_all(0, 100_000) if type(e).__name__ in WS_EVENT_TYPES)
             while len(ws_events) < expected:
                 ws_events.append(json.loads(ws.receive_text()))
+        # After every call, so each one's series are in the scrape.
+        scraped = client.get("/metrics", headers={"X-API-Key": observer_key})
+        if scraped.status_code != 200:
+            raise SystemExit(f"/metrics answered {scraped.status_code}")
+        metrics = scraped.text.splitlines()
 
     for server in context.runtime.repository.get_all().values():
         server.shutdown()
@@ -440,6 +448,7 @@ def main(surface: str, out: Path, endpoint: str, l7_mode: str = "audit") -> None
                     name: _read_lines(directory / f"{name}.log") for name in ("cef", "leef", "jsonlines", "syslog")
                 },
                 "logs": _read_lines(log_file),
+                "metrics": metrics,
                 "ws_events": ws_events,
                 "event_store": [{"stream": s, **e.to_dict()} for _p, s, e in store.read_all(0, 100_000)],
                 "upstream_seen": {
