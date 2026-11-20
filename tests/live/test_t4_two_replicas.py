@@ -19,6 +19,9 @@ database directly, so a replica cannot vouch for itself.
 * Group changes reach running replicas (#2172): a group, its member and its
   policy made on A hold on B with no restart, leave B again, and come back from
   the rows on a replica that starts later.
+* A server or group the file took over and then dropped (#2171): a replica on
+  the new file does not restore it, a peer on the old file keeps its policy,
+  and a reload on the replica without the lease changes no shared row.
 * A mixed-version set: the published 2.31.0 next to this checkout.
 
 Opt-in twice: `MCP_HANGAR_LIVE_VERIFY=1`, and `HANGAR_TEST_POSTGRES_DSN` naming
@@ -587,6 +590,97 @@ def test_a_replica_whose_file_dropped_a_taken_over_group_does_not_restore_it_and
         assert claims() == {None: 1, server: None}, "a row a peer restores from was deleted or claimed"
         system = a_again.api("GET", "/system/", OP).json()["system"]["instance"]
         assert system["dormant_file_claimed_rows"] == 1, system
+
+
+def _manages_fleet(replica: tr.Replica) -> bool:
+    got = replica.api("GET", "/system/", OP)
+    assert got.status_code == 200, got.text
+    return bool(got.json()["system"]["instance"]["manages_fleet"])
+
+
+def test_a_reload_on_a_replica_without_the_lease_deletes_no_shared_state(tmp_path: Path) -> None:
+    """The replica that does not hold the lease reloads a file that dropped a server; no shared row changes.
+
+    A server created over the API, with an L7 policy and a stored tool access
+    policy, is taken over by the file of both replicas, and the lease holder
+    claims its row. The other replica then reloads a file that no longer
+    declares the server. Its own copy goes, and nothing the fleet shares does:
+    the configuration row, live and claimed, keeps its L7 policy, and the stored
+    policy row stays. The holder still refuses the denied tool, and so does a
+    replica started afterwards on a file that declares the server, from its
+    first call (#2171, the third acceptance criterion).
+    """
+    address = tr.host_address()
+    if address is None:
+        pytest.skip("no non-loopback address to serve the upstreams on; the API refuses loopback endpoints")
+    server = tr.name("reloaded-away")
+    with ExitStack() as stack:
+        database = stack.enter_context(tr.fresh_database(DSN))
+        keys = tr.seed_keys(database, list(_ROLES))
+        endpoint = stack.enter_context(tr.upstream(None, address, tmp_path))
+        empty = tr.replica_config(database, address, _ROLES)
+        declares = empty.replace(
+            "mcp_servers: {}", f"mcp_servers:\n  {server}:\n    mode: remote\n    endpoint: {endpoint}"
+        )
+
+        def replica(label: str, config: str) -> tr.Replica:
+            (tmp_path / label).mkdir()
+            hangar = stack.enter_context(running_hangar(tmp_path / label, config))
+            return tr.Replica(label=label, base_url=hangar.base_url, keys=keys)
+
+        def stored_policies() -> list[tuple[Any, ...]]:
+            return database.query(
+                "SELECT scope, allow_list, deny_list, approval_list FROM tool_access_policies WHERE target_id = %s",
+                (server,),
+            )
+
+        with ExitStack() as seeding:
+            (tmp_path / "seed").mkdir()
+            hangar = seeding.enter_context(running_hangar(tmp_path / "seed", empty))
+            seed = tr.Replica(label="seed", base_url=hangar.base_url, keys=keys)
+            created = seed.create(OP, {"mcp_server_id": server, "mode": "remote", "endpoint": endpoint})
+            assert created.status_code == 201, created.text
+            pushed = seed.api("PUT", f"/mcp_servers/{server}/l7_policy", ADMIN, _DENY_ECHO)
+            assert pushed.status_code == 200, pushed.text
+            policy = seed.api("POST", f"/auth/policies/provider/{server}", ADMIN, {"deny_list": ["ping"]})
+            assert policy.status_code == 200, policy.text
+
+        a, b = replica("a", declares), replica("b", declares)
+        tr.eventually(
+            lambda: True if (database.row(server) or {}).get("claimed_by_file") is True else None,
+            "the lease holder claims the row its file took over",
+            timeout=60,
+        )
+        holder, other = tr.eventually(
+            lambda: next(
+                (pair for pair in ((a, b), (b, a)) if _manages_fleet(pair[0]) and not _manages_fleet(pair[1])), None
+            ),
+            "exactly one replica holds the management lease",
+        )
+        row, policies = database.row(server), stored_policies()
+        assert row is not None and row.get("l7_policy"), f"the claimed row holds no L7 policy: {row}"
+        assert policies, "the stored tool access policy was never written"
+
+        (tmp_path / other.label / "config.yaml").write_text(empty)
+        reloaded = other.api("POST", "/config/reload", ADMIN, {})
+        assert reloaded.status_code == 200, reloaded.text
+        tr.eventually(_gone_from(other, server), f"{other.label} drops the server its reloaded file no longer declares")
+        if _manages_fleet(other) or not _manages_fleet(holder):
+            pytest.fail(f"the lease moved to {other.label} during the test, so its reload proves nothing")
+
+        assert database.row(server) == row, "a reload without the lease changed or deleted the claimed row"
+        assert stored_policies() == policies, "a reload without the lease changed or deleted the stored policy"
+        result = holder.call(DEV, server)
+        assert result.get("success") is False and result.get("error_type") == _L7_DENIED, (
+            f"the holder, whose file still declares the server, served the denied tool: {result}"
+        )
+        fresh = replica("fresh", declares)
+        result = fresh.call(DEV, server)
+        assert result.get("success") is False and result.get("error_type") == _L7_DENIED, (
+            f"a replica started after the reload served the denied tool: {result}"
+        )
+        replayed = fresh.api("GET", f"/auth/policies/provider/{server}", ADMIN)
+        assert replayed.status_code == 200 and "ping" in replayed.text, replayed.text
 
 
 # --- mixed versions ------------------------------------------------------------------
