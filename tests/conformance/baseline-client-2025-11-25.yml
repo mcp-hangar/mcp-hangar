@@ -8,6 +8,14 @@
 # The client under test is tests/conformance/hangar_client.py: the scenario's
 # test server as a remote server in config.yaml, started over REST, called
 # through hangar_call. Each entry names the issue that tracks it.
+#
+# `elicitation-sep1034-client-defaults` is a non-pass by decision. Hangar
+# declares no elicitation capability as a client and drops every
+# server-to-client request, so it never answers the scenario's
+# `elicitation/create`. Answering by itself would consent on the user's behalf
+# with no human in the loop, and relaying the request to Hangar's own caller is
+# an undesigned feature. The decision and when to revisit it are on #2013:
+# https://github.com/mcp-hangar/mcp-hangar/issues/2013#issuecomment-7064031092
 client:
   - auth/basic-cimd # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - auth/metadata-default # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
@@ -23,5 +31,5 @@ client:
   - auth/token-endpoint-auth-basic # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - auth/token-endpoint-auth-none # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - auth/token-endpoint-auth-post # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
-  - elicitation-sep1034-client-defaults # #2013
+  - elicitation-sep1034-client-defaults # #2013 -- by decision: Hangar answers no server-to-client request
   - sse-retry # #2014
