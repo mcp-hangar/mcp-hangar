@@ -24,4 +24,3 @@ client:
   - auth/token-endpoint-auth-none # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - auth/token-endpoint-auth-post # #2012 -- Hangar authenticates to upstreams with static credentials, not as an OAuth client
   - elicitation-sep1034-client-defaults # #2013
-  - sse-retry # #2014
