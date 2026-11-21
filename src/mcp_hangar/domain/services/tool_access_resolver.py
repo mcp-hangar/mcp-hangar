@@ -476,7 +476,7 @@ class ToolAccessResolver:
         """Remove EVERY access policy for a mcp_server -- tool, prompt and resource,
         the server's own AND its per-tenant (``tool_access.member.<tenant>``) ones.
 
-        The one caller is the hot-unload path, and unloading a server retires
+        The callers -- `hangar_unload`, the REST delete and a reload -- retire
         the whole server, not one kind of policy about it. Removing a single
         kind would leave the other two behind for an id that is free to be
         loaded again, so a later server inheriting that id would be governed by
