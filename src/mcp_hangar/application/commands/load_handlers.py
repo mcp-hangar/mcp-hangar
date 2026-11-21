@@ -27,6 +27,7 @@ from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
 from ...redactor import OutputRedactor
 from ..ports.log_buffers import ILogBuffers
+from ..ports.stored_policies import IStoredToolAccessPolicies
 from ..services.package_resolver import PackageResolver
 from ..services.registry_ids import sanitize_mcp_server_id
 from ..services.secrets_resolver import SecretsResolver
@@ -546,6 +547,7 @@ class UnloadMcpServerHandler(CommandHandler):
         runtime_store: RuntimeMcpServerStore,
         event_bus: IEventBus,
         log_buffers: ILogBuffers | None = None,
+        stored_policies: IStoredToolAccessPolicies | None = None,
     ):
         """Initialize the handler.
 
@@ -555,10 +557,14 @@ class UnloadMcpServerHandler(CommandHandler):
             log_buffers: Where the unloaded server's log buffer is released.
                 Omitted means none is, and its output stays registered under an
                 id that is free again -- what unloading did before #1506.
+            stored_policies: Where the unloaded server's stored tool-access
+                policies are forgotten (#2298). Omitted means none are, and the
+                next restart replays them onto a server loaded under the id.
         """
         self._runtime_store = runtime_store
         self._event_bus = event_bus
         self._log_buffers = log_buffers
+        self._stored_policies = stored_policies
 
     def handle(self, command: UnloadMcpServerCommand) -> dict[str, Any]:
         """Handle the unload mcp_server command.
@@ -608,9 +614,12 @@ class UnloadMcpServerHandler(CommandHandler):
             self._log_buffers.release(command.mcp_server_id)
             logger.info("log_buffer_released", mcp_server_id=command.mcp_server_id)
 
-        # Remove tool access policy for unloaded mcp_server
+        # Its policies go with it: the id is free for a later server, which
+        # must not inherit them (#1028), now or after a restart (#2298).
         resolver = get_tool_access_resolver()
         resolver.remove_mcp_server_policy(command.mcp_server_id)
+        if self._stored_policies is not None:
+            self._stored_policies.forget(command.mcp_server_id)
 
         lifetime_seconds = metadata.lifetime_seconds()
 

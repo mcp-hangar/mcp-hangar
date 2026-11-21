@@ -10,7 +10,7 @@ from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
-from ..config import ServerConfigLoader, declared_in_config
+from ..config import ServerConfigLoader, StoredServerPolicies, declared_in_config
 from ..context import get_context
 from ..state import GROUPS, RUNTIME_PROVIDERS, get_runtime, set_group_rebalance_saga
 from .components import absolute_state_dir, register_auth_cqrs
@@ -165,6 +165,9 @@ def init_cqrs(
         # A discovered server whose definition changed is replaced only after
         # its calls in flight finish, as a graceful reload restarts one (#2091).
         drain=_drain_in_flight_calls,
+        # A deleted server's stored policies go where no peer reads them, as a
+        # reload's do, so a later server under the id inherits none (#2298).
+        stored_policies=StoredServerPolicies(),
     )
 
     if discovery_registry is not None:
