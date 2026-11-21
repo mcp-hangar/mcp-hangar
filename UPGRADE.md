@@ -1,5 +1,66 @@
 # Upgrading MCP Hangar
 
+## Upgrade to 2.40.0
+
+### a group created again keeps only the members added to it
+
+A group that `POST /api/groups` creates again, after a configuration file
+declared it and then dropped it, no longer takes the members the earlier group
+of that id had when this replica restarts. Only the members added after the
+create come back; each skipped one logs
+`recovery_skipped_member_row_of_an_earlier_group`. Add a member it should keep
+with `POST /api/groups/{group_id}/members`. A replica whose file still declares
+the group keeps every member, as before.
+
+The group and member rows get a `generation` column, added by the schema
+migration on both SQLite and PostgreSQL. Rows written before it read as the
+first generation, so nothing changes for a group that was never created again.
+During a rolling upgrade, a member that an older release adds to a group
+created again is written without a generation, and is skipped by this release
+at the next restart; add it again once every replica runs this release.
+
+### a held call the client gives up on is cancelled, not left for a late approval
+
+When a stdio client cancels a `tools/call` that is held for approval -- its
+own request timeout, or a `notifications/cancelled` -- the gateway now abandons the
+hold, as it does when the batch is cancelled: the approval record moves from
+`pending` to `cancelled` at once, with the reason "the held call was cancelled
+before a decision; it did not run", and the call never runs. This holds for a
+front door's flat call and for `hangar_call`. Before, only the request ended,
+the record stayed `pending` until its window closed, and an approval given
+meanwhile ran the call although the client had already been told it failed.
+
+What changes for an existing deployment:
+
+- An approval given after the client gave up is refused: `approvals approve`
+  exits 1 and REST answers 409, where before they succeeded and the call ran.
+  An approver who wants the action done must ask the agent to call again.
+- The approval window no longer outlives the client's own request timeout,
+  on a client that cancels the request when that timeout passes. The MCP
+  Python SDK does, and the TypeScript SDK gives a request 60 s by default, so
+  a held call can be cancelled long before `approval_timeout_seconds` ends.
+  Raise the client's request timeout to leave the approver more time.
+- A call approved before the client gave up is unchanged: it runs once, even
+  if the client leaves while the upstream is still answering.
+- Over streamable HTTP nothing changes yet: a client's cancel does not reach
+  the held call, which stays open for its window (mcp-hangar#2289).
+
+### a held call an HTTP client gave up on is cancelled
+
+When a streamable HTTP client cancels a `tools/call` that is held for approval,
+the approval now moves to `cancelled` and the call never runs, as it already
+did over stdio. An approver who acts on it afterwards is refused ("was
+cancelled: the held call will not run", REST 409).
+
+The approval table gains two columns, `client_request_id` and `batch_id`. They
+are added on start-up, on SQLite and PostgreSQL alike. Calls held before the
+upgrade have neither, so a cancel does not reach them.
+
+A cancel is matched by the caller's principal, tenant and JSON-RPC request id.
+When the same principal and tenant have two held requests with the same id, for
+example two agents sharing one API key, the cancel does nothing and both stay
+held, as before. Give each agent its own credential if this matters.
+
 ## Upgrade to 2.39.2
 
 ### an upstream's raw output is logged only at DEBUG

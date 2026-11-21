@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.2...v2.40.0) (2026-11-21)
+
+### Added
+
+- **core:** clearing a tool access policy with `DELETE /api/auth/policies/{scope}/{target_id}`
+  takes effect at once, on the replica that cleared it and on every running peer
+  within the event tail's interval. Before, the row was deleted but the policy
+  held until each replica restarted. What a clear leaves is what a restart
+  leaves: the configuration file's policy for that scope when the file declares
+  one, and no policy when it does not. A clear only takes back a policy the
+  endpoint stored; a policy `hangar_load` set for a server, with no stored row
+  behind it, is not lifted by a clear. ([#2292](https://github.com/mcp-hangar/mcp-hangar/pull/2292))
+
+### Fixed
+
+- **core:** a server deleted over REST or unloaded with `hangar_unload` no longer leaves its tool-access policy to the next server created under the same id. The REST delete cleared the policy neither from memory nor from the store, so a server created again was governed by it at once; `hangar_unload` cleared it from memory and left the stored row, which the next restart applied again. Both now remove the policy from memory and delete the stored row, as a reload already does (#2234). A server that discovery removes keeps its policy, so an operator's deny list survives the server dropping out of discovery and back. On a gateway whose policy store replicas may share (PostgreSQL, or a coordinated fleet) the stored rows are kept, because a replica whose file still declares the server replays them. ([#2303](https://github.com/mcp-hangar/mcp-hangar/pull/2303))
+- **core:** a streamable HTTP client that gave up on a call held for approval
+  left the approval open. On the handshake era the client's
+  `notifications/cancelled` is a POST of its own, and the gateway, which serves
+  HTTP without a session, had no request for it to reach: the record stayed
+  `pending`, and a later `mcp-hangar approvals approve` ran a call the client had
+  been told failed. The gateway now finds the held calls of the named request
+  through their approval records, on whichever replica the cancel lands, and
+  cancels them as a stdio cancel does (mcp-hangar#2279). It acts only for an
+  authenticated principal, and only when the pending calls of that principal and
+  tenant with that request id are all of one request. On 2026-07-28 the client
+  closes the request's stream, which already cancelled the hold ([#2297](https://github.com/mcp-hangar/mcp-hangar/pull/2297))
+- **core:** a stdio client that gave up on a call held for approval left the
+  approval open. When the client cancelled the `tools/call` (its own request timeout, or
+  `notifications/cancelled`), only the request ended: the call stayed held, the
+  record stayed `pending`, and a later `mcp-hangar approvals approve` (or REST)
+  exited 0 and ran a call the client had been told failed. The cancel now reaches
+  the hold, on a front door's flat call and on `hangar_call` alike: the record
+  moves to `cancelled` at once, every resolver is refused ("was cancelled: the
+  held call will not run", REST 409), and the call never runs. A call a human
+  granted before the client left still runs, once. Over streamable HTTP the
+  client's cancel does not reach the hold yet (mcp-hangar#2289) ([#2290](https://github.com/mcp-hangar/mcp-hangar/pull/2290))
+- **core:** a group created again over a row a configuration file had claimed
+  took, at this replica's next restart, every member added over REST to the
+  earlier group of that id, so it routed to servers its new creator never added,
+  and a reload and a restart disagreed about who was in it. Each creation is now
+  a generation of the group's row, and a member row records the generation it
+  was added to: a group restored from its row takes only its own members, while a
+  peer whose file still declares the group keeps them all, as before ([#2294](https://github.com/mcp-hangar/mcp-hangar/pull/2294))
+- **core:** a server that discovery registered, that the configuration file then took over and that a reload later dropped is discovered again, as after a restart. Discovery still held the name after the reload: as tracked, so every scan read the source's report as unchanged and skipped it, or as static, when the file had declared it at boot. The server stayed gone until the next restart, although its source still reported it. A reload now has discovery forget each server it removes, so the next scan registers the server, or holds it for approval, while the source reports it. A server the source no longer reports stays gone, and a server created again under the name before discovery hears of the reload is left alone. ([#2293](https://github.com/mcp-hangar/mcp-hangar/pull/2293))
+- **core:** a call to a remote upstream that closed its SSE response stream
+  before it answered failed with "SSE response did not contain valid JSON-RPC
+  response", although streamable HTTP lets an upstream do that (SEP-1699) and
+  deliver the answer on a resumed stream. Hangar, as the client of its upstreams,
+  now waits the upstream's `retry` interval (one second without one), opens a GET
+  that names the last event id in `Last-Event-ID`, and takes the answer there,
+  re-opening from the newer id if that stream closes too, all inside the call's
+  timeout (mcp-hangar#2014). The standing GET stream also waits `retry` and sends
+  `Last-Event-ID` when it re-opens, where it re-opened at once before. A
+  2026-07-28 connection has no GET stream and does not resume, and Hangar's own
+  server streams still carry no event id or `retry` (mcp-hangar#2232). ([#2304](https://github.com/mcp-hangar/mcp-hangar/pull/2304))
+
 ## [2.39.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.1...v2.39.2) (2026-11-19)
 
 ### Fixed
