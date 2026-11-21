@@ -10,6 +10,7 @@ from ...domain.model import McpServer
 from ...domain.security.hot_load_trust import hot_load_trust
 from ...infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 from ...logging_config import get_logger
+from ..config import StoredServerPolicies
 from ..state import get_runtime, get_runtime_mcp_servers
 from .logs import LogBuffers
 
@@ -112,6 +113,7 @@ def init_hot_loading(
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
             log_buffers=log_buffers,
+            stored_policies=StoredServerPolicies(),
         )
 
         logger.info("hot_loading_initialized")

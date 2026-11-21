@@ -143,7 +143,7 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
         """Persist a tool access policy (upsert).
 
         Args:
-            scope: "mcp_server", "group", or "member".
+            scope: "provider", "group", or "member".
             target_id: Provider/group/member identifier.
             policy: The policy to persist, in full -- including the approval
                 gate, which the store used to have no column for (#915).

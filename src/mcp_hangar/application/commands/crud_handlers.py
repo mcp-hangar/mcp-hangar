@@ -41,6 +41,7 @@ from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
+from ...domain.services import get_tool_access_resolver
 from ...domain.services.fleet_snapshot import snapshot_of
 from ...domain.value_objects import HealthCheckInterval, IdleTTL, LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.value_objects.mcp_server import MemberPriority, MemberWeight
@@ -52,6 +53,7 @@ from ..group_events import publish_group_events, publish_member_starts, publish_
 from ..group_membership import fill_vacant_member, vacate_member
 from ..ports.log_buffers import ILogBuffers
 from ..ports.peer_identity import IPeerIdentityAuthority
+from ..ports.stored_policies import IStoredToolAccessPolicies
 from .crud_commands import (
     AddGroupMemberCommand,
     AdoptDiscoveredMcpServerCommand,
@@ -460,8 +462,12 @@ class CreateMcpServerHandler(CommandHandler):
         replica whose file still declares the id reads its policy from this
         row at its next start, and must not find it gone. The operator's next
         push replaces it. The tool access policies are not carried: they left
-        with the server the file dropped (#1028). A payload that does not parse
-        denies every tool, as recovery does.
+        with the server the file dropped (#1028), from the resolver and, where
+        no peer reads the store, from the store. A store a peer may share --
+        PostgreSQL, or a gateway with a lease keeper -- keeps the old server's
+        rows, and the next restart or reload replays them onto this one; they
+        only narrow (#2237). A payload that does not parse denies every tool,
+        as recovery does.
         """
         if row.l7_policy is None:
             return
@@ -956,6 +962,7 @@ class DeleteMcpServerHandler(CommandHandler):
         declared_in_config: Callable[[str], bool] | None = None,
         peer_identity_authority: IPeerIdentityAuthority | None = None,
         groups: dict | None = None,
+        stored_policies: IStoredToolAccessPolicies | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -971,6 +978,9 @@ class DeleteMcpServerHandler(CommandHandler):
                 server; such a server is refused (#1744). Omitted means none is.
             groups: The groups, whose members hold a server by reference: a
                 deleted server's member is left vacant (#2107).
+            stored_policies: Where the deleted server's stored tool-access
+                policies are forgotten (#2298). Omitted means none are, and the
+                next restart replays them onto a server created under the id.
         """
         self._repository = repository
         self._event_bus = event_bus
@@ -979,6 +989,7 @@ class DeleteMcpServerHandler(CommandHandler):
         self._declared_in_config = declared_in_config
         self._peer_identity_authority = peer_identity_authority
         self._groups = groups
+        self._stored_policies = stored_policies
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
@@ -1035,6 +1046,17 @@ class DeleteMcpServerHandler(CommandHandler):
             raise
 
         self._repository.remove(command.mcp_server_id)
+
+        # An operator's delete takes the server's policies with it, as
+        # `hangar_unload` does: the id is free for a later server, which must
+        # not inherit them (#1028, #2298). Only once the deletion went through,
+        # so a refused one keeps them. Discovery's keeps them: a server that
+        # flapped out and back is the same server, and an operator's deny list
+        # on it must not lapse with its TTL. A row left behind only narrows.
+        if command.provenance is Provenance.HUMAN:
+            get_tool_access_resolver().remove_mcp_server_policy(command.mcp_server_id)
+            if self._stored_policies is not None:
+                self._stored_policies.forget(command.mcp_server_id)
 
         if vacated:
             # A call that selected it before it left its groups refuses rather
@@ -1429,6 +1451,7 @@ def register_crud_handlers(
     peer_identity_authority: IPeerIdentityAuthority | None = None,
     drain: Callable[[str, float], bool] | None = None,
     group_writer: IGroupWriter | None = None,
+    stored_policies: IStoredToolAccessPolicies | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -1453,6 +1476,8 @@ def register_crud_handlers(
             (ADR-030 §9). None refuses every such change.
         drain: Waits for a server's calls in flight before discovery replaces
             it (#2091). None replaces at once.
+        stored_policies: Where a deleted server's stored tool-access policies
+            are forgotten (#2298). None keeps them.
     """
     # McpServer handlers
     command_bus.register(
@@ -1510,6 +1535,7 @@ def register_crud_handlers(
             declared_in_config=declared_in_config,
             peer_identity_authority=peer_identity_authority,
             groups=groups,
+            stored_policies=stored_policies,
         ),
     )
 
