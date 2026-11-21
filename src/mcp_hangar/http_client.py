@@ -103,6 +103,38 @@ _NEVER_MIRRORED = frozenset(
         "upgrade",
     }
 )
+#: The wait before re-opening an upstream's SSE stream when it sent no
+#: ``retry`` field, the reference SDK client's default (#2014).
+DEFAULT_SSE_RECONNECT_S = 1.0
+#: Resume attempts in a row that may fail before a call gives up on its stream.
+#: A resume that opens resets the count; the call's timeout bounds the rest.
+MAX_SSE_RESUME_FAILURES = 2
+
+
+@dataclass
+class _SseCursor:
+    """Where an upstream's SSE stream resumes from (#2014): the last event id and its ``retry``, in seconds."""
+
+    last_event_id: str = ""
+    retry_s: float | None = None
+
+    def read(self, event_data: str) -> None:
+        """Take the ``id`` and ``retry`` fields of one event as the SSE rules read them.
+
+        An event with no data still moves the id: the priming event an upstream
+        sends before it closes a stream is exactly that.
+        """
+        for line in event_data.split("\n"):
+            name, _, value = line.rstrip("\r").partition(":")
+            value = value.removeprefix(" ")
+            if name == "id" and "\0" not in value:
+                self.last_event_id = value
+            elif name == "retry" and value.isascii() and value.isdigit():
+                self.retry_s = int(value) / 1000
+
+    @property
+    def reconnect_s(self) -> float:
+        return DEFAULT_SSE_RECONNECT_S if self.retry_s is None else self.retry_s
 
 
 class AuthType(Enum):
@@ -610,6 +642,9 @@ class HttpClient:
         # SSE reader thread (lazy-started)
         self._sse_thread: threading.Thread | None = None
         self._sse_running = False
+        # Set by close(): the stream's waits are the upstream's `retry`, of any
+        # length, so they must end when the client does (#2014).
+        self._sse_stop = threading.Event()
 
         # DEPRECATED (SEP-2567): MCP Streamable HTTP transport session tracking.
         # Sessions are removed from the transport for stateless upstreams
@@ -1029,7 +1064,7 @@ class HttpClient:
                 if "text/event-stream" in content_type:
                     # For SSE, response body is already read by httpx
                     # Parse it directly as SSE format
-                    answer = self._parse_sse_body(response.text, request_id)
+                    answer = self._parse_sse_body(response.text, request_id, start_time + timeout, span)
                     record_upstream_outcome(span, answer)
                     return answer
 
@@ -1225,13 +1260,20 @@ class HttpClient:
         if self._served.peer_spki is not None:
             span.set_attribute(Upstream.PEER_SPKI, self._served.peer_spki)
 
-    def _parse_sse_body(self, body: str, request_id: str) -> dict[str, Any]:
+    def _parse_sse_body(
+        self, body: str, request_id: str, deadline: float | None = None, span: Any = None
+    ) -> dict[str, Any]:
         """
         Parse SSE response body that was already fully read.
+
+        A body that ends without the answer but named an event id is a stream
+        the upstream closed early, to be resumed (#2014): see `_resume_stream`.
 
         Args:
             body: Full SSE response body text
             request_id: Our request ID to match
+            deadline: When the call times out, as ``time.time()``; None never resumes.
+            span: The call's CLIENT span, for the key of a resumed stream.
 
         Returns:
             JSON-RPC response dictionary
@@ -1240,6 +1282,24 @@ class HttpClient:
 
         # Split by double newline to get events
         events = body.split("\n\n")
+        answer = self._find_sse_answer(events, request_id)
+        if answer is None and deadline is not None and not self.modern_envelope:
+            cursor = _SseCursor()
+            for event_data in events:
+                cursor.read(event_data)
+            if cursor.last_event_id:
+                answer = self._resume_stream(request_id, cursor, deadline, span)
+        if answer is not None:
+            return answer
+        return {
+            "error": {
+                "code": -32000,
+                "message": "SSE response did not contain valid JSON-RPC response",
+            }
+        }
+
+    def _find_sse_answer(self, events: list[str], request_id: str) -> dict[str, Any] | None:
+        """The answer to *request_id* among *events*, else any JSON-RPC response there, else None."""
 
         for event_data in events:
             if not event_data.strip():
@@ -1271,13 +1331,74 @@ class HttpClient:
                                 return cast(dict[str, Any], msg)
                         except json.JSONDecodeError:
                             pass
+        return None
 
-        return {
-            "error": {
-                "code": -32000,
-                "message": "SSE response did not contain valid JSON-RPC response",
-            }
-        }
+    def _resume_stream(self, request_id: str, cursor: _SseCursor, deadline: float, span: Any) -> dict[str, Any] | None:
+        """Resume a POST's SSE stream that the upstream closed before it answered (#2014).
+
+        Streamable HTTP lets an upstream close the stream of a request it has
+        not answered yet (SEP-1699), after an event with an id and, optionally,
+        a ``retry`` interval. The client waits that interval and opens a GET
+        that names the last id in ``Last-Event-ID``; the answer comes there.
+        Hangar read the close as the end of the call and failed it with "SSE
+        response did not contain valid JSON-RPC response".
+
+        Every wait and read stays inside the call's *deadline*: a ``retry`` that
+        does not fit fails the call as a timeout at once, and a stream that
+        trickles bytes is cut at the deadline. A resume that opens and closes
+        again re-opens from the newer id; ``MAX_SSE_RESUME_FAILURES`` failed
+        opens in a row end it. Hangar as the client only: its own server
+        streams carry no priming id or ``retry`` (#2232).
+
+        Returns:
+            The answer, or None when the upstream does not offer resumption
+            (404/405 on the GET) or the attempts are spent.
+        """
+        label = self._mcp_server_id or self._host
+        failures = 0
+        while failures < MAX_SSE_RESUME_FAILURES and cursor.last_event_id:
+            delay = cursor.reconnect_s
+            if time.time() + delay >= deadline:
+                raise httpx.ReadTimeout("the upstream's SSE retry interval runs past the call's timeout")
+            time.sleep(delay)
+            if self._closed:
+                raise ClientError("client_closed")
+            headers = {"Accept": "text/event-stream", "Last-Event-ID": cursor.last_event_id}
+            if not self._http_config.stateless_upstream and self._mcp_session_id:
+                headers["Mcp-Session-Id"] = self._mcp_session_id
+            remaining = max(deadline - time.time(), 0.001)
+            timeout = httpx.Timeout(min(self._http_config.connect_timeout, remaining), read=remaining)
+            logger.info("http_client_sse_resuming", mcp_server=label, request_id=request_id, delay_s=delay)
+            try:
+                with (
+                    self._lease() as pool,
+                    pool.stream("GET", self._endpoint, headers=headers, timeout=timeout) as resp,
+                ):
+                    if resp.status_code in (404, 405):
+                        logger.info("http_client_sse_resume_unsupported", mcp_server=label, status=resp.status_code)
+                        return None
+                    if resp.status_code >= 300 or "text/event-stream" not in resp.headers.get("Content-Type", ""):
+                        raise ClientError(f"sse_resume_rejected: HTTP {resp.status_code}")
+                    failures = 0
+                    for event_data in self._iter_stream_events(
+                        resp, label, stop=lambda: self._closed or time.time() >= deadline, refuse_oversize=True
+                    ):
+                        cursor.read(event_data)
+                        answer = self._parse_sse_event(event_data, request_id)
+                        if answer is not None:
+                            if span is not None:
+                                self._remember_served_key(resp, span)
+                            return answer
+            except (UpstreamPeerKeyMismatchError, ResponseTooLarge, httpx.TimeoutException):
+                raise
+            except (httpx.HTTPError, ClientError) as e:
+                failures += 1
+                logger.warning("http_client_sse_resume_failed", mcp_server=label, error=str(e), failures=failures)
+            if self._closed:
+                raise ClientError("client_closed")
+            if time.time() >= deadline:
+                raise httpx.ReadTimeout("the upstream's resumed SSE stream did not answer before the call's timeout")
+        return None
 
     def _parse_sse_event(self, event_data: str, request_id: str) -> dict[str, Any] | None:
         """
@@ -1422,9 +1543,14 @@ class HttpClient:
     def _notification_stream_loop(self, on_message: Callable[[dict[str, Any]], None]) -> None:
         mcp_server_label = self._mcp_server_id or self._host
         backoff = 1.0
+        # Across reconnects: the stream resumes after the last event it carried,
+        # and waits the upstream's `retry` before it re-opens (#2014).
+        cursor = _SseCursor()
         while self._sse_running and not self._closed:
             try:
                 headers = {"Accept": "text/event-stream"}
+                if cursor.last_event_id:
+                    headers["Last-Event-ID"] = cursor.last_event_id
                 if not self._http_config.stateless_upstream and self._mcp_session_id:
                     headers["Mcp-Session-Id"] = self._mcp_session_id
                 # read=None: this stream is MEANT to sit idle between events.
@@ -1442,7 +1568,13 @@ class HttpClient:
                         raise ClientError(f"get_stream_rejected: HTTP {response.status_code}")
                     logger.info("http_client_get_stream_open", mcp_server=mcp_server_label)
                     backoff = 1.0
-                    self._read_stream_events(response, on_message, mcp_server_label)
+                    self._read_stream_events(response, on_message, mcp_server_label, cursor)
+                if self._stream_replaced:
+                    self._stream_replaced = False
+                elif self._sse_stop.wait(cursor.reconnect_s):
+                    # The upstream closed the stream: a normal end, re-opened
+                    # after its `retry`, where it re-opened at once before.
+                    return
             except UpstreamPeerKeyMismatchError as e:
                 # Terminal for this client: every reconnect would end at the same
                 # unlisted key. The stream opens again with the next client.
@@ -1466,13 +1598,18 @@ class HttpClient:
                     "http_client_get_stream_error",
                     mcp_server=mcp_server_label,
                     error=str(e),
-                    retry_in_s=backoff,
+                    retry_in_s=max(backoff, cursor.retry_s or 0.0),
                 )
-                time.sleep(backoff)
+                if self._sse_stop.wait(max(backoff, cursor.retry_s or 0.0)):
+                    return
                 backoff = min(backoff * 2, 30.0)
 
     def _read_stream_events(
-        self, response: httpx.Response, on_message: Callable[[dict[str, Any]], None], mcp_server_label: str
+        self,
+        response: httpx.Response,
+        on_message: Callable[[dict[str, Any]], None],
+        mcp_server_label: str,
+        cursor: _SseCursor | None = None,
     ) -> None:
         """Dispatch each event of the standing GET stream, none of them held past the read limit (#1613).
 
@@ -1480,10 +1617,27 @@ class HttpClient:
         An event past it is dropped as it is read, up to the blank line that
         ends it, where the framing is back in step; it answered no request.
         """
+        for event_data in self._iter_stream_events(
+            response, mcp_server_label, stop=lambda: not self._sse_running or self._closed, refuse_oversize=False
+        ):
+            if cursor is not None:
+                cursor.read(event_data)
+            self._dispatch_stream_event(event_data, on_message, mcp_server_label)
+
+    def _iter_stream_events(
+        self, response: httpx.Response, mcp_server_label: str, *, stop: Callable[[], bool], refuse_oversize: bool
+    ) -> Iterator[str]:
+        """Each event of an open SSE stream, none of them held past the read limit (#1613).
+
+        *stop* is asked before each chunk. An event past the limit fails the
+        read with `ResponseTooLarge` when *refuse_oversize*, as a POST's answer
+        would; otherwise it is dropped as it is read, up to the blank line that
+        ends it, where the framing is back in step.
+        """
         buffer = b""
         dropping = False
         for chunk in response.iter_bytes():
-            if not self._sse_running or self._closed:
+            if stop():
                 return
             buffer += chunk
             if dropping:
@@ -1496,12 +1650,17 @@ class HttpClient:
             while b"\n\n" in buffer:
                 event_data, buffer = buffer.split(b"\n\n", 1)
                 if len(event_data) > limit:
-                    logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
+                    self._oversized_event(mcp_server_label, limit, refuse_oversize)
                     continue
-                self._dispatch_stream_event(event_data.decode("utf-8", errors="replace"), on_message, mcp_server_label)
+                yield event_data.decode("utf-8", errors="replace")
             if len(buffer) > limit:
-                logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
+                self._oversized_event(mcp_server_label, limit, refuse_oversize)
                 buffer, dropping = buffer[-1:], True
+
+    def _oversized_event(self, mcp_server_label: str, limit: int, refuse: bool) -> None:
+        logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
+        if refuse:
+            raise ResponseTooLarge(limit, self._mcp_server_id or "")
 
     def _dispatch_stream_event(
         self,
@@ -1556,6 +1715,7 @@ class HttpClient:
 
         # Stop SSE reader if running
         self._sse_running = False
+        self._sse_stop.set()
 
         # SEP-2567 leftover duty (#882): a legacy session-based upstream gave us
         # a session; abandoning it leaves server-side resources held until its
