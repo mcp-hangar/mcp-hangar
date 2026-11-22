@@ -1,0 +1,71 @@
+# Known non-passes of the official MCP conformance suite against a front_door
+# gateway, run with `--requirements 2026-07-28` (#2307).
+#
+# Same semantics as baseline.yml: a failure listed here is known, a failure not
+# listed is a regression, and a listed scenario that now passes is a stale entry
+# that fails the run until its line is deleted. A WARNING counts as a non-pass;
+# a SKIPPED check counts neither way.
+#
+# The gateway under test is the one tests/conformance/front_door_gateway.py
+# starts: `serve --http` with `tool_access.mode: front_door`, auth on, one
+# API-key principal with the `developer` role, and the suite's reference
+# everything-server (the conformance repository at the commit of the pinned
+# npm version) as its only upstream, `upstream_protocol: auto`, every tool it
+# lists projected flat. A loopback proxy adds the principal's `X-API-Key` to
+# every request and changes nothing else; the suite's `server` command cannot
+# present a credential, and a front door serves an anonymous caller no tool.
+#
+# The reference server alone passes every scenario this revision scores, so a
+# line below is either Hangar's (an issue that tracks the fix), a recorded
+# decision, or a fixture the reference server lacks at this pin (it fails
+# those on its own too).
+#
+# ---------------------------------------------------------------------------
+# 1. Not relayed by the front door. The upstream answers; the caller does not
+#    get what it sent.
+#
+# 2. Recorded decision. The front door namespaces every resource URI it hands
+#    out as `hangar://<upstream>/<the upstream's URI>` (#1025), so a read of the
+#    reference server's own URI is an unknown resource here. The scenarios read
+#    the fixed fixture URIs rather than the ones resources/list returned.
+#
+# 3. No fixture at this pin. The reference server serves no tasks fixtures and
+#    no tool with `x-mcp-header`, and fails these on its own. Not scored for
+#    2026-07-28 (extension or pending); listed so the pass table reports them
+#    as known.
+# ---------------------------------------------------------------------------
+
+server:
+  # -- 1. not relayed ---------------------------------------------------------
+  - input-required-result-basic-elicitation # complete result instead of InputRequiredResult (#2313)
+  - input-required-result-basic-sampling # #2313
+  - input-required-result-basic-list-roots # #2313
+  - input-required-result-request-state # #2313
+  - input-required-result-multiple-input-requests # #2313
+  - input-required-result-multi-round # #2313
+  - input-required-result-missing-input-response # #2313
+  - input-required-result-non-tool-request # #2313
+  - input-required-result-result-type # #2313
+  - input-required-result-tampered-state # #2313
+  - input-required-result-capability-check # #2313
+  - input-required-result-validate-input # #2313; the reference server warns here on its own too
+  - tools-call-with-progress # progress on the POST response stream is dropped (#2314)
+  - server-stateless # upstream -32021 becomes a tool error (#2315); list-changed hooks are unlisted (#2318)
+  - sep-2164-resource-not-found # -32002 without data.uri (#2316)
+
+  # -- 2. recorded decision ---------------------------------------------------
+  - resources-read-text # URIs are namespaced (#1025)
+  - resources-read-binary # #1025
+  - resources-templates-read # #1025
+
+  # -- 3. no fixture at this pin (not scored) ---------------------------------
+  - http-custom-header-server-validation # no x-mcp-header tool upstream (#2318)
+  - tasks-lifecycle # no tasks fixtures upstream (#2318)
+  - tasks-capability-negotiation # #2318
+  - tasks-wire-fields # #2318
+  - tasks-request-state-removal # #2318
+  - tasks-mrtr-input # #2318
+  - tasks-request-headers # #2318
+  - tasks-dispatch-and-envelope # #2318
+  - tasks-required-task-error # #2318
+  - tasks-mrtr-composition # #2318
