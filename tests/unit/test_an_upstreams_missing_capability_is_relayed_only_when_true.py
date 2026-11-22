@@ -54,6 +54,9 @@ def test_a_capability_the_caller_left_out_is_relayed(declared: dict[str, Any], r
         # Hangar's own namespace, at either level.
         ({}, {"extensions": {"io.mcp-hangar/approval": {}}}),
         ({}, {"io.mcp-hangar/approval": {}}),
+        # A family the SDK does not model: dropped from any declaration, so it cannot be judged.
+        ({"x.example/future": {}}, {"x.example/future": {}}),
+        ({}, {"x.example/future": {}}),
         # Not a ClientCapabilities object.
         ({}, {}),
         ({}, {"sampling": True}),

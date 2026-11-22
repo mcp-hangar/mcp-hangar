@@ -19,9 +19,11 @@ tool error it got before.
 Everything else gets that tool error too, the only way to fail here. That
 covers a caller that does not speak 2026-07-28 (``-32021`` is not in its
 revision), a declaration that cannot be read, a capability the caller declared
-in any form, and a capability named under ``io.mcp-hangar/``, which no
-upstream may speak for. The ``data`` relayed is ``requiredCapabilities`` and
-nothing else. The domain dropped every other field (``_missing_capability_error``).
+in any form, a family the SDK does not model (it drops one from the
+declaration, so whether the caller declared it cannot be told), and a
+capability named under ``io.mcp-hangar/``, which no upstream may speak for.
+The ``data`` relayed is ``requiredCapabilities`` and nothing else. The domain
+dropped every other field (``_missing_capability_error``).
 """
 
 from __future__ import annotations
@@ -38,8 +40,14 @@ _NAMED_MEMBERS = ("extensions", "experimental")
 _HANGAR_PREFIX = "io.mcp-hangar/"
 
 
-def _declared(ctx: Any) -> Mapping[str, Any] | None:
-    """The caller's declared capabilities as JSON; None when the caller is not 2026-07-28 or they cannot be read."""
+def _declared(ctx: Any) -> tuple[Mapping[str, Any], frozenset[str]] | None:
+    """The caller's declared capabilities as JSON, and the families they can hold; None when unreadable.
+
+    None too when the caller is not 2026-07-28. The SDK's ``ClientCapabilities``
+    keeps only the families it models: a family it does not model is dropped
+    from the declaration whether or not the caller declared it, so only the
+    modelled ones can be judged.
+    """
     session = getattr(ctx, "session", None)
     version = getattr(session, "protocol_version", None)
     if not isinstance(version, str) or not is_modern_protocol_version(version):
@@ -48,7 +56,9 @@ def _declared(ctx: Any) -> Mapping[str, Any] | None:
     if capabilities is None:
         return None
     dumped = capabilities.model_dump(by_alias=True, mode="json", exclude_none=True)
-    return dumped if isinstance(dumped, dict) else None
+    fields = type(capabilities).model_fields
+    families = frozenset(field.alias or name for name, field in fields.items())
+    return (dumped, families) if isinstance(dumped, dict) else None
 
 
 def _names(required: Mapping[str, Any]) -> list[tuple[str, str | None]] | None:
@@ -89,13 +99,15 @@ def relayed_missing_capability(upstream: dict[str, Any] | None, ctx: Any) -> Exc
     if upstream is None:
         return None
     try:
-        declared = _declared(ctx)
+        read = _declared(ctx)
         required = upstream["data"]["requiredCapabilities"]
         names = _names(required) if isinstance(required, dict) else None
-        if declared is None or names is None:
+        if read is None or names is None:
             return None
-        if any(_is_hangars(family, member) or not _left_out(declared, family, member) for family, member in names):
-            return None
+        declared, families = read
+        for family, member in names:
+            if family not in families or _is_hangars(family, member) or not _left_out(declared, family, member):
+                return None
         data = {"requiredCapabilities": required}
         error: Exception = make_mcp_error(upstream["code"], upstream["message"], data=data)
         return error
