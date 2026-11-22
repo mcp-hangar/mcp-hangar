@@ -36,7 +36,6 @@ server:
   - tools-call-elicitation # #2313
   - elicitation-sep1034-defaults # #2313
   - elicitation-sep1330-enums # #2313
-  - tools-call-with-progress # progress on the POST response stream is dropped (#2314)
 
   # -- 2. recorded decision ---------------------------------------------------
   - resources-read-text # URIs are namespaced (#1025)
