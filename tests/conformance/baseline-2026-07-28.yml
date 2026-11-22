@@ -17,11 +17,10 @@
 #    suite's reference server defines (`json_schema_2020_12_tool`,
 #    `test_missing_capability`, `failing_job`, `confirm_delete`, image/audio
 #    tools, an `x-mcp-header` annotated tool, ...). The gateway relays what its
-#    upstream serves and the math backend serves none of these. Passing them
-#    needs the reference server behind the gateway, and the front_door topology
-#    that exposes upstream tool names needs an identity, which the suite's
-#    `server` command cannot present (it has no --header or auth option; the
-#    ecosystem watch in conformance.yml notices when that changes).
+#    upstream serves and the math backend serves none of these. The
+#    front_door leg (#2307, baseline-front-door-2026-07-28.yml) runs the same
+#    suite with the reference server behind the gateway; each line below says
+#    what that leg found: a pass, or the issue that tracks the non-pass.
 #
 # 2. Capability not advertised. Hangar declares no `completions`, `prompts` or
 #    `resources` for this configuration, so `completion/complete`, `prompts/*`
@@ -32,66 +31,60 @@
 #
 # 3. Gateway behaviour with no fixture to exercise it. The `input-required-*`
 #    and `tasks-*` families need a backend tool that returns an
-#    InputRequiredResult or creates a task. Hangar relays those from an
-#    upstream (see TOOL_RESULT_SURFACES in the docs repo); with no such upstream
-#    in the run, the gateway returns an ordinary complete result, which the
-#    suite reports as a failure. The first failing check of each is a "got
-#    complete" or "no taskId" message, which is what this classification rests
-#    on. It has not been confirmed by running the reference server behind a
-#    front_door gateway, which is the follow-up that would turn these lines
-#    into either passes or real findings.
+#    InputRequiredResult or creates a task. With no such upstream in the run,
+#    the gateway returns an ordinary complete result, which the suite reports
+#    as a failure. The front_door leg, with the reference server behind it,
+#    showed that the front door does not relay an InputRequiredResult either
+#    (#2313), and that the reference server has no tasks fixtures (#2318).
 #
-# Not covered yet, by design of this file: the second role in the issue, Hangar
-# as the CLIENT under test against the suite's reference servers. That needs a
-# harness that makes the upstream client path act on the suite's stdin/stdout
-# protocol and is tracked separately.
+# Hangar as the CLIENT under test is judged in baseline-client-2026-07-28.yml.
 # ---------------------------------------------------------------------------
 
 server:
   # -- 1. fixture-dependent ---------------------------------------------------
-  - server-stateless # needs the diagnostic tool test_missing_capability (#2307)
-  - json-schema-2020-12 # needs json_schema_2020_12_tool (#2307)
-  - http-custom-header-server-validation # needs a tool with x-mcp-header (#2307)
-  - tools-call-image # #2307
-  - tools-call-audio # #2307
-  - tools-call-embedded-resource # #2307
-  - tools-call-mixed-content # #2307
-  - tools-call-with-progress # #2307
+  - server-stateless # needs test_missing_capability; on front_door: #2315, #2318
+  - json-schema-2020-12 # needs json_schema_2020_12_tool; passes on front_door (#2307)
+  - http-custom-header-server-validation # needs a tool with x-mcp-header; the reference server has none (#2318)
+  - tools-call-image # passes on front_door (#2307)
+  - tools-call-audio # passes on front_door (#2307)
+  - tools-call-embedded-resource # passes on front_door (#2307)
+  - tools-call-mixed-content # passes on front_door (#2307)
+  - tools-call-with-progress # on front_door: progress is dropped (#2314)
 
   # -- 2. capability not advertised -------------------------------------------
-  - completion-complete # #2307
-  - prompts-list # #2307
-  - prompts-get-simple # #2307
-  - prompts-get-with-args # #2307
-  - prompts-get-embedded-resource # #2307
-  - prompts-get-with-image # #2307
-  - resources-list # #2307
-  - resources-read-text # #2307
-  - resources-read-binary # #2307
-  - resources-templates-read # #2307
-  - sep-2164-resource-not-found # resources/read answers -32601, the check wants -32602 (#2307)
-  - caching # prompts/resources hints; the tools/list hint passes (#2307)
+  - completion-complete # passes on front_door (#2307)
+  - prompts-list # passes on front_door (#2307)
+  - prompts-get-simple # passes on front_door (#2307)
+  - prompts-get-with-args # passes on front_door (#2307)
+  - prompts-get-embedded-resource # passes on front_door (#2307)
+  - prompts-get-with-image # passes on front_door (#2307)
+  - resources-list # passes on front_door (#2307)
+  - resources-read-text # on front_door: URIs are namespaced (#1025)
+  - resources-read-binary # on front_door: URIs are namespaced (#1025)
+  - resources-templates-read # on front_door: URIs are namespaced (#1025)
+  - sep-2164-resource-not-found # resources/read answers -32601, the check wants -32602; on front_door: #2316
+  - caching # prompts/resources hints; the tools/list hint passes; passes on front_door (#2307)
 
   # -- 3. no fixture to exercise the relay ------------------------------------
-  - input-required-result-basic-elicitation # #2307
-  - input-required-result-basic-sampling # #2307
-  - input-required-result-basic-list-roots # #2307
-  - input-required-result-request-state # #2307
-  - input-required-result-multiple-input-requests # #2307
-  - input-required-result-multi-round # #2307
-  - input-required-result-missing-input-response # #2307
-  - input-required-result-non-tool-request # #2307
-  - input-required-result-result-type # #2307
-  - input-required-result-tampered-state # #2307
-  - input-required-result-capability-check # #2307
-  - input-required-result-validate-input # #2307
-  - tasks-lifecycle # #2307
-  - tasks-capability-negotiation # #2307
-  - tasks-wire-fields # #2307
-  - tasks-request-state-removal # #2307
-  - tasks-mrtr-input # #2307
-  - tasks-request-headers # #2307
-  - tasks-dispatch-and-envelope # #2307
-  - tasks-status-notifications # #2307
-  - tasks-required-task-error # #2307
-  - tasks-mrtr-composition # #2307
+  - input-required-result-basic-elicitation # not relayed on front_door either (#2313)
+  - input-required-result-basic-sampling # not relayed on front_door either (#2313)
+  - input-required-result-basic-list-roots # not relayed on front_door either (#2313)
+  - input-required-result-request-state # not relayed on front_door either (#2313)
+  - input-required-result-multiple-input-requests # not relayed on front_door either (#2313)
+  - input-required-result-multi-round # not relayed on front_door either (#2313)
+  - input-required-result-missing-input-response # not relayed on front_door either (#2313)
+  - input-required-result-non-tool-request # not relayed on front_door either (#2313)
+  - input-required-result-result-type # not relayed on front_door either (#2313)
+  - input-required-result-tampered-state # not relayed on front_door either (#2313)
+  - input-required-result-capability-check # not relayed on front_door either (#2313)
+  - input-required-result-validate-input # not relayed on front_door either (#2313)
+  - tasks-lifecycle # the reference server has no tasks fixtures (#2318)
+  - tasks-capability-negotiation # the reference server has no tasks fixtures (#2318)
+  - tasks-wire-fields # the reference server has no tasks fixtures (#2318)
+  - tasks-request-state-removal # the reference server has no tasks fixtures (#2318)
+  - tasks-mrtr-input # the reference server has no tasks fixtures (#2318)
+  - tasks-request-headers # the reference server has no tasks fixtures (#2318)
+  - tasks-dispatch-and-envelope # the reference server has no tasks fixtures (#2318)
+  - tasks-status-notifications # runs no check on front_door; the reference server has no tasks fixtures (#2318)
+  - tasks-required-task-error # the reference server has no tasks fixtures (#2318)
+  - tasks-mrtr-composition # the reference server has no tasks fixtures (#2318)
