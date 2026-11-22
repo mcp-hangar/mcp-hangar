@@ -611,3 +611,35 @@ jobs:
           else
             echo "::notice::The Inspector now depends on the v2 packages (${pin}) -- it may speak 2026-07-28; revisit gate E interop."
           fi
+
+      # stdio is out of the suite's reach in both roles, and that is accepted
+      # (#1902, decided 2026-11-22): `conformance server` takes only `--url`,
+      # and `conformance client` hands the client under test an HTTP URL.
+      # Hangar serves stdio and meets stdio upstreams, so neither surface is
+      # judged by the official suite. No bridge: one would put a second
+      # implementation under test in front of the one being judged. This
+      # notices when either role can reach a stdio peer itself. `client`
+      # always has `--command`, since that launches the client under test, so
+      # only a stdio transport counts on that side.
+      - name: Can the conformance suite reach stdio yet?
+        run: |
+          reached=0
+          for tag in alpha latest; do
+            server=$(npx -y "@modelcontextprotocol/conformance@${tag}" server --help 2>&1 || echo "")
+            client=$(npx -y "@modelcontextprotocol/conformance@${tag}" client --help 2>&1 || echo "")
+            if ! printf '%s' "${server}${client}" | grep -q -- '--expected-failures'; then
+              echo "::notice::Could not read the conformance@${tag} CLI help -- this check needs updating."
+              continue
+            fi
+            if printf '%s' "${server}" | grep -qiE 'stdio|--transport|--command'; then
+              echo "::notice::conformance@${tag} server can now start or reach a stdio server -- Hangar's stdio surface can be judged; revisit #1902."
+              reached=1
+            fi
+            if printf '%s' "${client}" | grep -qiE 'stdio|--transport'; then
+              echo "::notice::conformance@${tag} client now offers a stdio transport -- Hangar's stdio upstream path can be judged; revisit #1902."
+              reached=1
+            fi
+          done
+          if [ "${reached}" = "0" ]; then
+            echo "Neither role of the suite reaches stdio yet; Hangar's stdio surfaces stay outside it."
+          fi
