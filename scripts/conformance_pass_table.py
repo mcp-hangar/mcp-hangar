@@ -15,12 +15,16 @@ table cannot drift from the result; nothing in it is written by hand.
 
 Usage:
   conformance_pass_table.py RESULTS_DIR BASELINE_YML [TITLE]
-      [--suite VERSION] [--commit SHA] [--requirements YAML] [--json OUT]
+      [--suite VERSION] [--commit SHA] [--reference SHA] [--requirements YAML]
+      [--json OUT]
   conformance_pass_table.py --page LEG_JSON...
 
 The first form prints one leg's table, for a job summary, and with ``--json``
-also writes the leg as data. The second assembles legs written that way into
-one Markdown document, for the docs page that publishes the pass table.
+also writes the leg as data. ``--reference`` names the commit of the suite's
+reference everything-server when the leg ran with it behind the gateway (the
+front_door legs), so the table says which fixtures it was judged against.
+The second form assembles legs written that way into one Markdown document,
+in the order given, for the docs page that publishes the pass table.
 """
 
 from __future__ import annotations
@@ -76,6 +80,7 @@ def leg(
     suite: str = "",
     commit: str = "",
     requirements: Path | None = None,
+    reference: str = "",
 ) -> dict:
     """One leg of a run as data: a row per scenario, with its verdict."""
     known = _baseline(baseline)
@@ -106,7 +111,10 @@ def leg(
                 "tracked": known.get(name, []),
             }
         )
-    return {"title": title, "baseline": baseline.name, "suite": suite, "commit": commit, "rows": rows}
+    data = {"title": title, "baseline": baseline.name, "suite": suite, "commit": commit, "rows": rows}
+    if reference:
+        data["reference"] = reference
+    return data
 
 
 def _headline(data: dict) -> str:
@@ -132,6 +140,8 @@ def _provenance(data: dict) -> str:
         bits.append(f"suite `@modelcontextprotocol/conformance@{data['suite']}`")
     if data["commit"]:
         bits.append(f"Hangar at `{data['commit'][:12]}`")
+    if data.get("reference"):
+        bits.append(f"the suite's reference everything-server at `{data['reference'][:12]}` behind it")
     return ("Run with " + ", ".join(bits) + ".") if bits else ""
 
 
@@ -160,8 +170,9 @@ def render(
     suite: str = "",
     commit: str = "",
     requirements: Path | None = None,
+    reference: str = "",
 ) -> str:
-    return "\n".join(_table(leg(results, baseline, title, suite, commit, requirements)))
+    return "\n".join(_table(leg(results, baseline, title, suite, commit, requirements, reference)))
 
 
 def page(legs: list[dict]) -> str:
@@ -188,13 +199,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--suite", default="")
     parser.add_argument("--commit", default="")
     parser.add_argument("--requirements", type=Path)
+    parser.add_argument("--reference", default="")
     parser.add_argument("--json", type=Path)
     try:
         args = parser.parse_args(argv[1:])
     except SystemExit:
         print(__doc__, file=sys.stderr)
         return 2
-    data = leg(args.results, args.baseline, args.title, args.suite, args.commit, args.requirements)
+    data = leg(args.results, args.baseline, args.title, args.suite, args.commit, args.requirements, args.reference)
     if args.json:
         args.json.write_text(json.dumps(data, indent=2) + "\n")
     sys.stdout.write("\n".join(_table(data)))
