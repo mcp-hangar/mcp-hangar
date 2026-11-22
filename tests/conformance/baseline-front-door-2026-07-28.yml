@@ -15,10 +15,11 @@
 # every request and changes nothing else; the suite's `server` command cannot
 # present a credential, and a front door serves an anonymous caller no tool.
 #
-# The reference server alone passes every scenario this revision scores, so a
-# line below is either Hangar's (an issue that tracks the fix), a recorded
-# decision, or a fixture the reference server lacks at this pin (it fails
-# those on its own too).
+# The reference server alone passes every scenario this revision scores but
+# one: in `input-required-result-validate-input` it warns on its own on
+# `sep-2322-validate-input-responses`. Otherwise a line below is Hangar's (an
+# issue that tracks the fix), a recorded decision, or a fixture the reference
+# server lacks at this pin (it fails those on its own too).
 #
 # ---------------------------------------------------------------------------
 # 1. Not relayed by the front door. The upstream answers; the caller does not
@@ -48,7 +49,7 @@ server:
   - input-required-result-result-type # #2313
   - input-required-result-tampered-state # #2313
   - input-required-result-capability-check # #2313
-  - input-required-result-validate-input # #2313; the reference server warns here on its own too
+  - input-required-result-validate-input # #2313; the reference server warns here on its own too (#2318)
   - tools-call-with-progress # progress on the POST response stream is dropped (#2314)
   - server-stateless # upstream -32021 becomes a tool error (#2315); list-changed hooks are unlisted (#2318)
   - sep-2164-resource-not-found # -32002 without data.uri (#2316)
