@@ -16,27 +16,66 @@
 # below exists to notice that rather than rely on someone remembering.
 name: MCP Conformance
 
+# No `paths:` filter on the trigger, deliberately, for the reason ci-core.yml
+# gives: a path-filtered workflow produces no check run on a PR it skips, and a
+# required check that never reports stays pending forever. The `changes` job
+# below decides whether the suite runs, and the `Conformance` job always
+# reports, so that one name can be a required check on `main` (#1902):
+#   scripts/setup-branch-protection.sh --add "Conformance"
 on:
   pull_request:
-    paths:
-      - "src/mcp_hangar/fastmcp_server/**"
-      - "src/mcp_hangar/server/**"
-      # Hangar's side of a connection to an upstream, which the client run judges.
-      - "src/mcp_hangar/http_client.py"
-      - "src/mcp_hangar/stdio_client.py"
-      - "scripts/conformance_pass_table.py"
-      - "tests/conformance/**"
-      - ".github/workflows/conformance.yml"
-      - "pyproject.toml"
+  push:
+    branches: [main]
   schedule:
     - cron: "17 5 * * 2" # weekly; also how the scenario-drift check runs
   workflow_dispatch: {}
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  # Whether the suite has anything to judge. Everything Hangar serves or sends
+  # on a connection can change a result, so the filter is the whole package and
+  # the backend the server legs proxy, not only the transport modules. A
+  # schedule or a manual run always runs the suite.
+  changes:
+    name: Conformance paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists the PR's files through the API
+    outputs:
+      run: ${{ steps.always.outputs.run || steps.filter.outputs.conformance }}
+    steps:
+      - name: Scheduled or manual runs always run the suite
+        id: always
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: echo "run=true" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.always.outputs.run != 'true'
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: filter
+        if: steps.always.outputs.run != 'true'
+        with:
+          filters: |
+            conformance:
+              - 'src/mcp_hangar/**'
+              - 'examples/provider_math/**'
+              - 'scripts/conformance_pass_table.py'
+              - 'tests/conformance/**'
+              - '.github/workflows/conformance.yml'
+              - 'pyproject.toml'
+
   conformance:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Server conformance (baselined)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -101,6 +140,8 @@ jobs:
   # version, the one the client job uses too. It does not replace the 0.1.16
   # job above, which stays until `latest` moves past it.
   conformance-server:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Server conformance ${{ matrix.revision }} (baselined)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -174,6 +215,8 @@ jobs:
   # Both revisions, each against its own baseline; every entry there names the
   # issue that tracks it.
   conformance-client:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Client conformance ${{ matrix.revision }} (baselined)
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -219,6 +262,41 @@ jobs:
           if [ -d conformance-results ]; then
             python scripts/conformance_pass_table.py conformance-results \
               "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  # The one check `main` requires (#1902). It always reports, whatever the
+  # trigger and whatever `changes` decided, and it fails closed: if the paths
+  # job did not succeed, or the suite was due and any leg did anything but
+  # succeed, the check is red. A leg that was not due must have been skipped.
+  # The ecosystem watch below is advisory and deliberately not in `needs`.
+  conformance-gate:
+    name: Conformance
+    if: always()
+    needs: [changes, conformance, conformance-server, conformance-client]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every conformance leg passed, or none was due
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DUE: ${{ needs.changes.outputs.run }}
+          LEGS: ${{ needs.conformance.result }} ${{ needs.conformance-server.result }} ${{ needs.conformance-client.result }}
+        run: |
+          echo "paths job: ${CHANGES}; suite due: ${DUE:-false}; legs: ${LEGS}"
+          if [ "${CHANGES}" != "success" ]; then
+            echo "::error::the paths job did not succeed (${CHANGES}), so nothing says the suite was not due"
+            exit 1
+          fi
+          want=skipped
+          [ "${DUE}" = "true" ] && want=success
+          for result in ${LEGS}; do
+            if [ "${result}" != "${want}" ]; then
+              echo "::error::a conformance leg ended ${result}; expected ${want}"
+              exit 1
+            fi
+          done
+          if [ "${want}" = "skipped" ]; then
+            echo "No change under the conformance paths; the suite did not run."
           fi
 
   # Gate E is blocked on the ecosystem, not on us: the 2026-07-28 server vectors
