@@ -199,14 +199,28 @@ jobs:
             --expected-failures "tests/conformance/baseline-${REVISION}.yml" \
             --output-dir conformance-results
 
+      # Which scenarios the revision scores is the suite's own frozen
+      # requirements file, shipped in its package; the table reads it so that
+      # a scenario the suite runs but does not score is not shown as a pass,
+      # a regression or a stale entry.
+      - name: Read what the suite scores for ${{ matrix.revision }}
+        if: always()
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          npm pack --silent "@modelcontextprotocol/conformance@${SUITE}" > suite-tarball.txt
+          tar -xzf "$(cat suite-tarball.txt)" "package/requirements/${REVISION}.yaml"
+          echo "REQUIREMENTS=--requirements package/requirements/${REVISION}.yaml" >> "${GITHUB_ENV}"
+
       - name: Pass table
         if: always()
         env:
           REVISION: ${{ matrix.revision }}
         run: |
           if [ -d conformance-results ]; then
+            # shellcheck disable=SC2086 # REQUIREMENTS is a flag and its value
             python scripts/conformance_pass_table.py conformance-results \
-              "tests/conformance/baseline-${REVISION}.yml" "Server, ${REVISION}" \
+              "tests/conformance/baseline-${REVISION}.yml" "Server, ${REVISION}" ${REQUIREMENTS} \
               --suite "${SUITE}" --commit "${GITHUB_SHA}" \
               --json "server-${REVISION}.json" >> "${GITHUB_STEP_SUMMARY}"
           fi
@@ -242,8 +256,10 @@ jobs:
         include:
           - revision: "2026-07-28"
             select: "--requirements 2026-07-28"
+            scored-by-requirements: true
           - revision: "2025-11-25"
             select: "--spec-version 2025-11-25 --suite all"
+            scored-by-requirements: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -270,14 +286,28 @@ jobs:
             --expected-failures "tests/conformance/baseline-client-${REVISION}.yml" \
             --output-dir conformance-results
 
+      # Which scenarios the revision scores is the suite's own frozen
+      # requirements file, shipped in its package; the table reads it so that
+      # a scenario the suite runs but does not score is not shown as a pass,
+      # a regression or a stale entry.
+      - name: Read what the suite scores for ${{ matrix.revision }}
+        if: always() && matrix.scored-by-requirements
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          npm pack --silent "@modelcontextprotocol/conformance@${SUITE}" > suite-tarball.txt
+          tar -xzf "$(cat suite-tarball.txt)" "package/requirements/${REVISION}.yaml"
+          echo "REQUIREMENTS=--requirements package/requirements/${REVISION}.yaml" >> "${GITHUB_ENV}"
+
       - name: Pass table
         if: always()
         env:
           REVISION: ${{ matrix.revision }}
         run: |
           if [ -d conformance-results ]; then
+            # shellcheck disable=SC2086 # REQUIREMENTS is a flag and its value, or empty
             python scripts/conformance_pass_table.py conformance-results \
-              "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" \
+              "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" ${REQUIREMENTS} \
               --suite "${SUITE}" --commit "${GITHUB_SHA}" \
               --json "client-${REVISION}.json" >> "${GITHUB_STEP_SUMMARY}"
           fi
