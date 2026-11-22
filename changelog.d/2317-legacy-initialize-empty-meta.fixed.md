@@ -1,1 +1,0 @@
-**core:** omit an empty `_meta` object on legacy HTTP requests (including the `initialize` handshake) when neither the caller nor active trace context populates it, so dual-era upstreams no longer misclassify the handshake as 2026-07-28 traffic and reject it with HTTP 400 (`-32020 Missing MCP-Protocol-Version header`).
