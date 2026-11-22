@@ -68,7 +68,7 @@ class TestHttp:
         with patch.object(client._client, "post", return_value=_accepted()) as post:
             client.notify("notifications/initialized")
 
-        assert _PV not in post.call_args.kwargs["json"]["params"]["_meta"]
+        assert _PV not in post.call_args.kwargs["json"]["params"].get("_meta", {})
 
     def test_the_session_header_rides_along(self) -> None:
         client = _http_client()

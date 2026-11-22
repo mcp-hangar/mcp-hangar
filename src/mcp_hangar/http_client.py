@@ -893,12 +893,19 @@ class HttpClient:
             version = sent["_meta"].get(_META_PROTOCOL_VERSION_KEY)
             if isinstance(version, str):
                 headers[MCP_PROTOCOL_VERSION_HEADER] = version
-        elif not self._http_config.stateless_upstream and self._mcp_session_id:
-            # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
-            # legacy session-based upstream that established one. A modern
-            # connection has no session; declaring the upstream stateless keeps
-            # _mcp_session_id None, so this is skipped either way.
-            headers["Mcp-Session-Id"] = self._mcp_session_id
+        else:
+            # A dual-era upstream treats any sessionless request carrying `_meta`
+            # (even `{}`) as 2026-07-28 traffic and rejects it for missing the
+            # modern headers (#2317). Drop `_meta` on legacy sends when neither
+            # the caller nor trace context put anything in it.
+            if not sent["_meta"]:
+                del sent["_meta"]
+            if not self._http_config.stateless_upstream and self._mcp_session_id:
+                # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
+                # legacy session-based upstream that established one. A modern
+                # connection has no session; declaring the upstream stateless keeps
+                # _mcp_session_id None, so this is skipped either way.
+                headers["Mcp-Session-Id"] = self._mcp_session_id
         return sent, headers
 
     def _learn_tools(self, params: Mapping[str, Any] | None, answer: Mapping[str, Any]) -> None:
