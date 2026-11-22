@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.40.0...v2.40.1) (2026-11-22)
+
+### Fixed
+
+- **core:** split an HTTP upstream's SSE stream on blank lines under CRLF, LF and CR line endings per WHATWG SSE framing (shared across the standing GET stream, SEP-1699 resumed GET streams, POST SSE bodies and the POST progress relay), preserving the per-event read limit and handling CRLF boundaries split across chunks including while dropping an oversized event; previously Python MCP SDK upstreams (which emit CRLF via `sse-starlette`) never delivered server-initiated GET-stream messages or resumed answers. ([#2328](https://github.com/mcp-hangar/mcp-hangar/pull/2328))
+- **core:** omit an empty `_meta` object on legacy HTTP requests (including the `initialize` handshake) when neither the caller nor active trace context populates it, so dual-era upstreams no longer misclassify the handshake as 2026-07-28 traffic and reject it with HTTP 400 (`-32020 Missing MCP-Protocol-Version header`). ([#2321](https://github.com/mcp-hangar/mcp-hangar/pull/2321))
+- **core:** a front-door caller on 2026-07-28 that did not declare a capability an upstream needs now gets the upstream's `-32021` (MissingRequiredClientCapabilityError) on HTTP 400, with `data.requiredCapabilities`, instead of a tool result reading `tool_error: HTTP error: 400`; a caller that declared the capability, a legacy caller and every other upstream error on a 400 keep the tool error, which now carries the upstream's message. ([#2325](https://github.com/mcp-hangar/mcp-hangar/pull/2325))
+- **core:** relay the `notifications/progress` an HTTP upstream sends on the SSE body of a `tools/call` POST response to the caller whose token it carries, as each event arrives (a compressed body is relayed once it is read); a stateless (2026-07-28) upstream has no standing GET stream, so a long call through the gateway showed its caller no progress at all. Only progress carrying the token that call sent is relayed; any other token on that stream is dropped. ([#2326](https://github.com/mcp-hangar/mcp-hangar/pull/2326))
+
 ## [2.40.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.39.2...v2.40.0) (2026-11-21)
 
 ### Added
