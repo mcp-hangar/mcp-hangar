@@ -31,8 +31,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 _RUN_SUFFIX = re.compile(r"^server-|-\d{4}-\d{2}-\d{2}T.*$")
 _PASSING = {"SUCCESS", "INFO"}
 # What the suite itself counts against a scenario, in its baseline check and its
@@ -43,6 +41,8 @@ _FAILING = {"FAILURE", "WARNING"}
 # next line's section comment.
 _ENTRY = re.compile(r"^[ \t]*-[ \t]+([A-Za-z0-9_./\-]+)[ \t]*(?:#(.*))?$", flags=re.MULTILINE)
 _REF = re.compile(r"#\d+\b|SEP-\d+\b")
+# A baseline file holds one role, as its single top-level key.
+_ROLE = re.compile(r"^(server|client):", flags=re.MULTILINE)
 
 
 def _baseline(path: Path) -> dict[str, list[str]]:
@@ -54,6 +54,9 @@ def _not_scored(requirements: Path | None, role: str) -> dict[str, str]:
     """The scenarios the suite runs for this role but does not score, and why."""
     if requirements is None:
         return {}
+    # Imported here so that `--page`, which reads only JSON, runs on a bare interpreter.
+    import yaml
+
     entries = yaml.safe_load(requirements.read_text()).get("not_scored") or []
     return {e["scenario"]: e.get("reason", "") for e in entries if e.get("leg") == role}
 
@@ -76,8 +79,8 @@ def leg(
 ) -> dict:
     """One leg of a run as data: a row per scenario, with its verdict."""
     known = _baseline(baseline)
-    # A baseline file holds one role, as its single top-level key.
-    role = next(iter(yaml.safe_load(baseline.read_text()) or {"server": None}))
+    found = _ROLE.search(baseline.read_text())
+    role = found.group(1) if found else "server"
     unscored = _not_scored(requirements, role)
     rows = []
     for name, checks in sorted(_scenarios(results).items()):
