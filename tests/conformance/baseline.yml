@@ -16,10 +16,9 @@
 # 1. Fixture-dependent — the scenario needs content the reference
 #    "everything server" serves and our proxied backend does not have.
 #    Not a protocol failure: the gateway relays faithfully, there is simply no
-#    image/audio/resource/prompt upstream to relay. These would need the
-#    reference server behind the gateway, which in turn needs front_door mode
-#    plus auth (front_door with no identity is fail-closed by design and
-#    advertises zero tools -- see `_build_flat_map`).
+#    image/audio/resource/prompt upstream to relay. The front_door leg (#2307,
+#    baseline-front-door-2025-11-25.yml) runs the alpha suite on this revision
+#    with the reference server behind the gateway; each line says what it found.
 # ---------------------------------------------------------------------------
 #
 # 2. Capability not advertised — we do not declare `completions`, `prompts` or
@@ -92,27 +91,27 @@ server:
   - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
 
   # -- 2. capability not advertised -----------------------------------------
-  - completion-complete # `completions` is absent from initialize (#2307)
+  - completion-complete # `completions` is absent from initialize; passes on front_door (#2307)
   - prompts-list # `prompts` is absent from initialize (#888)
   - resources-list # `resources` is absent from initialize (#888)
-  - resources-subscribe # ditto -- subscribe rides the resources capability (#2307)
-  - resources-unsubscribe # ditto (#2307)
+  - resources-subscribe # ditto -- subscribe rides the resources capability; on front_door: #2317
+  - resources-unsubscribe # ditto; on front_door: #2317
 
   # -- 1. fixture-dependent --------------------------------------------------
-  - tools-call-image # no image-returning tool upstream (#2307)
-  - tools-call-audio # no audio-returning tool upstream (#2307)
-  - tools-call-embedded-resource # no embedded-resource tool upstream (#2307)
-  - tools-call-mixed-content # no mixed-content tool upstream (#2307)
-  - tools-call-with-logging # backend emits no log notifications (#2307)
-  - tools-call-with-progress # backend emits no progress notifications (#2307)
-  - tools-call-sampling # backend issues no sampling request (#2307)
-  - tools-call-elicitation # backend issues no elicitation request (#2307)
-  - elicitation-sep1034-defaults # needs an eliciting backend (#2307)
-  - elicitation-sep1330-enums # needs an eliciting backend (#2307)
-  - resources-read-text # `test://static-text` exists only on the reference server (#2307)
-  - resources-read-binary # ditto (#2307)
-  - resources-templates-read # ditto (#2307)
-  - prompts-get-simple # reference-server prompts (#2307)
-  - prompts-get-with-args # ditto (#2307)
-  - prompts-get-embedded-resource # ditto (#2307)
-  - prompts-get-with-image # ditto (#2307)
+  - tools-call-image # no image-returning tool upstream; passes on front_door (#2307)
+  - tools-call-audio # no audio-returning tool upstream; passes on front_door (#2307)
+  - tools-call-embedded-resource # no embedded-resource tool upstream; passes on front_door (#2307)
+  - tools-call-mixed-content # no mixed-content tool upstream; passes on front_door (#2307)
+  - tools-call-with-logging # backend emits no log notifications; on front_door: logging/setLevel is removed (SEP-2575)
+  - tools-call-with-progress # backend emits no progress notifications; on front_door: #2314
+  - tools-call-sampling # backend issues no sampling request; on front_door: #2313
+  - tools-call-elicitation # backend issues no elicitation request; on front_door: #2313
+  - elicitation-sep1034-defaults # needs an eliciting backend; on front_door: #2313
+  - elicitation-sep1330-enums # needs an eliciting backend; on front_door: #2313
+  - resources-read-text # `test://static-text` exists only on the reference server; on front_door: URIs are namespaced (#1025)
+  - resources-read-binary # ditto; on front_door: #1025
+  - resources-templates-read # ditto; on front_door: #1025
+  - prompts-get-simple # reference-server prompts; passes on front_door (#2307)
+  - prompts-get-with-args # ditto; passes on front_door (#2307)
+  - prompts-get-embedded-resource # ditto; passes on front_door (#2307)
+  - prompts-get-with-image # ditto; passes on front_door (#2307)
