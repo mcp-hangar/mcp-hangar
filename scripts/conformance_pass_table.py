@@ -97,8 +97,9 @@ def _table(data: dict) -> list[str]:
         "| --- | --- | --- | --- | --- |",
     ]
     for r in data["rows"]:
-        tracked = ", ".join(r["tracked"])
-        lines.append(f"| `{r['scenario']}` | {r['passed']} | {r['failed']} | {r['verdict']} | {tracked} |")
+        # One space each side, empty cells included: the docs lint compact tables (MD060).
+        cells = [f"`{r['scenario']}`", str(r["passed"]), str(r["failed"]), r["verdict"], ", ".join(r["tracked"])]
+        lines.append("|" + "|".join(f" {c} " if c else " " for c in cells) + "|")
     lines.append("")
     return lines
 
