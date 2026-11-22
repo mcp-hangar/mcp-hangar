@@ -42,7 +42,7 @@
 
 server:
   # -- 1. fixture-dependent ---------------------------------------------------
-  - server-stateless # needs test_missing_capability; on front_door: #2315, #2318
+  - server-stateless # needs test_missing_capability; on front_door: #2318
   - json-schema-2020-12 # needs json_schema_2020_12_tool; passes on front_door (#2307)
   - http-custom-header-server-validation # needs a tool with x-mcp-header; the reference server has none (#2318)
   - tools-call-image # passes on front_door (#2307)

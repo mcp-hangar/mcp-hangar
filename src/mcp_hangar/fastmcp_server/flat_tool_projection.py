@@ -104,6 +104,7 @@ from .catalogue_warmup import is_warming, wait_for_catalogue
 from .flat_call_log import as_client_result, logging_each_call, note_failure
 from .header_verdicts import HEADER_EXPOSURE_REFUSE_BOOT, denied_header_exposure
 from .header_verdicts import invalid_header_annotation as _invalid_header_annotation
+from .missing_capability_relay import relayed_missing_capability
 from .projection_metrics import expose_change_count, observe_served_listing
 from .resource_link_read_through import project_result_uris
 from .served_tool_names import projection_changed_error_data, remember_served, was_served_to_caller
@@ -1105,6 +1106,20 @@ def _failed_flat_result(
     )
 
 
+def _failed_flat_call(result: Any, mcp_ctx: Any) -> Any:
+    """What the caller of a flat call the executor did not complete is answered with.
+
+    An upstream's ``-32021`` that is true of this caller is raised as its
+    protocol error, which the SDK sends on HTTP 400, not a tool result (#2315).
+    Every other failure is the tool result :func:`_failed_flat_result` builds.
+    """
+    missing_capability = relayed_missing_capability(result.upstream_missing_capability, mcp_ctx)
+    if missing_capability is not None:
+        raise missing_capability
+    note_failure(result.error_type)  # the text below does not carry the code; the log line does
+    return _failed_flat_result(result.error, result.upstream_result, result.refusal_meta)
+
+
 def register_flat_tool_handlers(mcp: FastMCP) -> None:
     """Replace the default tools/list and tools/call handlers with flat-projection ones.
 
@@ -1331,8 +1346,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # `hangar_call` records it, before the caller sees it (#1394).
         result, created_task = govern_flat_call(batch.results)
         if not result.success:
-            note_failure(result.error_type)  # the text below does not carry the code; the log line does
-            return _failed_flat_result(result.error, result.upstream_result, result.refusal_meta)
+            return _failed_flat_call(result, mcp_ctx)
 
         # Namespace every resource URI we are about to hand this tenant with its
         # owning upstream, and remember the resource_links, so following one on

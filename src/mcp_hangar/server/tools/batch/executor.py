@@ -2902,6 +2902,7 @@ class BatchExecutor:
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(retry_result.final_error),
                     upstream_result=_upstream_result_of(retry_result.final_error),
+                    upstream_missing_capability=_missing_capability_of(retry_result.final_error),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                     refusal_meta=refusal_meta,
                     retry_metadata=RetryMetadata(
@@ -2931,6 +2932,7 @@ class BatchExecutor:
                     elapsed_ms=elapsed_ms,
                     member_outcome=member_outcome(e),
                     upstream_result=_upstream_result_of(e),
+                    upstream_missing_capability=_missing_capability_of(e),
                     l7_evaluator_failed=l7 is not None and l7.evaluator_failed,
                     refusal_meta=refusal_meta,
                 )
@@ -2987,6 +2989,13 @@ def _upstream_result_of(error: BaseException | None) -> dict[str, Any] | None:
         return None
     result = details.get("result")
     return result if isinstance(result, dict) else None
+
+
+def _missing_capability_of(error: BaseException | None) -> dict[str, Any] | None:
+    """The upstream's ``-32021`` the aggregate kept, for the front door to judge (#2315)."""
+    details = getattr(error, "details", None)
+    kept = details.get("missing_capability") if isinstance(details, dict) else None
+    return kept if isinstance(kept, dict) else None
 
 
 def _remaining_budget(p: _CallPipeline) -> float:

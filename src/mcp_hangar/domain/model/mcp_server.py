@@ -207,6 +207,36 @@ def _rpc_error_code(error: dict[str, Any]) -> int | None:
     return code if type(code) is int else None
 
 
+#: JSON-RPC ``MissingRequiredClientCapabilityError`` (SEP-2575): the request
+#: needs a capability the client did not declare.
+_MISSING_REQUIRED_CLIENT_CAPABILITY = -32021
+
+#: How much of an upstream's ``-32021`` message is kept for the caller (#2315).
+_MISSING_CAPABILITY_MESSAGE_LIMIT = 500
+
+
+def _missing_capability_error(error: dict[str, Any]) -> dict[str, Any] | None:
+    """An upstream's ``-32021`` as its code, message and ``requiredCapabilities``; None for anything else (#2315).
+
+    Whether the caller is shown it is the front door's decision, made against
+    what that caller declared. Only the fields the spec gives the error are
+    kept: any other ``data`` the upstream sent is dropped. An error without a
+    string message or an object of required capabilities is None.
+    """
+    if _rpc_error_code(error) != _MISSING_REQUIRED_CLIENT_CAPABILITY:
+        return None
+    message = error.get("message")
+    data = error.get("data")
+    required = data.get("requiredCapabilities") if isinstance(data, dict) else None
+    if not isinstance(message, str) or not isinstance(required, dict):
+        return None
+    return {
+        "code": _MISSING_REQUIRED_CLIENT_CAPABILITY,
+        "message": message[:_MISSING_CAPABILITY_MESSAGE_LIMIT],
+        "data": {"requiredCapabilities": required},
+    }
+
+
 def _served_peer_spki(client: Any) -> str | None:
     """The key pin of the connection that served *client*'s last call on this thread, if it has one (ADR-030 §6)."""
     served = getattr(client, "served_peer_spki", None)
@@ -2322,6 +2352,8 @@ class McpServer(AggregateRoot):
                         # Whether the error answers the request or reports a broken
                         # exchange: a group reads it to judge the member (#1409).
                         "jsonrpc_code": _rpc_error_code(response["error"]),
+                        # The one upstream error the front door may answer with (#2315).
+                        "missing_capability": _missing_capability_error(response["error"]),
                     },
                 )
 

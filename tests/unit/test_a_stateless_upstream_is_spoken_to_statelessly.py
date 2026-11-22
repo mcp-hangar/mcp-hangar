@@ -232,13 +232,29 @@ class TestTheVersionRefusalReachesTheCaller:
         with self._client(httpx.Response(400, json={"jsonrpc": "2.0", "id": None, "error": error})) as client:
             assert client.call("server/discover", {}) == {"error": error}
 
-    def test_any_other_400_keeps_the_http_error_shape(self) -> None:
-        error = {"code": -32602, "message": "Invalid params"}
-        with self._client(httpx.Response(400, json={"jsonrpc": "2.0", "id": None, "error": error})) as client:
-            answer = client.call("server/discover", {})
+    def test_another_jsonrpc_error_on_a_400_keeps_its_code_message_and_data(self) -> None:
+        """2026-07-28 answers -32020, -32021 and -32602 on a 400; the caller is owed the code (#2315)."""
+        error = {"code": -32021, "message": "Missing capability", "data": {"requiredCapabilities": {"sampling": {}}}}
+        body = {"jsonrpc": "2.0", "id": None, "error": {**error, "extra": "not an error field"}}
+        with self._client(httpx.Response(400, json=body)) as client:
+            assert client.call("tools/call", {"name": "t"}) == {"error": error}
 
-        assert answer["error"]["code"] == -32000
-        assert answer["error"]["message"] == "HTTP error: 400"
+    def test_a_400_without_a_jsonrpc_error_keeps_the_http_error_shape(self) -> None:
+        for body in ({"error": "not an object"}, {"error": {"code": "-32602", "message": "x"}}, {"error": {"code": 1}}):
+            with self._client(httpx.Response(400, json=body)) as client:
+                answer = client.call("server/discover", {})
+
+            assert answer["error"]["code"] == -32000, body
+            assert answer["error"]["message"] == "HTTP error: 400"
+
+    def test_a_jsonrpc_error_on_another_status_keeps_the_http_error_shape(self) -> None:
+        error = {"code": -32602, "message": "Invalid params"}
+        for status in (401, 403, 500):
+            with self._client(httpx.Response(status, json={"jsonrpc": "2.0", "id": None, "error": error})) as client:
+                answer = client.call("server/discover", {})
+
+            assert answer["error"]["code"] == -32000, status
+            assert answer["error"]["message"] == f"HTTP error: {status}"
 
 
 class TestAProbeThatTimesOut:

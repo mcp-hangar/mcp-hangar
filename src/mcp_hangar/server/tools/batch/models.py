@@ -200,6 +200,10 @@ class CallResult:
     # `structuredContent` and every content block reach the caller as sent (#1900).
     # None for a failure Hangar raised itself and for every success.
     upstream_result: dict[str, Any] | None = None
+    # The upstream's `-32021` (code, message, `requiredCapabilities`), which the
+    # front door may answer its caller with (#2315). Never serialized: no other
+    # surface shows it. None for every other failure and every success.
+    upstream_missing_capability: dict[str, Any] | None = None
 
 
 @dataclass
