@@ -59,35 +59,35 @@
 
 server:
   # -- 1. fixture-dependent ---------------------------------------------------
-  - tools-call-image # no image-returning tool upstream
-  - tools-call-audio # no audio-returning tool upstream
-  - tools-call-embedded-resource # no embedded-resource tool upstream
-  - tools-call-mixed-content # no mixed-content tool upstream
-  - tools-call-with-progress # backend emits no progress notifications
-  - tools-call-sampling # backend issues no sampling request
-  - tools-call-elicitation # backend issues no elicitation request
-  - elicitation-sep1034-defaults # needs an eliciting backend
-  - elicitation-sep1330-enums # needs an eliciting backend
-  - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored)
-  - server-sse-polling # needs the test_reconnection tool; WARNINGs by decision, #2232 (pending, not scored)
+  - tools-call-image # no image-returning tool upstream (#2307)
+  - tools-call-audio # no audio-returning tool upstream (#2307)
+  - tools-call-embedded-resource # no embedded-resource tool upstream (#2307)
+  - tools-call-mixed-content # no mixed-content tool upstream (#2307)
+  - tools-call-with-progress # backend emits no progress notifications (#2307)
+  - tools-call-sampling # backend issues no sampling request (#2307)
+  - tools-call-elicitation # backend issues no elicitation request (#2307)
+  - elicitation-sep1034-defaults # needs an eliciting backend (#2307)
+  - elicitation-sep1330-enums # needs an eliciting backend (#2307)
+  - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored) (#2307)
+  - server-sse-polling # needs the test_reconnection tool (#2307); WARNINGs by decision, #2232 (pending, not scored)
 
   # -- 2. capability not advertised -------------------------------------------
-  - completion-complete # `completions` is absent from initialize
-  - prompts-list
-  - prompts-get-simple
-  - prompts-get-with-args
-  - prompts-get-embedded-resource
-  - prompts-get-with-image
-  - resources-list
-  - resources-read-text
-  - resources-read-binary
-  - resources-templates-read
-  - resources-subscribe # subscribe rides the resources capability
-  - resources-unsubscribe
+  - completion-complete # `completions` is absent from initialize (#2307)
+  - prompts-list # #2307
+  - prompts-get-simple # #2307
+  - prompts-get-with-args # #2307
+  - prompts-get-embedded-resource # #2307
+  - prompts-get-with-image # #2307
+  - resources-list # #2307
+  - resources-read-text # #2307
+  - resources-read-binary # #2307
+  - resources-templates-read # #2307
+  - resources-subscribe # subscribe rides the resources capability (#2307)
+  - resources-unsubscribe # #2307
 
   # -- 3. deliberately not implemented ----------------------------------------
   - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
-  - tools-call-with-logging # needs logging/setLevel, which answers -32601
+  - tools-call-with-logging # needs logging/setLevel, which answers -32601 (SEP-2575)
 
   # -- 4. not evaluable without a session id ----------------------------------
   - server-sse-multiple-streams # short-circuits to WARNING before its own check (#877)
