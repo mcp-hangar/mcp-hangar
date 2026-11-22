@@ -209,7 +209,7 @@ class TestALegacyUpstreamKeepsTheHandshake:
             if request.method != "POST":
                 continue
             assert "MCP-Protocol-Version" not in request.headers
-            assert VERSION_KEY not in _meta(request)
+            assert VERSION_KEY not in json.loads(request.content)["params"].get("_meta", {})
         client.close()
 
     def test_the_session_it_establishes_is_echoed(self) -> None:
@@ -303,6 +303,64 @@ class TestUpstreamProtocolLegacy:
         assert _methods(seen).count("initialize") == 2
         assert "server/discover" not in _methods(seen)
         client.close()
+
+    def test_legacy_initialize_omits_empty_meta(self) -> None:
+        """#2317: a dual-era upstream treats a sessionless request carrying `_meta` as 2026-07-28 traffic."""
+        legacy = _legacy(lambda body: _error(body, -32601))
+
+        def reference_everything(body: dict[str, Any]) -> httpx.Response:
+            if body["method"] == "initialize" and "_meta" in (body.get("params") or {}):
+                return httpx.Response(
+                    400,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "error": {"code": -32020, "message": "Missing MCP-Protocol-Version header"},
+                    },
+                )
+            return legacy(body)
+
+        server, client, seen = _start(reference_everything, _loaded(upstream_protocol="legacy"))
+
+        assert _methods(seen)[:3] == ["initialize", "notifications/initialized", "tools/list"]
+        assert "_meta" not in json.loads(seen[0].content)["params"]
+        assert "lookup" in server.tools
+        client.close()
+
+    def test_legacy_initialize_keeps_meta_when_trace_context_fills_it(self) -> None:
+        """Trace context in `_meta` still rides on a legacy handshake when an active span populates it."""
+        legacy = _legacy(lambda body: _error(body, -32601))
+
+        def add_traceparent(carrier: dict[str, Any]) -> None:
+            carrier["traceparent"] = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+
+        with patch("mcp_hangar.http_client.inject_trace_context", side_effect=add_traceparent):
+            _, client, seen = _start(legacy, _loaded(upstream_protocol="legacy"))
+
+        meta = json.loads(seen[0].content)["params"]["_meta"]
+        assert meta == {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+        assert VERSION_KEY not in meta
+        client.close()
+
+    def test_legacy_request_keeps_caller_supplied_meta(self) -> None:
+        """Caller-provided `_meta` fields survive on a legacy HTTP request."""
+        seen: list[httpx.Request] = []
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return _ok(json.loads(request.content), {"protocolVersion": "2025-11-25", "capabilities": {}})
+
+        client = HttpClient("http://upstream.test/mcp", http_config=HttpClientConfig(max_retries=1))
+        client._client.close()
+        client._client = httpx.Client(transport=httpx.MockTransport(handle))
+        try:
+            client.call("initialize", {"protocolVersion": MODERN, "_meta": {"progressToken": "p-1"}})
+        finally:
+            client.close()
+
+        meta = json.loads(seen[0].content)["params"]["_meta"]
+        assert meta == {"progressToken": "p-1"}
+        assert VERSION_KEY not in meta
 
 
 class TestUpstreamProtocolAuto:
