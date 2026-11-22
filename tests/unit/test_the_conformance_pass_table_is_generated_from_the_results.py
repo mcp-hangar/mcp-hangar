@@ -31,9 +31,9 @@ def test_each_scenario_is_a_pass_a_known_failure_or_a_regression(tmp_path):
 
     table = _load().render(tmp_path, baseline, "Server")
 
-    assert "| `tools-list` | 2 | 0 | pass |  |" in table
-    assert "| `prompts-list` | 0 | 1 | known |  |" in table
-    assert "| `caching` | 1 | 1 | REGRESSION |  |" in table
+    assert "| `tools-list` | 2 | 0 | pass | |" in table
+    assert "| `prompts-list` | 0 | 1 | known | |" in table
+    assert "| `caching` | 1 | 1 | REGRESSION | |" in table
     assert "1 of 3 scenarios pass" in table
 
 
@@ -81,7 +81,19 @@ def test_each_known_non_pass_names_the_issues_and_seps_on_its_baseline_line(tmp_
     assert "| `server-sse-polling` | 0 | 1 | known | #2307, #2232 |" in table
     assert "| `logging-set-level` | 0 | 1 | known | SEP-2575 |" in table
     # The next line's comment is not this entry's comment.
-    assert "| `resources-list` | 0 | 1 | known |  |" in table
+    assert "| `resources-list` | 0 | 1 | known | |" in table
+
+
+def test_an_empty_cell_is_one_space_wide(tmp_path):
+    # The docs lint tables in the compact style (MD060), where `|  |` is an error.
+    _write(tmp_path, "tools-list", ["SUCCESS"])
+    baseline = tmp_path / "baseline.yml"
+    baseline.write_text("server:\n")
+
+    table = _load().render(tmp_path, baseline, "Server")
+
+    assert "|  |" not in table
+    assert "| `tools-list` | 1 | 0 | pass | |" in table
 
 
 def test_the_table_says_what_it_was_run_against(tmp_path):
@@ -120,7 +132,7 @@ def test_legs_written_as_json_assemble_into_one_page(tmp_path):
     doc = buffer.getvalue()
 
     assert doc.index("### Server, 2026-07-28") < doc.index("### Client, 2026-07-28")
-    assert "| `tools-list` | 1 | 0 | pass |  |" in doc
+    assert "| `tools-list` | 1 | 0 | pass | |" in doc
     assert "| `tools_call` | 0 | 1 | known | #2010 |" in doc
 
 
@@ -135,6 +147,6 @@ def test_client_results_are_read_with_their_auth_scenarios(tmp_path):
 
     table = _load().render(tmp_path, baseline, "Client")
 
-    assert "| `tools_call` | 1 | 0 | pass |  |" in table
+    assert "| `tools_call` | 1 | 0 | pass | |" in table
     assert "| `auth/pre-registration` | 1 | 1 | known | #2012 |" in table
     assert "1 of 2 scenarios pass" in table
