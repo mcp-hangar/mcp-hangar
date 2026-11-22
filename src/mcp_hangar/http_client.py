@@ -550,6 +550,84 @@ def _sse_data(event_data: str) -> str:
     return "\n".join(line for line in data_lines if line)
 
 
+class _SseEventSplitter:
+    """Split an SSE byte stream into events on blank lines under CRLF, LF or CR (#2327).
+
+    WHATWG HTML Living Standard ("Parsing an event stream") terminates a line
+    with CRLF, a lone LF or a lone CR, and an event with an empty line.
+    Normalising CRLF and lone CR to LF with a 1-byte held trailing CR handles
+    every chunk split of ``\\r\\n\\r\\n`` and ``\\r\\r``, including while dropping an
+    oversized event (#1613).
+    """
+
+    def __init__(self) -> None:
+        self._buffer = b""
+        self._cr = b""
+        self._dropping = False
+
+    def _normalize(self, chunk: bytes) -> bytes:
+        data, self._cr = self._cr + chunk, b""
+        if data.endswith(b"\r"):
+            data, self._cr = data[:-1], b"\r"
+        return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+    def feed(
+        self,
+        chunk: bytes,
+        *,
+        limit: int | None = None,
+        on_oversize: Callable[[int], None] | None = None,
+    ) -> list[str]:
+        """Append *chunk* and return every event it completes."""
+        return self._drain(self._normalize(chunk), limit=limit, on_oversize=on_oversize)
+
+    def finish(
+        self,
+        *,
+        limit: int | None = None,
+        on_oversize: Callable[[int], None] | None = None,
+    ) -> list[str]:
+        """Flush a trailing CR at EOF (e.g. a CR-only stream ending in ``\\r\\r``)."""
+        if not self._cr:
+            return []
+        self._cr = b""
+        return self._drain(b"\n", limit=limit, on_oversize=on_oversize)
+
+    def _drain(
+        self,
+        normalized: bytes,
+        *,
+        limit: int | None,
+        on_oversize: Callable[[int], None] | None,
+    ) -> list[str]:
+        self._buffer += normalized
+        if self._dropping:
+            end = self._buffer.find(b"\n\n")
+            if end < 0:
+                self._buffer = self._buffer[-1:]
+                return []
+            self._buffer, self._dropping = self._buffer[end + 2 :], False
+
+        events: list[str] = []
+        while b"\n\n" in self._buffer:
+            event_data, self._buffer = self._buffer.split(b"\n\n", 1)
+            if limit is not None and len(event_data) > limit:
+                if on_oversize is not None:
+                    on_oversize(limit)
+                continue
+            events.append(event_data.decode("utf-8", errors="replace"))
+        if limit is not None and len(self._buffer) > limit:
+            if on_oversize is not None:
+                on_oversize(limit)
+            self._buffer, self._dropping = self._buffer[-1:], True
+        return events
+
+    @staticmethod
+    def split_text(body: str) -> list[str]:
+        """Split a fully-read SSE text body into events under CRLF, LF or CR."""
+        return body.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
+
+
 class _PostStreamRelay:
     """Hands on the progress a POST's own SSE body carries for that POST's token (#2314).
 
@@ -566,23 +644,17 @@ class _PostStreamRelay:
         self._deliver = deliver
         #: Whether the transport hands this body over as it is read; else `_call` does once it is.
         self.live = False
-        self._buffer = b""
-        self._cr = b""
+        self._splitter = _SseEventSplitter()
 
     def feed(self, chunk: bytes) -> None:
-        """Take the next bytes of the body; each event they complete is handed to `event`.
+        """Take the next bytes of the body; each event they complete is handed to `event`."""
+        for event_data in self._splitter.feed(chunk):
+            self.event(event_data)
 
-        A line ends in CRLF, LF or CR, as SSE allows: the Python SDK's server
-        sends CRLF. A CR that ends a chunk waits for the next one, which may
-        start with its LF.
-        """
-        data, self._cr = self._cr + chunk, b""
-        if data.endswith(b"\r"):
-            data, self._cr = data[:-1], b"\r"
-        self._buffer += data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        while b"\n\n" in self._buffer:
-            event_data, self._buffer = self._buffer.split(b"\n\n", 1)
-            self.event(event_data.decode("utf-8", errors="replace"))
+    def finish(self) -> None:
+        """Flush a trailing CR at EOF."""
+        for event_data in self._splitter.finish():
+            self.event(event_data)
 
     def event(self, event_data: str) -> None:
         data = _sse_data(event_data)
@@ -614,6 +686,7 @@ class _RelayedStream(httpx.SyncByteStream):
         for chunk in self._stream:
             self._relay.feed(chunk)
             yield chunk
+        self._relay.finish()
 
     def close(self) -> None:
         self._stream.close()
@@ -1414,11 +1487,11 @@ class HttpClient:
         """
         logger.debug("http_client_parsing_sse_body", request_id=request_id, body_length=len(body))
 
-        # Split by double newline to get events
-        events = body.split("\n\n")
+        events = _SseEventSplitter.split_text(body)
         if relay is not None and not relay.live:
             # The transport did not hand its progress on as it came (a compressed body).
             relay.feed(body.encode("utf-8"))
+            relay.finish()
         answer = self._find_sse_answer(events, request_id)
         if answer is None and deadline is not None and not self.modern_envelope:
             cursor = _SseCursor()
@@ -1786,28 +1859,17 @@ class HttpClient:
         would; otherwise it is dropped as it is read, up to the blank line that
         ends it, where the framing is back in step.
         """
-        buffer = b""
-        dropping = False
+        splitter = _SseEventSplitter()
+
+        def on_oversize(limit: int) -> None:
+            self._oversized_event(mcp_server_label, limit, refuse_oversize)
+
         for chunk in response.iter_bytes():
             if stop():
                 return
-            buffer += chunk
-            if dropping:
-                end = buffer.find(b"\n\n")
-                if end < 0:
-                    buffer = buffer[-1:]  # the first newline of a boundary split across chunks
-                    continue
-                buffer, dropping = buffer[end + 2 :], False
-            limit = self._read_limit()
-            while b"\n\n" in buffer:
-                event_data, buffer = buffer.split(b"\n\n", 1)
-                if len(event_data) > limit:
-                    self._oversized_event(mcp_server_label, limit, refuse_oversize)
-                    continue
-                yield event_data.decode("utf-8", errors="replace")
-            if len(buffer) > limit:
-                self._oversized_event(mcp_server_label, limit, refuse_oversize)
-                buffer, dropping = buffer[-1:], True
+            yield from splitter.feed(chunk, limit=self._read_limit(), on_oversize=on_oversize)
+        if not stop():
+            yield from splitter.finish(limit=self._read_limit(), on_oversize=on_oversize)
 
     def _oversized_event(self, mcp_server_label: str, limit: int, refuse: bool) -> None:
         logger.warning("http_client_stream_event_too_large", mcp_server=mcp_server_label, limit_bytes=limit)
