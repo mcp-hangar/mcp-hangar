@@ -401,6 +401,41 @@ jobs:
             echo "No change under the conformance paths; the suite did not run."
           fi
 
+  # The one check `main` requires (#1902). It always reports, whatever the
+  # trigger and whatever `changes` decided, and it fails closed: if the paths
+  # job did not succeed, or the suite was due and any leg did anything but
+  # succeed, the check is red. A leg that was not due must have been skipped.
+  # The ecosystem watch below is advisory and deliberately not in `needs`.
+  conformance-gate:
+    name: Conformance
+    if: always()
+    needs: [changes, conformance, conformance-server, conformance-client]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every conformance leg passed, or none was due
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DUE: ${{ needs.changes.outputs.run }}
+          LEGS: ${{ needs.conformance.result }} ${{ needs.conformance-server.result }} ${{ needs.conformance-client.result }}
+        run: |
+          echo "paths job: ${CHANGES}; suite due: ${DUE:-false}; legs: ${LEGS}"
+          if [ "${CHANGES}" != "success" ]; then
+            echo "::error::the paths job did not succeed (${CHANGES}), so nothing says the suite was not due"
+            exit 1
+          fi
+          want=skipped
+          [ "${DUE}" = "true" ] && want=success
+          for result in ${LEGS}; do
+            if [ "${result}" != "${want}" ]; then
+              echo "::error::a conformance leg ended ${result}; expected ${want}"
+              exit 1
+            fi
+          done
+          if [ "${want}" = "skipped" ]; then
+            echo "No change under the conformance paths; the suite did not run."
+          fi
+
   # Gate E is blocked on the ecosystem, not on us: the 2026-07-28 server vectors
   # do not exist yet, and no released MCP client speaks that generation either
   # (the Inspector pins TypeScript SDK v1.x, and npm has no 2.x SDK at all).
