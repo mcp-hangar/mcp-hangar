@@ -247,9 +247,9 @@ jobs:
   # adds one principal's key on a loopback proxy and changes nothing else.
   # The reference server is the conformance repository at the commit the
   # pinned npm version was built from, read from the registry, so the suite
-  # and its fixtures cannot drift apart. Its table goes to the job summary
-  # only; the published page (`pass-table`) still holds the egress server and
-  # client legs alone.
+  # and its fixtures cannot drift apart. Its table names that commit and
+  # joins the published page (`pass-table`) after the four egress and client
+  # sections.
   conformance-front-door:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -281,6 +281,7 @@ jobs:
             echo "::error::the registry names no commit for conformance@${SUITE}"; exit 1
           fi
           echo "reference server at ${commit}"
+          echo "REFERENCE_COMMIT=${commit}" >> "${GITHUB_ENV}"
           git init -q reference
           git -C reference fetch -q --depth 1 https://github.com/modelcontextprotocol/conformance.git "${commit}"
           git -C reference checkout -q FETCH_HEAD
@@ -324,8 +325,18 @@ jobs:
             python scripts/conformance_pass_table.py conformance-results \
               "tests/conformance/baseline-front-door-${REVISION}.yml" "Server, front_door, ${REVISION}" \
               --requirements "reference/requirements/${REVISION}.yaml" \
-              --suite "${SUITE}" --commit "${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+              --suite "${SUITE}" --commit "${GITHUB_SHA}" --reference "${REFERENCE_COMMIT}" \
+              --json "server-front-door-${REVISION}.json" >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+      - name: Keep this leg for the published table
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: conformance-leg-server-front-door-${{ matrix.revision }}
+          path: server-front-door-${{ matrix.revision }}.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Logs on failure
         if: failure()
@@ -414,16 +425,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The pass table the docs publish (#1902), assembled from the four
+  # The pass table the docs publish (#1902), assembled from the six
   # revision-selected legs' own output, never typed. It runs whenever the suite
   # was due, so a PR shows the page it would publish; the docs sync takes it
   # only from a run on `main`. A leg that wrote no table fails this job rather
-  # than leaving a hole in the page. The 0.1.16 job is not on the page: it
-  # judges 2025-11-25 too, and the alpha leg for that revision is the one the
-  # other three share a suite version with.
+  # than leaving a hole in the page, and the `Conformance` gate fails with it.
+  # The order is fixed and the docs sync checks every heading: server
+  # 2026-07-28, server 2025-11-25, client 2026-07-28, client 2025-11-25, then
+  # the front_door server legs, 2026-07-28 and 2025-11-25 (#2307), each with
+  # its own provenance line naming the reference server's commit. The 0.1.16
+  # job is not on the page: it judges 2025-11-25 too, and the alpha leg for
+  # that revision is the one the others share a suite version with.
   pass-table:
     name: Conformance pass table
-    needs: [changes, conformance-server, conformance-client]
+    needs: [changes, conformance-server, conformance-front-door, conformance-client]
     if: always() && needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -439,7 +454,8 @@ jobs:
       - name: Assemble the page
         run: |
           legs=""
-          for leg in server-2026-07-28 server-2025-11-25 client-2026-07-28 client-2025-11-25; do
+          for leg in server-2026-07-28 server-2025-11-25 client-2026-07-28 client-2025-11-25 \
+            server-front-door-2026-07-28 server-front-door-2025-11-25; do
             if [ ! -f "legs/${leg}.json" ]; then
               echo "::error::the ${leg} leg wrote no table; refusing to publish a page without it"
               exit 1

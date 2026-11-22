@@ -149,6 +149,45 @@ def test_the_table_says_what_it_was_run_against(tmp_path):
     assert "Run with suite `@modelcontextprotocol/conformance@0.2.0-alpha.12`, Hangar at `f3d946c20000`." in table
 
 
+def test_a_front_door_leg_names_the_reference_server_it_ran_against(tmp_path):
+    module = _load()
+    _write(tmp_path / "results", "tools-list", ["SUCCESS"])
+    baseline = tmp_path / "baseline.yml"
+    baseline.write_text("server:\n")
+    out = tmp_path / "leg.json"
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        argv = [
+            "x",
+            str(tmp_path / "results"),
+            str(baseline),
+            "Server, front_door, 2026-07-28",
+            "--suite",
+            "0.2.0-alpha.12",
+        ]
+        assert module.main([*argv, "--commit", "a" * 40, "--reference", "f44482ba" + "0" * 32, "--json", str(out)]) == 0
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert module.main(["x", "--page", str(out)]) == 0
+
+    assert json.loads(out.read_text())["reference"] == "f44482ba" + "0" * 32
+    assert (
+        "Run with suite `@modelcontextprotocol/conformance@0.2.0-alpha.12`, Hangar at `aaaaaaaaaaaa`, "
+        "the suite's reference everything-server at `f44482ba0000` behind it." in buffer.getvalue()
+    )
+
+
+def test_a_leg_without_a_reference_says_nothing_about_one(tmp_path):
+    _write(tmp_path, "tools-list", ["SUCCESS"])
+    baseline = tmp_path / "baseline.yml"
+    baseline.write_text("server:\n")
+
+    data = _load().leg(tmp_path, baseline, "Server", suite="0.2.0-alpha.12")
+
+    assert "reference" not in data
+    assert "everything-server" not in "\n".join(_load()._table(data))
+
+
 def test_legs_written_as_json_assemble_into_one_page(tmp_path):
     module = _load()
     server, client = tmp_path / "server", tmp_path / "client"
