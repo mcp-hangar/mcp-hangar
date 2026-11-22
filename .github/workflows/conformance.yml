@@ -37,6 +37,11 @@ concurrency:
 permissions:
   contents: read
 
+# The alpha line every revision-selected leg runs, spelled once: the legs run
+# it and the pass table names it, so the two cannot disagree.
+env:
+  SUITE: 0.2.0-alpha.12
+
 jobs:
   # Whether the suite has anything to judge. Everything Hangar serves or sends
   # on a connection can change a result, so the filter is the whole package and
@@ -188,11 +193,24 @@ jobs:
         env:
           REVISION: ${{ matrix.revision }}
         run: |
-          npx -y @modelcontextprotocol/conformance@0.2.0-alpha.12 server \
+          npx -y "@modelcontextprotocol/conformance@${SUITE}" server \
             --url http://127.0.0.1:52444/mcp \
             --requirements "${REVISION}" \
             --expected-failures "tests/conformance/baseline-${REVISION}.yml" \
             --output-dir conformance-results
+
+      # Which scenarios the revision scores is the suite's own frozen
+      # requirements file, shipped in its package; the table reads it so that
+      # a scenario the suite runs but does not score is not shown as a pass,
+      # a regression or a stale entry.
+      - name: Read what the suite scores for ${{ matrix.revision }}
+        if: always()
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          npm pack --silent "@modelcontextprotocol/conformance@${SUITE}" > suite-tarball.txt
+          tar -xzf "$(cat suite-tarball.txt)" "package/requirements/${REVISION}.yaml"
+          echo "REQUIREMENTS=--requirements package/requirements/${REVISION}.yaml" >> "${GITHUB_ENV}"
 
       - name: Pass table
         if: always()
@@ -200,9 +218,21 @@ jobs:
           REVISION: ${{ matrix.revision }}
         run: |
           if [ -d conformance-results ]; then
+            # shellcheck disable=SC2086 # REQUIREMENTS is a flag and its value
             python scripts/conformance_pass_table.py conformance-results \
-              "tests/conformance/baseline-${REVISION}.yml" "Server, ${REVISION}" >> "${GITHUB_STEP_SUMMARY}"
+              "tests/conformance/baseline-${REVISION}.yml" "Server, ${REVISION}" ${REQUIREMENTS} \
+              --suite "${SUITE}" --commit "${GITHUB_SHA}" \
+              --json "server-${REVISION}.json" >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+      - name: Keep this leg for the published table
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: conformance-leg-server-${{ matrix.revision }}
+          path: server-${{ matrix.revision }}.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Gateway log on failure
         if: failure()
@@ -226,8 +256,10 @@ jobs:
         include:
           - revision: "2026-07-28"
             select: "--requirements 2026-07-28"
+            scored-by-requirements: true
           - revision: "2025-11-25"
             select: "--spec-version 2025-11-25 --suite all"
+            scored-by-requirements: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -248,11 +280,24 @@ jobs:
           REVISION: ${{ matrix.revision }}
         run: |
           # shellcheck disable=SC2086 # SELECT is a list of flags
-          npx -y @modelcontextprotocol/conformance@0.2.0-alpha.12 client \
+          npx -y "@modelcontextprotocol/conformance@${SUITE}" client \
             --command "python tests/conformance/hangar_client.py" \
             $SELECT \
             --expected-failures "tests/conformance/baseline-client-${REVISION}.yml" \
             --output-dir conformance-results
+
+      # Which scenarios the revision scores is the suite's own frozen
+      # requirements file, shipped in its package; the table reads it so that
+      # a scenario the suite runs but does not score is not shown as a pass,
+      # a regression or a stale entry.
+      - name: Read what the suite scores for ${{ matrix.revision }}
+        if: always() && matrix.scored-by-requirements
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          npm pack --silent "@modelcontextprotocol/conformance@${SUITE}" > suite-tarball.txt
+          tar -xzf "$(cat suite-tarball.txt)" "package/requirements/${REVISION}.yaml"
+          echo "REQUIREMENTS=--requirements package/requirements/${REVISION}.yaml" >> "${GITHUB_ENV}"
 
       - name: Pass table
         if: always()
@@ -260,9 +305,64 @@ jobs:
           REVISION: ${{ matrix.revision }}
         run: |
           if [ -d conformance-results ]; then
+            # shellcheck disable=SC2086 # REQUIREMENTS is a flag and its value, or empty
             python scripts/conformance_pass_table.py conformance-results \
-              "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" >> "${GITHUB_STEP_SUMMARY}"
+              "tests/conformance/baseline-client-${REVISION}.yml" "Client, ${REVISION}" ${REQUIREMENTS} \
+              --suite "${SUITE}" --commit "${GITHUB_SHA}" \
+              --json "client-${REVISION}.json" >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+      - name: Keep this leg for the published table
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: conformance-leg-client-${{ matrix.revision }}
+          path: client-${{ matrix.revision }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The pass table the docs publish (#1902), assembled from the four
+  # revision-selected legs' own output, never typed. It runs whenever the suite
+  # was due, so a PR shows the page it would publish; the docs sync takes it
+  # only from a run on `main`. A leg that wrote no table fails this job rather
+  # than leaving a hole in the page. The 0.1.16 job is not on the page: it
+  # judges 2025-11-25 too, and the alpha leg for that revision is the one the
+  # other three share a suite version with.
+  pass-table:
+    name: Conformance pass table
+    needs: [changes, conformance-server, conformance-client]
+    if: always() && needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: conformance-leg-*
+          path: legs
+          merge-multiple: true
+
+      - name: Assemble the page
+        run: |
+          legs=""
+          for leg in server-2026-07-28 server-2025-11-25 client-2026-07-28 client-2025-11-25; do
+            if [ ! -f "legs/${leg}.json" ]; then
+              echo "::error::the ${leg} leg wrote no table; refusing to publish a page without it"
+              exit 1
+            fi
+            legs="${legs} legs/${leg}.json"
+          done
+          # shellcheck disable=SC2086 # legs is a list of paths without spaces
+          python3 scripts/conformance_pass_table.py --page ${legs} > conformance-pass-table.md
+          cat conformance-pass-table.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: conformance-pass-table
+          path: conformance-pass-table.md
+          if-no-files-found: error
+          retention-days: 90
 
   # The one check `main` requires (#1902). It always reports, whatever the
   # trigger and whatever `changes` decided, and it fails closed: if the paths
@@ -272,7 +372,7 @@ jobs:
   conformance-gate:
     name: Conformance
     if: always()
-    needs: [changes, conformance, conformance-server, conformance-client]
+    needs: [changes, conformance, conformance-server, conformance-client, pass-table]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -280,7 +380,9 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           DUE: ${{ needs.changes.outputs.run }}
-          LEGS: ${{ needs.conformance.result }} ${{ needs.conformance-server.result }} ${{ needs.conformance-client.result }}
+          LEGS: >-
+            ${{ needs.conformance.result }} ${{ needs.conformance-server.result }}
+            ${{ needs.conformance-client.result }} ${{ needs.pass-table.result }}
         run: |
           echo "paths job: ${CHANGES}; suite due: ${DUE:-false}; legs: ${LEGS}"
           if [ "${CHANGES}" != "success" ]; then
