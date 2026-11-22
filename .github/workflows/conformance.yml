@@ -238,6 +238,99 @@ jobs:
         if: failure()
         run: tail -100 gateway.log
 
+  # The same server suite against the topology the legs above cannot reach
+  # (#2307): a front_door gateway, auth on, with the suite's own reference
+  # everything-server behind it, so the scenarios that need the reference
+  # fixtures are judged through Hangar instead of being "not evaluated here".
+  # A front door serves an anonymous caller no tool and `conformance server`
+  # cannot present a credential, so tests/conformance/front_door_gateway.py
+  # adds one principal's key on a loopback proxy and changes nothing else.
+  # The reference server is the conformance repository at the commit the
+  # pinned npm version was built from, read from the registry, so the suite
+  # and its fixtures cannot drift apart. Its table goes to the job summary
+  # only; the published page (`pass-table`) still holds the egress server and
+  # client legs alone.
+  conformance-front-door:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    name: Server conformance front_door ${{ matrix.revision }} (baselined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: ["2026-07-28", "2025-11-25"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+
+      - name: Install the gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Fetch the reference server at the suite's commit
+        run: |
+          commit=$(npm view "@modelcontextprotocol/conformance@${SUITE}" gitHead)
+          if [ -z "${commit}" ]; then
+            echo "::error::the registry names no commit for conformance@${SUITE}"; exit 1
+          fi
+          echo "reference server at ${commit}"
+          git init -q reference
+          git -C reference fetch -q --depth 1 https://github.com/modelcontextprotocol/conformance.git "${commit}"
+          git -C reference checkout -q FETCH_HEAD
+          npm ci --prefix reference/examples/servers/typescript
+
+      # The front door warms its upstream once, at boot; the harness waits for
+      # the reference server before it starts the gateway, and opens the proxy
+      # only when the caller's projection holds the reference tools.
+      - name: Start the reference server and the front door
+        run: |
+          (cd reference/examples/servers/typescript && PORT=3000 npx tsx everything-server.ts > ../../../../reference.log 2>&1 &)
+          python tests/conformance/front_door_gateway.py \
+            --upstream http://127.0.0.1:3000/mcp --port 52445 --log gateway.log > front-door.log 2>&1 &
+          for _ in $(seq 1 180); do
+            if curl -sf -o /dev/null http://127.0.0.1:52445/health/live; then
+              echo "front door ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the front door never became ready"
+          tail -50 front-door.log gateway.log reference.log; exit 1
+
+      - name: Run the conformance suite for ${{ matrix.revision }}
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          npx -y "@modelcontextprotocol/conformance@${SUITE}" server \
+            --url http://127.0.0.1:52445/mcp \
+            --requirements "${REVISION}" \
+            --expected-failures "tests/conformance/baseline-front-door-${REVISION}.yml" \
+            --output-dir conformance-results
+
+      # The checkout holds the suite's frozen requirements file for the
+      # revision, so the table can mark what the suite runs but does not score.
+      - name: Pass table
+        if: always()
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          if [ -d conformance-results ]; then
+            python scripts/conformance_pass_table.py conformance-results \
+              "tests/conformance/baseline-front-door-${REVISION}.yml" "Server, front_door, ${REVISION}" \
+              --requirements "reference/requirements/${REVISION}.yaml" \
+              --suite "${SUITE}" --commit "${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Logs on failure
+        if: failure()
+        run: tail -100 front-door.log gateway.log reference.log
+
   # Hangar as the CLIENT under test (#1902). Hangar meets every upstream as an
   # MCP client, so the suite's reference servers judge what it sends them:
   # tests/conformance/hangar_client.py puts the scenario's test server in a
@@ -372,7 +465,7 @@ jobs:
   conformance-gate:
     name: Conformance
     if: always()
-    needs: [changes, conformance, conformance-server, conformance-client, pass-table]
+    needs: [changes, conformance, conformance-server, conformance-front-door, conformance-client, pass-table]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -382,7 +475,8 @@ jobs:
           DUE: ${{ needs.changes.outputs.run }}
           LEGS: >-
             ${{ needs.conformance.result }} ${{ needs.conformance-server.result }}
-            ${{ needs.conformance-client.result }} ${{ needs.pass-table.result }}
+            ${{ needs.conformance-front-door.result }} ${{ needs.conformance-client.result }}
+            ${{ needs.pass-table.result }}
         run: |
           echo "paths job: ${CHANGES}; suite due: ${DUE:-false}; legs: ${LEGS}"
           if [ "${CHANGES}" != "success" ]; then
@@ -442,22 +536,13 @@ jobs:
             fi
           done
 
-      # The tasks half of gate E is blocked on the suite, not on us.
-      #
-      # `@modelcontextprotocol/conformance@alpha` now ships seven `tasks-*`
-      # extension scenarios -- an external audit of exactly the SEP-2663 relay
-      # this repo serves. They cannot be run against Hangar today, and the
-      # reason is structural rather than a missing fixture name:
-      #
-      #   * the scenarios require `greet` / `slow_compute` in `tools/list`;
-      #   * Hangar exposes backend tool names only in `front_door` topology,
-      #     which projects per tenant and therefore needs an identity -- with
-      #     auth off it advertises ZERO tools, by design and verified;
-      #   * `conformance server` has no `--header` / auth option, so it cannot
-      #     present one.
-      #
-      # Those two are mutually exclusive, so this unblocks when the suite grows
-      # a way to authenticate. Watching for that instead of re-discovering it.
+      # `conformance server` has no `--header` / auth option, and a front door
+      # serves an anonymous caller no tool. The front_door leg (#2307) works
+      # around it with a loopback proxy that adds one principal's key; an auth
+      # option on the suite would let that leg drop the proxy. The `tasks-*`
+      # scenarios do run there now, and fail because the reference server has
+      # no tasks fixtures (`greet`, `slow_compute`, ...; #2318), not for want
+      # of an identity.
       - name: Can the conformance suite authenticate yet?
         run: |
           help=$(npx -y @modelcontextprotocol/conformance@alpha server --help 2>&1 || echo "")
@@ -466,9 +551,9 @@ jobs:
             exit 0
           fi
           if printf '%s' "${help}" | grep -qiE '\-\-header|\-\-auth|\-\-bearer|\-\-token'; then
-            echo "::notice::conformance server now accepts auth/header options -- the tasks-* scenarios can finally be run against a front_door gateway; revisit gate E."
+            echo "::notice::conformance server now accepts auth/header options -- the front_door leg can drop its key-adding proxy (tests/conformance/front_door_gateway.py)."
           else
-            echo "Still no auth option on `conformance server` -- tasks-* remain unrunnable against Hangar."
+            echo "Still no auth option on 'conformance server' -- the front_door leg keeps its proxy."
           fi
 
       # The interop half of gate E needs a real client that speaks 2026-07-28.

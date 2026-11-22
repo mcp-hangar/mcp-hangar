@@ -21,9 +21,9 @@
 # 1. Fixture-dependent. The scenario calls a tool the suite's reference server
 #    defines (image/audio/resource tools, `test_reconnection`,
 #    `json_schema_2020_12_tool`, eliciting or sampling tools). The math backend
-#    serves none of them, and the front_door topology that would expose the
-#    reference server's tools needs an identity the suite's `server` command
-#    cannot present.
+#    serves none of them. The front_door leg (#2307,
+#    baseline-front-door-2025-11-25.yml) runs the same suite with the reference
+#    server behind the gateway; each line says what that leg found.
 #
 # 2. Capability not advertised. Hangar declares no `completions`, `prompts` or
 #    `resources` for this configuration, so those methods answer -32601. The
@@ -59,31 +59,31 @@
 
 server:
   # -- 1. fixture-dependent ---------------------------------------------------
-  - tools-call-image # no image-returning tool upstream (#2307)
-  - tools-call-audio # no audio-returning tool upstream (#2307)
-  - tools-call-embedded-resource # no embedded-resource tool upstream (#2307)
-  - tools-call-mixed-content # no mixed-content tool upstream (#2307)
-  - tools-call-with-progress # backend emits no progress notifications (#2307)
-  - tools-call-sampling # backend issues no sampling request (#2307)
-  - tools-call-elicitation # backend issues no elicitation request (#2307)
-  - elicitation-sep1034-defaults # needs an eliciting backend (#2307)
-  - elicitation-sep1330-enums # needs an eliciting backend (#2307)
-  - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored) (#2307)
-  - server-sse-polling # needs the test_reconnection tool (#2307); WARNINGs by decision, #2232 (pending, not scored)
+  - tools-call-image # no image-returning tool upstream; passes on front_door (#2307)
+  - tools-call-audio # no audio-returning tool upstream; passes on front_door (#2307)
+  - tools-call-embedded-resource # no embedded-resource tool upstream; passes on front_door (#2307)
+  - tools-call-mixed-content # no mixed-content tool upstream; passes on front_door (#2307)
+  - tools-call-with-progress # backend emits no progress notifications; on front_door: #2314
+  - tools-call-sampling # backend issues no sampling request; on front_door: #2313
+  - tools-call-elicitation # backend issues no elicitation request; on front_door: #2313
+  - elicitation-sep1034-defaults # needs an eliciting backend; on front_door: #2313
+  - elicitation-sep1330-enums # needs an eliciting backend; on front_door: #2313
+  - json-schema-2020-12 # needs json_schema_2020_12_tool (pending, not scored); passes on front_door (#2307)
+  - server-sse-polling # needs the test_reconnection tool; WARNINGs by decision, #2232 (pending, not scored)
 
   # -- 2. capability not advertised -------------------------------------------
-  - completion-complete # `completions` is absent from initialize (#2307)
-  - prompts-list # #2307
-  - prompts-get-simple # #2307
-  - prompts-get-with-args # #2307
-  - prompts-get-embedded-resource # #2307
-  - prompts-get-with-image # #2307
-  - resources-list # #2307
-  - resources-read-text # #2307
-  - resources-read-binary # #2307
-  - resources-templates-read # #2307
-  - resources-subscribe # subscribe rides the resources capability (#2307)
-  - resources-unsubscribe # #2307
+  - completion-complete # `completions` is absent from initialize; passes on front_door (#2307)
+  - prompts-list # passes on front_door (#2307)
+  - prompts-get-simple # passes on front_door (#2307)
+  - prompts-get-with-args # passes on front_door (#2307)
+  - prompts-get-embedded-resource # passes on front_door (#2307)
+  - prompts-get-with-image # passes on front_door (#2307)
+  - resources-list # passes on front_door (#2307)
+  - resources-read-text # on front_door: URIs are namespaced (#1025)
+  - resources-read-binary # on front_door: URIs are namespaced (#1025)
+  - resources-templates-read # on front_door: URIs are namespaced (#1025)
+  - resources-subscribe # subscribe rides the resources capability; on front_door: #2317
+  - resources-unsubscribe # on front_door: #2317
 
   # -- 3. deliberately not implemented ----------------------------------------
   - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)

@@ -1,0 +1,52 @@
+# Known non-passes of the official MCP conformance suite against a front_door
+# gateway, run with `--requirements 2025-11-25` (#2307).
+#
+# Same semantics as baseline.yml: a failure listed here is known, a failure not
+# listed is a regression, and a listed scenario that now passes is a stale entry
+# that fails the run until its line is deleted. A WARNING counts as a non-pass.
+#
+# The gateway, its one principal, the proxy that adds the principal's key and
+# the reference everything-server behind it are the ones
+# baseline-front-door-2026-07-28.yml describes. The reference server alone
+# passes every scenario this revision scores.
+#
+# The caller speaks 2025-11-25 to the gateway; the gateway speaks 2026-07-28 to
+# the upstream, statelessly, because `upstream_protocol: auto` finds that the
+# reference server serves it. That changes what can be judged here: a
+# stateless upstream asks for sampling and elicitation with an
+# InputRequiredResult rather than a server-to-client request, and has no
+# resources/subscribe. A legacy upstream would carry both, but
+# `upstream_protocol: legacy` cannot start against this server today (#2317).
+#
+# ---------------------------------------------------------------------------
+# 1. Not relayed by the front door.
+#
+# 2. Recorded decision. Resource URIs are namespaced (#1025); logging/setLevel
+#    is removed in 2026-07-28 (SEP-2575) and the Logging feature deprecated
+#    (SEP-2577), as in baseline-2025-11-25.yml; no session id since #877; no
+#    SSE resumption as a server (#2232).
+#
+# 3. Not evaluable with a stateless upstream. resources/subscribe has no
+#    2026-07-28 counterpart to relay to; it needs a legacy upstream (#2317).
+# ---------------------------------------------------------------------------
+
+server:
+  # -- 1. not relayed ---------------------------------------------------------
+  - tools-call-sampling # the upstream's InputRequiredResult is not relayed (#2313)
+  - tools-call-elicitation # #2313
+  - elicitation-sep1034-defaults # #2313
+  - elicitation-sep1330-enums # #2313
+  - tools-call-with-progress # progress on the POST response stream is dropped (#2314)
+
+  # -- 2. recorded decision ---------------------------------------------------
+  - resources-read-text # URIs are namespaced (#1025)
+  - resources-read-binary # #1025
+  - resources-templates-read # #1025
+  - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
+  - tools-call-with-logging # needs logging/setLevel, which answers -32601 (SEP-2575)
+  - server-sse-multiple-streams # short-circuits to WARNING without a session id (#877)
+  - server-sse-polling # no session id (#877); no priming event or retry, by decision (#2232)
+
+  # -- 3. not evaluable with a stateless upstream -----------------------------
+  - resources-subscribe # needs a legacy upstream (#2317)
+  - resources-unsubscribe # #2317
