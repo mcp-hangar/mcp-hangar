@@ -162,7 +162,9 @@ class FrontDoor:
         era: str = MODERN,
         request_id: int = 1,
         extra_headers: dict[str, str] | None = None,
+        capabilities: dict[str, Any] | None = None,
     ) -> httpx.Response:
+        """One POST; *capabilities* is the modern envelope's ``clientCapabilities`` (``{}`` when None)."""
         headers = {
             **(extra_headers or {}),
             "Accept": "application/json, text/event-stream",
@@ -176,7 +178,11 @@ class FrontDoor:
             headers["Mcp-Method"] = method
             if method == "tools/call":
                 headers["Mcp-Name"] = params["name"]
-            body_params["_meta"] = _ENVELOPE
+            body_params["_meta"] = (
+                _ENVELOPE
+                if capabilities is None
+                else {**_ENVELOPE, "io.modelcontextprotocol/clientCapabilities": capabilities}
+            )
         body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": body_params}
         return self.client.post("/mcp", headers=headers, content=json.dumps(body))
 
@@ -197,9 +203,18 @@ class FrontDoor:
         era: str = MODERN,
         request_id: int = 1,
         extra_headers: dict[str, str] | None = None,
+        capabilities: dict[str, Any] | None = None,
     ) -> httpx.Response:
         params = {"name": name, "arguments": arguments or {}}
-        return self.post(tenant, "tools/call", params, era=era, request_id=request_id, extra_headers=extra_headers)
+        return self.post(
+            tenant,
+            "tools/call",
+            params,
+            era=era,
+            request_id=request_id,
+            extra_headers=extra_headers,
+            capabilities=capabilities,
+        )
 
     def error(self, tenant: str, name: str, *, era: str = MODERN) -> dict[str, Any]:
         payload = jsonrpc(self.call(tenant, name, era=era))

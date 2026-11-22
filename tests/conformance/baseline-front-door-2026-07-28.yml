@@ -51,7 +51,7 @@ server:
   - input-required-result-capability-check # #2313
   - input-required-result-validate-input # #2313; the reference server warns here on its own too (#2318)
   - tools-call-with-progress # progress on the POST response stream is dropped (#2314)
-  - server-stateless # upstream -32021 becomes a tool error (#2315); list-changed hooks are unlisted (#2318)
+  - server-stateless # its two list-changed hooks are unlisted upstream, so not projected (#2318)
   - sep-2164-resource-not-found # -32002 without data.uri (#2316)
 
   # -- 2. recorded decision ---------------------------------------------------

@@ -558,7 +558,11 @@ def _http_error(response: httpx.Response) -> dict[str, Any]:
     """The JSON-RPC error a 4xx/5xx answer is returned as.
 
     An upstream's own -32022 is kept whole (#2009): its ``data.supported`` is
-    what the start's version retry reads. Every other status keeps the
+    what the start's version retry reads. A 400 whose body is any other
+    JSON-RPC error, an integer code and a string message, is that error's
+    code, message and data (#2315): 2026-07-28 answers its protocol errors on
+    a 400 (-32020, -32021, -32602), and which of them a caller is shown is
+    decided where the caller is known, not here. Every other answer keeps the
     ``HTTP error`` shape callers key on.
     """
     try:
@@ -567,6 +571,13 @@ def _http_error(response: httpx.Response) -> dict[str, Any]:
         error = None
     if isinstance(error, dict) and error.get("code") == UNSUPPORTED_PROTOCOL_VERSION_CODE:
         return error
+    if (
+        response.status_code == 400
+        and isinstance(error, dict)
+        and type(error.get("code")) is int
+        and isinstance(error.get("message"), str)
+    ):
+        return {key: error[key] for key in ("code", "message", "data") if key in error}
     return {"code": -32000, "message": f"HTTP error: {response.status_code}", "data": response.text[:500]}
 
 
