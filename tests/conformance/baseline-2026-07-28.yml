@@ -3,8 +3,8 @@
 #
 # Same semantics as baseline.yml: a failure listed here is known, a failure not
 # listed is a regression, and a listed scenario that now passes is a stale entry
-# that fails the run until its line is deleted. A WARNING or SKIPPED result
-# counts as a non-pass here, as it does in the suite.
+# that fails the run until its line is deleted. A WARNING counts as a non-pass
+# here, as it does in the suite; a SKIPPED check counts neither way.
 #
 # The gateway under test is the one conformance.yml starts: one subprocess
 # backend (`examples/provider_math`), no authentication, `mode` left at its
