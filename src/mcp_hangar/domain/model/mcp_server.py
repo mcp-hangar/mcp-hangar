@@ -1663,7 +1663,9 @@ class McpServer(AggregateRoot):
     def _route_upstream_message(self, msg: dict[str, Any]) -> None:
         """Route a server-initiated message from the standing GET stream (#882).
 
-        Runs on the stream's reader thread. ``tools/list_changed`` triggers
+        Runs on the stream's reader thread. The ``notifications/progress`` a
+        POST response's own SSE body carries for that POST's token comes here
+        too, on the calling thread, as it is read (#2314). ``tools/list_changed`` triggers
         rediscovery (a stale catalogue used to persist until the next
         restart). ``notifications/progress`` gains its home with the
         caller-token mapping (#883). The change-notification vocabulary --

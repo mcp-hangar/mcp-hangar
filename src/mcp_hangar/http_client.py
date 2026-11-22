@@ -414,14 +414,21 @@ class _SsrfGuardedTransport(httpx.HTTPTransport):
         self._max_response_bytes = max_response_bytes
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        relay = request.extensions.pop(_POST_STREAM_RELAY, None)
         response = self._connect_checked(request)
+        encoding = response.headers.get("Content-Encoding", "").strip().lower()
         # A POST is answered by one response, JSON or SSE framed, bounded as a
         # whole while httpx reads it (#1613): each SSE event of it is part of
         # it. The standing GET stream has no end, and is bounded per event by
         # its reader instead.
         if request.method == "POST" and self._max_response_bytes is not None:
-            encoding = response.headers.get("Content-Encoding", "").strip().lower()
             response.stream = _BoundedStream(response.stream, self._max_response_bytes(), encoding)
+        # Its progress is handed on as it arrives, read after the bound (#2314).
+        # A compressed body is not read here: `_call` hands it on once read.
+        sse = "text/event-stream" in response.headers.get("Content-Type", "")
+        if isinstance(relay, _PostStreamRelay) and sse and encoding in ("", "identity"):
+            response.stream = _RelayedStream(response.stream, relay)
+            relay.live = True
         return response
 
     def _connect_checked(self, request: httpx.Request) -> httpx.Response:
@@ -528,6 +535,85 @@ class _BoundedStream(httpx.SyncByteStream):
             self._inflate = None
             return len(chunk)
         return size
+
+    def close(self) -> None:
+        self._stream.close()
+
+
+#: The request extension a POST carries its `_PostStreamRelay` in, to the transport.
+_POST_STREAM_RELAY = "mcp_hangar.post_stream_relay"
+
+
+def _sse_data(event_data: str) -> str:
+    """The data of one SSE event: its ``data:`` lines joined, as the GET stream reads them."""
+    data_lines = [line.strip()[5:].strip() for line in event_data.split("\n") if line.strip().startswith("data:")]
+    return "\n".join(line for line in data_lines if line)
+
+
+class _PostStreamRelay:
+    """Hands on the progress a POST's own SSE body carries for that POST's token (#2314).
+
+    Streamable HTTP lets an upstream send the notifications of a request on the
+    body of its POST response, and a stateless (2026-07-28) upstream has no
+    standing GET stream to send them on at all. The body is this request's own
+    stream, so only ``notifications/progress`` carrying the token this request
+    sent is handed on; a token it did not send is dropped, never delivered to
+    the caller it may belong to. Anything else on the body is left as it was.
+    """
+
+    def __init__(self, token: str | int, deliver: Callable[[dict[str, Any], int], None]) -> None:
+        self.token = token
+        self._deliver = deliver
+        #: Whether the transport hands this body over as it is read; else `_call` does once it is.
+        self.live = False
+        self._buffer = b""
+        self._cr = b""
+
+    def feed(self, chunk: bytes) -> None:
+        """Take the next bytes of the body; each event they complete is handed to `event`.
+
+        A line ends in CRLF, LF or CR, as SSE allows: the Python SDK's server
+        sends CRLF. A CR that ends a chunk waits for the next one, which may
+        start with its LF.
+        """
+        data, self._cr = self._cr + chunk, b""
+        if data.endswith(b"\r"):
+            data, self._cr = data[:-1], b"\r"
+        self._buffer += data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        while b"\n\n" in self._buffer:
+            event_data, self._buffer = self._buffer.split(b"\n\n", 1)
+            self.event(event_data.decode("utf-8", errors="replace"))
+
+    def event(self, event_data: str) -> None:
+        data = _sse_data(event_data)
+        if not data:
+            return
+        try:
+            msg = json.loads(data)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(msg, dict) or "id" in msg or msg.get("method") != "notifications/progress":
+            return
+        params = msg.get("params")
+        token = params.get("progressToken") if isinstance(params, dict) else None
+        # `type(...) is`: the token 1 is not "1", nor True.
+        if type(token) is not type(self.token) or token != self.token:
+            logger.debug("http_client_post_stream_progress_foreign_token")
+            return
+        self._deliver(msg, len(data))
+
+
+class _RelayedStream(httpx.SyncByteStream):
+    """A POST's SSE body that feeds its `_PostStreamRelay` each chunk as httpx reads it."""
+
+    def __init__(self, stream: Any, relay: _PostStreamRelay) -> None:
+        self._stream = stream
+        self._relay = relay
+
+    def __iter__(self) -> Any:
+        for chunk in self._stream:
+            self._relay.feed(chunk)
+            yield chunk
 
     def close(self) -> None:
         self._stream.close()
@@ -652,6 +738,9 @@ class HttpClient:
 
         # SSE reader thread (lazy-started)
         self._sse_thread: threading.Thread | None = None
+        #: The handler `start_notification_stream` was given: also the one a
+        #: POST body's own progress goes to (#2314), with or without a GET stream.
+        self._on_message: Callable[[dict[str, Any]], None] | None = None
         self._sse_running = False
         # Set by close(): the stream's waits are the upstream's `retry`, of any
         # length, so they must end when the client does (#2014).
@@ -816,6 +905,7 @@ class HttpClient:
         headers: dict[str, str] | None,
         timeout: float | None,
         mcp_server_label: str,
+        relay: _PostStreamRelay | None = None,
     ) -> httpx.Response:
         """POST, retrying the transient failures the config says to retry.
 
@@ -839,6 +929,7 @@ class HttpClient:
             headers: Per-request headers, or None.
             timeout: Per-request timeout.
             mcp_server_label: Metric label for this upstream.
+            relay: Where the response's own progress goes as it is read (#2314), or None.
 
         Returns:
             The last response received -- a retried status is returned as-is
@@ -853,7 +944,13 @@ class HttpClient:
             reason: str
             try:
                 with self._lease() as pool:
-                    response = pool.post(url, json=request_body, headers=headers, timeout=timeout)
+                    if relay is None:
+                        response = pool.post(url, json=request_body, headers=headers, timeout=timeout)
+                    else:
+                        extensions = {_POST_STREAM_RELAY: relay}
+                        response = pool.post(
+                            url, json=request_body, headers=headers, timeout=timeout, extensions=extensions
+                        )
                 if response.status_code not in retry_statuses or attempt == attempts - 1:
                     return response
                 reason = str(response.status_code)
@@ -918,6 +1015,15 @@ class HttpClient:
                 # _mcp_session_id None, so this is skipped either way.
                 headers["Mcp-Session-Id"] = self._mcp_session_id
         return sent, headers
+
+    def _post_stream_relay(self, sent: Mapping[str, Any], mcp_server_label: str) -> _PostStreamRelay | None:
+        """The relay of this POST's own progress (#2314): None when it sent no token or nothing listens."""
+        on_message = self._on_message
+        meta = sent.get("_meta")
+        token = meta.get("progressToken") if isinstance(meta, Mapping) else None
+        if on_message is None or isinstance(token, bool) or not isinstance(token, (str, int)):
+            return None
+        return _PostStreamRelay(token, lambda msg, size: self._hand_on(msg, on_message, mcp_server_label, size))
 
     def _learn_tools(self, params: Mapping[str, Any] | None, answer: Mapping[str, Any]) -> None:
         """Keep each tool's ``inputSchema`` from a ``tools/list`` answer (#2011).
@@ -1047,12 +1153,14 @@ class HttpClient:
                 request_body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": sent_params}
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 self._served.peer_spki = None
+                relay = self._post_stream_relay(sent_params, mcp_server_label)
                 response = self._post_with_retry(
                     url,
                     request_body,
                     extra_headers if extra_headers else None,
                     timeout,
                     mcp_server_label,
+                    relay,
                 )
                 self._remember_served_key(response, span)
 
@@ -1082,7 +1190,7 @@ class HttpClient:
                 if "text/event-stream" in content_type:
                     # For SSE, response body is already read by httpx
                     # Parse it directly as SSE format
-                    answer = self._parse_sse_body(response.text, request_id, start_time + timeout, span)
+                    answer = self._parse_sse_body(response.text, request_id, start_time + timeout, span, relay)
                     record_upstream_outcome(span, answer)
                     return answer
 
@@ -1279,7 +1387,12 @@ class HttpClient:
             span.set_attribute(Upstream.PEER_SPKI, self._served.peer_spki)
 
     def _parse_sse_body(
-        self, body: str, request_id: str, deadline: float | None = None, span: Any = None
+        self,
+        body: str,
+        request_id: str,
+        deadline: float | None = None,
+        span: Any = None,
+        relay: _PostStreamRelay | None = None,
     ) -> dict[str, Any]:
         """
         Parse SSE response body that was already fully read.
@@ -1292,6 +1405,9 @@ class HttpClient:
             request_id: Our request ID to match
             deadline: When the call times out, as ``time.time()``; None never resumes.
             span: The call's CLIENT span, for the key of a resumed stream.
+            relay: Where the body's own progress goes (#2314), when the
+                transport did not hand it on as it was read, and a resumed
+                stream's; or None.
 
         Returns:
             JSON-RPC response dictionary
@@ -1300,13 +1416,16 @@ class HttpClient:
 
         # Split by double newline to get events
         events = body.split("\n\n")
+        if relay is not None and not relay.live:
+            # The transport did not hand its progress on as it came (a compressed body).
+            relay.feed(body.encode("utf-8"))
         answer = self._find_sse_answer(events, request_id)
         if answer is None and deadline is not None and not self.modern_envelope:
             cursor = _SseCursor()
             for event_data in events:
                 cursor.read(event_data)
             if cursor.last_event_id:
-                answer = self._resume_stream(request_id, cursor, deadline, span)
+                answer = self._resume_stream(request_id, cursor, deadline, span, relay)
         if answer is not None:
             return answer
         return {
@@ -1351,7 +1470,14 @@ class HttpClient:
                             pass
         return None
 
-    def _resume_stream(self, request_id: str, cursor: _SseCursor, deadline: float, span: Any) -> dict[str, Any] | None:
+    def _resume_stream(
+        self,
+        request_id: str,
+        cursor: _SseCursor,
+        deadline: float,
+        span: Any,
+        relay: _PostStreamRelay | None = None,
+    ) -> dict[str, Any] | None:
         """Resume a POST's SSE stream that the upstream closed before it answered (#2014).
 
         Streamable HTTP lets an upstream close the stream of a request it has
@@ -1407,6 +1533,9 @@ class HttpClient:
                             if span is not None:
                                 self._remember_served_key(resp, span)
                             return answer
+                        if relay is not None:
+                            # The same request's stream, resumed: its progress too (#2314).
+                            relay.event(event_data)
             except (UpstreamPeerKeyMismatchError, ResponseTooLarge, httpx.TimeoutException):
                 raise
             except (httpx.HTTPError, ClientError) as e:
@@ -1542,7 +1671,12 @@ class HttpClient:
                 stream. Exceptions it raises are logged, not propagated -- a bad
                 handler must not kill the channel.
         """
-        if self._sse_thread is not None or self._closed:
+        if self._closed:
+            return
+        # Kept with or without a GET stream: a POST body's own progress goes
+        # to the same handler (#2314), and a stateless upstream has no other.
+        self._on_message = on_message
+        if self._sse_thread is not None:
             return
         if self.modern_envelope:
             # 2026-07-28 has no standalone GET stream: it needs a session, and a
@@ -1686,8 +1820,7 @@ class HttpClient:
         on_message: Callable[[dict[str, Any]], None],
         mcp_server_label: str,
     ) -> None:
-        data_lines = [line.strip()[5:].strip() for line in event_data.split("\n") if line.strip().startswith("data:")]
-        data = "\n".join(line for line in data_lines if line)
+        data = _sse_data(event_data)
         if not data:
             return
         try:
@@ -1697,8 +1830,14 @@ class HttpClient:
             return
         if not isinstance(msg, dict):
             return
+        self._hand_on(msg, on_message, mcp_server_label, len(data))
+
+    def _hand_on(
+        self, msg: dict[str, Any], on_message: Callable[[dict[str, Any]], None], mcp_server_label: str, size: int
+    ) -> None:
+        """Give one upstream-initiated message to *on_message*, behind the handler's fault barrier."""
         prometheus_metrics.record_message_received(
-            mcp_server_label, prometheus_metrics.classify_jsonrpc_message(msg), len(data)
+            mcp_server_label, prometheus_metrics.classify_jsonrpc_message(msg), size
         )
         try:
             on_message(msg)
