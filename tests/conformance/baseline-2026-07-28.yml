@@ -49,49 +49,49 @@
 
 server:
   # -- 1. fixture-dependent ---------------------------------------------------
-  - server-stateless # needs the diagnostic tool test_missing_capability
-  - json-schema-2020-12 # needs json_schema_2020_12_tool
-  - http-custom-header-server-validation # needs a tool with x-mcp-header
-  - tools-call-image
-  - tools-call-audio
-  - tools-call-embedded-resource
-  - tools-call-mixed-content
-  - tools-call-with-progress
+  - server-stateless # needs the diagnostic tool test_missing_capability (#2307)
+  - json-schema-2020-12 # needs json_schema_2020_12_tool (#2307)
+  - http-custom-header-server-validation # needs a tool with x-mcp-header (#2307)
+  - tools-call-image # #2307
+  - tools-call-audio # #2307
+  - tools-call-embedded-resource # #2307
+  - tools-call-mixed-content # #2307
+  - tools-call-with-progress # #2307
 
   # -- 2. capability not advertised -------------------------------------------
-  - completion-complete
-  - prompts-list
-  - prompts-get-simple
-  - prompts-get-with-args
-  - prompts-get-embedded-resource
-  - prompts-get-with-image
-  - resources-list
-  - resources-read-text
-  - resources-read-binary
-  - resources-templates-read
-  - sep-2164-resource-not-found # resources/read answers -32601, the check wants -32602
-  - caching # prompts/resources hints; the tools/list hint passes
+  - completion-complete # #2307
+  - prompts-list # #2307
+  - prompts-get-simple # #2307
+  - prompts-get-with-args # #2307
+  - prompts-get-embedded-resource # #2307
+  - prompts-get-with-image # #2307
+  - resources-list # #2307
+  - resources-read-text # #2307
+  - resources-read-binary # #2307
+  - resources-templates-read # #2307
+  - sep-2164-resource-not-found # resources/read answers -32601, the check wants -32602 (#2307)
+  - caching # prompts/resources hints; the tools/list hint passes (#2307)
 
   # -- 3. no fixture to exercise the relay ------------------------------------
-  - input-required-result-basic-elicitation
-  - input-required-result-basic-sampling
-  - input-required-result-basic-list-roots
-  - input-required-result-request-state
-  - input-required-result-multiple-input-requests
-  - input-required-result-multi-round
-  - input-required-result-missing-input-response
-  - input-required-result-non-tool-request
-  - input-required-result-result-type
-  - input-required-result-tampered-state
-  - input-required-result-capability-check
-  - input-required-result-validate-input
-  - tasks-lifecycle
-  - tasks-capability-negotiation
-  - tasks-wire-fields
-  - tasks-request-state-removal
-  - tasks-mrtr-input
-  - tasks-request-headers
-  - tasks-dispatch-and-envelope
-  - tasks-status-notifications
-  - tasks-required-task-error
-  - tasks-mrtr-composition
+  - input-required-result-basic-elicitation # #2307
+  - input-required-result-basic-sampling # #2307
+  - input-required-result-basic-list-roots # #2307
+  - input-required-result-request-state # #2307
+  - input-required-result-multiple-input-requests # #2307
+  - input-required-result-multi-round # #2307
+  - input-required-result-missing-input-response # #2307
+  - input-required-result-non-tool-request # #2307
+  - input-required-result-result-type # #2307
+  - input-required-result-tampered-state # #2307
+  - input-required-result-capability-check # #2307
+  - input-required-result-validate-input # #2307
+  - tasks-lifecycle # #2307
+  - tasks-capability-negotiation # #2307
+  - tasks-wire-fields # #2307
+  - tasks-request-state-removal # #2307
+  - tasks-mrtr-input # #2307
+  - tasks-request-headers # #2307
+  - tasks-dispatch-and-envelope # #2307
+  - tasks-status-notifications # #2307
+  - tasks-required-task-error # #2307
+  - tasks-mrtr-composition # #2307
