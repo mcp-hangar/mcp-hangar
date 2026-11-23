@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.40.1...v2.40.2) (2026-11-23)
+
+### Fixed
+
+- **core:** answer `resources/read` of an unknown or undeliverable URI in `front_door` mode with JSON-RPC `-32602` (`INVALID_PARAMS`) and `data.uri` set to the requested URI (SEP-2164), instead of `-32002` with no `data`, and preserve/project `data.uri` on relayed upstream errors. ([#2316](https://github.com/mcp-hangar/mcp-hangar/pull/2316))
+
 ## [2.40.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.40.0...v2.40.1) (2026-11-22)
 
 ### Fixed
