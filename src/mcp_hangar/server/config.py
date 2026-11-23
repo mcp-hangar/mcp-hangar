@@ -102,6 +102,9 @@ class _StagedConfig:
     #: The REST endpoint's stored policies, read when a reload is prepared so
     #: that a store that cannot be read refuses the reload. None: no store.
     stored_policies: list[Any] | None = None
+    #: The stored rows' L7 policies of the servers this configuration builds,
+    #: read when a reload is prepared; put on a server the reload adds (#2332).
+    stored_l7_policies: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Each server's and group's `max_concurrency`, put on the concurrency
     #: manager by `commit` and not before, so a reload refused after a server
     #: was built leaves every limit as it was (#1432).
@@ -123,6 +126,7 @@ class _StagedConfig:
         from ..application.read_models.tool_projection import get_tool_projection_registry
         from ..domain.policies.header_exposure import adopt_header_exposure_policies
         from ..domain.services import get_tool_access_resolver
+        from ..infrastructure.persistence.recovery_service import carry_stored_l7_policy
 
         # Function-local, as the rest are: `server.bootstrap` imports this module.
         from .bootstrap.logs import ensure_log_buffer
@@ -172,6 +176,12 @@ class _StagedConfig:
                 running = repository.get(mcp_server_id)
                 if running is not None and running is not mcp_server:
                     _carry_runtime_state(mcp_server_id, running, mcp_server)
+                elif running is None:
+                    # No running object to carry a policy from: the file dropped
+                    # it and declares it again, or declares it for the first
+                    # time over a stored row. A restart reads the row's policy,
+                    # and so does this (#2332).
+                    carry_stored_l7_policy(mcp_server_id, mcp_server, self.stored_l7_policies.get(mcp_server_id))
                 # A server this configuration ADDS has no predecessor to carry a
                 # buffer from, and bootstrap's pass runs once, at boot: it had
                 # none at all, so its output reached no log the API reads
@@ -843,6 +853,36 @@ def _stored_peer_key_names() -> dict[str, str]:
         ) from e
     finally:
         loop.close()
+
+
+def _stored_l7_policies(mcp_server_ids: set[str]) -> dict[str, dict[str, Any]]:
+    """The L7 policy stored on the row of each of these servers that has one (#2332).
+
+    Read while a reload can still be refused: a store that cannot be read
+    refuses it, since starting a server without the policy its row holds would
+    serve what the operator meant to govern, and report success.
+    """
+    from ..infrastructure.async_bridge import BackgroundLoop
+    from ..infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+
+    repository = getattr(get_runtime(), "config_repository", None)
+    if not mcp_server_ids or repository is None or isinstance(repository, InMemoryMcpServerConfigRepository):
+        return {}
+    loop = BackgroundLoop()
+    try:
+        rows = loop.run(repository.get_all(), 15.0)
+    except Exception as e:  # noqa: BLE001 -- any store failure refuses the reload, before anything changed
+        raise ConfigurationUnavailableError(
+            "The stored L7 policies could not be read, so the reload was refused and nothing was "
+            "changed. Reload again once the configuration store is reachable."
+        ) from e
+    finally:
+        loop.close()
+    return {
+        row.mcp_server_id: row.l7_policy
+        for row in rows
+        if row.mcp_server_id in mcp_server_ids and row.l7_policy is not None
+    }
 
 
 def _refuse_what_the_record_contradicts(staged: "_StagedConfig") -> None:
@@ -2630,6 +2670,7 @@ class ServerConfigLoader(IConfigLoader):
         prepared = build_config(mcp_servers_config)
         _refuse_what_the_record_contradicts(prepared)
         prepared.stored_policies = _read_stored_policies()
+        prepared.stored_l7_policies = _stored_l7_policies(set(prepared.servers))
         return prepared
 
     def forget_stored_policies(self, prepared: PreparedServers, mcp_server_ids: list[str]) -> None:

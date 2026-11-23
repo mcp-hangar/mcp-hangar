@@ -1,0 +1,1 @@
+**core:** start a server that a config reload declares again, or declares for the first time over a stored row, with the L7 policy its row holds, as a restart does; a stored policy that does not parse denies every tool, and a configuration store that cannot be read refuses the reload before anything changes.

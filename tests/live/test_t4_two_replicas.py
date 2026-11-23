@@ -21,7 +21,8 @@ database directly, so a replica cannot vouch for itself.
   the rows on a replica that starts later.
 * A server or group the file took over and then dropped (#2171): a replica on
   the new file does not restore it, a peer on the old file keeps its policy,
-  and a reload on the replica without the lease changes no shared row.
+  and a reload on the replica without the lease changes no shared row. A
+  reload that declares it again starts it with that policy (#2332).
 * A mixed-version set: the published 2.31.0 next to this checkout.
 
 Opt-in twice: `MCP_HANGAR_LIVE_VERIFY=1`, and `HANGAR_TEST_POSTGRES_DSN` naming
@@ -590,6 +591,52 @@ def test_a_replica_whose_file_dropped_a_taken_over_group_does_not_restore_it_and
         assert claims() == {None: 1, server: None}, "a row a peer restores from was deleted or claimed"
         system = a_again.api("GET", "/system/", OP).json()["system"]["instance"]
         assert system["dormant_file_claimed_rows"] == 1, system
+
+
+def test_a_server_a_reload_declares_again_refuses_a_tool_outside_the_policy_its_row_holds(tmp_path: Path) -> None:
+    """One replica over the shared database: drop a server from the file, reload, declare it again, reload (#2332).
+
+    The L7 push writes the server's row, claimed by the file. The reload that
+    drops the server leaves the row, and the reload that declares it again
+    starts it with the row's policy, as a restart does: the denied tool is
+    refused from the first call after it.
+    """
+    address = tr.host_address()
+    if address is None:
+        pytest.skip("no non-loopback address to serve the upstreams on; the API refuses loopback endpoints")
+    server = tr.name("declared-again")
+    with ExitStack() as stack:
+        database = stack.enter_context(tr.fresh_database(DSN))
+        keys = tr.seed_keys(database, list(_ROLES))
+        endpoint = stack.enter_context(tr.upstream(None, address, tmp_path))
+        empty = tr.replica_config(database, address, _ROLES)
+        declares = empty.replace(
+            "mcp_servers: {}", f"mcp_servers:\n  {server}:\n    mode: remote\n    endpoint: {endpoint}"
+        )
+        (tmp_path / "a").mkdir()
+        hangar = stack.enter_context(running_hangar(tmp_path / "a", declares))
+        a = tr.Replica(label="a", base_url=hangar.base_url, keys=keys)
+
+        def reload(config: str) -> None:
+            (tmp_path / "a" / "config.yaml").write_text(config)
+            reloaded = a.api("POST", "/config/reload", ADMIN, {})
+            assert reloaded.status_code == 200, reloaded.text
+
+        pushed = a.api("PUT", f"/mcp_servers/{server}/l7_policy", ADMIN, _DENY_ECHO)
+        assert pushed.status_code == 200, pushed.text
+        result = a.call(DEV, server)
+        assert result.get("success") is False and result.get("error_type") == _L7_DENIED, result
+
+        reload(empty)
+        tr.eventually(_gone_from(a, server), "A drops the server its reloaded file no longer declares")
+        assert (database.row(server) or {}).get("l7_policy"), "the dormant row lost its L7 policy"
+
+        reload(declares)
+        tr.eventually(_held_by(a, server), "A adds the server its reloaded file declares again")
+        result = a.call(DEV, server)
+        assert result.get("success") is False and result.get("error_type") == _L7_DENIED, (
+            f"the server a reload declared again served the denied tool: {result}"
+        )
 
 
 def _manages_fleet(replica: tr.Replica) -> bool:

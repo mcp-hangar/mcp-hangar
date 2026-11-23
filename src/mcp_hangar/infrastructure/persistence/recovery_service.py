@@ -212,41 +212,15 @@ class RecoveryService:
         The operator pushes its policy over REST onto servers the file declares
         too, and the push writes it to this row. Skipping the row wholesale
         dropped it: every restart lifted enforcement until the operator's next
-        reconcile, while the CR still reported it (#1306). No config key can
-        declare an L7 policy, so there is no file intent for the row to revert.
+        reconcile, while the CR still reported it (#1306). See
+        `carry_stored_l7_policy` for the rule, which a reload applies too.
 
-        The same rule a reload applies (#1498): what the file says wins, so a
-        policy already on the built server is left alone.
-
-        A stored payload that no longer parses fails closed: the server the file
-        built stays in the fleet, so leaving it with no policy would serve every
-        call the operator meant to govern. It gets a policy that denies every
-        tool instead, until the operator delivers one again, which replaces it.
         A server registered over REST with the same row is not restored at all,
         so both refuse rather than one of them serving ungoverned.
         """
-        if config.l7_policy is None:
-            return
         mcp_server = self._mcp_server_repo.get(config.mcp_server_id)
-        if not isinstance(mcp_server, McpServer) or mcp_server.l7_policy is not None:
-            return
-        try:
-            policy = L7Policy.from_dict(config.l7_policy)
-        except (ValueError, TypeError) as e:
-            mcp_server.set_l7_policy(L7Policy())
-            logger.error(
-                "l7_policy_unreadable_denying_all",
-                mcp_server_id=config.mcp_server_id,
-                error=str(e),
-                detail="every tool call to this server is denied until the operator delivers its policy again",
-            )
-            return
-        mcp_server.set_l7_policy(policy)
-        logger.info(
-            "l7_policy_restored_to_declared_mcp_server",
-            mcp_server_id=config.mcp_server_id,
-            policy_id=policy.policy_id,
-        )
+        if isinstance(mcp_server, McpServer):
+            carry_stored_l7_policy(config.mcp_server_id, mcp_server, config.l7_policy)
 
     def _restore_lifecycle_state(self, mcp_server: McpServer, mcp_server_id: str) -> None:
         """Replay this server's stream onto the aggregate built from config.
@@ -420,3 +394,36 @@ class RecoveryService:
             )
 
         return deleted
+
+
+def carry_stored_l7_policy(mcp_server_id: str, mcp_server: McpServer, stored: dict[str, Any] | None) -> None:
+    """Put a stored row's L7 egress policy on a server the file built (#1306, #2332).
+
+    Recovery applies it to every server the file declares at a restart, and a
+    reload to every server it adds, so a restart and a reload of the same file
+    start a server under the same policy. No config key can declare an L7
+    policy, so there is no file intent for the row to revert.
+
+    What the file says wins (#1498): a policy already on *mcp_server* is left
+    alone.
+
+    A stored payload that no longer parses fails closed: the server the file
+    built stays in the fleet, so leaving it with no policy would serve every
+    call the operator meant to govern. It gets a policy that denies every
+    tool instead, until the operator delivers one again, which replaces it.
+    """
+    if stored is None or mcp_server.l7_policy is not None:
+        return
+    try:
+        policy = L7Policy.from_dict(stored)
+    except (ValueError, TypeError) as e:
+        mcp_server.set_l7_policy(L7Policy())
+        logger.error(
+            "l7_policy_unreadable_denying_all",
+            mcp_server_id=mcp_server_id,
+            error=str(e),
+            detail="every tool call to this server is denied until the operator delivers its policy again",
+        )
+        return
+    mcp_server.set_l7_policy(policy)
+    logger.info("l7_policy_restored_to_declared_mcp_server", mcp_server_id=mcp_server_id, policy_id=policy.policy_id)
