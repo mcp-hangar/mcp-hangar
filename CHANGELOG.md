@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.40.2...v2.40.3) (2026-11-23)
+
+### Fixed
+
+- **core:** start a server that a config reload declares again, or declares for the first time over a stored row, with the L7 policy its row holds, as a restart does; a stored policy that does not parse denies every tool, and a configuration store that cannot be read refuses the reload before anything changes. ([#2332](https://github.com/mcp-hangar/mcp-hangar/pull/2332))
+
 ## [2.40.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.40.1...v2.40.2) (2026-11-23)
 
 ### Fixed
