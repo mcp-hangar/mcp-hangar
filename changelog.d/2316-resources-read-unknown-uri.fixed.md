@@ -1,1 +1,0 @@
-**core:** answer `resources/read` of an unknown or undeliverable URI in `front_door` mode with JSON-RPC `-32602` (`INVALID_PARAMS`) and `data.uri` set to the requested URI (SEP-2164), instead of `-32002` with no `data`, and preserve/project `data.uri` on relayed upstream errors.
