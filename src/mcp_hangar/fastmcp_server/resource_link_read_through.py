@@ -59,15 +59,15 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
-from mcp_hangar._sdk_compat import lowlevel_server, make_mcp_error
+from mcp_hangar._sdk_compat import INVALID_PARAMS, lowlevel_server, make_mcp_error
 
 from .. import metrics as prometheus_metrics
 from ..domain.services.ui_resource_guard import UiResourceGuard, get_ui_resource_guard
 
 logger = logging.getLogger(__name__)
 
-#: JSON-RPC error for an unknown/undeliverable resource (MCP spec).
-RESOURCE_NOT_FOUND = -32002
+#: JSON-RPC error for an unknown/undeliverable resource (SEP-2164: -32602).
+RESOURCE_NOT_FOUND = INVALID_PARAMS
 
 #: Prefix of a gateway-projected resource URI. Everything after it is
 #: ``<upstream id>/<the upstream's own URI, verbatim>``; upstream ids never
@@ -232,7 +232,13 @@ def _relay_read(mcp_server_id: str, uri: str) -> dict[str, Any]:
         # tool call selects it, so it is one `_deliverable` decided on (#1784).
         server = _member_answering(group, "resources/read") if group else None
     if server is None:
-        return {"error": {"code": RESOURCE_NOT_FOUND, "message": f"Unknown resource: {uri}"}}
+        return {
+            "error": {
+                "code": RESOURCE_NOT_FOUND,
+                "message": f"Unknown resource: {uri}",
+                "data": {"uri": uri},
+            }
+        }
     return server.relay_request("resources/read", {"uri": uri})
 
 
@@ -387,18 +393,25 @@ def maybe_register_resource_read_through(mcp: Any) -> bool:
             tenant_id = _tenant()
             target = await asyncio.to_thread(_resolve_target, tenant_id, uri)
             if target is None:
-                raise make_mcp_error(RESOURCE_NOT_FOUND, f"Unknown resource: {uri}")
+                raise make_mcp_error(RESOURCE_NOT_FOUND, f"Unknown resource: {uri}", data={"uri": uri})
             mcp_server_id, upstream_uri = target
             # The guard reads the UPSTREAM uri: `ui://` is invisible once the
             # scheme has been namespaced, and a guard that cannot see the
             # scheme it guards is not fail-closed (SEP-1865).
             decision = await _ui_guard().enforce(upstream_uri, tenant_id, mcp_server_id)
             if not decision.allowed:
-                raise make_mcp_error(RESOURCE_NOT_FOUND, f"Resource not deliverable: {uri}")
+                raise make_mcp_error(RESOURCE_NOT_FOUND, f"Resource not deliverable: {uri}", data={"uri": uri})
             response = await asyncio.to_thread(_relay_read, mcp_server_id, upstream_uri)
             if "error" in response:
                 error = response["error"]
-                raise make_mcp_error(error.get("code", RESOURCE_NOT_FOUND), error.get("message", "resource error"))
+                data = error.get("data")
+                if isinstance(data, dict) and data.get("uri") == upstream_uri:
+                    data = {**data, "uri": uri}
+                raise make_mcp_error(
+                    error.get("code", RESOURCE_NOT_FOUND),
+                    error.get("message", "resource error"),
+                    data=data,
+                )
             result = response.get("result") or {}
             for entry in result.get("contents") or []:
                 if isinstance(entry, dict) and isinstance(entry.get("uri"), str):
