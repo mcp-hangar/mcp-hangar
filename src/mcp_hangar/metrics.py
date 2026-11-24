@@ -14,9 +14,43 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from prometheus_client.samples import Exemplar
+
 # =============================================================================
 # Core Metric Types
 # =============================================================================
+
+_EXEMPLAR_MAX_CHARS = 128
+
+
+def _validate_exemplar(exemplar: dict[str, str]) -> dict[str, str]:
+    """Validate and copy exemplar labels per OpenMetrics 1.0 (<= 128 UTF-8 chars)."""
+    sanitized = {str(k): str(v) for k, v in exemplar.items()}
+    total_chars = sum(len(k) + len(v) for k, v in sanitized.items())
+    if total_chars > _EXEMPLAR_MAX_CHARS:
+        raise ValueError(
+            f"Exemplar labels exceed OpenMetrics limit of {_EXEMPLAR_MAX_CHARS} UTF-8 characters ({total_chars})"
+        )
+    return sanitized
+
+
+def _current_span_exemplar() -> dict[str, str] | None:
+    """Read trace_id and span_id from the current sampled span without initializing tracing."""
+    try:
+        from opentelemetry import trace as otel_trace
+    except ImportError:
+        return None
+
+    span = otel_trace.get_current_span()
+    if span is None:
+        return None
+    ctx = span.get_span_context()
+    if ctx is None or not ctx.is_valid or not ctx.trace_flags.sampled:
+        return None
+    return {
+        "trace_id": format(ctx.trace_id, "032x"),
+        "span_id": format(ctx.span_id, "016x"),
+    }
 
 
 @dataclass
@@ -25,6 +59,7 @@ class MetricSample:
 
     value: float
     labels: dict[str, str] = field(default_factory=dict)
+    exemplar: Exemplar | None = None
 
 
 class Counter:
@@ -40,17 +75,21 @@ class Counter:
         self.label_names = labels or []
         self._values: dict[tuple, float] = defaultdict(float)
         self._created: dict[tuple, float] = {}
+        self._exemplars: dict[tuple, Exemplar] = {}
         self._lock = threading.Lock()
 
-    def inc(self, value: float = 1.0, **labels) -> None:
+    def inc(self, value: float = 1.0, *, exemplar: dict[str, str] | None = None, **labels) -> None:
         """Increment counter by value (must be >= 0)."""
         if value < 0:
             raise ValueError("Counter can only increase")
         key = self._make_key(labels)
+        validated = _validate_exemplar(exemplar) if exemplar else None
         with self._lock:
             if key not in self._created:
                 self._created[key] = time.time()
             self._values[key] += value
+            if validated is not None:
+                self._exemplars[key] = Exemplar(validated, value, time.time())
 
     def _make_key(self, labels: dict) -> tuple:
         return tuple(labels.get(label_name, "") for label_name in self.label_names)
@@ -63,7 +102,11 @@ class Counter:
         """Collect all samples."""
         with self._lock:
             return [
-                MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False)))
+                MetricSample(
+                    value=v,
+                    labels=dict(zip(self.label_names, k, strict=False)),
+                    exemplar=self._exemplars.get(k),
+                )
                 for k, v in self._values.items()
             ]
 
@@ -223,10 +266,12 @@ class Histogram:
         self._buckets: dict[tuple, dict[float, int]] = defaultdict(lambda: dict.fromkeys(self.buckets, 0))
         self._sums: dict[tuple, float] = defaultdict(float)
         self._counts: dict[tuple, int] = defaultdict(int)
+        self._exemplars: dict[tuple, dict[float, Exemplar]] = defaultdict(dict)
 
-    def observe(self, value: float, **labels) -> None:
+    def observe(self, value: float, *, exemplar: dict[str, str] | None = None, **labels) -> None:
         """Record an observation."""
         key = self._make_key(labels)
+        validated = _validate_exemplar(exemplar) if exemplar else None
         with self._lock:
             self._sums[key] += value
             self._counts[key] += 1
@@ -234,6 +279,8 @@ class Histogram:
             for bucket in self.buckets:
                 if value <= bucket:
                     self._buckets[key][bucket] += 1
+                    if validated is not None:
+                        self._exemplars[key][bucket] = Exemplar(validated, value, time.time())
                     break  # Only add to the first matching bucket
 
     def _make_key(self, labels: dict) -> tuple:
@@ -256,11 +303,18 @@ class Histogram:
         with self._lock:
             for key, bucket_values in self._buckets.items():
                 base_labels = dict(zip(self.label_names, key, strict=False))
+                key_exemplars = self._exemplars.get(key, {})
                 cumulative = 0
                 for bucket in self.buckets:
                     cumulative += bucket_values.get(bucket, 0)
                     le = "+Inf" if bucket == float("inf") else str(bucket)
-                    buckets.append(MetricSample(value=cumulative, labels={**base_labels, "le": le}))
+                    buckets.append(
+                        MetricSample(
+                            value=cumulative,
+                            labels={**base_labels, "le": le},
+                            exemplar=key_exemplars.get(bucket),
+                        )
+                    )
                 sums.append(MetricSample(value=self._sums[key], labels=base_labels))
                 counts.append(MetricSample(value=self._counts[key], labels=base_labels))
 
@@ -343,8 +397,8 @@ class _LabeledCounter:
         self._counter = counter
         self._labels = labels
 
-    def inc(self, value: float = 1.0) -> None:
-        self._counter.inc(value, **self._labels)
+    def inc(self, value: float = 1.0, exemplar: dict[str, str] | None = None) -> None:
+        self._counter.inc(value, exemplar=exemplar, **self._labels)
 
 
 class _LabeledGauge:
@@ -371,8 +425,8 @@ class _LabeledHistogram:
         self._histogram = histogram
         self._labels = labels
 
-    def observe(self, value: float) -> None:
-        self._histogram.observe(value, **self._labels)
+    def observe(self, value: float, exemplar: dict[str, str] | None = None) -> None:
+        self._histogram.observe(value, exemplar=exemplar, **self._labels)
 
     def time(self) -> "_Timer":
         return _Timer(self._histogram, self._labels)
@@ -1586,9 +1640,108 @@ _register_all_metrics()
 # =============================================================================
 
 
+PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+
+def _sanitize_labels(labels: dict[str, Any]) -> dict[str, str]:
+    return {str(k): "" if v is None else str(v) for k, v in labels.items()}
+
+
+class _OpenMetricsAdapter:
+    """Translates a hand-rolled ``CollectorRegistry`` into ``prometheus_client`` families.
+
+    Used only when a scrape negotiates OpenMetrics (``Accept: application/openmetrics-text``).
+    Registered on a private ``prometheus_client.CollectorRegistry`` so the process-global
+    registry is never touched.
+    """
+
+    def __init__(self, registry: CollectorRegistry) -> None:
+        self._registry = registry
+
+    def collect(self):
+        from prometheus_client.metrics_core import Metric
+        from prometheus_client.samples import Sample
+
+        with self._registry._lock:
+            collectors = list(self._registry._collectors.items())
+
+        for name, collector in collectors:
+            if isinstance(collector, Counter):
+                family = Metric(name, collector.description, "counter")
+                for sample in collector.collect():
+                    family.samples.append(
+                        Sample(
+                            f"{name}_total",
+                            _sanitize_labels(sample.labels),
+                            float(sample.value),
+                            exemplar=sample.exemplar,
+                        )
+                    )
+                yield family
+
+            elif isinstance(collector, Gauge):
+                family = Metric(name, collector.description, "gauge")
+                for sample in collector.collect():
+                    family.samples.append(Sample(name, _sanitize_labels(sample.labels), float(sample.value)))
+                yield family
+
+            elif isinstance(collector, Histogram):
+                family = Metric(name, collector.description, "histogram")
+                buckets, sums, counts = collector.collect()
+                n_buckets = len(collector.buckets)
+                for idx, (s_sum, s_cnt) in enumerate(zip(sums, counts, strict=True)):
+                    for s_bucket in buckets[idx * n_buckets : (idx + 1) * n_buckets]:
+                        family.samples.append(
+                            Sample(
+                                f"{name}_bucket",
+                                _sanitize_labels(s_bucket.labels),
+                                float(s_bucket.value),
+                                exemplar=s_bucket.exemplar,
+                            )
+                        )
+                    family.samples.append(Sample(f"{name}_count", _sanitize_labels(s_cnt.labels), float(s_cnt.value)))
+                    family.samples.append(Sample(f"{name}_sum", _sanitize_labels(s_sum.labels), float(s_sum.value)))
+                yield family
+
+            elif isinstance(collector, Summary):
+                family = Metric(name, collector.description, "summary")
+                sums, counts = collector.collect()
+                for s_sum, s_cnt in zip(sums, counts, strict=True):
+                    family.samples.append(Sample(f"{name}_count", _sanitize_labels(s_cnt.labels), float(s_cnt.value)))
+                    family.samples.append(Sample(f"{name}_sum", _sanitize_labels(s_sum.labels), float(s_sum.value)))
+                yield family
+
+            elif isinstance(collector, Info):
+                family = Metric(name, collector.description, "info")
+                for sample in collector.collect():
+                    family.samples.append(Sample(f"{name}_info", _sanitize_labels(sample.labels), 1.0))
+                yield family
+
+
 def get_metrics() -> str:
     """Get all metrics in Prometheus exposition format."""
     return REGISTRY.collect()
+
+
+def render_metrics(accept_header: str | None = None) -> tuple[bytes, str]:
+    """Render metrics according to HTTP Accept negotiation.
+
+    Returns ``(body_bytes, content_type)``. When ``accept_header`` negotiates
+    OpenMetrics (matching ``prometheus_client.exposition.choose_encoder``),
+    renders via a private ``prometheus_client.CollectorRegistry`` with
+    exemplars and ``# EOF``. Otherwise returns the 0.0.4 exposition unchanged.
+    """
+    if accept_header and "application/openmetrics-text" in accept_header:
+        from prometheus_client import CollectorRegistry as PromCollectorRegistry
+        from prometheus_client.exposition import choose_encoder
+
+        encoder, content_type = choose_encoder(accept_header)
+        if content_type.startswith("application/openmetrics-text"):
+            prom_registry = PromCollectorRegistry()
+            prom_registry.register(_OpenMetricsAdapter(REGISTRY))
+            return encoder(prom_registry), content_type
+
+    return get_metrics().encode("utf-8"), PROMETHEUS_CONTENT_TYPE
 
 
 def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str | None = None):
@@ -1600,11 +1753,12 @@ def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool
     Failures are counted separately via TOOL_CALL_ERRORS_TOTAL.
     """
     status = "success" if success else "error"
-    TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status)
+    exemplar = _current_span_exemplar()
+    TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status, exemplar=exemplar)
     if success:
-        TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
+        TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool, exemplar=exemplar)
     elif error_type:
-        TOOL_CALL_ERRORS_TOTAL.inc(mcp_server=mcp_server, tool=tool, error_type=error_type)
+        TOOL_CALL_ERRORS_TOTAL.inc(mcp_server=mcp_server, tool=tool, error_type=error_type, exemplar=exemplar)
 
 
 def observe_health_check(

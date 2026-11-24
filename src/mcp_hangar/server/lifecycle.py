@@ -539,11 +539,13 @@ def metrics_endpoint(request: Any) -> Any:
     the served process mounts (#1369). A test that read the registry directly
     could not tell whether the scrape carries the metric.
     """
-    from starlette.responses import PlainTextResponse
+    from starlette.responses import Response
 
-    from ..metrics import get_metrics
+    from ..metrics import render_metrics
 
-    return PlainTextResponse(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
+    accept = request.headers.get("accept") if hasattr(request, "headers") else None
+    body, content_type = render_metrics(accept)
+    return Response(content=body, media_type=content_type)
 
 
 def _is_loopback_host(host: str) -> bool:
